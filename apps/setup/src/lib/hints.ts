@@ -57,6 +57,10 @@ export const BAR_COLORS_HINT =
 export const REFERENCE_HINT =
   'A reference knows what each character looks like in one font and color, learned from the boxes you draw on screenshots and the readings you record. Values that show the same font can share one.';
 
+/** The characters of its reference that a number value reads. */
+export const CHARACTERS_READ_HINT =
+  'A reference can know a whole font. Reading only the characters this value shows stops it mistaking one character for a lookalike, such as 0 for O. The reference keeps every character, so other values can read more of it.';
+
 /** A reference's characters' color. */
 export const INK_HINT =
   'Pick a pixel inside a character, not on its edge. Pixels within the tolerance of this color count as part of the characters.';

@@ -31,6 +31,7 @@ import {
   toReference,
   withFixRegion,
   withRecordedInk,
+  withReference,
   withState,
 } from '../lib/check.ts';
 import { boxNumber, boxOf } from '../lib/boxes.ts';
@@ -782,9 +783,16 @@ export function Capture({
         onSaved({ app: saved.app, value: null });
         return;
       }
-      await appFile.reload();
+      // The choice of characters was made against the references as they were before this save.
+      const before = file?.references ?? [];
+      const references = (await appFile.reload())?.references ?? [];
       closeEditor();
-      setDraft((current) => ({ ...current, kind: 'number', reference: saved.reference }));
+      // A value's choice of characters follows its reference, as when one is picked. A fix reads its value's.
+      setDraft((current) =>
+        fixing === null
+          ? withReference({ ...current, kind: 'number' }, saved.reference, references, before)
+          : { ...current, kind: 'number', reference: saved.reference },
+      );
     } catch (error: unknown) {
       setSaveError(errorText(error));
     } finally {
@@ -907,8 +915,9 @@ export function Capture({
       selected={draft.reference}
       hasRegion={draft.region !== null}
       whole={draft.whole}
+      characters={draft.characters}
       onSelect={(reference) => {
-        setDraft((current) => ({ ...current, reference }));
+        setDraft((current) => withReference(current, reference, file?.references ?? []));
       }}
       onEdit={(id) => {
         background(openEditor(file?.references.find((reference) => reference.id === id) ?? null, null));
@@ -922,6 +931,9 @@ export function Capture({
       }}
       onWhole={(whole) => {
         setDraft((current) => ({ ...current, whole }));
+      }}
+      onCharacters={(characters) => {
+        setDraft((current) => ({ ...current, characters }));
       }}
     />
   );

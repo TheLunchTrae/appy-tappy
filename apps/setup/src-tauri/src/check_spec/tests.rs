@@ -368,6 +368,7 @@ fn a_number_reads_with_its_saved_reference() {
         region: left(),
         reference: digits_ref(),
         whole,
+        characters: None,
     };
     let built = build(&spec(true), session(&[], None)).expect("a saved reference");
     let red_square = screenshot().crop(built.region).expect("inside");
@@ -387,6 +388,7 @@ fn a_number_reads_with_its_saved_reference() {
         CheckDef::Number {
             reference: "digits".to_owned(),
             whole: true,
+            characters: None,
         }
     );
     assert!(
@@ -404,6 +406,7 @@ fn a_number_reads_with_its_saved_reference() {
             id: "gone".to_owned(),
         },
         whole: false,
+        characters: None,
     };
     let error = build(&gone, session(&[], None)).expect_err("not saved");
     assert_eq!(
@@ -411,6 +414,109 @@ fn a_number_reads_with_its_saved_reference() {
         SpecError::Reference("That reference is not saved.".to_owned())
     );
     assert_eq!(error.to_string(), "That reference is not saved.");
+}
+
+/// Rings in red, 16 pixels tall and each as wide as `widths` says, a blank
+/// column apart.
+fn rings(widths: &[usize]) -> Image {
+    let line = |fill: &str| {
+        let rings: Vec<String> = widths
+            .iter()
+            .map(|width| format!("#{}#", fill.repeat(width.saturating_sub(2))))
+            .collect();
+        rings.join(".")
+    };
+    let (edge, middle) = (line("#"), line("."));
+    let mut rows = vec![middle.as_str(); 16];
+    rows[0] = &edge;
+    rows[15] = &edge;
+    let bgra = rows
+        .concat()
+        .chars()
+        .flat_map(|cell| {
+            if cell == '#' {
+                [0, 0, 255, 0]
+            } else {
+                [40, 40, 40, 0]
+            }
+        })
+        .collect();
+    let size = Size {
+        width: u32::try_from(edge.len()).expect("small"),
+        height: 16,
+    };
+    Image::new(size, bgra).expect("matching length")
+}
+
+/// The saved reference `digits` as a font's: a letter and the digit that
+/// looks like it, a column wider, so each shape matches both and the
+/// letter's own glyph is closer.
+fn lookalikes(reference: &ReferenceRef) -> Result<SavedReference, String> {
+    let mut saved = digits(reference)?;
+    saved.reference.samples[0].text = "O0".to_owned();
+    saved.pictures = vec![rings(&[10, 11])];
+    Ok(saved)
+}
+
+#[test]
+fn a_number_reads_and_saves_the_characters_it_is_told_to() {
+    let reading = |characters: Option<&str>| CheckSpec::Number {
+        region: left(),
+        reference: digits_ref(),
+        whole: false,
+        characters: characters.map(str::to_owned),
+    };
+    let font = Session {
+        references: &lookalikes,
+        ..session(&[], None)
+    };
+    let read = |characters| {
+        build(&reading(characters), font)
+            .expect("it knows one")
+            .check
+            .read(&rings(&[10]))
+    };
+    // The letter's shape reads as the letter, which is no number, until
+    // the value reads only digits.
+    assert!(read(None).is_err());
+    assert_eq!(
+        read(Some("0123456789")),
+        Ok(Value::Number(Number::new(0.0).expect("finite")))
+    );
+    assert_eq!(
+        to_saved(&reading(Some("0123456789")), font, "app", "progress").map(|saved| saved.check),
+        Ok(CheckDef::Number {
+            reference: "digits".to_owned(),
+            whole: false,
+            characters: Some("0123456789".to_owned()),
+        })
+    );
+    // Nothing is saved that would read nothing.
+    assert_eq!(
+        to_saved(&reading(Some("2%")), font, "app", "progress"),
+        Err(SpecError::NoCharacters {
+            reference: "Digits".to_owned(),
+            characters: "2%".to_owned(),
+        })
+    );
+    for none in ["", " \t"] {
+        assert_eq!(
+            to_saved(&reading(Some(none)), font, "app", "progress"),
+            Err(SpecError::Check(CheckDefError::NoCharacters)),
+            "{none:?}"
+        );
+    }
+    assert_eq!(
+        build(&reading(Some("2%")), font)
+            .expect_err("it knows none of them")
+            .to_string(),
+        "Digits knows none of the characters this value reads, \"2%\". Teach it one of them, \
+         or change which characters the value reads."
+    );
+    assert_eq!(
+        SpecError::Check(CheckDefError::NoCharacters).to_string(),
+        "Choose at least one character for the value to read."
+    );
 }
 
 #[test]
@@ -631,6 +737,7 @@ fn the_ui_describes_checks_in_camel_case_json() {
             region: left(),
             reference: digits_ref(),
             whole: true,
+            characters: None,
         }
     );
 }

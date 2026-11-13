@@ -108,8 +108,10 @@ function missing(next: string): { readonly ok: false; readonly next: string } {
 /** `spec` as the file spells it, when it names no screenshot; null for a check that takes pictures. */
 function fileCheck(spec: CheckSpec): CheckDef | null {
   switch (spec.kind) {
-    case 'number':
-      return { kind: 'number', reference: spec.reference.id, whole: spec.whole };
+    case 'number': {
+      const check = { kind: 'number', reference: spec.reference.id, whole: spec.whole } as const;
+      return spec.characters === undefined ? check : { ...check, characters: spec.characters };
+    }
     case 'barFill':
       return { kind: 'barFill', filled: spec.filled, empty: spec.empty };
     case 'color':

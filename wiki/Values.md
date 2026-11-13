@@ -256,7 +256,10 @@ instant can then be missed.
   after **Missing**; it still reads the characters it knows.
   **Record readings** teaches the picked one, or a new one, from
   what the region shows while you use the application, as
-  [Record screenshots](#record-screenshots) describes. Turn on
+  [Record screenshots](#record-screenshots) describes.
+  **Characters it reads** says which of the reference's characters the value
+  reads, as [Characters a number reads](#characters-a-number-reads)
+  describes. Turn on
   **Whole number only** to ignore every digit after the
   decimal point, so `87.5%` reads as 87. The reference still has to know the
   point, so teach it on a screenshot that shows one.
@@ -295,6 +298,57 @@ instant can then be missed.
 
 State names are up to 32 characters, with no space at either end. Two states
 cannot share a name, ignoring case, and none can be named `none`.
+
+### Characters a number reads
+
+A reference can know a whole font: digits, signs, and letters. A value that
+shows only some of them reads better when it reads only those, since it can
+then no longer take one character for a lookalike, such as a `0` for an `O`
+or a `2` for a `Z`. Under the reference you picked, **Characters it reads**
+chooses them:
+
+- **All it knows** reads every character the reference knows, and any it
+  learns later. A new value starts with it.
+- **Digits** reads `0` to `9` and nothing else. A digit the reference learns
+  later is read too.
+- **Digits and symbols** reads the digits and each character the reference
+  knows that is neither a digit nor a letter, such as `%`, `.`, `,`, `:`,
+  `/`, `-`, and `+`. It shows while the reference knows such a character. A
+  symbol the reference learns later from another value or the References
+  page is not added: the value then shows
+  **Choose…** with the characters it reads turned on, and choosing
+  **Digits and symbols** again adds the new symbol.
+- **Choose…** shows each character the reference knows with a box, with the
+  ones the value reads so far turned on. Turn on the ones the value shows, at
+  least one. A character the value reads that the reference has yet to learn
+  shows too, outlined: it reads once the reference learns it, and you can
+  turn it off.
+
+Picking another reference keeps **All it knows** and **Digits**, takes
+**Digits and symbols** from the new reference's symbols, and takes out of a
+**Choose…** set the characters that only the old reference knows. Teaching
+the reference from this value, with **Edit** or **Record readings**, adds a
+new symbol to **Digits and symbols** and changes no other choice.
+
+Under the list, the value shows the characters it reads. The choice belongs
+to the value. The reference keeps every character it knows, so another value
+can read more of the same reference, and the References page still lists them
+all.
+
+The value reads as if its reference knew nothing else. A character it does
+not read counts as one the reference has not learned, and the value reads
+nothing while its region shows one before the number, inside it, or right
+after it. So **Digits** reads a region that shows only digits, such as `87`.
+It cannot read `87%`, `1,234`, or `37 HP`: the value has to read the
+character that follows the digits to know that the number ended. Add what
+the region shows: the `%` of `87%`, the `,` of `1,234`, the `L`, `v`, and
+`.` of `Lv.5`. Only text after such a character needs none, such as the `HP`
+in `37% HP` once the value reads the `%`. To read `87.5%`, the value reads
+the digits, the `.`, and the `%`; with **Whole number only** on, the number
+ends at the `.`, so the digits and the `.` are enough.
+
+A [fix](#fix-a-value-at-one-size) that reads with its own reference reads the
+same characters of that reference.
 
 ### Show matching pixels
 

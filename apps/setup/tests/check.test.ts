@@ -24,6 +24,7 @@ import {
   withFixRegion,
   withRecordedInk,
   withKind,
+  withReference,
   withoutState,
   withState,
   withStateAt,
@@ -46,6 +47,18 @@ describe('buildSpec', () => {
     expect(buildSpec({ ...EMPTY_DRAFT, region, reference: 'percent', whole: true }, 'example')).toEqual({
       ok: true,
       spec: { kind: 'number', region, reference: percent, whole: true },
+    });
+  });
+
+  test('a number names the characters it reads only once some are chosen, and needs one', () => {
+    const number = { ...EMPTY_DRAFT, region, reference: 'percent' };
+    expect(buildSpec({ ...number, characters: ['1', '2', '%'] }, 'example')).toEqual({
+      ok: true,
+      spec: { kind: 'number', region, reference: percent, whole: false, characters: '12%' },
+    });
+    expect(buildSpec({ ...number, characters: [] }, 'example')).toEqual({
+      ok: false,
+      next: 'Choose at least one character for the value to read.',
     });
   });
 
@@ -455,12 +468,53 @@ test("a new screenshot carries the value's region when it fits, and clears it wh
   expect(onPicture(drawn, 1, null)).toBe(drawn);
 });
 
+test('withReference keeps the choice of characters that was picked, for the new reference', () => {
+  const reference = (id: string, text: string) => ({
+    id,
+    name: id,
+    ink: red,
+    tolerance: 40,
+    samples: [{ image: `ref-${id}-1.png`, text }],
+  });
+  const references = [reference('percent', '10%L'), reference('clock', '12:')];
+  const number = { ...EMPTY_DRAFT, reference: 'percent' };
+  expect(withReference(number, 'clock', references)).toEqual({ ...number, reference: 'clock' });
+  const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  expect(withReference({ ...number, characters: [...digits, '%'] }, 'clock', references).characters).toEqual([
+    ...digits,
+    ':',
+  ]);
+  expect(withReference({ ...number, characters: ['1', 'L'] }, 'clock', references).characters).toEqual(['1']);
+  // A reference that is not among them, such as while its file cannot be read, changes nothing that is read.
+  expect(withReference({ ...number, characters: ['1', 'L'] }, 'gone', references)).toEqual({
+    ...number,
+    reference: 'gone',
+    characters: ['1', 'L'],
+  });
+  // The value's own reference taught a `.` in place: the choice was made against what it knew before.
+  const taught = [reference('percent', '10%L.')];
+  const inPlace = (characters: readonly string[]) =>
+    withReference({ ...number, characters }, 'percent', taught, references).characters;
+  // The digits and symbols take the new symbol, and keep the digits it has yet to learn.
+  expect(inPlace([...digits, '%'])).toEqual([...digits, '%', '.']);
+  expect(inPlace(digits)).toEqual(digits);
+  // A chosen set loses nothing, even a character the reference never knew.
+  expect(inPlace(['1', '7', '%'])).toEqual(['1', '7', '%']);
+  // A first reference has no choice to carry over but the one the draft holds.
+  expect(withReference({ ...EMPTY_DRAFT, characters: digits }, 'clock', references).characters).toEqual(digits);
+});
+
 describe('fixDraft', () => {
   test("starts from the saved check's kind and settings, with no region", () => {
     expect(fixDraft({ kind: 'number', reference: 'percent', whole: true })).toEqual({
       ...EMPTY_DRAFT,
       reference: 'percent',
       whole: true,
+    });
+    expect(fixDraft({ kind: 'number', reference: 'percent', whole: false, characters: '%10 1' })).toEqual({
+      ...EMPTY_DRAFT,
+      reference: 'percent',
+      characters: ['0', '1', '%'],
     });
     expect(fixDraft({ kind: 'barFill', filled: red, empty: gray })).toEqual({
       ...EMPTY_DRAFT,

@@ -333,7 +333,8 @@ mod tests {
             file.values[0].screen.check,
             CheckDef::Number {
                 reference: "digits".to_owned(),
-                whole: true
+                whole: true,
+                characters: None,
             }
         );
         harness
@@ -360,6 +361,7 @@ mod tests {
                 screen.check = CheckDef::Number {
                     reference: "small".to_owned(),
                     whole: true,
+                    characters: None,
                 };
                 screen.fixes = vec![FixDef {
                     window_size: SizeDef {

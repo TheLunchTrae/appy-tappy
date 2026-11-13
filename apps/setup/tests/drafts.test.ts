@@ -146,6 +146,7 @@ describe('what a draft keeps', () => {
       ignoreBackground: false,
       reference: 'percent',
       whole: true,
+      characters: ['1', '%'],
     };
     const drawn: Readonly<Record<string, unknown>> = { ...draft };
     for (const [key, start] of Object.entries(EMPTY_DRAFT)) {
@@ -209,6 +210,7 @@ describe('the shape a draft keeps', () => {
     expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'mayMove', 'recordedShots', 'step', 'valueName']);
     expect(Object.keys(stored.draft).sort()).toEqual([
       'boxes',
+      'characters',
       'color',
       'colorMatch',
       'drawnOn',
@@ -348,6 +350,14 @@ describe('a draft and what it belongs to', () => {
     expect(captureProblem(fits, apps)).toBeNull();
     // The reference a fix reads with is its own choice, so another one still fits.
     expect(fixOutdated(fixOf({ ...fixDraft(progress.screen.check), reference: 'other' }), progress)).toBe(false);
+    // What a number counts and which characters it reads are the value's, which a fix follows.
+    const whole = { ...progress.screen.check, whole: true };
+    expect(fixOutdated(fits, { ...progress, screen: { ...progress.screen, check: whole } })).toBe(true);
+    const digits = { ...progress.screen.check, characters: '0123456789' };
+    expect(fixOutdated(fits, { ...progress, screen: { ...progress.screen, check: digits } })).toBe(true);
+    expect(fixOutdated(fixOf(fixDraft(digits)), { ...progress, screen: { ...progress.screen, check: digits } })).toBe(
+      false,
+    );
     const bar = {
       kind: 'barFill' as const,
       filled: { red: 1, green: 2, blue: 3 },

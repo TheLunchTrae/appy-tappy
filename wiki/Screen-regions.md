@@ -45,7 +45,15 @@ the same answer on every system, and allocate nothing per read.
   text, characters that touch, or text on a background that shares the
   text's color; those need a different check. A character drawn as marks
   with blank columns between them, as some fonts draw `%`, is one character
-  for each mark.
+  for each mark. A value may name the characters it reads, `characters` in
+  its check, and then reads with only its reference's glyphs for them, as if
+  the reference had learned nothing else: a shape takes the closest of those
+  glyphs, so a value of digits cannot read a `0` as the `O` its font also
+  has, and any other character counts as not learned. `DigitReader::reading`
+  drops the other glyphs once, when `saved::build` builds the check, so a
+  read matches against fewer glyphs and does nothing more. Characters the
+  reference has yet to learn are passed over, and a value whose reference
+  knows none of its characters is not read (`SavedError::NoCharacters`).
 - **Bar fill** returns how full a bar is, from 0 to 100. The user clicks one
   filled spot and one empty spot. The check counts the region's pixels closer
   to each color and ignores pixels near neither, such as a border or a label:

@@ -10,18 +10,20 @@ import { background } from './repeat.ts';
 export function useAppFile(app: string): {
   readonly file: AppFile | null;
   readonly error: string | null;
-  /** Reads the file again, such as after a save added to it. */
-  readonly reload: () => Promise<void>;
+  /** Reads the file again, such as after a save added to it, and answers it, or null when it cannot be read. */
+  readonly reload: () => Promise<AppFile | null>;
 } {
   const [file, setFile] = useState<AppFile | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const reload = useCallback(async (): Promise<void> => {
+  const reload = useCallback(async (): Promise<AppFile | null> => {
     try {
       const found = (await listApps()).find((summary) => summary.id === app);
       setFile(found?.file ?? null);
       setError(found === undefined || found.file !== null ? null : found.error);
+      return found?.file ?? null;
     } catch (error: unknown) {
       setError(errorText(error));
+      return null;
     }
   }, [app]);
   useEffect(() => {

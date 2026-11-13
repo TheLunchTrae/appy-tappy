@@ -68,6 +68,13 @@ pub(crate) enum SpecError {
     Picture,
     /// A saved reference the check names cannot be had, and why.
     Reference(String),
+    /// A number reads only characters that its reference knows none of.
+    NoCharacters {
+        /// The reference's name.
+        reference: String,
+        /// The characters the number reads.
+        characters: String,
+    },
     /// A value's reference belongs to another application.
     OtherApplication,
     /// Characters still being taught were saved as a value, or something
@@ -108,6 +115,19 @@ impl fmt::Display for SpecError {
             Self::Check(CheckDefError::SameStateName(name)) => write!(
                 formatter,
                 "Two states are named \"{name}\". Give each state its own name."
+            ),
+            Self::Check(CheckDefError::NoCharacters) => {
+                formatter.write_str("Choose at least one character for the value to read.")
+            },
+            // A fix reads the characters its value chose, with a reference
+            // of its own, so the wording holds where they cannot be chosen.
+            Self::NoCharacters {
+                reference,
+                characters,
+            } => write!(
+                formatter,
+                "{reference} knows none of the characters this value reads, {characters:?}. Teach \
+                 it one of them, or change which characters the value reads."
             ),
             Self::NothingSelected(name) => write!(
                 formatter,

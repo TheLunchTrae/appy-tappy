@@ -171,6 +171,7 @@ fn runtime_check(
         check: CheckDef::Number {
             reference: reference.id.clone(),
             whole: false,
+            characters: None,
         },
         pin: None,
         fixes: Vec::new(),

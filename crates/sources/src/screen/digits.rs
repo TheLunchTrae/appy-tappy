@@ -211,6 +211,24 @@ impl DigitReader {
         self.glyphs.iter().any(|glyph| glyph.character == character)
     }
 
+    /// The reader a number check reads with when it names `characters`, as
+    /// `CheckDef::Number` does: with only its glyphs for them, in the order
+    /// it learned them, or `None` when it has learned none of them. It then
+    /// reads as if it had learned nothing else, so a shape matches the
+    /// closest of those glyphs alone: a reader of digits cannot read a `0`
+    /// as the `O` its font also has, and any other character it sees is
+    /// unknown to it. A check that names no characters reads with the
+    /// reader as it is.
+    #[must_use]
+    pub fn reading(mut self, characters: Option<&str>) -> Option<Self> {
+        let Some(characters) = characters else {
+            return Some(self);
+        };
+        self.glyphs
+            .retain(|glyph| characters.contains(glyph.character));
+        (!self.glyphs.is_empty()).then_some(self)
+    }
+
     /// Reads the first number in `image`: an optional `-`, digits, and an
     /// optional `.` with more digits. A number that starts with its `.`
     /// reads as `0.`, so `-.5` reads as -0.5, unless letters came before,
@@ -1252,6 +1270,48 @@ mod tests {
             reader.read(&draw(&[crowded.as_str()]), false),
             Err(ReadError::TooManyCharacters)
         );
+    }
+
+    /// A ring `width` pixels wide and 16 tall, a cell a pixel on the grid.
+    fn ring(width: usize) -> Vec<String> {
+        let wall = format!("#{}#", ".".repeat(width.checked_sub(2).unwrap()));
+        let mut rows = vec![wall; 16];
+        rows[0] = "#".repeat(width);
+        rows[15] = "#".repeat(width);
+        rows
+    }
+
+    #[test]
+    fn a_reader_of_some_characters_matches_only_their_glyphs() {
+        // A letter and the digit that looks like it, a column wider: each
+        // shape matches both glyphs, and the letter's own glyph is closer.
+        let both: Vec<String> = ring(10)
+            .iter()
+            .zip(ring(11))
+            .map(|(letter, digit)| format!("{letter}.{digit}"))
+            .collect();
+        let rows: Vec<&str> = both.iter().map(String::as_str).collect();
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&draw(&rows), "O0").unwrap();
+        let letter = ring(10);
+        let letter = draw(&letter.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(
+            reader.read(&letter, false),
+            Err(ReadError::NoNumber {
+                read: read_text("O")
+            })
+        );
+        let digits = reader.clone().reading(Some("0123456789")).unwrap();
+        assert!(digits.knows('0'));
+        assert!(!digits.knows('O'));
+        assert_eq!(digits.read(&letter, false), Ok(Number::new(0.0).unwrap()));
+        // The glyphs kept stay in the order they were learned.
+        assert_eq!(reader.clone().reading(Some("0 O")), Some(reader.clone()));
+        assert_eq!(reader.clone().reading(Some("%")), None);
+        // A check that names none reads with them all, even before any.
+        assert_eq!(reader.clone().reading(None), Some(reader));
+        let blank = DigitReader::new(WHITE, 0);
+        assert_eq!(blank.clone().reading(None), Some(blank));
     }
 
     #[test]

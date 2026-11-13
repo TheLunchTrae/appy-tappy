@@ -3,6 +3,7 @@ import { referenceCoverage } from '../lib/expected.ts';
 import { readers, referenceCharacters } from '../lib/reference.ts';
 import { REFERENCE_HINT } from '../lib/hints.ts';
 import { CharacterChips, MissingNote } from './CharacterChips.tsx';
+import { CharactersRead } from './CharactersRead.tsx';
 import { Hint } from './Hint.tsx';
 
 interface Props {
@@ -13,6 +14,8 @@ interface Props {
   /** Whether a region is drawn to make a reference from. */
   readonly hasRegion: boolean;
   readonly whole: boolean;
+  /** The characters the value reads of its reference, or null for every character it knows. */
+  readonly characters: readonly string[] | null;
   readonly onSelect: (reference: string) => void;
   readonly onEdit: (reference: string) => void;
   /** The references that have a draft of changes, which are changed by finishing it instead. */
@@ -21,9 +24,13 @@ interface Props {
   /** Opens the picked reference, or a new one, to record the region's readings. */
   readonly onRecord: () => void;
   readonly onWhole: (whole: boolean) => void;
+  readonly onCharacters: (characters: readonly string[] | null) => void;
 }
 
-/** How a number value is read: one of its application's references, and whether only whole numbers count. */
+/**
+ * How a number value is read: one of its application's references, which of its characters, and whether only whole
+ * numbers count.
+ */
 export function ReferencePicker(props: Props) {
   const { appName, file, selected, hasRegion, whole } = props;
   const references = file?.references ?? [];
@@ -106,6 +113,9 @@ export function ReferencePicker(props: Props) {
           {chosen === null ? 'a new reference' : chosen.name} its characters.
         </span>
       </div>
+      {chosen === null ? null : (
+        <CharactersRead reference={chosen} characters={props.characters} onCharacters={props.onCharacters} />
+      )}
       <div className="field">
         <label className="toggle">
           <input
