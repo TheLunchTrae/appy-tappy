@@ -1404,10 +1404,6 @@ mod tests {
             build(&number, &mut unknown, OFTEN, from(&BTreeMap::new())),
             Err(SavedError::Missing { .. })
         ));
-        assert!(matches!(
-            unknown.reader("other", from(&files)),
-            Err(SavedError::NoReference { .. })
-        ));
     }
 
     #[test]

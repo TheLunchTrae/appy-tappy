@@ -2767,8 +2767,7 @@ each edit in the editor. A reference is kept only when every sample's
 picture could be read, so one that is missing a picture is read again on
 each ask and learned once the picture is back. It keeps the pictures, not a
 reader learned from them: the color and tolerance being taught decide what
-the samples teach, and each ask learns them again, which costs well under a
-millisecond for each sample. `Owner::write_app` empties it
+the samples teach, so each ask learns them again. `Owner::write_app` empties it
 before any saved application is written or removed, whether that works or
 fails, and keeping another reference replaces it. An import writes a new
 application, which no kept reference is part of. A file changed outside the setup app
