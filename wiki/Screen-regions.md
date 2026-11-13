@@ -448,10 +448,9 @@ The runtime reads an application's values in one pass of its reader, so each
 reader keeps one read interval for all of them: a minimum and a maximum time
 between reads. The defaults are 16 ms and 500 ms; `ReadInterval` in
 `crates/config/src/settings_file.rs` holds them and the rule that the minimum
-is no longer than the maximum. A shorter minimum notices
-changes sooner; a longer maximum saves CPU while nothing changes. Reads happen
-only on frames the window draws, so a window that draws nothing new is not read
-at all.
+is no longer than the maximum. A shorter minimum notices changes sooner; a
+longer maximum saves CPU while nothing changes. Reads happen only on frames the
+window draws, so a window that draws nothing new is not read at all.
 
 Between the two, the reader adapts. After a read that changed a value, it waits
 the minimum. Each read that changed nothing doubles the wait, up to the maximum.
