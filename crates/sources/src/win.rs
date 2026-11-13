@@ -25,8 +25,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::BOOL;
 
-use crate::screen::{Size, content_on_screen};
-use crate::system::{Bounds, ProcessEntry, Rgb, System, WindowEntry, WindowPlace};
+use crate::screen::{Rgb, content_on_screen};
+use crate::system::{Bounds, ProcessEntry, ScreenPixels, System, WindowEntry, WindowPlace};
 
 mod build;
 mod capture;
@@ -281,26 +281,6 @@ impl System for WindowsSystem {
         }))
     }
 
-    fn content_size(&self, window: u64) -> io::Result<Option<Size>> {
-        let handle = window_handle(window)?;
-        #[expect(unsafe_code, reason = "Win32 calls")]
-        // SAFETY: both calls only read the state of the window `handle`
-        // names and answer false when no such window exists.
-        let (exists, minimized) =
-            unsafe { (IsWindow(Some(handle)).as_bool(), IsIconic(handle).as_bool()) };
-        // A minimized window's bounds are its small placeholder, not the size
-        // it will draw at once restored.
-        if !exists || minimized {
-            return Ok(None);
-        }
-        let content = content_on_screen(frame_on_screen(handle)?, client_on_screen(handle).ok());
-        let side = |from: i32, to: i32| u32::try_from(to.saturating_sub(from)).unwrap_or_default();
-        Ok(Some(Size {
-            width: side(content.left, content.right),
-            height: side(content.top, content.bottom),
-        }))
-    }
-
     fn content_bounds(&self, window: u64) -> io::Result<Option<Bounds>> {
         let Some(place) = self.window_place(window)? else {
             return Ok(None);
@@ -318,7 +298,9 @@ impl System for WindowsSystem {
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {
         build::executable_build(process)
     }
+}
 
+impl ScreenPixels for WindowsSystem {
     fn screen_pixel(&self, x: i32, y: i32) -> io::Result<Rgb> {
         #[expect(unsafe_code, reason = "Win32 calls")]
         // SAFETY: the screen device context is released before the block ends and

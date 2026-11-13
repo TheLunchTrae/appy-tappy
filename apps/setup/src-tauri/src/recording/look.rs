@@ -92,7 +92,7 @@ pub(crate) fn run(
 mod tests {
     use std::sync::mpsc;
 
-    use appytappy_sources::system::Rgb;
+    use appytappy_sources::screen::Rgb;
 
     use super::*;
 

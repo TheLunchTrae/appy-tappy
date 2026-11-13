@@ -2,17 +2,20 @@
 //!
 //! The UI sends the steps the user took on a screenshot: a rough box to snap
 //! to the thing inside it, or a click to grow over the thing's colors, each
-//! replacing the selection, adding to it, or taking from it. [`select`]
+//! replacing the selection, adding to it, or taking from it. [`select()`]
 //! replays them, so the same steps give the same selection on the screenshot
 //! the check is built from as on the one the UI showed.
 
-use std::ops::Range;
-
-use appytappy_sources::screen::select::{Selection, grow, snap};
+use appytappy_config::app_file::RegionDef;
+use appytappy_sources::screen::mask::Mask;
 use appytappy_sources::screen::{Image, Region};
 use serde::{Deserialize, Serialize};
 
 use crate::check_spec::RegionSpec;
+
+mod select;
+
+use select::{Selection, grow, snap};
 
 /// How a step's pick combines with the selection before it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -65,7 +68,8 @@ pub(crate) fn select(image: &Image, spec: &SelectionSpec) -> Option<Selection> {
     spec.steps.iter().fold(None, |current, step| {
         let (picked, combine) = match *step {
             SelectStep::Snap { region, combine } => (
-                Region::new(region.x, region.y, region.width, region.height)
+                Region::try_from(region)
+                    .ok()
                     .and_then(|rough| snap(image, rough, spec.tolerance)),
                 combine,
             ),
@@ -87,7 +91,7 @@ pub(crate) fn select(image: &Image, spec: &SelectionSpec) -> Option<Selection> {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct SelectionView {
     /// The box around the selected pixels.
-    region: RegionSpec,
+    region: RegionDef,
     /// The runs of selected pixels in the box, each as the index of its
     /// first pixel and of the pixel after its last, row by row from the top.
     spans: Vec<[usize; 2]>,
@@ -95,23 +99,26 @@ pub(crate) struct SelectionView {
 
 impl From<&Selection> for SelectionView {
     fn from(selection: &Selection) -> Self {
-        let region = selection.region();
-        let size = region.size();
         Self {
-            region: RegionSpec {
-                x: region.x(),
-                y: region.y(),
-                width: size.width,
-                height: size.height,
-            },
-            spans: selection
-                .mask()
-                .spans()
-                .into_iter()
-                .map(|Range { start, end }| [start, end])
-                .collect(),
+            region: selection.region().into(),
+            spans: spans(selection.mask()),
         }
     }
+}
+
+/// The runs of pixels `mask` keeps, each as the index of its first pixel
+/// and of the pixel after its last. A run goes on across the end of a row.
+fn spans(mask: &Mask) -> Vec<[usize; 2]> {
+    let mut spans = Vec::new();
+    let mut index = 0_usize;
+    for run in mask.kept().chunk_by(|one, other| one == other) {
+        let end = index.saturating_add(run.len());
+        if run.first() == Some(&true) {
+            spans.push([index, end]);
+        }
+        index = end;
+    }
+    spans
 }
 
 #[cfg(test)]
@@ -150,6 +157,15 @@ mod tests {
         }
     }
 
+    fn saved(x: u32, y: u32, width: u32, height: u32) -> RegionDef {
+        RegionDef {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
     fn view(steps: Vec<SelectStep>) -> Option<SelectionView> {
         select(
             &picture(),
@@ -167,9 +183,26 @@ mod tests {
     }
 
     #[test]
+    fn spans_cover_each_run_of_kept_pixels() {
+        let size = Size {
+            width: 3,
+            height: 2,
+        };
+        let mask = |kept: [bool; 6]| Mask::new(size, kept.to_vec()).expect("keeps one");
+        assert_eq!(
+            spans(&mask([true, false, true, true, false, true])),
+            [[0, 1], [2, 4], [5, 6]]
+        );
+        assert_eq!(
+            spans(&mask([false, true, true, true, true, false])),
+            [[1, 5]]
+        );
+    }
+
+    #[test]
     fn a_snap_or_a_click_selects_the_thing() {
         let square = Some(SelectionView {
-            region: region(1, 1, 2, 2),
+            region: saved(1, 1, 2, 2),
             spans: vec![[0, 4]],
         });
         assert_eq!(
@@ -191,7 +224,7 @@ mod tests {
                 click(4, 3, Combine::Replace)
             ]),
             Some(SelectionView {
-                region: region(4, 3, 1, 1),
+                region: saved(4, 3, 1, 1),
                 spans: vec![[0, 1]],
             })
         );
@@ -201,7 +234,7 @@ mod tests {
                 click(4, 3, Combine::Add)
             ]),
             Some(SelectionView {
-                region: region(1, 1, 4, 3),
+                region: saved(1, 1, 4, 3),
                 spans: vec![[0, 2], [4, 6], [11, 12]],
             })
         );
@@ -212,7 +245,7 @@ mod tests {
                 click(2, 1, Combine::Remove),
             ]),
             Some(SelectionView {
-                region: region(4, 3, 1, 1),
+                region: saved(4, 3, 1, 1),
                 spans: vec![[0, 1]],
             })
         );
@@ -260,7 +293,7 @@ mod tests {
                 click(4, 3, Combine::Add)
             ]),
             Some(SelectionView {
-                region: region(4, 3, 1, 1),
+                region: saved(4, 3, 1, 1),
                 spans: vec![[0, 1]],
             }),
             "adding to nothing is the pick"

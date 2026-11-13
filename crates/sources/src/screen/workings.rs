@@ -7,10 +7,9 @@
 
 use appytappy_config::signal::StateName;
 
-use super::Image;
 use super::check::{Check, CheckError, Difference};
 use super::digits::CharacterScore;
-use crate::system::Rgb;
+use super::{Image, Rgb};
 
 /// How a check came to its reading of one region.
 #[derive(Debug, Clone, PartialEq, Eq)]
