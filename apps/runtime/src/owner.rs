@@ -2210,6 +2210,35 @@ mod tests {
     }
 
     #[test]
+    fn a_reader_that_started_is_kept_for_its_session_and_traced() {
+        let (mut crew, _controls, _received, heard) = crew();
+        let mut scratch = Scratch::new("reader-started");
+        let (trace, entries) = Trace::for_test(1, &[TraceCategory::Lifecycle]);
+        crew.trace = trace;
+        let (reader, _told) = Reader::stand_in();
+        let session = SessionId(3);
+        crew.read(
+            session,
+            ReaderNumber(1),
+            Ok(reader),
+            "Example App",
+            &mut scratch.log,
+        );
+        assert_eq!(
+            crew.readers.keys().collect::<Vec<_>>(),
+            [&session],
+            "the owner stops it with its session"
+        );
+        let sent: Vec<(What, Option<SessionId>)> = crate::trace::sent(&entries)
+            .into_iter()
+            .map(|record| (record.what, record.session))
+            .collect();
+        assert_eq!(sent, [(What::Reading, Some(session))]);
+        assert!(heard.try_recv().is_err(), "nothing ended");
+        assert_eq!(scratch.log(), "", "and nothing is logged");
+    }
+
+    #[test]
     fn a_queued_job_reaches_the_action_thread_between_its_decision_and_queued() {
         let (mut crew, controls, _received, _heard) = crew();
         let mut scratch = Scratch::new("queued-job");
