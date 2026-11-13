@@ -10,7 +10,8 @@ use super::Owner;
 use super::host::Host;
 
 /// What a draft says is still to do when a screenshot was too large to keep.
-const LEFT_OUT: &str = "A screenshot was too large to keep, so take it again.";
+const LEFT_OUT: &str =
+    "A screenshot was larger than AppyTappy keeps, so make the window smaller and take it again.";
 
 impl<H: Host> Owner<H> {
     /// Every saved draft.

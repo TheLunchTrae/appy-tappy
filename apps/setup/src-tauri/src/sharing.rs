@@ -385,8 +385,8 @@ impl fmt::Display for ShareError {
             ),
             Self::DecodesTooMuch => write!(
                 formatter,
-                "its values read their references' pictures so often that reading them \
-                 decodes more pixels than {DECODES} pictures of {LARGEST_PICTURE}"
+                "its values read their references' pictures so many times that reading them \
+                 would decode more pixels than four {LARGEST_PICTURE} pictures"
             ),
             Self::Read(error) => write!(formatter, "it cannot be read ({error})"),
             Self::Pack(error) => write!(formatter, "its file cannot be made ({error})"),
@@ -796,8 +796,8 @@ mod tests {
         assert!(matches!(error, ShareError::DecodesTooMuch));
         assert_eq!(
             error.to_string(),
-            "its values read their references' pictures so often that reading them decodes \
-             more pixels than 4 pictures of 7680x4320"
+            "its values read their references' pictures so many times that reading them would \
+             decode more pixels than four 7680x4320 pictures"
         );
         assert!(error.source().is_none());
     }

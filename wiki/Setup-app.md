@@ -1038,7 +1038,7 @@ first saved (`apps/setup/src-tauri/src/drafts.rs`). The folder holds
 each as `shot-{index}.png` under the index it has in the capture, so the
 indexes of removed screenshots stay empty. A screenshot larger than
 AppyTappy reads back is left out too, and `save_draft` adds a sentence to the
-draft's to-do list to take it again. The runtime never reads this
+draft's to-do list to make the window smaller and take it again. The runtime never reads this
 folder, so a draft never runs and the authoring files never hold an
 unfinished item.
 

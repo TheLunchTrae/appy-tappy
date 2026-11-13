@@ -100,7 +100,9 @@ impl<H: Host> Owner<H> {
 /// it, with what to change when the cause is the user's to change.
 fn cannot_export(name: &str, error: &ShareError) -> String {
     let change = match error {
-        ShareError::TooManyPixels => " Draw smaller regions or fewer states, then export it again.",
+        ShareError::TooManyPixels => {
+            " Draw smaller regions or fewer states or fixes, then export it again."
+        },
         ShareError::DecodesTooMuch => {
             " Teach its references with smaller pictures, then export it again."
         },
@@ -350,13 +352,13 @@ mod tests {
         assert_eq!(
             cannot_export("Example App", &ShareError::TooManyPixels),
             "AppyTappy cannot export Example App: its pictures together hold more pixels than \
-             one 7680x4320 picture. Draw smaller regions or fewer states, then export it again."
+             one 7680x4320 picture. Draw smaller regions or fewer states or fixes, then export it again."
         );
         assert_eq!(
             cannot_export("Example App", &ShareError::DecodesTooMuch),
             "AppyTappy cannot export Example App: its values read their references' pictures \
-             so often that reading them decodes more pixels than 4 pictures of 7680x4320. Teach \
-             its references with smaller pictures, then export it again."
+             so many times that reading them would decode more pixels than four 7680x4320 \
+             pictures. Teach its references with smaller pictures, then export it again."
         );
         assert_eq!(
             cannot_export("Example App", &ShareError::NoAppFile),
