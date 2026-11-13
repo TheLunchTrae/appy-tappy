@@ -1,7 +1,7 @@
 //! The values, jobs, and frames the reader's tests read.
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{PinDef, SizeChangesDef};
+use appytappy_config::process::ProcessId;
 use appytappy_config::signal::SignalName;
 use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
 use appytappy_sources::screen::Rgb;

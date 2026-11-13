@@ -20,25 +20,12 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::anti_cheat::AntiCheatClass;
+use crate::names::is_image_name;
 use crate::signal::{SignalName, StateName};
 use crate::window_match::{MustMatch, Pattern, WindowFacts, WindowMatch};
 
 /// The format version this build writes and reads.
 pub const FORMAT: u32 = 1;
-
-/// The longest picture file name, in bytes.
-const MAX_IMAGE_NAME_LEN: usize = 64;
-
-/// The longest ID [`value_id`] makes, in bytes. It leaves room for the
-/// pictures named after the value, such as `{id}-16.png` for a state
-/// check's sixteenth state and `{id}-10-16.png` for it in a fix or in a
-/// drawing whose states were taken again, within [`MAX_IMAGE_NAME_LEN`].
-const MAX_VALUE_ID_LEN: usize = 48;
-
-/// The longest ID [`reference_id`] makes, in bytes. It leaves room for the
-/// pictures named after the reference, such as `ref-{id}-12.png` for its
-/// twelfth sample, within [`MAX_IMAGE_NAME_LEN`].
-const MAX_REFERENCE_ID_LEN: usize = 40;
 
 /// The most states a state check may have.
 pub const MAX_STATES: usize = 16;
@@ -1064,25 +1051,6 @@ fn check_image(image: &str) -> Result<(), String> {
     }
 }
 
-/// Whether `name` is a picture file name the folder can hold.
-///
-/// That is lowercase ASCII letters, digits, hyphens, and underscores, then
-/// `.png`. No separator or dot can appear before the extension, so the name never
-/// leaves the application's folder.
-#[must_use]
-pub fn is_image_name(name: &str) -> bool {
-    name.len() <= MAX_IMAGE_NAME_LEN
-        && name.strip_suffix(".png").is_some_and(|stem| {
-            !stem.is_empty()
-                && stem.chars().all(|character| {
-                    character.is_ascii_lowercase()
-                        || character.is_ascii_digit()
-                        || character == '-'
-                        || character == '_'
-                })
-        })
-}
-
 /// An application's file cannot be used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppFileError {
@@ -1118,144 +1086,10 @@ impl fmt::Display for AppFileError {
 
 impl Error for AppFileError {}
 
-/// A value ID made from a name the user typed, such as `progress` from
-/// `Progress`.
-///
-/// It keeps lowercase ASCII letters and digits, with an underscore for each
-/// run of anything else. A name with no letter or digit, or
-/// one that starts with a digit, gets a `value` prefix so the ID is valid.
-#[must_use]
-pub fn value_id(name: &str) -> String {
-    id_from_name(name, "value", MAX_VALUE_ID_LEN)
-}
-
-/// The ID for a new value named `name` that no ID in `taken` uses yet:
-/// [`value_id`] of the name, or that with `_2`, `_3` and so on when a renamed
-/// value still has it.
-#[must_use]
-pub fn new_value_id(name: &str, taken: &[&str]) -> String {
-    free_id(value_id(name), MAX_VALUE_ID_LEN, taken)
-}
-
-/// A reference ID made from a name the user typed, such as `percent_font`
-/// from `Percent font`, the way [`value_id`] makes one, with a `reference`
-/// prefix where it needs one.
-#[must_use]
-pub fn reference_id(name: &str) -> String {
-    id_from_name(name, "reference", MAX_REFERENCE_ID_LEN)
-}
-
-/// The ID for a new reference named `name` that no ID in `taken` uses yet:
-/// [`reference_id`] of the name, or that with `_2`, `_3` and so on when a
-/// renamed reference still has it.
-#[must_use]
-pub fn new_reference_id(name: &str, taken: &[&str]) -> String {
-    free_id(reference_id(name), MAX_REFERENCE_ID_LEN, taken)
-}
-
-/// `id`, or `id` with `_2`, `_3` and so on, cut to fit `max_len` bytes,
-/// whichever comes first that no ID in `taken` uses.
-fn free_id(id: String, max_len: usize, taken: &[&str]) -> String {
-    if !taken.contains(&id.as_str()) {
-        return id;
-    }
-    let mut base = id;
-    base.truncate(max_len.saturating_sub(4));
-    let base = base.trim_end_matches('_');
-    // `taken` is finite, so one of its length plus one numbers is free.
-    (2_usize..=taken.len().saturating_add(2))
-        .map(|number| format!("{base}_{number}"))
-        .find(|candidate| candidate.len() <= max_len && !taken.contains(&candidate.as_str()))
-        .unwrap_or_else(|| base.to_owned())
-}
-
-/// The file name of a reference's `number`th sample, such as
-/// `ref-percent_font-3.png`. No value's picture can have it: a value's ID
-/// has no hyphen, and its pictures are `{id}-{n}.png`.
-#[must_use]
-pub fn sample_name(reference: &str, number: usize) -> String {
-    format!("ref-{reference}-{number}.png")
-}
-
-/// The file name of the picture of a value's `state`th state, counted from
-/// 1.
-///
-/// It is `{value}-{state}.png` for a new value's drawing, such as
-/// `status-2.png`, and `{value}-{set}-{state}.png` for its picture in the
-/// set numbered `set`, such as `status-1-2.png`: a fix's pictures, or the
-/// drawing's once an edit took its states again. A value's ID has no hyphen,
-/// so neither name is another value's. No reference's sample can have
-/// either: a sample's name has the reference's ID after `ref-`, which starts
-/// with a letter.
-#[must_use]
-pub fn state_image_name(value: &str, set: Option<usize>, state: usize) -> String {
-    match set {
-        Some(set) => format!("{value}-{set}-{state}.png"),
-        None => format!("{value}-{state}.png"),
-    }
-}
-
-/// Whether `name` is a file name AppyTappy itself gives a picture in an
-/// application's folder.
-///
-/// That is a reference's sample as [`sample_name`] names it, or a state's
-/// picture as [`state_image_name`] names it, for a first drawing or a fix.
-/// A file with any other name, such as one the user put in the folder, is
-/// not AppyTappy's to remove.
-#[must_use]
-pub(crate) fn is_own_image_name(name: &str) -> bool {
-    let Some(stem) = name.strip_suffix(".png").filter(|_| is_image_name(name)) else {
-        return false;
-    };
-    let id = |part: &str| SignalName::new(part).is_ok();
-    let number = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
-    let mut parts = stem.split('-');
-    match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(value), Some(state), None, None) => id(value) && number(state),
-        // A sample's middle part is an ID, which starts with a letter, and a
-        // fix's is a number, so a name is one or the other.
-        (Some(first), Some(middle), Some(last), None) => {
-            number(last) && ((first == "ref" && id(middle)) || (id(first) && number(middle)))
-        },
-        _ => false,
-    }
-}
-
-/// An ID made from a name the user typed, as [`value_id`] describes, with
-/// `prefix` in front when the name does not start with a letter, and at most
-/// `max_len` bytes long.
-pub(crate) fn id_from_name(name: &str, prefix: &str, max_len: usize) -> String {
-    let mut id = String::new();
-    for character in name.chars().flat_map(char::to_lowercase) {
-        if character.is_ascii_lowercase() || character.is_ascii_digit() {
-            id.push(character);
-        } else if !id.is_empty() && !id.ends_with('_') {
-            id.push('_');
-        }
-    }
-    while id.ends_with('_') {
-        id.pop();
-    }
-    if !id.starts_with(|first: char| first.is_ascii_lowercase()) {
-        id.insert_str(
-            0,
-            &if id.is_empty() {
-                prefix.to_owned()
-            } else {
-                format!("{prefix}_")
-            },
-        );
-    }
-    id.truncate(max_len);
-    while id.ends_with('_') {
-        id.pop();
-    }
-    id
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::names::sample_name;
 
     const RED: ColorDef = ColorDef {
         red: 255,
@@ -1533,8 +1367,6 @@ mod tests {
                 .starts_with("value \"status\": picture \"../out.png\" must be"),
             "{error}"
         );
-        assert_eq!(state_image_name("status", None, 2), "status-2.png");
-        assert_eq!(state_image_name("status", Some(1), 2), "status-1-2.png");
     }
 
     #[test]
@@ -2014,125 +1846,5 @@ mod tests {
         for (error, message) in cases {
             assert_eq!(error.to_string(), message);
         }
-    }
-
-    #[test]
-    fn picture_names_stay_inside_the_folder() {
-        for name in ["a.png", "progress-1.png", "x9.png"] {
-            assert!(is_image_name(name), "{name}");
-        }
-        let long = format!("{}.png", "a".repeat(61));
-        let longest = format!("{}.png", "a".repeat(60));
-        assert!(is_image_name(&longest));
-        for name in [
-            ".png",
-            "a.PNG",
-            "A.png",
-            "a.jpg",
-            "a b.png",
-            "../a.png",
-            "a/b.png",
-            "a.b.png",
-            long.as_str(),
-        ] {
-            assert!(!is_image_name(name), "{name}");
-        }
-    }
-
-    #[test]
-    fn only_the_names_appytappy_gives_pictures_are_its_own() {
-        for name in [
-            "ref-percent_font-3.png",
-            "status-1.png",
-            "status-2-1.png",
-            // A value named `ref`, and a fix of it.
-            "ref-1.png",
-            "ref-1-2.png",
-        ] {
-            assert!(is_own_image_name(name), "{name}");
-        }
-        let long = format!("a-{}.png", "1".repeat(61));
-        for name in [
-            "photo.png",
-            "icon_visible.png",
-            "holiday-snap.png",
-            "holiday-snap-1.png",
-            "status-2-x.png",
-            "status-1-2-3.png",
-            "ref-9x-1.png",
-            "1-2.png",
-            "9-1-1.png",
-            "status-.png",
-            "-1.png",
-            "Status-1.png",
-            "status-1.PNG",
-            "status-1.jpg",
-            "status-1",
-            "status-1.png.bak",
-            long.as_str(),
-        ] {
-            assert!(!is_own_image_name(name), "{name}");
-        }
-    }
-
-    #[test]
-    fn value_ids_come_from_the_names_users_type() {
-        let cases = [
-            ("Progress", "progress"),
-            ("  Icon visible? ", "icon_visible"),
-            ("HP / max HP", "hp_max_hp"),
-            ("2 steps", "value_2_steps"),
-            ("!!!", "value"),
-            ("", "value"),
-            ("Ünïcode name", "n_code_name"),
-        ];
-        for (name, id) in cases {
-            assert_eq!(value_id(name), id, "{name:?}");
-            assert!(SignalName::new(&value_id(name)).is_ok());
-        }
-        // A cut that ends on an underscore drops it.
-        assert_eq!(value_id(&"ab ".repeat(40)).len(), MAX_VALUE_ID_LEN - 1);
-        let long = value_id(&"abc".repeat(30));
-        assert_eq!(long.len(), MAX_VALUE_ID_LEN);
-        assert!(SignalName::new(&long).is_ok());
-        // The last state's picture named after the longest ID still fits.
-        assert!(is_image_name(&format!("{long}-{MAX_STATES}.png")));
-        // A renamed value keeps its ID, so a new value named like its old
-        // name takes that ID with a number, which still fits a fix's
-        // pictures.
-        assert_eq!(new_value_id("Progress", &["other"]), "progress");
-        assert_eq!(
-            new_value_id("Progress", &["progress", "progress_2"]),
-            "progress_3"
-        );
-        let numbered = new_value_id(&"abc".repeat(30), &[long.as_str()]);
-        assert_eq!(numbered.len(), MAX_VALUE_ID_LEN.saturating_sub(2));
-        assert!(numbered.ends_with("_2"));
-        assert!(SignalName::new(&numbered).is_ok());
-        assert!(is_image_name(&state_image_name(
-            &long,
-            Some(MAX_FIXES.saturating_add(2)),
-            MAX_STATES
-        )));
-    }
-
-    #[test]
-    fn reference_ids_and_their_sample_names_fit() {
-        assert_eq!(reference_id("Percent font"), "percent_font");
-        assert_eq!(reference_id("0-9"), "reference_0_9");
-        let long = reference_id(&"abc".repeat(30));
-        assert_eq!(long.len(), MAX_REFERENCE_ID_LEN);
-        assert!(SignalName::new(&long).is_ok());
-        assert_eq!(sample_name("percent_font", 3), "ref-percent_font-3.png");
-        assert_eq!(new_reference_id("Digits", &["other"]), "digits");
-        assert_eq!(
-            new_reference_id("Digits", &["digits", "digits_2"]),
-            "digits_3"
-        );
-        let numbered = new_reference_id(&"abc".repeat(30), &[long.as_str()]);
-        assert_eq!(numbered.len(), MAX_REFERENCE_ID_LEN.saturating_sub(2));
-        assert!(numbered.ends_with("_2"));
-        assert!(SignalName::new(&numbered).is_ok());
-        assert!(is_image_name(&sample_name(&long, 999_999_999)));
     }
 }

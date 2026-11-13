@@ -371,11 +371,12 @@ mod tests {
     use appytappy_config::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
         OriginDef, ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
-        StateDef, ValueDef, WindowDef, sample_name,
+        StateDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
         ActionDef, AutomationDef, ComparisonDef, FORMAT, MediaCommandDef, TargetDef, WhenDef,
     };
+    use appytappy_config::names::sample_name;
     use appytappy_config::window_match::Pattern;
     use appytappy_sources::screen::{Image, Size};
 

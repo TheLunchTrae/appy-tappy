@@ -13,8 +13,8 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
+use appytappy_config::process::ProcessId;
 use windows::Wdk::System::SystemInformation::{NtQuerySystemInformation, SYSTEM_INFORMATION_CLASS};
 use windows::Win32::Foundation::{
     ERROR_RESOURCE_DATA_NOT_FOUND, ERROR_RESOURCE_LANG_NOT_FOUND, ERROR_RESOURCE_NAME_NOT_FOUND,

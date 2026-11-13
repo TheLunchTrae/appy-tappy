@@ -6,8 +6,8 @@ use std::io;
 
 use appytappy_config::app_file::{
     CheckDefError, MAX_STATES, ReferenceDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
-    sample_name,
 };
+use appytappy_config::names::sample_name;
 use appytappy_config::signal::Number;
 use appytappy_sources::screen::check::ImageMatch;
 use appytappy_sources::screen::saved;

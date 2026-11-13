@@ -5,7 +5,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use appytappy_config::action::Modifier;
-use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::process::ProcessId;
 
 use crate::{MouseMessage, Press, Stroke};
 

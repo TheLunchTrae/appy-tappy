@@ -13,7 +13,8 @@
 //! A reference being taught is a [`CharactersSpec`], which `characters.rs`
 //! turns into a saved reference the same way.
 
-use appytappy_config::app_file::{CheckDef, ColorDef, RegionDef, StateDef, state_image_name};
+use appytappy_config::app_file::{CheckDef, ColorDef, RegionDef, StateDef};
+use appytappy_config::names::state_image_name;
 use appytappy_sources::screen::{EmptyRegion, Image, Region, Rgb, Size};
 use serde::{Deserialize, Serialize};
 

@@ -27,9 +27,8 @@ use std::error::Error;
 use std::fmt;
 use std::io::{self, Cursor, Read as _};
 
-use appytappy_config::app_file::{
-    AppFile, AppFileError, CheckDef, OriginDef, sample_name, state_image_name,
-};
+use appytappy_config::app_file::{AppFile, AppFileError, CheckDef, OriginDef};
+use appytappy_config::names::{sample_name, state_image_name};
 use appytappy_config::store::APP_FILE;
 use appytappy_sources::screen::saved::{self, SavedError};
 use appytappy_sources::screen::{Image, LARGEST_PICTURE};

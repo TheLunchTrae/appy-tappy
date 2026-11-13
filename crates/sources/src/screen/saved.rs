@@ -725,7 +725,8 @@ impl Error for SavedError {
 mod tests {
     use std::collections::BTreeMap;
 
-    use appytappy_config::app_file::{ColorDef, SampleDef, StateDef, sample_name};
+    use appytappy_config::app_file::{ColorDef, SampleDef, StateDef};
+    use appytappy_config::names::sample_name;
     use appytappy_config::signal::{Number, Value};
 
     use super::*;

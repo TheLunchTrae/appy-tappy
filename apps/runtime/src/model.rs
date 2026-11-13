@@ -595,8 +595,8 @@ fn acts(
 mod tests {
     use std::time::Duration;
 
-    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::app_file::BuildDef;
+    use appytappy_config::process::ProcessId;
     use appytappy_config::rule::{Comparison, Condition, Restore, Rule};
     use appytappy_engine::RuleIndex;
 

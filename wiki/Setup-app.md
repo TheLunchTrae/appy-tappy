@@ -958,7 +958,8 @@ another format says which format it has instead of naming a field this
 format lacks.
 
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
-`settings_file.rs`) and the files (`store.rs`). Each save writes a temporary
+`settings_file.rs`), the IDs and picture file names (`names.rs`), and the
+files (`store.rs`). Each save writes a temporary
 file and renames it over the old one, so a crash never leaves half a file; a
 later save in that folder removes a temporary file that a crash left between the
 two steps, once it is ten minutes old. A file that cannot be read is listed with
@@ -1034,7 +1035,7 @@ saved file is held to and takes nothing else from it:
   own names only find the entries. A file made elsewhere could name one
   picture for two values, or name a value's picture as another value's next
   one, which a later save would overwrite; after the renaming each picture
-  has one owner, and `AppStore::prune` knows every name.
+  has one owner, and `AppStore::save` knows every name it may remove.
 - `saved::build` reads each value from the pictures, and `saved::Readers`
   each reference, as the runtime does and as saving a value does, so a file
   with a value the runtime could not read is refused.
@@ -1243,9 +1244,8 @@ more pixels as ink sees only those within the margin.
 
 ### Removal
 
-- After each save of an application's file, `Owner::write_app` removes the
-  pictures in its folder that the file as saved does not name
-  (`AppStore::prune`). So the pictures of a deleted value, fix, or reference
+- Each save of an application's file removes the pictures in its folder that
+  the file as saved does not name (`AppStore::save`). So the pictures of a deleted value, fix, or reference
   go with it; a save that fails takes back the pictures it wrote, since the
   file still saved does not name them; and pictures left by a save that the
   program ended in the middle of go with the application's next save.
