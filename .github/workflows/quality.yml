@@ -97,6 +97,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      # The list's length sets the shard count; its values are not read.
       matrix:
         shard: [0, 1, 2, 3]
     env:
