@@ -1,10 +1,9 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, type RefObject, useState } from 'react';
 
 import type { RecordingView } from '../../lib/bindings.ts';
 import { clock } from '../../lib/review.ts';
 import type { Size } from '../../lib/region.ts';
 import type { useReview } from '../../lib/useReview.ts';
-import type { useScreenshotShortcut } from '../../lib/useScreenshotShortcut.ts';
 import { Question, useQuestion } from '../Question.tsx';
 
 /** What the stage shows now, for the bar's pill. */
@@ -72,6 +71,8 @@ interface ReviewProps {
   readonly settingsChanged: boolean;
   /** Why recording cannot go on, or null. */
   readonly recordBlocked: string | null;
+  /** Record more, which takes the focus once it shows in place of Use its settings. */
+  readonly recordMore: RefObject<HTMLButtonElement | null>;
   readonly onDiscard: () => void;
   readonly onUseSettings: () => void;
   readonly onRecordMore: () => void;
@@ -82,6 +83,7 @@ export function ReviewActions({
   review,
   settingsChanged,
   recordBlocked,
+  recordMore,
   onDiscard,
   onUseSettings,
   onRecordMore,
@@ -99,7 +101,7 @@ export function ReviewActions({
           Use its settings
         </button>
       ) : (
-        <button type="button" className="btn" data-record-more disabled={recordBlocked !== null} onClick={onRecordMore}>
+        <button ref={recordMore} type="button" className="btn" disabled={recordBlocked !== null} onClick={onRecordMore}>
           Record more
         </button>
       )}
@@ -122,63 +124,44 @@ interface WindowProps {
   readonly busy: boolean;
   /** What changing the window would lose, which it asks about first: unsaved work, a draft's screenshots, or nothing. */
   readonly loses: 'unsaved' | 'draft' | 'nothing';
-  readonly shortcut: ReturnType<typeof useScreenshotShortcut>;
   readonly onChangeWindow: () => void;
-  readonly onTake: () => void;
 }
 
-/** The bar's buttons while the stage shows the window: change it, change the shortcut, and take a screenshot. */
-export function WindowActions({ busy, loses, shortcut, onChangeWindow, onTake }: WindowProps) {
+/** The bar's button that changes the window, after asking about what that loses. */
+export function ChangeWindow({ busy, loses, onChangeWindow }: WindowProps) {
   const [leaving, setLeaving] = useState(false);
   const question = useQuestion<HTMLButtonElement>(leaving);
-  return (
-    <>
-      {leaving ? (
-        <Question
-          refs={question.refs}
-          label="Change window?"
-          keepLabel="Keep this window"
-          actLabel="Change window"
-          busy={busy}
-          onKeep={() => {
-            setLeaving(false);
-          }}
-          onAct={onChangeWindow}
-        >
-          {loses === 'unsaved'
-            ? 'Change window? The screenshots, everything set up on them, and any recording are lost.'
-            : 'Change window? This starts over on the new window. The draft stays as it is unless you save it again.'}
-        </Question>
-      ) : (
-        <button
-          ref={question.control}
-          type="button"
-          className="btn"
-          disabled={busy}
-          onClick={() => {
-            if (loses === 'nothing') {
-              onChangeWindow();
-            } else {
-              setLeaving(true);
-            }
-          }}
-        >
-          Change window
-        </button>
-      )}
-      <button
-        type="button"
-        className="btn small"
-        aria-pressed={shortcut.choosing}
-        onClick={shortcut.toggle}
-        onBlur={shortcut.cancel}
-        onKeyDown={shortcut.onKeyDown}
-      >
-        Change shortcut
-      </button>
-      <button type="button" className="btn primary" onClick={onTake}>
-        Take screenshot<span className="kbd">{shortcut.label}</span>
-      </button>
-    </>
+  return leaving ? (
+    <Question
+      refs={question.refs}
+      label="Change window?"
+      keepLabel="Keep this window"
+      actLabel="Change window"
+      busy={busy}
+      onKeep={() => {
+        setLeaving(false);
+      }}
+      onAct={onChangeWindow}
+    >
+      {loses === 'unsaved'
+        ? 'Change window? The screenshots, everything set up on them, and any recording are lost.'
+        : 'Change window? This starts over on the new window. The draft stays as it is unless you save it again.'}
+    </Question>
+  ) : (
+    <button
+      ref={question.control}
+      type="button"
+      className="btn"
+      disabled={busy}
+      onClick={() => {
+        if (loses === 'nothing') {
+          onChangeWindow();
+        } else {
+          setLeaving(true);
+        }
+      }}
+    >
+      Change window
+    </button>
   );
 }
