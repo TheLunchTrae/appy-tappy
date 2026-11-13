@@ -1611,7 +1611,8 @@ that size, once.
 stateDiagram-v2
     [*] --> Placed: Record, placed at the size the region was drawn at
     Placed --> Settling: a frame of another window size
-    Settling --> Placed: a frame of the size it is placed at
+    Settling --> Placed: a frame of the size it is placed at, when the rule places it there
+    Settling --> Unplaced: a frame of the size it is placed at, when the rule places it nowhere there
     Settling --> Settling: a frame of yet another size, which starts the wait again
     Settling --> Placed: a frame or the page's poll finds one size kept for SETTLE, and the rule places the recording there
     Settling --> Unplaced: a frame or the page's poll finds one size kept for SETTLE, and the rule places the recording nowhere
@@ -1620,6 +1621,7 @@ stateDiagram-v2
     Unplaced --> Settling: a frame of another window size
     Unplaced --> Placed: Record more, when the rule places the recording at that size as the user has it now
     Placed --> Unplaced: Record more, when the rule places the recording nowhere at that size
+    Placed --> Unplaced: another example adds a text size, when the rule places the recording nowhere at that size
 ```
 
 - **Placed** records each frame of its size: it crops the region as it lies
@@ -1630,9 +1632,10 @@ stateDiagram-v2
   sizes stays here and records none of them. It clears the places the last
   look found and abandons a look that is out, since both are of the window
   as it was.
-- **Unplaced** records nothing. The settle that places it nowhere, and each
-  frame of its size, sets the recording's `problem` to the reason
-  (`follow::Unplaced`):
+- **Unplaced** records nothing. The settle, **Record more**, or new text
+  size that places it nowhere, and each frame of its size, sets the
+  recording's `problem` to the reason (`follow::Unplaced`), so a window that
+  draws no new frame still says why:
   - The recording does not follow the window to that size.
   - The scaled region reaches outside the window, for a recording of the
     region alone.

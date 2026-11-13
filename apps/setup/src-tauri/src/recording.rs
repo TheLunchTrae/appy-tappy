@@ -332,7 +332,7 @@ impl Recording {
             }
         }
         // A new size may be one that is not looked for at this window size.
-        self.put(self.placed.0);
+        self.put_here(self.placed.0);
     }
 
     /// Where it looks for characters.
@@ -360,6 +360,17 @@ impl Recording {
         self.placed = (size, place);
     }
 
+    /// Places it on a window of `size` ([`Self::put`]) and, while it
+    /// records, has the reason as its problem when that is nowhere, so a
+    /// window that draws no new frame still says why nothing is recorded.
+    fn put_here(&mut self, size: Size) {
+        self.put(size);
+        if let (true, Err(reason)) = (self.life.is_recording(), self.placed.1) {
+            self.life
+                .set_problem(Some(unplaced(reason, self.window_size, size)));
+        }
+    }
+
     /// Places it at the window size frames have settled at by `now`
     /// ([`Settle`]), when they settled at another than it is placed at,
     /// and answers whether it records there, so the newest frame, which
@@ -376,15 +387,8 @@ impl Recording {
         let Some(size) = self.settle.settled(now) else {
             return false;
         };
-        self.put(size);
-        match self.placed.1 {
-            Ok(_) => true,
-            Err(reason) => {
-                self.life
-                    .set_problem(Some(unplaced(reason, self.window_size, size)));
-                false
-            },
-        }
+        self.put_here(size);
+        self.placed.1.is_ok()
     }
 
     /// Where it records on a frame that arrived at `at` and shows the
@@ -571,7 +575,7 @@ impl Recording {
         self.life.resume(at);
         self.follows = follows;
         self.settle = Settle::new(self.placed.0);
-        self.put(self.placed.0);
+        self.put_here(self.placed.0);
         self.drop_look();
     }
 
@@ -1491,6 +1495,10 @@ mod tests {
         // And back: it waits for the size it was drawn at again.
         recording.stop(after(start, 500));
         recording.resume(Follows::Drawn, after(start, 600));
+        assert!(
+            recording.view(after(start, 600)).problem.is_some(),
+            "it says why at once, before the window draws again"
+        );
         assert_eq!(
             recording.offer(&frame(32, 64, larger(2, eight)), after(start, 600)),
             None
@@ -2097,6 +2105,11 @@ mod tests {
         assert_eq!(job.sizes.heights(), [8]);
         assert_eq!(recording.looked(job.at, Some(Vec::new()), start), []);
         recording.look_for([8]);
+        assert_eq!(
+            recording.view(after(start, 300)).problem.as_deref(),
+            Some(TOO_SMALL),
+            "it says why at once, before the window draws again"
+        );
         assert!(recording.look(&half, after(start, 800)).is_none());
         assert_eq!(
             recording.view(after(start, 800)).problem.as_deref(),
