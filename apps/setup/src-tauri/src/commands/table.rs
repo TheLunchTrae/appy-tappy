@@ -138,6 +138,9 @@ macro_rules! with_commands {
             /// another one than the picked window.
             commands::click_now(click: ClickSpec) -> ClickSent;
             commands::list_apps() -> Vec<AppSummary>;
+            /// The file of the saved application `application`, read without the other applications or the open
+            /// windows, or null when it is no longer saved. Rejects with why when its file cannot be read.
+            commands::app_file(application: String) -> Option<AppFile>;
             /// The saved applications and the open windows, with the windows each application's match takes, from
             /// one listing of the desktop, so the three agree. Rejects when the windows cannot be listed.
             commands::list_app_windows() -> AppWindows;
