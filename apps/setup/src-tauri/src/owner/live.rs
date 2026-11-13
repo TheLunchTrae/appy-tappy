@@ -169,8 +169,10 @@ impl<H: Host> Owner<H> {
     /// drawn in, placed as a value of its application is. The number is the
     /// one the reference is made for, where it is made for one: it reads
     /// only that number's characters, as `saved::build` has the saved value
-    /// read, whole when that number is, and stays at its side.
+    /// read, whole when that number is, and stays at its side. The saved
+    /// reference the characters add to is kept for the asks that follow.
     pub(crate) fn set_characters(&mut self, trial: &ReferenceTrial) -> Result<(), String> {
+        self.keep_reference(trial.characters.reference.as_ref());
         let size_changes = self.stores()?.app(&trial.app)?.file.size_changes;
         let taught = self
             .with_session(|session| trial.characters.teach(session, None, "", ""))
