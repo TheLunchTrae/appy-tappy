@@ -6,7 +6,7 @@
 //! owner thread answers the UI in microseconds. The owner sends one frame
 //! at a time and sends the next only once this one is answered, so a look
 //! that takes longer than the time between looks makes the looks rarer
-//! rather than queueing frames.
+//! rather than queuing frames.
 
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc::{Receiver, Sender};
