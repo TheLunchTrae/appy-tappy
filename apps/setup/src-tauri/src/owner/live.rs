@@ -240,7 +240,8 @@ impl<H: Host> Owner<H> {
         // the application's file has it, and from the pictures it was
         // taught with, not the folder's.
         found.file.references = vec![taught.reference];
-        let pictures = [taught.pictures, taught.kept].concat();
+        let mut pictures = taught.pictures;
+        pictures.extend(taught.kept);
         let value = read_back(&screen, &found, &pictures)?;
         self.go_live(value);
         Ok(())
