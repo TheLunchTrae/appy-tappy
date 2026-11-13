@@ -25,13 +25,15 @@ and no task covers it.
 ## Platform
 
 AppyTappy ships for Windows only. CI runs these jobs from
-`.github/workflows/quality.yml`: `quality` runs `mise run standards:check` on
-Linux and is the required gate. `windows` runs `rust:lint`, `rust:doc`, and
-`rust:test:members` on Windows, and also `rust:bench` on pushes to main and
-manual runs. `footprint` runs `rust:footprint` on Windows.
-`quality`, `windows`, and `footprint` restore a Rust build cache that only
-pushes to main save, once for each set of manifests, `Cargo.lock` and
-toolchain.
+`.github/workflows/quality.yml`: `quality` runs `mise run standards:check:base`,
+the gate without the mutation lane, on Linux, and four `mutants` jobs run
+`rust:mutants:diff` in shards on Linux; together they are the required gate.
+`windows` runs `rust:lint`, `rust:doc`, and `rust:test:members` on Windows, and
+also `rust:bench` on pushes to main and manual runs. `footprint` runs
+`rust:footprint` on Windows. `quality`, `windows`, and `footprint` restore a
+Rust build cache that only pushes to main save, once for each set of
+manifests, `Cargo.lock` and toolchain; the `mutants` jobs read the `quality`
+job's cache.
 
 - Inline mise tasks are POSIX `sh`. `[task_config] shell` in
   `.config/mise/config.toml` runs them with `sh` on every platform, so tasks
