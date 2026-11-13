@@ -6,8 +6,9 @@ use std::fmt;
 use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 
+use appytappy_config::app_file::{ColorDef, RegionDef, SizeDef};
+
 use super::mask::{self, Mask, MaskError};
-use crate::system::Rgb;
 
 /// The widest or tallest picture AppyTappy reads or writes, in pixels.
 const MAX_PNG_SIDE: u32 = 8192;
@@ -80,6 +81,69 @@ impl fmt::Display for Size {
     }
 }
 
+impl From<SizeDef> for Size {
+    fn from(SizeDef { width, height }: SizeDef) -> Self {
+        Self { width, height }
+    }
+}
+
+impl From<Size> for SizeDef {
+    fn from(Size { width, height }: Size) -> Self {
+        Self { width, height }
+    }
+}
+
+/// A pixel's color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Rgb {
+    /// Red.
+    pub red: u8,
+    /// Green.
+    pub green: u8,
+    /// Blue.
+    pub blue: u8,
+}
+
+impl Rgb {
+    /// The color of `pixel`, as `[blue, green, red, unused]` like
+    /// [`Image::pixels`] holds it.
+    #[must_use]
+    pub const fn of_pixel([blue, green, red, _]: [u8; 4]) -> Self {
+        Self { red, green, blue }
+    }
+
+    /// Whether each of this color's red, green, and blue is within
+    /// `tolerance` of `other`'s. Every check that asks whether two colors
+    /// are the same asks it here: a number's ink, a color check, and a
+    /// selection's spread.
+    #[must_use]
+    pub fn near(self, other: Self, tolerance: u8) -> bool {
+        self.farthest_channel(other) <= tolerance
+    }
+
+    /// How far this color is from `other`: the largest difference among
+    /// their red, green, and blue.
+    #[must_use]
+    pub fn farthest_channel(self, other: Self) -> u8 {
+        self.red
+            .abs_diff(other.red)
+            .max(self.green.abs_diff(other.green))
+            .max(self.blue.abs_diff(other.blue))
+    }
+}
+
+impl From<ColorDef> for Rgb {
+    fn from(ColorDef { red, green, blue }: ColorDef) -> Self {
+        Self { red, green, blue }
+    }
+}
+
+impl From<Rgb> for ColorDef {
+    fn from(Rgb { red, green, blue }: Rgb) -> Self {
+        Self { red, green, blue }
+    }
+}
+
 /// A non-empty rectangle of a frame, in pixels from the frame's top-left
 /// corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +212,38 @@ impl Region {
     #[must_use]
     pub const fn fits(self, size: Size) -> bool {
         self.right() <= size.width && self.bottom() <= size.height
+    }
+}
+
+/// A saved region was empty, or its far edge passed `u32::MAX`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmptyRegion;
+
+impl fmt::Display for EmptyRegion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a region needs a width and a height that end inside a frame")
+    }
+}
+
+impl Error for EmptyRegion {}
+
+impl TryFrom<RegionDef> for Region {
+    type Error = EmptyRegion;
+
+    fn try_from(region: RegionDef) -> Result<Self, EmptyRegion> {
+        Self::new(region.x, region.y, region.width, region.height).ok_or(EmptyRegion)
+    }
+}
+
+impl From<Region> for RegionDef {
+    fn from(region: Region) -> Self {
+        let Size { width, height } = region.size();
+        Self {
+            x: region.x,
+            y: region.y,
+            width,
+            height,
+        }
     }
 }
 
@@ -640,6 +736,66 @@ mod tests {
             OutsideWindow::in_error(&io::Error::from(io::ErrorKind::InvalidInput)),
             None
         );
+    }
+
+    #[test]
+    fn a_color_is_as_far_as_its_farthest_channel() {
+        let color = |red, green, blue| Rgb { red, green, blue };
+        let red = color(200, 20, 20);
+        assert_eq!(red.farthest_channel(color(197, 25, 20)), 5);
+        assert_eq!(red.farthest_channel(color(200, 20, 13)), 7);
+        assert_eq!(red.farthest_channel(color(209, 20, 20)), 9);
+        // Exactly the tolerance is near; one more is not, on any channel.
+        assert!(red.near(color(210, 10, 30), 10));
+        assert!(!red.near(color(211, 20, 20), 10));
+        assert!(!red.near(color(200, 9, 20), 10));
+        assert!(!red.near(color(200, 20, 31), 10));
+        assert_eq!(Rgb::of_pixel([3, 2, 1, 255]), color(1, 2, 3));
+    }
+
+    #[test]
+    fn saved_types_convert_field_by_field() {
+        let region = RegionDef {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        assert_eq!(
+            Region::try_from(region),
+            Ok(Region::new(1, 2, 3, 4).unwrap())
+        );
+        assert_eq!(RegionDef::from(Region::new(1, 2, 3, 4).unwrap()), region);
+        assert_eq!(
+            Region::try_from(RegionDef { width: 0, ..region }),
+            Err(EmptyRegion)
+        );
+        assert_eq!(
+            EmptyRegion.to_string(),
+            "a region needs a width and a height that end inside a frame"
+        );
+        let size = Size {
+            width: 3,
+            height: 4,
+        };
+        let saved = SizeDef {
+            width: 3,
+            height: 4,
+        };
+        assert_eq!(Size::from(saved), size);
+        assert_eq!(SizeDef::from(size), saved);
+        let color = Rgb {
+            red: 1,
+            green: 2,
+            blue: 3,
+        };
+        let saved = ColorDef {
+            red: 1,
+            green: 2,
+            blue: 3,
+        };
+        assert_eq!(Rgb::from(saved), color);
+        assert_eq!(ColorDef::from(color), saved);
     }
 
     #[test]

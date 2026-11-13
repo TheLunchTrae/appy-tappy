@@ -112,6 +112,10 @@ The reasons a number has no reading:
   learned the one shown: draw a box around a reading with it.
   [What a reference can't learn](References.md#what-a-reference-cant-learn)
   lists the characters no box teaches.
+- **The value does not read a digit its reference knows.** The message
+  shows what it read and names the digit. The value's
+  [characters](Values.md#characters-a-number-reads) leave that digit out:
+  turn it on under **Characters it reads**, or pick **Digits**.
 - **The characters hold no number.** The message shows what it read, such as
   `%`. The region shows no digit now, or the region cuts the digits off.
 

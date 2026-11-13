@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { ValueDef } from '../src/lib/bindings.ts';
-import { DEFAULT_TOLERANCE, type Draft, EMPTY_DRAFT, withKind, withState, withStateAt } from '../src/lib/check.ts';
+import { CHECKS, type Draft, EMPTY_DRAFT, withKind, withState, withStateAt } from '../src/lib/check.ts';
 import { AUTOMATIC } from '../src/lib/pin.ts';
 import { held } from '../src/lib/unsaved.ts';
 import {
@@ -47,7 +47,7 @@ describe('editDraft', () => {
     expect(editDraft(bar.screen)).toEqual({
       ...EMPTY_DRAFT,
       kind: 'barFill',
-      tolerance: DEFAULT_TOLERANCE.barFill,
+      tolerance: CHECKS.barFill.tolerance,
       region,
       filled: red,
       empty: gray,
@@ -161,7 +161,7 @@ describe('buildEdit', () => {
     expect(all.ok && all.spec.drawing).toEqual({ kind: 'kept', check: number.screen.check });
     const color = { ...withKind(editDraft(bar.screen), 'color'), color: red };
     expect(edit(color, bar)).toMatchObject({
-      spec: { drawing: { kind: 'kept', check: { kind: 'color', color: red, tolerance: DEFAULT_TOLERANCE.color } } },
+      spec: { drawing: { kind: 'kept', check: { kind: 'color', color: red, tolerance: CHECKS.color.tolerance } } },
     });
   });
 

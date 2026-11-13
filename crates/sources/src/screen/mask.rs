@@ -2,13 +2,11 @@
 //!
 //! A mask leaves out the background behind the thing a state check looks
 //! for, so the check still matches when that background changes. The setup
-//! app makes one when the user selects the thing with
-//! [`select`](super::select), and saves it as the transparent pixels of the
-//! check's PNG file.
+//! app makes one when the user selects the thing, and saves it as the
+//! transparent pixels of the check's PNG file.
 
 use std::error::Error;
 use std::fmt;
-use std::ops::Range;
 
 use super::Size;
 
@@ -70,30 +68,8 @@ impl Mask {
     /// Whether it keeps every pixel, so comparing with it is comparing
     /// without one.
     #[must_use]
-    pub fn is_full(&self) -> bool {
+    pub(crate) fn is_full(&self) -> bool {
         !self.kept.contains(&false)
-    }
-
-    /// The runs of kept pixels as ranges of pixel indexes, so a check walks
-    /// them without testing each pixel.
-    #[must_use]
-    pub fn spans(&self) -> Vec<Range<usize>> {
-        let mut spans = Vec::new();
-        let mut start = None;
-        for (index, &kept) in self.kept.iter().enumerate() {
-            match (kept, start) {
-                (true, None) => start = Some(index),
-                (false, Some(from)) => {
-                    spans.push(from..index);
-                    start = None;
-                },
-                _ => {},
-            }
-        }
-        if let Some(from) = start {
-            spans.push(from..self.kept.len());
-        }
-        spans
     }
 }
 
@@ -163,14 +139,6 @@ mod tests {
         assert_eq!(mask.count(), 4);
         assert!(!mask.is_full());
         assert!(Mask::new(THREE_BY_TWO, vec![true; 6]).unwrap().is_full());
-    }
-
-    #[test]
-    fn spans_cover_each_run_of_kept_pixels() {
-        let mask = Mask::new(THREE_BY_TWO, vec![true, false, true, true, false, true]).unwrap();
-        assert_eq!(mask.spans(), vec![0..1, 2..4, 5..6]);
-        let edges = Mask::new(THREE_BY_TWO, vec![false, true, true, true, true, false]).unwrap();
-        assert_eq!(edges.spans(), vec![1..5]);
     }
 
     #[test]

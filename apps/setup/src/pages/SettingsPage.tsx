@@ -4,6 +4,7 @@ import { LIMITS, type ReadIntervalDef } from '../lib/bindings.ts';
 import { errorText, setStartsWithWindows, startsWithWindows } from '../lib/api.ts';
 import { READING_HINT, SHORTCUT_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
+import { ask } from '../lib/request.ts';
 import { Hint } from '../components/Hint.tsx';
 import { NumberSetting } from '../components/NumberSetting.tsx';
 import { RuntimeTrace } from '../components/RuntimeTrace.tsx';
@@ -22,25 +23,20 @@ function StartWithWindows() {
   const [error, setError] = useState<string | null>(null);
   // Asking Windows again after a failed read is what a press does while the state is unknown.
   const [asks, setAsks] = useState(0);
-  useEffect(() => {
-    let current = true;
-    startsWithWindows().then(
-      (starts) => {
-        if (current) {
+  useEffect(
+    () =>
+      ask(
+        startsWithWindows,
+        (starts) => {
           setOn(starts);
           setError(null);
-        }
-      },
-      (failure: unknown) => {
-        if (current) {
+        },
+        (failure) => {
           setError(errorText(failure));
-        }
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [asks]);
+        },
+      ),
+    [asks],
+  );
   const toggle = async (): Promise<void> => {
     if (busy) {
       return;

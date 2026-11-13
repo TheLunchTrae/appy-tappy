@@ -21,7 +21,7 @@ use appytappy_config::automation_file::{
 };
 use appytappy_config::signal::SignalName;
 use appytappy_config::store::StoredApp;
-use appytappy_sources::automation::{Problem, Runnable};
+use appytappy_sources::automation::{AppReaders, Problem, Runnable};
 use appytappy_sources::screen::click::ClickPictureError;
 use serde::Serialize;
 
@@ -97,7 +97,12 @@ fn apps(stores: &Stores) -> Result<Vec<StoredApp>, String> {
 /// too. An application it watches or clicks in whose file does not read is
 /// named first, with why, since this app read the file and `Runnable::new`
 /// takes only the applications whose files read.
-fn problem(automation: &AutomationDef, apps: &[StoredApp], stores: &Stores) -> Option<String> {
+fn problem<'apps>(
+    automation: &AutomationDef,
+    apps: &'apps [StoredApp],
+    stores: &Stores,
+    readers: &mut AppReaders<'apps>,
+) -> Option<String> {
     let unreadable = |id: &str| {
         apps.iter()
             .find(|app| app.id == id)
@@ -126,6 +131,7 @@ fn problem(automation: &AutomationDef, apps: &[StoredApp], stores: &Stores) -> O
     let problem = Runnable::new(
         automation,
         &readable,
+        readers,
         |app, name| fs::read(stores.apps.folder(app).join(name)),
         |name| stores.automations.picture(name),
     )
@@ -154,11 +160,12 @@ fn problem(automation: &AutomationDef, apps: &[StoredApp], stores: &Stores) -> O
 pub(crate) fn watched_values(stores: &Stores, app: &str) -> Result<BTreeSet<String>, String> {
     let file = load(stores)?;
     let apps = apps(stores)?;
+    let mut readers = AppReaders::new();
     Ok(file
         .automations
         .iter()
         .filter(|automation| automation.enabled && automation.when.app == app)
-        .filter(|automation| problem(automation, &apps, stores).is_none())
+        .filter(|automation| problem(automation, &apps, stores, &mut readers).is_none())
         .map(|automation| automation.when.value.clone())
         .collect())
 }
@@ -167,12 +174,14 @@ pub(crate) fn watched_values(stores: &Stores, app: &str) -> Result<BTreeSet<Stri
 pub(crate) fn list(stores: &Stores) -> Result<Vec<AutomationSummary>, String> {
     let file = load(stores)?;
     let apps = apps(stores)?;
+    // One listing reads each reference once, for all its automations.
+    let mut readers = AppReaders::new();
     Ok(file
         .automations
         .iter()
         .map(|automation| AutomationSummary {
             automation: automation.clone(),
-            problem: problem(automation, &apps, stores),
+            problem: problem(automation, &apps, stores, &mut readers),
         })
         .collect())
 }
@@ -209,7 +218,7 @@ pub(crate) fn save(
             ActionDef::Click { .. } => {},
         }
     }
-    if let Some(problem) = problem(&draft, &apps(stores)?, stores) {
+    if let Some(problem) = problem(&draft, &apps(stores)?, stores, &mut AppReaders::new()) {
         return Err(problem);
     }
     let mut file = load(stores)?;
@@ -300,7 +309,10 @@ pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<()
     )]
     {
         let automation = &file.automations[position];
-        if enabled && let Some(problem) = problem(automation, &apps(stores)?, stores) {
+        if enabled
+            && let Some(problem) =
+                problem(automation, &apps(stores)?, stores, &mut AppReaders::new())
+        {
             return Err(format!(
                 "{} cannot run until it is fixed. {problem}",
                 automation.name
