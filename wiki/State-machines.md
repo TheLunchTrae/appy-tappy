@@ -393,7 +393,7 @@ The thread can also panic in any state, which ends it.
   the 2 second check ended the capture, it then sends `Unseen`, so no
   reading from the old capture can follow it.
 - **Backoff.** After `Lost`, `Failing`, or `Panicked`, the thread waits
-  before it looks again: `FIND_AGAIN` at first, doubling up to
+  before it looks again: `RESTART_WAIT_MIN` at first, doubling up to
   `RESTART_WAIT_MAX` while each new capture ends before it reads a frame. It
   logs the reason once until the reason changes. A restarted capture that
   reads a frame sends `Recovered`, which resets both. A frame whose reading
@@ -415,7 +415,8 @@ The thread can also panic in any state, which ends it.
 
 ### Frame handler
 
-`FrameReader::handle` runs once per frame and acts on what the frame means,
+`FrameReader::handle`, in `apps/runtime/src/workers/reader/frames.rs`, runs once
+per frame and acts on what the frame means,
 which `Placed::meaning` decides for every reader of saved values, as
 [Window sizes](Screen-regions.md#window-sizes) describes: the window at the
 capture's size, at another size, or at the capture's size with a region
