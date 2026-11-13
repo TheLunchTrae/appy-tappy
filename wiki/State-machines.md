@@ -1292,7 +1292,7 @@ and the next frame of a size it is read at answers a reading. Its
 state is `state`, a `CheckState`; `read`, the reading or the problem shown;
 `preview`, what saving an edit would do; `tried`, the number of the newest
 trial; and `inForce`, the number of the trial the owner reads with, or none.
-Below, a check stands for either.
+Below, a check stands for any of the three.
 
 ```mermaid
 stateDiagram-v2
@@ -1320,8 +1320,11 @@ stateDiagram-v2
   until the first read with the new check answers, and a problem is cleared.
 - **Set.** The owner took the check, and its number is in force. The window
   is read every 120 ms with `read_value`, each read after the last answered.
-  An answer replaces what the box shows: a reading, or why the frame cannot
-  be read.
+  An answer replaces what the box shows: a reading, why the frame cannot
+  be read, or that the value is not read at the window's size now, such as
+  `Not read at 1280 × 720, the window's size now: …`. The check stays set
+  through that answer, an edit's included, so the first frame of a size the
+  value is read at answers a reading with no new trial.
 - **Failed** (`error`). The owner refused the check, such as a label its
   reference cannot learn, and the box says why. The owner keeps the check it
   had, and nothing is read until the check changes.

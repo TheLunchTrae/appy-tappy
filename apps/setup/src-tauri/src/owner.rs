@@ -63,8 +63,8 @@ pub(crate) use self::host::{Desktop, Host};
 use self::live::LiveCheck;
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
-    AppSummary, AppWindows, EditPreview, EditSpec, FixSpec, Live, Message, Reading,
-    ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
+    AppSummary, AppWindows, EditPreview, EditSpec, FixSpec, Live, Message, Reading, RecordSpec,
+    ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
 };
 use self::watch::Watched;
 

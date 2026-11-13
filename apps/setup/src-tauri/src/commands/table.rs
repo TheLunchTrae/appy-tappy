@@ -46,17 +46,17 @@ macro_rules! with_commands {
             /// Reads the live window with the value `trial` would save, where and how the runtime would read it at the
             /// window's size now.
             commands::set_check(trial: TrialSpec) -> ();
-            /// Reads the live window with the reference `spec` teaches, in the region its characters were drawn in. With
-            /// `reads`, the characters of the value the reference is made for, it reads only those, as that value does.
-            commands::set_characters(spec: CharactersSpec, reads: Option<String>) -> ();
+            /// Reads the live window with the reference `trial` teaches, in the region its characters were drawn in,
+            /// as the number it is made for reads there once both are saved.
+            commands::set_characters(trial: ReferenceTrial) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;
             /// How the check reads the newest frame, for the debug details, or null without a check or a frame.
             commands::explain_reading() -> Option<ReadingDetails>;
-            /// Records the region of the picked window that `spec`'s characters were drawn in, in their color. With
+            /// Records the region of the picked window that `spec` names, in the characters' color. With
             /// `more`, goes on with the stopped recording, which needs the same region, ink and window size;
             /// otherwise starts a new one.
-            commands::start_recording(spec: CharactersSpec, more: bool) -> ();
+            commands::start_recording(spec: RecordSpec, more: bool) -> ();
             /// Stops the recording, of readings or of looks, keeping what it recorded.
             commands::stop_recording() -> ();
             /// Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay.

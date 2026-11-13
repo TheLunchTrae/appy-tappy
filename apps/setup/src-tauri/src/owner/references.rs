@@ -2,8 +2,9 @@
 //! application. Saving one learns its samples, as the check that reads with
 //! it would, and deleting one waits until no value reads with it.
 
-use crate::check_spec::{ReferenceRef, SavedReference, Session};
 use appytappy_config::app_file::{new_reference_id, reference_id};
+
+use crate::check_spec::{ReferenceRef, SavedReference, Session};
 
 use super::host::Host;
 use super::messages::{ReferenceSaveSpec, SavedReferenceId};

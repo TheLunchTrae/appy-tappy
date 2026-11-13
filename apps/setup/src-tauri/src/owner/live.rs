@@ -9,17 +9,17 @@
 //! made at that size, the first drawing scaled to it while the
 //! application's window changes size often, or nothing, with the reason.
 
-use appytappy_config::app_file::{PinDef, RegionDef, ScreenDef, SizeChangesDef, SizeDef};
+use appytappy_config::app_file::{PinDef, RegionDef, ScreenDef, SizeDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::saved::{AtSize, SavedCheck, SavedValue, Unread};
 use appytappy_sources::screen::{Image, Size};
 
-use crate::check_spec::{self, CharactersSpec, SpecError};
+use crate::check_spec::{self, SpecError};
 
 use super::Owner;
 use super::host::Host;
-use super::messages::TrialSpec;
+use super::messages::{ReferenceTrial, TrialSpec};
 use super::values::read_back;
 
 /// The ID a value is tried under before it is saved under its own. It
@@ -111,19 +111,18 @@ impl<H: Host> Owner<H> {
         Ok(())
     }
 
-    /// Makes the reference `spec` teaches the check the live frame is read
-    /// with: a number read with it in the region the characters were drawn
-    /// in, which scales with the window as a value's does by default. With
-    /// `reads`, the characters of the value the reference is made for, the
-    /// number reads only those, as `saved::build` has that value read.
-    pub(crate) fn set_characters(
-        &mut self,
-        spec: &CharactersSpec,
-        reads: Option<&str>,
-    ) -> Result<(), String> {
+    /// Makes the reference `trial` teaches the check the live frame is
+    /// read with: a number read with it in the region the characters were
+    /// drawn in, placed as a value of its application is. The number is the
+    /// one the reference is made for, where it is made for one: it reads
+    /// only that number's characters, as `saved::build` has the saved value
+    /// read, whole when that number is, and stays at its side.
+    pub(crate) fn set_characters(&mut self, trial: &ReferenceTrial) -> Result<(), String> {
+        let size_changes = self.stores()?.app(&trial.app)?.file.size_changes;
         let taught = self
-            .with_session(|session| spec.teach(session, None, "", ""))
+            .with_session(|session| trial.characters.teach(session, None, "", ""))
             .map_err(|error| error.to_string())?;
+        let reads = trial.reads.as_deref();
         let reader = taught.reader.reading(reads).ok_or_else(|| {
             SpecError::NoCharacters {
                 reference: "The reference".to_owned(),
@@ -133,30 +132,32 @@ impl<H: Host> Owner<H> {
         })?;
         let size = taught.window_size;
         let region = taught.region.size();
-        let pin = PinDef::guess(
-            RegionDef {
-                x: taught.region.x(),
-                y: taught.region.y(),
-                width: region.width,
-                height: region.height,
-            },
-            SizeDef {
-                width: size.width,
-                height: size.height,
-            },
-        );
+        let pin = trial.pin.unwrap_or_else(|| {
+            PinDef::guess(
+                RegionDef {
+                    x: taught.region.x(),
+                    y: taught.region.y(),
+                    width: region.width,
+                    height: region.height,
+                },
+                SizeDef {
+                    width: size.width,
+                    height: size.height,
+                },
+            )
+        });
         self.go_live(SavedValue {
             drawn: SavedCheck {
                 window_size: size,
                 region: taught.region,
                 check: Check::Number {
                     reader,
-                    whole: false,
+                    whole: trial.whole,
                 },
             },
             fixes: Vec::new(),
             pin,
-            size_changes: SizeChangesDef::Often,
+            size_changes,
         });
         Ok(())
     }
@@ -177,14 +178,15 @@ mod tests {
     use std::fs;
     use std::time::Duration;
 
-    use appytappy_config::app_file::{CheckDef, ValueDef};
+    use appytappy_config::app_file::{CheckDef, SizeChangesDef, ValueDef};
     use appytappy_sources::screen::saved;
 
-    use crate::check_spec::CheckSpec;
+    use crate::check_spec::{CharactersSpec, CheckSpec};
     use crate::debug::workings::WorkingsView;
     use crate::owner::messages::{Reading, ReferenceSaveSpec};
     use crate::owner::test_support::{
-        BAR, Harness, add_example_app, capturing, characters, harness_with, scratch_store, trial,
+        BAR, Harness, add_example_app, capturing, characters, harness_with, scratch_store,
+        teaching, trial,
     };
     use crate::stores::SavedApp;
 
@@ -268,7 +270,7 @@ mod tests {
                 "labels":[{"screenshot":0,"text":"1"}]}"#,
         );
         harness
-            .ask(|owner| owner.set_characters(&spec, None))
+            .ask(|owner| owner.set_characters(&teaching(spec.clone())))
             .expect("valid check");
         assert_eq!(
             harness.ask(|owner| owner.reading()),
@@ -295,11 +297,12 @@ mod tests {
     }
 
     /// A font of 3 by 5 pixels.
-    const GLYPHS: [(char, [&str; 5]); 4] = [
+    const GLYPHS: [(char, [&str; 5]); 5] = [
         ('3', ["###", "..#", "###", "..#", "###"]),
         ('7', ["###", "..#", "..#", "..#", "..#"]),
         ('9', ["###", "#.#", "###", "..#", "###"]),
         ('%', ["#.#", "..#", ".#.", "#..", "#.#"]),
+        ('.', ["...", "...", "...", "...", ".#."]),
     ];
 
     /// The window's size on the screenshot the percentage is drawn on.
@@ -505,6 +508,67 @@ mod tests {
         fs::remove_dir_all(root).expect("clean up");
     }
 
+    /// `frame`, of a window of [`DRAWN`], with its last column once more.
+    fn a_column_wider(frame: &Image) -> Image {
+        Image::new(
+            Size {
+                width: DRAWN.width + 1,
+                height: DRAWN.height,
+            },
+            frame
+                .pixels()
+                .chunks(24)
+                .flat_map(|row| row.iter().chain(row.last()).flatten().copied())
+                .collect(),
+        )
+        .expect("a column more")
+    }
+
+    /// What the live box says at a window a column wider than [`DRAWN`]
+    /// when the application's window changes size rarely.
+    const A_COLUMN_WIDER: &str = "Not read at 25 × 12, the window's size now: it is read only \
+        at the window sizes it was drawn at.";
+
+    #[test]
+    fn a_reference_made_for_a_number_reads_as_that_number_will() {
+        let (mut harness, mut handler, root) =
+            with_percent("live-made-for", SizeChangesDef::Rarely);
+        harness.deliver(&mut handler, Ok(&showing("3.7%", 1)));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(1));
+        let taught = CharactersSpec {
+            screenshot: 1,
+            labels: vec![serde_json::from_str(r#"{"screenshot":1,"text":"3.7%"}"#).expect("valid")],
+            ..characters(PERCENT)
+        };
+        harness
+            .ask(|owner| owner.set_characters(&teaching(taught.clone())))
+            .expect("learns");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(3.7)))
+        );
+        // Made for a whole number, it reads as one.
+        let whole = ReferenceTrial {
+            whole: true,
+            ..teaching(taught)
+        };
+        harness
+            .ask(|owner| owner.set_characters(&whole))
+            .expect("learns");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(3.0)))
+        );
+        // Its application's window changes size rarely, so at another size
+        // it reads nothing, as the number will.
+        harness.deliver(&mut handler, Ok(&a_column_wider(&showing("3.7%", 1))));
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Err(A_COLUMN_WIDER.to_owned())
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
     #[test]
     fn a_value_tried_at_a_size_the_runtime_does_not_read_it_at_says_so() {
         let (mut harness, mut handler, root) = with_percent("live-rarely", SizeChangesDef::Rarely);
@@ -517,19 +581,7 @@ mod tests {
         );
         // A frame of another size places the value again. Its text still
         // shows inside the region as drawn, which is not read all the same.
-        let wider = showing("37%", 1);
-        let wider = Image::new(
-            Size {
-                width: DRAWN.width + 1,
-                height: DRAWN.height,
-            },
-            wider
-                .pixels()
-                .chunks(24)
-                .flat_map(|row| row.iter().chain(row.last()).flatten().copied())
-                .collect(),
-        )
-        .expect("a column more");
+        let wider = a_column_wider(&showing("37%", 1));
         harness.deliver(&mut handler, Ok(&wider));
         let unread = "Not read at 25 × 12, the window's size now: it is read only at the window \
                       sizes it was drawn at.";
@@ -558,23 +610,30 @@ mod tests {
             ..characters(PERCENT)
         };
         harness
-            .ask(|owner| owner.set_characters(&taught, None))
+            .ask(|owner| owner.set_characters(&teaching(taught.clone())))
             .expect("learns");
         assert_eq!(
             harness.ask(|owner| owner.reading()),
             Ok(Some(Reading::Number(379.0)))
         );
+        let digits = ReferenceTrial {
+            reads: Some("0123456789".to_owned()),
+            ..teaching(taught.clone())
+        };
         // Made for a value that reads only digits, it reads as that value
         // will: the percent sign is a shape it does not know.
         harness
-            .ask(|owner| owner.set_characters(&taught, Some("0123456789")))
+            .ask(|owner| owner.set_characters(&digits))
             .expect("learns the digits");
         assert_eq!(
             harness.ask(|owner| owner.reading()),
             Err(DIGITS_ONLY.to_owned())
         );
         assert_eq!(
-            harness.ask(|owner| owner.set_characters(&taught, Some("2"))),
+            harness.ask(|owner| owner.set_characters(&ReferenceTrial {
+                reads: Some("2".to_owned()),
+                ..teaching(taught.clone())
+            })),
             Err(
                 "The reference knows none of the characters this value reads, \"2\". Teach it \
                  one of them, or change which characters the value reads."
@@ -582,7 +641,7 @@ mod tests {
             )
         );
         harness
-            .ask(|owner| owner.set_characters(&taught, None))
+            .ask(|owner| owner.set_characters(&teaching(taught.clone())))
             .expect("learns");
         harness.deliver(&mut handler, Ok(&showing("97%", 2)));
         assert_eq!(

@@ -70,12 +70,10 @@ impl<H: Host> Owner<H> {
         let found = self.stores()?.app(&spec.app)?;
         let edited = self.edited(spec, &found)?;
         let value = read_back(&edited.value.screen, &found, &edited.pictures)?;
+        // A value that is not read at the window's size stays the live
+        // check: the answer says why, as each read does until a frame has
+        // a size it is read at.
         let unread = self.go_live(value).unread();
-        // A value that is not read at the window's size reads nothing, and
-        // the answer says why.
-        if unread.is_some() {
-            self.check = None;
-        }
         Ok(EditPreview {
             unread,
             dropped_fixes: edited.dropped,

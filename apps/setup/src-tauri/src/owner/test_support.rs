@@ -20,7 +20,7 @@ use crate::recording::ocr;
 use crate::stores::{self, Stores};
 
 use super::host::{ClickNow, ClickedWindow, Host};
-use super::messages::{Message, SaveSpec, TrialSpec};
+use super::messages::{Message, RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
 use super::{Owner, PREVIEW_INTERVAL};
 
 /// A host with one window whose captures the test drives by hand: each
@@ -452,17 +452,26 @@ pub(super) fn characters(json: &str) -> CharactersSpec {
     serde_json::from_str(json).expect("valid JSON")
 }
 
-/// Characters of the color `ink`, at no tolerance, in `region` of screenshot
-/// 0, with nothing taught yet: what a recording needs.
-pub(super) fn characters_in(region: RegionSpec, ink: ColorSpec) -> CharactersSpec {
-    CharactersSpec {
+/// A recording of `region` of screenshot 0, of characters of the color
+/// `ink` at no tolerance.
+pub(super) fn characters_in(region: RegionSpec, ink: ColorSpec) -> RecordSpec {
+    RecordSpec {
         region,
         screenshot: 0,
-        reference: None,
         ink,
         tolerance: 0,
-        labels: Vec::new(),
-        recorded: Vec::new(),
+    }
+}
+
+/// `characters` tried for the application `example` as a reference made
+/// for no number.
+pub(super) fn teaching(characters: CharactersSpec) -> ReferenceTrial {
+    ReferenceTrial {
+        app: "example".to_owned(),
+        characters,
+        reads: None,
+        whole: false,
+        pin: None,
     }
 }
 

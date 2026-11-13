@@ -15,7 +15,7 @@ import {
 import { type Box, boxLabels } from './boxes.ts';
 import { forReference, savedCharacters } from './charactersRead.ts';
 import { AUTOMATIC, type PinChoice } from './pin.ts';
-import { referenceCharacters } from './reference.ts';
+import { knownCharacters, referenceCharacters } from './reference.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { sameSize, sizeText } from './sizes.ts';
@@ -451,6 +451,35 @@ export function withReference(draft: Draft, reference: string, references: reado
   const to = known(reference);
   const characters = to === null ? draft.characters : forReference(draft.characters, known(draft.reference) ?? [], to);
   return { ...draft, reference, characters };
+}
+
+/** `characters`, a number's choice, as a live check takes it: null for every character, and until it names one. */
+export function readsOf(characters: readonly string[] | null): string | null {
+  return characters === null || characters.length === 0 ? null : characters.join('');
+}
+
+/**
+ * The characters the number `draft` describes reads once the reference `taught` teaches is saved and the number
+ * reads with it, or null for every character it knows. `references` are its application's before that save. The
+ * number's choice stays the one that was picked, as {@link forReference} says, from what the reference it reads
+ * with knows now to what the taught one will know: its saved samples, when it is saved already, and what `taught`
+ * labels. So Digits and symbols takes up a symbol that is being taught.
+ */
+export function charactersOnceTaught(
+  draft: Draft,
+  references: readonly ReferenceDef[],
+  taught: CharactersSpec,
+): readonly string[] | null {
+  const known = (id: string | null | undefined): readonly string[] => {
+    const saved = references.find((each) => each.id === id);
+    return saved === undefined ? [] : referenceCharacters(saved);
+  };
+  const to = knownCharacters([
+    ...known(taught.reference?.id),
+    ...taught.labels.map((label) => label.text),
+    ...taught.recorded.map((label) => label.text),
+  ]);
+  return forReference(draft.characters, known(draft.reference), to);
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

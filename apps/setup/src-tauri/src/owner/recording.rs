@@ -7,6 +7,7 @@ use std::time::Instant;
 use appytappy_sources::screen::{Image, Region, Size};
 
 use crate::check_spec::{self, CharactersSpec, RegionSpec};
+use crate::owner::messages::RecordSpec;
 use crate::pixels;
 use crate::recording::{Recorder, Recording, RecordingView, Text, ocr};
 
@@ -90,16 +91,12 @@ impl<H: Host> Owner<H> {
         check_spec::drawn(&self.screenshots, region, screenshot).map_err(|error| error.to_string())
     }
 
-    /// Records the region of the picked window that `spec`'s characters
-    /// were drawn in, keeping each reading it shows in their color. With
+    /// Records the region of the picked window that `spec` names, keeping
+    /// each reading it shows in the characters' color. With
     /// `more`, goes on with the stopped recording, which must be of the same
     /// region, ink, and window size; otherwise starts a new one in place of
     /// any recording.
-    pub(crate) fn start_recording(
-        &mut self,
-        spec: &CharactersSpec,
-        more: bool,
-    ) -> Result<(), String> {
+    pub(crate) fn start_recording(&mut self, spec: RecordSpec, more: bool) -> Result<(), String> {
         let (region, window_size) = self.recordable(spec.region, spec.screenshot)?;
         let settings = (spec.ink.into(), spec.tolerance);
         let now = Instant::now();
@@ -187,7 +184,9 @@ mod tests {
 
     use crate::check_spec::ColorSpec;
     use crate::owner::messages::Message;
-    use crate::owner::test_support::{FakeHost, Harness, characters_in, frame_image, harness};
+    use crate::owner::test_support::{
+        FakeHost, Harness, capturing, characters_in, frame_image, harness, teaching,
+    };
     use crate::pixels;
     use crate::recording::RecordingView;
 
@@ -225,7 +224,7 @@ mod tests {
         let ink: ColorSpec =
             serde_json::from_str(&format!(r#"{{"red":{red},"green":0,"blue":0}}"#))
                 .expect("valid JSON");
-        move |owner: &mut Owner<FakeHost>| owner.start_recording(&characters_in(region, ink), more)
+        move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region, ink), more)
     }
 
     impl Harness {
@@ -345,10 +344,7 @@ mod tests {
 
     #[test]
     fn review_and_the_check_learn_from_recorded_readings() {
-        let mut harness = harness(false);
-        let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let (mut harness, mut handler, root) = capturing("recording-review");
         harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.deliver(&mut handler, Ok(&red_columns(3)));
@@ -404,13 +400,13 @@ mod tests {
             .expect("valid JSON")
         };
         assert_eq!(
-            harness.ask(|owner| owner.set_characters(&number(0), None)),
+            harness.ask(|owner| owner.set_characters(&teaching(number(0)))),
             Ok(())
         );
         harness.ask(Owner::discard_recording);
         assert_eq!(harness.recording(), None);
         assert_eq!(
-            harness.ask(|owner| owner.set_characters(&number(0), None)),
+            harness.ask(|owner| owner.set_characters(&teaching(number(0)))),
             Err("That recording is gone. Record the region again.".to_owned())
         );
         assert_eq!(
@@ -419,6 +415,7 @@ mod tests {
                 "That recording is gone. Record the region again.".to_owned()
             )])
         );
+        std::fs::remove_dir_all(root).expect("clean up");
     }
 
     #[test]
@@ -515,7 +512,7 @@ mod tests {
         let ink: ColorSpec =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         assert_eq!(
-            harness.ask(|owner| owner.start_recording(&characters_in(empty, ink), false)),
+            harness.ask(|owner| owner.start_recording(characters_in(empty, ink), false)),
             Err("Draw a region on the screenshot first.".to_owned())
         );
     }
