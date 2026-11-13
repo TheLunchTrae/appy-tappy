@@ -21,7 +21,6 @@ import {
   unusedKey,
   usedBy,
   valueChoices,
-  valueKind,
   withSource,
 } from '../src/lib/automation.ts';
 
@@ -93,13 +92,6 @@ const pauseMusic: AutomationDef = {
 };
 
 describe('values', () => {
-  test('number and bar fill checks read numbers, color checks yes or no, and state checks a state', () => {
-    expect(valueKind({ kind: 'number', reference: 'percent', whole: true })).toBe('number');
-    expect(valueKind({ kind: 'barFill', filled: white, empty: white })).toBe('number');
-    expect(valueKind({ kind: 'color', color: white, tolerance: 0 })).toBe('flag');
-    expect(valueKind({ kind: 'state', states: [{ name: 'Paused', image: 'a.png' }], tolerance: 0 })).toBe('state');
-  });
-
   test('a value says what it reads', () => {
     const [number, flag, state] = choices;
     if (number === undefined || flag === undefined || state === undefined) {

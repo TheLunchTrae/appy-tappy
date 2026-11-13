@@ -6,7 +6,8 @@ import {
   type Draft,
   buildCharacters,
   buildSpec,
-  DEFAULT_TOLERANCE,
+  CHECKS,
+  CHECK_KINDS,
   EMPTY_DRAFT,
   boxBlocked,
   findBlocked,
@@ -37,6 +38,27 @@ const region = { x: 1, y: 2, width: 3, height: 4 };
 const red = { red: 255, green: 0, blue: 0 };
 const gray = { red: 40, green: 40, blue: 40 };
 const percent = { app: 'example', id: 'percent' };
+
+describe('the kinds of check', () => {
+  test("each is offered in the table's order, and its entry builds a check of its own kind", () => {
+    expect(CHECK_KINDS).toEqual(['number', 'barFill', 'color', 'state']);
+    const complete: Draft = {
+      ...EMPTY_DRAFT,
+      region,
+      drawnOn: 1,
+      reference: 'percent',
+      filled: red,
+      empty: gray,
+      color: red,
+      states: [{ name: 'Paused', screenshot: 1, steps: [] }],
+    };
+    for (const kind of CHECK_KINDS) {
+      const built = buildSpec(withKind(complete, kind), 'example');
+      expect(built.ok ? built.spec.kind : built.next).toBe(kind);
+      expect(withKind(complete, kind).tolerance).toBe(CHECKS[kind].tolerance);
+    }
+  });
+});
 
 describe('buildSpec', () => {
   test('asks for a region first', () => {
@@ -79,7 +101,7 @@ describe('buildSpec', () => {
     expect(buildSpec(color, 'example')).toEqual({ ok: false, next: 'Pick the color to look for.' });
     expect(buildSpec({ ...color, color: red }, 'example')).toEqual({
       ok: true,
-      spec: { kind: 'color', region, color: red, tolerance: DEFAULT_TOLERANCE.color },
+      spec: { kind: 'color', region, color: red, tolerance: CHECKS.color.tolerance },
     });
   });
 
@@ -98,7 +120,7 @@ describe('buildSpec', () => {
           { name: 'State 1', screenshot: 1 },
           { name: 'State 2', screenshot: 3 },
         ],
-        tolerance: DEFAULT_TOLERANCE.state,
+        tolerance: CHECKS.state.tolerance,
       },
     });
     const named = withStateAt(two, 0, (state) => ({ ...state, name: '  Paused ' }));
@@ -136,7 +158,7 @@ describe('buildSpec', () => {
           { name: 'State 1', screenshot: 2 },
           { name: 'State 2', screenshot: 3, selection: { tolerance: 30, steps } },
         ],
-        tolerance: DEFAULT_TOLERANCE.state,
+        tolerance: CHECKS.state.tolerance,
       },
     });
     const ignoring = buildSpec({ ...draft, ignoreBackground: false }, 'app');
@@ -209,7 +231,7 @@ describe('buildCharacters', () => {
         screenshot: 2,
         reference: null,
         ink: red,
-        tolerance: DEFAULT_TOLERANCE.number,
+        tolerance: CHECKS.number.tolerance,
         labels: [
           { screenshot: 2, region, text: '87%' },
           { screenshot: 0, region: other, text: '12%' },
@@ -286,7 +308,7 @@ test('reviewSpec waits for the region and color, and names the reference', () =>
     screenshot: 1,
     reference: percent,
     ink: red,
-    tolerance: DEFAULT_TOLERANCE.number,
+    tolerance: CHECKS.number.tolerance,
     labels: [],
     recorded: kept,
   });
@@ -297,7 +319,7 @@ test('withKind keeps the region and colors and resets the tolerance', () => {
   expect(draft.kind).toBe('color');
   expect(draft.region).toEqual(region);
   expect(draft.ink).toEqual(red);
-  expect(draft.tolerance).toBe(DEFAULT_TOLERANCE.color);
+  expect(draft.tolerance).toBe(CHECKS.color.tolerance);
 });
 
 describe('the reference editor', () => {
@@ -314,7 +336,7 @@ describe('the reference editor', () => {
   test("opens with the reference's characters and the value's region, and no boxes", () => {
     const value = { ...EMPTY_DRAFT, region, ink: gray, boxes: [{ id: 0, screenshot: 0, region, text: '5' }] };
     expect(toReference(value, saved)).toEqual({ ...value, ink: red, tolerance: 25, boxes: [] });
-    expect(toReference(value, null)).toEqual({ ...value, ink: null, tolerance: DEFAULT_TOLERANCE.number, boxes: [] });
+    expect(toReference(value, null)).toEqual({ ...value, ink: null, tolerance: CHECKS.number.tolerance, boxes: [] });
   });
 
   test("leaves the value's region as it was, without the editor's boxes or readings", () => {
@@ -556,7 +578,7 @@ describe('fixDraft', () => {
     expect(fixDraft({ kind: 'barFill', filled: red, empty: gray })).toEqual({
       ...EMPTY_DRAFT,
       kind: 'barFill',
-      tolerance: DEFAULT_TOLERANCE.barFill,
+      tolerance: CHECKS.barFill.tolerance,
       filled: red,
       empty: gray,
     });

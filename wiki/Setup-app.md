@@ -1396,6 +1396,15 @@ that `apps/setup/tests/pixels.test.ts` decodes. The UI's formatting and lint
 checks skip both generated files, and its unused-type check skips
 `bindings.ts`.
 
+What the page knows of each kind of check is one entry of `CHECKS` in
+`apps/setup/src/lib/check.ts`: its name, the tolerance it starts with, the
+kind of value it reads, how a draft builds it, how a saved one reads on the
+Values page, and what a fix keeps of it. The table's keys are the generated
+`CheckDef` kinds, and so are those of the capture screen's fields for each
+kind (`howFields` in `Capture.tsx`) and of what a kind does about content
+that moves (`lib/moving.ts`), so a kind the Rust side adds does not compile
+until it has all three.
+
 The page reads a typed path, link, key press, screenshot shortcut, or app name
 itself, so the user sees what to fix as they type, and places a click's spot
 in the window itself. `PARSE_CASES` holds what the Rust side makes of a fixed
