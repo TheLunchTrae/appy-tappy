@@ -34,7 +34,9 @@ it was about has gone. Sixteen guards drop such stale messages:
   sent, and what the capture of a reader that panicked still read.
 - **Generations.** The setup app's owner thread adds 1 to `generation` each
   time it starts or stops a capture. A frame or a failure from an older
-  generation is dropped.
+  generation is dropped. A picked window's capture is numbered by its
+  generation, and a stop that carries the number of an older capture is
+  dropped too.
 - **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
   from one counter, so text that the text reader sends back for a recording
   that was discarded, or replaced by one of either kind, is dropped, and so
@@ -1397,7 +1399,11 @@ stateDiagram-v2
   (`useCapture` in `apps/setup/src/lib/capture.ts`): a value or reference
   flow, and a click's target screen. The capture stops when that screen
   goes, on **Change window**, and when a click's target screen looks for
-  its window again. While one holds it, the pages' lists are read only
+  its window again. The screen stops the capture it started, by the number
+  its pick answered (`ownCapture`), and the owner drops the stop when
+  another capture took that one's place (`Owner::stop_capture`): a stop
+  sent as a screen goes can arrive after the next screen's pick or the
+  automation editor's watch started. While one holds it, the pages' lists are read only
   after a save.
 - The automation editor's watch (`liveWatchStep` in
   `apps/setup/src/lib/liveWatch.ts`) holds the owner's watch number, the

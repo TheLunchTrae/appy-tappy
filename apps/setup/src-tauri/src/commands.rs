@@ -113,9 +113,10 @@ pub(crate) async fn list_windows(app: AppHandle) -> Result<WindowList, String> {
     try_ask(&app, "list_windows", |owner| owner.window_list()).await
 }
 
-/// Starts capturing `window` for the preview.
+/// Starts capturing `window` for the preview, and answers the capture's
+/// number.
 #[tauri::command]
-pub(crate) async fn pick_window(app: AppHandle, window: u64) -> Result<(), String> {
+pub(crate) async fn pick_window(app: AppHandle, window: u64) -> Result<u64, String> {
     try_ask(&app, "pick_window", move |owner| owner.pick(window)).await
 }
 
@@ -127,10 +128,14 @@ pub(crate) async fn preview(app: AppHandle, max_width: u32) -> Result<Response, 
         .map(pixels)
 }
 
-/// Stops capturing and forgets the session's screenshots and check.
+/// Stops capture `capture` and forgets the session's screenshots and
+/// check, unless another capture took its place.
 #[tauri::command]
-pub(crate) async fn stop_capture(app: AppHandle) -> Result<(), String> {
-    ask(&app, "stop_capture", Owner::stop).await
+pub(crate) async fn stop_capture(app: AppHandle, capture: u64) -> Result<(), String> {
+    ask(&app, "stop_capture", move |owner| {
+        owner.stop_capture(capture);
+    })
+    .await
 }
 
 /// Keeps the newest frame as a screenshot and returns its index.

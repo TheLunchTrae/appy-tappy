@@ -73,11 +73,19 @@ impl<H: Host> Owner<H> {
         self.watched = None;
     }
 
+    /// Stops capture `capture`, the number [`Owner::pick`] answered, unless
+    /// another capture took its place: a screen that goes stops its own
+    /// capture, and its stop can arrive after the next screen started one.
+    pub(crate) fn stop_capture(&mut self, capture: u64) {
+        if capture == self.generation {
+            self.stop();
+        }
+    }
+
     /// Captures `window`, dropping the previous window's screenshots and
-    /// check, and answers once the capture started.
-    pub(crate) fn pick(&mut self, window: u64) -> Result<(), String> {
+    /// check, and answers the capture's number once it started.
+    pub(crate) fn pick(&mut self, window: u64) -> Result<u64, String> {
         self.start(window, Crop::Whole, PREVIEW_INTERVAL, preview_message)
-            .map(drop)
     }
 
     /// Stops the capture and starts capturing `crop` of `window`, sending
@@ -352,6 +360,22 @@ mod tests {
         harness.deliver(&mut handler, Ok(&frame_image()));
         let bytes = harness.ask(preview).expect("running").expect("a frame");
         assert_eq!(bytes, pixels::rgba(&frame_image(), 100));
+    }
+
+    #[test]
+    fn a_stop_of_an_older_capture_leaves_the_newer_one() {
+        let mut harness = harness(false);
+        let (older, _replaced) = harness.pick_numbered();
+        let (newest, mut handler) = harness.pick_numbered();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
+        harness.ask(move |owner| owner.stop_capture(older));
+        assert!(
+            harness.ask(preview).expect("running").is_some(),
+            "the newer capture keeps its frame"
+        );
+        harness.ask(move |owner| owner.stop_capture(newest));
+        assert_eq!(harness.ask(preview), Ok(None));
     }
 
     #[test]
@@ -700,8 +724,9 @@ mod tests {
         };
         assert_eq!(harness.ask(held), [true; 5]);
 
-        // The page's `stop_capture`, as it reaches the owner when a flow
-        // closes or the user selects Change window.
+        // The stop that `stop_capture` runs for the capture that still
+        // runs, sent as a command reaches the owner when a flow closes or
+        // the user selects Change window.
         let (reply, mut answer) = oneshot::channel();
         let stop = Message::Run(Run::new(reply, Owner::stop));
         assert!(harness.owner.handle(stop).is_continue());

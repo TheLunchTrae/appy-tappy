@@ -92,7 +92,7 @@ export function CaptureFlow({
   // What the flow started for: its mode stays the same object while it shows.
   const [{ mode, lockedApp, heading }] = useState(() => subject(flow));
   // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at.
-  const stop = useCapture();
+  const { pick, stop } = useCapture();
   if (picking || choice === null) {
     return (
       <Picker
@@ -106,6 +106,7 @@ export function CaptureFlow({
         onAddApplication={onAddApplication}
         onEditApplication={onEditApplication}
         draftedApps={draftedApps}
+        onCapture={pick}
         onPick={async (picked) => {
           // Picking the window forgets the session's screenshots, so a draft's come back after it, the first time.
           if (draft !== null) {
