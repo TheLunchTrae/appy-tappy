@@ -353,17 +353,12 @@ fn number_check(
         .iter()
         .find(|known| known.id == id)
         .ok_or_else(|| SavedError::NoReference { id: id.to_owned() })?;
-    let all = reader(reference, picture)?;
-    let reader = match characters {
-        Some(characters) => {
-            all.reading_only(characters)
-                .ok_or_else(|| SavedError::NoCharacters {
-                    id: id.to_owned(),
-                    characters: characters.to_owned(),
-                })?
-        },
-        None => all,
-    };
+    let reader = reader(reference, picture)?
+        .reading(characters)
+        .ok_or_else(|| SavedError::NoCharacters {
+            id: id.to_owned(),
+            characters: characters.unwrap_or_default().to_owned(),
+        })?;
     Ok(Check::Number { reader, whole })
 }
 

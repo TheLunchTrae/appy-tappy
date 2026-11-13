@@ -14,7 +14,7 @@ import type {
   BarMeasure,
   BundleSpec,
   CaptureOutline,
-  CheckSpec,
+  CharactersSpec,
   ClickAtDef,
   ClickPictureView,
   ClickSent,
@@ -54,6 +54,7 @@ import type {
   TraceMetrics,
   TraceRange,
   TraceRows,
+  TrialSpec,
   UpdateOffer,
   WhenDef,
   WindowDef,
@@ -133,8 +134,20 @@ export async function matchPixels(screenshot: number, area: RegionSpec, rule: Ma
   return invoke<MatchView>('match_pixels', { screenshot, area, rule });
 }
 
-export async function setCheck(spec: CheckSpec): Promise<void> {
-  await invoke('set_check', { spec });
+/**
+ * Reads the live window with the value `trial` would save, where and how the runtime would read it at the
+ * window's size now.
+ */
+export async function setCheck(trial: TrialSpec): Promise<void> {
+  await invoke('set_check', { trial });
+}
+
+/**
+ * Reads the live window with the reference `spec` teaches, in the region its characters were drawn in. With
+ * `reads`, the characters of the value the reference is made for, it reads only those, as that value does.
+ */
+export async function setCharacters(spec: CharactersSpec, reads: string | null): Promise<void> {
+  await invoke('set_characters', { spec, reads });
 }
 
 /** What the check reads on the newest frame, or null without a check or a frame. */
@@ -148,11 +161,12 @@ export async function explainReading(): Promise<ReadingDetails | null> {
 }
 
 /**
- * Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped
- * recording, which needs the same region, ink and window size; otherwise starts a new one.
+ * Records the region of the picked window that `spec`'s characters were drawn in, in their color. With
+ * `more`, goes on with the stopped recording, which needs the same region, ink and window size;
+ * otherwise starts a new one.
  */
-export async function startRecording(region: RegionSpec, ink: ColorSpec, tolerance: number, screenshot: number, more: boolean): Promise<void> {
-  await invoke('start_recording', { region, ink, tolerance, screenshot, more });
+export async function startRecording(spec: CharactersSpec, more: boolean): Promise<void> {
+  await invoke('start_recording', { spec, more });
 }
 
 /** Stops the recording, of readings or of looks, keeping what it recorded. */
@@ -193,7 +207,7 @@ export async function recordedReading(index: number, maxWidth: number): Promise<
  * Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
  * can.
  */
-export async function reviewProblems(spec: CheckSpec): Promise<ReadonlyArray<string | null>> {
+export async function reviewProblems(spec: CharactersSpec): Promise<ReadonlyArray<string | null>> {
   return invoke<ReadonlyArray<string | null>>('review_problems', { spec });
 }
 
@@ -224,13 +238,21 @@ export async function foundPicture(search: number, index: number, maxWidth: numb
   return decodePicture(await invoke<ArrayBuffer>('found_picture', { search, index, maxWidth }));
 }
 
+/**
+ * Has the text reader read finds `indexes` of search `search` again, in the color `ink` within `tolerance`,
+ * and answers the search, or null when that search was replaced or forgotten.
+ */
+export async function rereadFound(search: number, indexes: ReadonlyArray<number>, ink: ColorSpec, tolerance: number): Promise<FoundView | null> {
+  return invoke<FoundView | null>('reread_found', { search, indexes, ink, tolerance });
+}
+
 /** Forgets the search. */
 export async function forgetFound(): Promise<void> {
   await invoke('forget_found');
 }
 
 /** Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can. */
-export async function foundProblems(spec: CheckSpec, found: ReadonlyArray<Label>): Promise<ReadonlyArray<string | null>> {
+export async function foundProblems(spec: CharactersSpec, found: ReadonlyArray<Label>): Promise<ReadonlyArray<string | null>> {
   return invoke<ReadonlyArray<string | null>>('found_problems', { spec, found });
 }
 

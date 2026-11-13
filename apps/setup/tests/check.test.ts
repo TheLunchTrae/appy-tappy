@@ -20,6 +20,7 @@ import {
   toReference,
   withFixRegion,
   withKind,
+  withReference,
   withoutState,
   withState,
   withStateAt,
@@ -197,7 +198,6 @@ describe('buildCharacters', () => {
     expect(buildCharacters(draft, null)).toEqual({
       ok: true,
       spec: {
-        kind: 'characters',
         // With no value's region, the reference reads where its first box is.
         region,
         screenshot: 2,
@@ -276,7 +276,6 @@ test('reviewSpec waits for the region and color, and names the reference', () =>
   expect(reviewSpec({ ...EMPTY_DRAFT, region, ink: red }, [], null)).toBeNull();
   const kept = [{ reading: 0, text: '5' }];
   expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1, ink: red }, kept, percent)).toEqual({
-    kind: 'characters',
     region,
     screenshot: 1,
     reference: percent,
@@ -403,6 +402,36 @@ test("a new screenshot carries the value's region when it fits, and clears it wh
   // A saved value's region waits, on no screenshot, for one of the size it was drawn at.
   const saved = { ...EMPTY_DRAFT, region };
   expect(onPicture(saved, 1, false)).toBe(saved);
+});
+
+test('withReference keeps the choice of characters that was picked, for the new reference', () => {
+  const reference = (id: string, text: string) => ({
+    id,
+    name: id,
+    ink: red,
+    tolerance: 40,
+    samples: [{ image: `ref-${id}-1.png`, text }],
+  });
+  const references = [reference('percent', '10%L'), reference('clock', '12:')];
+  const number = { ...EMPTY_DRAFT, reference: 'percent' };
+  expect(withReference(number, 'clock', references)).toEqual({ ...number, reference: 'clock' });
+  const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  expect(withReference({ ...number, characters: [...digits, '%'] }, 'clock', references).characters).toEqual([
+    ...digits,
+    ':',
+  ]);
+  expect(withReference({ ...number, characters: ['1', 'L'] }, 'clock', references).characters).toEqual(['1']);
+  // A reference that is not among them, such as while its file cannot be read, changes nothing that is read.
+  expect(withReference({ ...number, characters: ['1', 'L'] }, 'gone', references)).toEqual({
+    ...number,
+    reference: 'gone',
+    characters: ['1', 'L'],
+  });
+  // One taught more in place keeps a chosen set.
+  const taught = [reference('percent', '10%L.')];
+  expect(withReference({ ...number, characters: ['1', '%'] }, 'percent', taught).characters).toEqual(['1', '%']);
+  // A first reference has no choice to carry over but the one the draft holds.
+  expect(withReference({ ...EMPTY_DRAFT, characters: digits }, 'clock', references).characters).toEqual(digits);
 });
 
 describe('fixDraft', () => {

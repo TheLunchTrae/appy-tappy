@@ -1,0 +1,594 @@
+//! The live check: the value or the reference the capture screen is
+//! setting up, read on the picked window's newest frame the way the
+//! runtime will read it once it is saved.
+//!
+//! The owner builds a check's saved form and reads it back with
+//! `saved::build`, exactly as a save does, so a check that reads here is
+//! one the runtime can read. It then places the value at each frame's
+//! window size with `SavedValue::at`, as the runtime does: the drawing
+//! made at that size, the first drawing scaled to it while the
+//! application's window changes size often, or nothing, with the reason.
+
+use appytappy_config::app_file::{PinDef, RegionDef, ScreenDef, SizeChangesDef, SizeDef};
+use appytappy_config::signal::Value;
+use appytappy_sources::screen::check::Check;
+use appytappy_sources::screen::saved::{AtSize, SavedCheck, SavedValue, Unread};
+use appytappy_sources::screen::{Image, Size};
+
+use crate::check_spec::{self, CharactersSpec, SpecError};
+
+use super::Owner;
+use super::host::Host;
+use super::messages::TrialSpec;
+use super::values::read_back;
+
+/// The ID a value is tried under before it is saved under its own. It
+/// names only pictures that are never written.
+const TRIED: &str = "tried";
+
+/// A value as it would be saved, placed at the window size of the newest
+/// frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LiveCheck {
+    value: SavedValue,
+    /// The window size the value is placed at, and where and how it reads
+    /// there or why it does not.
+    placed: (Size, Result<AtSize, Unread>),
+}
+
+impl LiveCheck {
+    /// `value`, placed at `size`.
+    pub(super) fn new(value: SavedValue, size: Size) -> Self {
+        let placed = (size, value.at(size));
+        Self { value, placed }
+    }
+
+    /// Places the value at `size`, the window size a new frame shows,
+    /// unless it is placed there already.
+    pub(super) fn place(&mut self, size: Size) {
+        if self.placed.0 != size {
+            self.placed = (size, self.value.at(size));
+        }
+    }
+
+    /// Why the value is not read at the size it is placed at, as a
+    /// sentence, or `None` when it reads there.
+    pub(super) fn unread(&self) -> Option<String> {
+        let (size, placed) = &self.placed;
+        placed.as_ref().err().map(|unread| {
+            format!(
+                "Not read at {} × {}, the window's size now: {unread}.",
+                size.width, size.height
+            )
+        })
+    }
+
+    /// The check that reads the value where it is placed and its region's
+    /// pixels on `frame`, or why the value is not read there, for the user.
+    pub(super) fn region_of(&self, frame: &Image) -> Result<(&Check, Image), String> {
+        let Ok(at) = &self.placed.1 else {
+            return Err(self.unread().unwrap_or_default());
+        };
+        let region = frame
+            .crop(at.region)
+            .ok_or_else(|| SpecError::Outside.to_string())?;
+        Ok((self.value.check(at), region))
+    }
+
+    /// What the value reads on `frame`, or why it cannot be read there, for
+    /// the user.
+    pub(super) fn read(&self, frame: &Image) -> Result<Value, String> {
+        let (check, region) = self.region_of(frame)?;
+        check
+            .read(&region)
+            .map_err(|error| format!("Not read on the live window now: {error}."))
+    }
+}
+
+impl<H: Host> Owner<H> {
+    /// Makes `trial` the check the live frame is read with: the value it
+    /// would save, read back as the runtime reads a saved value and placed
+    /// at the window's size now.
+    pub(crate) fn set_check(&mut self, trial: &TrialSpec) -> Result<(), String> {
+        let found = self.stores()?.app(&trial.app)?;
+        let size = check_spec::drawn_size(&trial.check, &self.screenshots, trial.screenshot)
+            .map_err(|error| error.to_string())?;
+        let saved = check_spec::to_saved(&trial.check, &self.screenshots, &trial.app, TRIED)
+            .map_err(|error| error.to_string())?;
+        let screen = ScreenDef {
+            window_size: SizeDef {
+                width: size.width,
+                height: size.height,
+            },
+            region: saved.region,
+            check: saved.check,
+            pin: trial.pin,
+            reading_area: false,
+            fixes: Vec::new(),
+        };
+        let value = read_back(&screen, &found, &saved.pictures)?;
+        self.go_live(value);
+        Ok(())
+    }
+
+    /// Makes the reference `spec` teaches the check the live frame is read
+    /// with: a number read with it in the region the characters were drawn
+    /// in, which scales with the window as a value's does by default. With
+    /// `reads`, the characters of the value the reference is made for, the
+    /// number reads only those, as `saved::build` has that value read.
+    pub(crate) fn set_characters(
+        &mut self,
+        spec: &CharactersSpec,
+        reads: Option<&str>,
+    ) -> Result<(), String> {
+        let taught = self
+            .with_session(|session| spec.teach(session, None, "", ""))
+            .map_err(|error| error.to_string())?;
+        let reader = taught.reader.reading(reads).ok_or_else(|| {
+            SpecError::NoCharacters {
+                reference: "The reference".to_owned(),
+                characters: reads.unwrap_or_default().to_owned(),
+            }
+            .to_string()
+        })?;
+        let size = taught.window_size;
+        let region = taught.region.size();
+        let pin = PinDef::guess(
+            RegionDef {
+                x: taught.region.x(),
+                y: taught.region.y(),
+                width: region.width,
+                height: region.height,
+            },
+            SizeDef {
+                width: size.width,
+                height: size.height,
+            },
+        );
+        self.go_live(SavedValue {
+            drawn: SavedCheck {
+                window_size: size,
+                region: taught.region,
+                check: Check::Number {
+                    reader,
+                    whole: false,
+                },
+            },
+            fixes: Vec::new(),
+            pin,
+            size_changes: SizeChangesDef::Often,
+        });
+        Ok(())
+    }
+
+    /// Reads the live frame with `value` from now on, placed at the newest
+    /// frame's size, or at the size it was drawn at before a frame arrived.
+    pub(super) fn go_live(&mut self, value: SavedValue) -> &LiveCheck {
+        let size = self
+            .latest
+            .as_ref()
+            .map_or(value.drawn.window_size, Image::size);
+        self.check.insert(LiveCheck::new(value, size))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::time::Duration;
+
+    use appytappy_config::app_file::{CheckDef, ValueDef};
+    use appytappy_sources::screen::saved;
+
+    use crate::check_spec::CheckSpec;
+    use crate::debug::workings::WorkingsView;
+    use crate::owner::messages::{Reading, ReferenceSaveSpec};
+    use crate::owner::test_support::{
+        BAR, Harness, add_example_app, capturing, characters, harness_with, scratch_store, trial,
+    };
+    use crate::stores::SavedApp;
+
+    use super::*;
+
+    #[test]
+    fn the_check_reads_the_live_frame() {
+        let (mut harness, _handler, root) = capturing("live-reads");
+        assert_eq!(harness.ask(|owner| owner.reading()), Ok(None));
+        assert_eq!(harness.ask(|owner| owner.explain_reading()), Ok(None));
+        harness
+            .ask(|owner| owner.set_check(&trial(BAR)))
+            .expect("valid check");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(50.0)))
+        );
+        harness.wait(Duration::from_millis(30));
+        let details = harness
+            .ask(|owner| owner.explain_reading())
+            .expect("explains")
+            .expect("a frame arrived");
+        assert_eq!(details.frame_age_ms, 30, "by the owner's clock");
+        assert!(
+            matches!(
+                details.workings,
+                Some(WorkingsView::BarFill { filled, counted }) if filled * 2 == counted
+            ),
+            "{details:?}"
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_check_that_cannot_be_saved_or_read_back_says_what_to_fix() {
+        let (mut harness, _handler, root) = capturing("live-refused");
+        let mut refused = |check: &str| harness.ask(|owner| owner.set_check(&trial(check)));
+        assert_eq!(
+            refused(
+                r#"{"kind":"color","region":{"x":0,"y":0,"width":0,"height":2},
+                    "color":{"red":255,"green":0,"blue":0},"tolerance":0}"#
+            ),
+            Err("Draw a region on the screenshot first.".to_owned())
+        );
+        // What only `saved::build` judges is refused before the save, too.
+        assert_eq!(
+            refused(
+                r#"{"kind":"barFill","region":{"x":0,"y":0,"width":4,"height":2},
+                    "filled":{"red":9,"green":9,"blue":9},"empty":{"red":9,"green":9,"blue":9}}"#
+            ),
+            Err("Pick a filled color and an empty color that differ.".to_owned())
+        );
+        assert_eq!(
+            refused(
+                r#"{"kind":"color","region":{"x":3,"y":0,"width":2,"height":2},
+                    "color":{"red":255,"green":0,"blue":0},"tolerance":0}"#
+            ),
+            Err(
+                "The region reaches past the edge of the window. Draw it inside the window."
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            refused(
+                r#"{"kind":"number","region":{"x":0,"y":0,"width":2,"height":2},
+                    "reference":{"app":"example","id":"gone"},"whole":false}"#
+            ),
+            Err("Example App no longer has that reference.".to_owned())
+        );
+        assert_eq!(harness.ask(|owner| owner.reading()), Ok(None));
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_live_frame_the_check_cannot_read_says_which_stage_failed() {
+        let (mut harness, mut handler, root) = capturing("live-stage");
+        // A reference taught that the screenshot's red half is a 1.
+        let spec = characters(
+            r#"{"region":{"x":0,"y":0,"width":4,"height":2},"screenshot":0,
+                "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+                "labels":[{"screenshot":0,"text":"1"}]}"#,
+        );
+        harness
+            .ask(|owner| owner.set_characters(&spec, None))
+            .expect("valid check");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(1.0)))
+        );
+        let gray = Image::new(
+            Size {
+                width: 4,
+                height: 2,
+            },
+            [40, 40, 40, 0].repeat(8),
+        )
+        .expect("matching length");
+        harness.deliver(&mut handler, Ok(&gray));
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Err(
+                "Not read on the live window now: no pixel in the region has the characters' \
+                 color."
+                    .to_owned()
+            )
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// A font of 3 by 5 pixels.
+    const GLYPHS: [(char, [&str; 5]); 4] = [
+        ('3', ["###", "..#", "###", "..#", "###"]),
+        ('7', ["###", "..#", "..#", "..#", "..#"]),
+        ('9', ["###", "#.#", "###", "..#", "###"]),
+        ('%', ["#.#", "..#", ".#.", "#..", "#.#"]),
+    ];
+
+    /// The window's size on the screenshot the percentage is drawn on.
+    const DRAWN: Size = Size {
+        width: 24,
+        height: 12,
+    };
+
+    /// A frame of a window `scale` times [`DRAWN`] that shows `text` in
+    /// white on black, 8 pixels across and 4 down at scale 1, each cell of
+    /// the font `scale` pixels wide and tall, a blank cell between
+    /// characters.
+    fn showing(text: &str, scale: u32) -> Image {
+        let lit = |x: u32, y: u32| {
+            let cell = |pixel: u32| pixel.checked_div(scale).expect("a scale above zero");
+            let (Some(column), Some(row)) = (cell(x).checked_sub(8), cell(y).checked_sub(4)) else {
+                return false;
+            };
+            let across = usize::try_from(column % 4).expect("small");
+            usize::try_from(column / 4)
+                .ok()
+                .and_then(|index| text.chars().nth(index))
+                .and_then(|character| {
+                    GLYPHS
+                        .iter()
+                        .find_map(|(glyph, rows)| (*glyph == character).then_some(rows))
+                })
+                .and_then(|rows| rows.get(usize::try_from(row).expect("small")))
+                .is_some_and(|line| line.as_bytes().get(across) == Some(&b'#'))
+        };
+        let size = Size {
+            width: DRAWN.width.checked_mul(scale).expect("a small window"),
+            height: DRAWN.height.checked_mul(scale).expect("a small window"),
+        };
+        let bgra = (0..size.height)
+            .flat_map(|y| (0..size.width).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                if lit(x, y) {
+                    [255, 255, 255, 0]
+                } else {
+                    [0; 4]
+                }
+            })
+            .collect();
+        Image::new(size, bgra).expect("a pixel for each of the window's")
+    }
+
+    /// The reference `percent`, taught `379%` on screenshot 0, and the
+    /// number `Charge` read with it in a region around the text.
+    const PERCENT: &str = r#"{"region":{"x":6,"y":2,"width":18,"height":9},"screenshot":0,
+        "ink":{"red":255,"green":255,"blue":255},"tolerance":0,
+        "labels":[{"screenshot":0,"text":"379%"}]}"#;
+    const CHARGE: &str = r#"{"kind":"number","region":{"x":6,"y":2,"width":18,"height":9},
+        "reference":{"app":"example","id":"percent"},"whole":false}"#;
+
+    /// What the live box says of `379%` read with the digits alone.
+    const DIGITS_ONLY: &str = "Not read on the live window now: a character has a shape the \
+        reference has not learned: it read `3 7 9 ?`, and character 4 is closest to the `3` it \
+        learned.";
+
+    /// A harness whose application `example` changes size as `size_changes`
+    /// say, with a window that shows `379%` at [`DRAWN`] on screenshot 0 and
+    /// the reference `percent` saved from it.
+    fn with_percent(
+        name: &str,
+        size_changes: SizeChangesDef,
+    ) -> (
+        Harness,
+        appytappy_sources::screen::FrameHandler,
+        std::path::PathBuf,
+    ) {
+        let (stores, root) = scratch_store(name);
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        harness
+            .ask(|owner| {
+                owner.update_app("example", crate::owner::Changed::Values, |_owner, found| {
+                    found.file.size_changes = size_changes;
+                    Ok(crate::owner::Edit::Save((), Vec::new()))
+                })
+            })
+            .expect("saves");
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&showing("379%", 1)));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        harness
+            .ask(|owner| {
+                owner.save_reference(&ReferenceSaveSpec {
+                    app: "example".to_owned(),
+                    reference_name: "Percent".to_owned(),
+                    expects: String::new(),
+                    characters: characters(PERCENT),
+                })
+            })
+            .expect("saves the reference");
+        (harness, handler, root)
+    }
+
+    /// What the runtime reads for `value` of `app` on `frame`, a frame of
+    /// the whole window: the value built from the saved files, placed at
+    /// the frame's size, and read from its region there.
+    fn as_the_runtime_reads(app: &SavedApp, value: &ValueDef, frame: &Image) -> Option<Value> {
+        let file = &app.file;
+        let built = saved::build(&value.screen, &file.references, file.size_changes, |name| {
+            app.picture(name)
+        })
+        .expect("the runtime reads the saved value");
+        let at = built.at(frame.size()).ok()?;
+        built.check(&at).read(&frame.crop(at.region)?).ok()
+    }
+
+    #[test]
+    fn a_percentage_tried_on_the_live_window_reads_as_the_runtime_reads_it_once_saved() {
+        let (mut harness, mut handler, root) = with_percent("live-percent", SizeChangesDef::Often);
+        harness
+            .ask(|owner| owner.set_check(&trial(CHARGE)))
+            .expect("valid check");
+        let tried_at = |harness: &mut Harness, handler: &mut _, frame: &Image| {
+            harness.deliver(handler, Ok(frame));
+            harness.ask(|owner| owner.reading())
+        };
+        let same_size = showing("37%", 1);
+        // The window at twice the size it was drawn at: the unscaled region
+        // holds only the top left corner of the text.
+        let doubled = showing("93%", 2);
+        let tried = [
+            tried_at(&mut harness, &mut handler, &same_size),
+            tried_at(&mut harness, &mut handler, &doubled),
+        ];
+        assert_eq!(
+            tried,
+            [
+                Ok(Some(Reading::Number(37.0))),
+                Ok(Some(Reading::Number(93.0)))
+            ]
+        );
+
+        let saved = harness
+            .ask(|owner| {
+                owner.save(&crate::owner::test_support::spec(
+                    "example", "Charge", CHARGE,
+                ))
+            })
+            .expect("saves");
+        let app = harness
+            .ask(|owner| owner.stores().and_then(|stores| stores.app("example")))
+            .expect("loads");
+        let value = app
+            .file
+            .values
+            .iter()
+            .find(|value| value.id == saved.value)
+            .expect("saved");
+        assert!(matches!(value.screen.check, CheckDef::Number { .. }));
+        let runtime = [&same_size, &doubled]
+            .map(|frame| Ok(as_the_runtime_reads(&app, value, frame).map(Reading::from)));
+        assert_eq!(tried, runtime, "setup previews what the runtime reads");
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_number_tried_with_characters_its_reference_knows_none_of_says_so() {
+        let (mut harness, _handler, root) = with_percent("live-subset", SizeChangesDef::Often);
+        let reading = |characters: &str| {
+            let mut tried = trial(CHARGE);
+            let CheckSpec::Number {
+                characters: reads, ..
+            } = &mut tried.check
+            else {
+                panic!("a number");
+            };
+            *reads = Some(characters.to_owned());
+            tried
+        };
+        harness
+            .ask(|owner| owner.set_check(&reading("0123456789%")))
+            .expect("the reference knows four of them");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(379.0)))
+        );
+        // Read with the digits alone, the percent sign is a shape the value
+        // does not know, as it is for the runtime.
+        harness
+            .ask(|owner| owner.set_check(&reading("0123456789")))
+            .expect("the reference knows three of them");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Err(DIGITS_ONLY.to_owned())
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.set_check(&reading("2"))),
+            Err(
+                "Percent knows none of the characters this value reads, \"2\". Teach it one of \
+                 them, or change which characters the value reads."
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.set_check(&reading(""))),
+            Err("Choose at least one character for the value to read.".to_owned())
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_value_tried_at_a_size_the_runtime_does_not_read_it_at_says_so() {
+        let (mut harness, mut handler, root) = with_percent("live-rarely", SizeChangesDef::Rarely);
+        harness
+            .ask(|owner| owner.set_check(&trial(CHARGE)))
+            .expect("valid check");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(379.0)))
+        );
+        // A frame of another size places the value again. Its text still
+        // shows inside the region as drawn, which is not read all the same.
+        let wider = showing("37%", 1);
+        let wider = Image::new(
+            Size {
+                width: DRAWN.width + 1,
+                height: DRAWN.height,
+            },
+            wider
+                .pixels()
+                .chunks(24)
+                .flat_map(|row| row.iter().chain(row.last()).flatten().copied())
+                .collect(),
+        )
+        .expect("a column more");
+        harness.deliver(&mut handler, Ok(&wider));
+        let unread = "Not read at 25 × 12, the window's size now: it is read only at the window \
+                      sizes it was drawn at.";
+        assert_eq!(harness.ask(|owner| owner.reading()), Err(unread.to_owned()));
+        assert_eq!(
+            harness.ask(|owner| owner.explain_reading()),
+            Err(unread.to_owned())
+        );
+        // A frame of the drawn size places it back.
+        harness.deliver(&mut handler, Ok(&showing("37%", 1)));
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(37.0)))
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_reference_being_taught_reads_where_its_region_scales_to() {
+        let (mut harness, mut handler, root) = capturing("live-taught");
+        harness.deliver(&mut handler, Ok(&showing("379%", 1)));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(1));
+        let taught = CharactersSpec {
+            screenshot: 1,
+            labels: vec![serde_json::from_str(r#"{"screenshot":1,"text":"379%"}"#).expect("valid")],
+            ..characters(PERCENT)
+        };
+        harness
+            .ask(|owner| owner.set_characters(&taught, None))
+            .expect("learns");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(379.0)))
+        );
+        // Made for a value that reads only digits, it reads as that value
+        // will: the percent sign is a shape it does not know.
+        harness
+            .ask(|owner| owner.set_characters(&taught, Some("0123456789")))
+            .expect("learns the digits");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Err(DIGITS_ONLY.to_owned())
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.set_characters(&taught, Some("2"))),
+            Err(
+                "The reference knows none of the characters this value reads, \"2\". Teach it \
+                 one of them, or change which characters the value reads."
+                    .to_owned()
+            )
+        );
+        harness
+            .ask(|owner| owner.set_characters(&taught, None))
+            .expect("learns");
+        harness.deliver(&mut handler, Ok(&showing("97%", 2)));
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(97.0)))
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+}

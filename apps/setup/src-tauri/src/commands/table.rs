@@ -43,20 +43,20 @@ macro_rules! with_commands {
             /// The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
             /// to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
             commands::match_pixels(screenshot: usize, area: RegionSpec, rule: MatchRule) -> MatchView;
-            commands::set_check(spec: CheckSpec) -> ();
+            /// Reads the live window with the value `trial` would save, where and how the runtime would read it at the
+            /// window's size now.
+            commands::set_check(trial: TrialSpec) -> ();
+            /// Reads the live window with the reference `spec` teaches, in the region its characters were drawn in. With
+            /// `reads`, the characters of the value the reference is made for, it reads only those, as that value does.
+            commands::set_characters(spec: CharactersSpec, reads: Option<String>) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;
             /// How the check reads the newest frame, for the debug details, or null without a check or a frame.
             commands::explain_reading() -> Option<ReadingDetails>;
-            /// Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped
-            /// recording, which needs the same region, ink and window size; otherwise starts a new one.
-            commands::start_recording(
-                region: RegionSpec,
-                ink: ColorSpec,
-                tolerance: u8,
-                screenshot: usize,
-                more: bool
-            ) -> ();
+            /// Records the region of the picked window that `spec`'s characters were drawn in, in their color. With
+            /// `more`, goes on with the stopped recording, which needs the same region, ink and window size;
+            /// otherwise starts a new one.
+            commands::start_recording(spec: CharactersSpec, more: bool) -> ();
             /// Stops the recording, of readings or of looks, keeping what it recorded.
             commands::stop_recording() -> ();
             /// Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay.
@@ -73,7 +73,7 @@ macro_rules! with_commands {
             commands::recorded_reading(index: usize, max_width: u32) -> Pixels;
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
             /// can.
-            commands::review_problems(spec: CheckSpec) -> Vec<Option<String>>;
+            commands::review_problems(spec: CharactersSpec) -> Vec<Option<String>>;
             /// What the runtime copies out of each frame of a saved application's window at `width` by `height`, and
             /// where each of its saved values reads there.
             commands::capture_outline(application: String, width: u32, height: u32) -> CaptureOutline;
@@ -85,10 +85,13 @@ macro_rules! with_commands {
             commands::found_state() -> Option<FoundView>;
             /// A find of search `search` at most `maxWidth` wide, or null for an unknown index or a replaced search.
             commands::found_picture(search: U64AsNumber, index: usize, max_width: u32) -> Pixels;
+            /// Has the text reader read finds `indexes` of search `search` again, in the color `ink` within `tolerance`,
+            /// and answers the search, or null when that search was replaced or forgotten.
+            commands::reread_found(search: U64AsNumber, indexes: Vec<usize>, ink: ColorSpec, tolerance: u8) -> Option<FoundView>;
             /// Forgets the search.
             commands::forget_found() -> ();
             /// Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can.
-            commands::found_problems(spec: CheckSpec, found: Vec<Label>) -> Vec<Option<String>>;
+            commands::found_problems(spec: CharactersSpec, found: Vec<Label>) -> Vec<Option<String>>;
             /// Captures a saved value's region on its application's window, replacing any capture, and returns the
             /// watch's number.
             commands::watch_value(application: String, value: String) -> U64AsNumber;

@@ -299,7 +299,6 @@ mod tests {
 
     use appytappy_sources::screen::settle::SETTLE;
 
-    use crate::check_spec::CheckSpec;
     use crate::debug::workings::WorkingsView;
     use crate::owner::messages::Reading;
     use crate::owner::test_support::{
@@ -418,16 +417,6 @@ mod tests {
         let mut elsewhere = at_least("progress_bar", 0.0);
         "other".clone_into(&mut elsewhere.app);
         assert_eq!(harness.ask(watched(watch, Some(elsewhere))), read(None));
-        // A setup check of the capture screen does not change what is read.
-        let spec: CheckSpec = serde_json::from_str(
-            r#"{"kind":"color","region":{"x":0,"y":0,"width":1,"height":1},
-                "color":{"red":255,"green":0,"blue":0},"tolerance":0}"#,
-        )
-        .expect("valid JSON");
-        harness
-            .ask(|owner| owner.set_check(&spec))
-            .expect("valid check");
-        assert_eq!(harness.ask(watched(watch, None)), read(None));
         assert_eq!(
             harness.ask(watched(watch.wrapping_add(1), None)),
             Err("No value is watched.".to_owned()),

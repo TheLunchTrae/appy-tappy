@@ -37,8 +37,7 @@ impl<H: Host> Owner<H> {
         if self.screenshots.get(spec.screenshot).is_none() {
             return Err("Take a screenshot first.".to_owned());
         }
-        let size = self
-            .with_session(|session| check_spec::drawn_size(&spec.check, session, spec.screenshot))
+        let size = check_spec::drawn_size(&spec.check, &self.screenshots, spec.screenshot)
             .map_err(|error| error.to_string())?;
         self.update_app(&spec.app, Changed::Values, |owner, found| {
             let file = &found.file;
@@ -63,17 +62,14 @@ impl<H: Host> Owner<H> {
             }
             same_kind(&value.screen.check, &spec.check)?;
             let number = free_picture_number(&value.id, value.screen.images());
-            let saved = owner
-                .with_session(|session| {
-                    check_spec::to_saved_fix(
-                        &spec.check,
-                        session,
-                        &spec.app,
-                        &value.id,
-                        Some(number),
-                    )
-                })
-                .map_err(|error| error.to_string())?;
+            let saved = check_spec::to_saved_fix(
+                &spec.check,
+                &owner.screenshots,
+                &spec.app,
+                &value.id,
+                Some(number),
+            )
+            .map_err(|error| error.to_string())?;
             let reference = match (&value.screen.check, &saved.check) {
                 (CheckDef::Number { reference, .. }, CheckDef::Number { reference: own, .. })
                     if own != reference =>

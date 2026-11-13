@@ -1,6 +1,7 @@
 // The check the user is setting up, and when it is complete enough to try.
 
 import {
+  type CharactersSpec,
   type CheckDef,
   type CheckSpec,
   LIMITS,
@@ -12,15 +13,13 @@ import {
   type StateSpec,
 } from './bindings.ts';
 import { type Box, boxLabels } from './boxes.ts';
-import { savedCharacters } from './charactersRead.ts';
+import { forReference, savedCharacters } from './charactersRead.ts';
 import { AUTOMATIC, type PinChoice } from './pin.ts';
+import { referenceCharacters } from './reference.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { sameSize, sizeText } from './sizes.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
-
-/** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
-type CharactersSpec = Extract<CheckSpec, { readonly kind: 'characters' }>;
 
 /** The kinds of check, in the order the capture screen offers them. */
 export const CHECK_KINDS = ['number', 'barFill', 'color', 'state'] as const;
@@ -237,7 +236,6 @@ export function reviewSpec(
     return null;
   }
   return {
-    kind: 'characters',
     region,
     screenshot: drawnOn,
     reference,
@@ -438,6 +436,21 @@ export function fixDraft(check: CheckDef): Draft {
  */
 export function withFixRegion(draft: Draft, region: Rect | null, shot: number): Draft {
   return region === null || draft.region !== null ? draft : { ...draft, region, drawnOn: shot };
+}
+
+/**
+ * `draft`, a number value's, reading with `reference` of `references`, its application's, and the characters of it
+ * that its choice of characters comes to, as {@link forReference} says. A reference that `references` do not hold,
+ * such as while the file cannot be read, leaves the choice as it is: nothing says what it knows.
+ */
+export function withReference(draft: Draft, reference: string, references: readonly ReferenceDef[]): Draft {
+  const known = (id: string | null): readonly string[] | null => {
+    const saved = references.find((each) => each.id === id);
+    return saved === undefined ? null : referenceCharacters(saved);
+  };
+  const to = known(reference);
+  const characters = to === null ? draft.characters : forReference(draft.characters, known(draft.reference) ?? [], to);
+  return { ...draft, reference, characters };
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

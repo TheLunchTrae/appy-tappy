@@ -117,6 +117,8 @@ pub(crate) enum Reading {
     Sample {
         /// The session.
         session: SessionId,
+        /// Which of the session's readers read it.
+        reader: ReaderNumber,
         /// The value's position among the application's values.
         position: usize,
         /// What it read.
@@ -158,6 +160,8 @@ pub(crate) enum Reading {
     Unseen {
         /// The session.
         session: SessionId,
+        /// Which of the session's readers no longer sees them.
+        reader: ReaderNumber,
     },
     /// The reader thread ended, and reads nothing more. It is the last the
     /// thread sends, however it ends: stopped by its session, or by a
@@ -350,7 +354,10 @@ impl Reader {
         let _ = self.control.send(Control::Trace(trace));
     }
 
-    /// Stops the reader and its capture, and waits for both.
+    /// Stops the reader and waits for it. A reader that ends on a stop
+    /// closes its capture first and waits for it. One that panicked dropped
+    /// its capture, which stops without being waited for, so what that
+    /// capture read can still arrive after this returns.
     ///
     /// # Errors
     ///
@@ -546,6 +553,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                 // no reading from it can follow.
                 let unseen = Reading::Unseen {
                     session: job.session,
+                    reader: job.reader,
                 };
                 if !report(&mut reported, problem) || !send(events, unseen) {
                     return;
@@ -892,6 +900,7 @@ fn not_read(unread: Unread) -> String {
 /// size from a frame and sends what changed.
 struct FrameReader<E> {
     session: SessionId,
+    reader: ReaderNumber,
     plan: Arc<AppPlan>,
     /// Where each value reads at the window size it reads.
     placed: Placed,
@@ -945,6 +954,7 @@ impl<E: From<Reading>> FrameReader<E> {
         let count = job.plan.runs.values.len();
         Self {
             session: job.session,
+            reader: job.reader,
             plan: Arc::clone(&job.plan),
             placed,
             told: None,
@@ -1150,6 +1160,7 @@ impl<E: From<Reading>> FrameReader<E> {
         )]
         let _ = self.events.send(E::from(Reading::Sample {
             session: self.session,
+            reader: self.reader,
             position,
             value: reading,
             at: frame.received,
@@ -1197,6 +1208,7 @@ impl<E: From<Reading>> FrameReader<E> {
             )]
             let _ = self.events.send(E::from(Reading::Unseen {
                 session: self.session,
+                reader: self.reader,
             }));
         }
     }
@@ -1566,7 +1578,8 @@ mod tests {
         assert_eq!(
             readings.try_iter().collect::<Vec<_>>(),
             [Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             }],
             "nothing is read before the size settles"
         );
@@ -2006,7 +2019,8 @@ mod tests {
                     problem: "a frame cannot be read: the copy failed".to_owned()
                 },
                 Reading::Unseen {
-                    session: SessionId(3)
+                    session: SessionId(3),
+                    reader: ReaderNumber(2),
                 },
             ]
         );
@@ -2369,6 +2383,7 @@ mod tests {
                 &sample,
                 Reading::Sample {
                     session: SessionId(3),
+                    reader: ReaderNumber(2),
                     value: Value::Flag(true),
                     ..
                 }
@@ -2388,7 +2403,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             }),
             "the values it read are out of sight"
         );
@@ -2456,7 +2472,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             })
         );
         // The other window came in front meanwhile.
@@ -2490,7 +2507,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             })
         );
         // Once the size settles, the reader says why the value is not read,
@@ -2547,7 +2565,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             })
         );
         desk.answer(Ok(desktop()));
@@ -2936,7 +2955,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             })
         );
         desk.answer(Ok(better()));
@@ -3036,7 +3056,8 @@ mod tests {
             [
                 problem("a frame cannot be read: the copy failed"),
                 Reading::Unseen {
-                    session: SessionId(3)
+                    session: SessionId(3),
+                    reader: ReaderNumber(2),
                 },
                 problem(
                     "5 frames in a row cannot be read, so its capture starts again: the copy \

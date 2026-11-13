@@ -5,10 +5,9 @@
 //! unusable removes them only with the user's word for it.
 
 use appytappy_config::app_file::{CheckDef, FixDef, PinDef, ScreenDef, SizeDef, ValueDef};
-use appytappy_sources::screen::Image;
 
 use crate::automations;
-use crate::check_spec::{self, Pictures, RegionCheck};
+use crate::check_spec::{self, Pictures};
 use crate::stores::SavedApp;
 
 use super::fixes::free_picture_number;
@@ -71,26 +70,12 @@ impl<H: Host> Owner<H> {
         let found = self.stores()?.app(&spec.app)?;
         let edited = self.edited(spec, &found)?;
         let value = read_back(&edited.value.screen, &found, &edited.pictures)?;
-        let size = self
-            .latest
-            .as_ref()
-            .map_or(value.drawn.window_size, Image::size);
-        let unread = match value.at(size) {
-            Ok(at) => {
-                self.check = Some(RegionCheck {
-                    region: at.region,
-                    check: value.check(&at).clone(),
-                });
-                None
-            },
-            Err(unread) => {
-                self.check = None;
-                Some(format!(
-                    "Not read at {} × {}, the window's size now: {unread}.",
-                    size.width, size.height
-                ))
-            },
-        };
+        let unread = self.go_live(value).unread();
+        // A value that is not read at the window's size reads nothing, and
+        // the answer says why.
+        if unread.is_some() {
+            self.check = None;
+        }
         Ok(EditPreview {
             unread,
             dropped_fixes: edited.dropped,
@@ -157,8 +142,7 @@ impl<H: Host> Owner<H> {
                 if self.screenshots.get(*screenshot).is_none() {
                     return Err("Take a screenshot first.".to_owned());
                 }
-                let size = self
-                    .with_session(|session| check_spec::drawn_size(check, session, *screenshot))
+                let size = check_spec::drawn_size(check, &self.screenshots, *screenshot)
                     .map_err(|error| error.to_string())?;
                 if (size.width, size.height) != (drawn.width, drawn.height) {
                     return Err(format!(
@@ -176,11 +160,14 @@ impl<H: Host> Owner<H> {
                 // New pictures never take the name of one still saved, so a
                 // save that fails partway leaves the saved value readable.
                 let number = free_picture_number(&saved.id, saved.screen.images());
-                let built = self
-                    .with_session(|session| {
-                        check_spec::to_saved_fix(check, session, &spec.app, &saved.id, Some(number))
-                    })
-                    .map_err(|error| error.to_string())?;
+                let built = check_spec::to_saved_fix(
+                    check,
+                    &self.screenshots,
+                    &spec.app,
+                    &saved.id,
+                    Some(number),
+                )
+                .map_err(|error| error.to_string())?;
                 (built.region, built.check, built.pictures)
             },
         };

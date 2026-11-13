@@ -66,9 +66,9 @@ This page covers what the user guide leaves out.
   Removing one releases its pixels and leaves its index empty, so the indexes
   the draft holds stay right, and the strip numbers a screenshot by its index
   so its number never changes. The UI refuses to remove a screenshot the draft
-  uses: the one its region is drawn on, one a state is taken from, a labeled
-  one, and the value's own while the reference editor is open over it
-  (`lib/looks.ts`). A check that names a removed screenshot is refused like
+  uses: the one its region is drawn on, one a state is taken from, and one a
+  reference's box is on (`lib/looks.ts`), and one whose found text is
+  listed. A check that names a removed screenshot is refused like
   one that names a screenshot of another session. The draft keeps
   the screenshot its region was drawn on, and a value saves that screenshot's
   window size. The owner refuses a check or a save that cuts the region from
@@ -105,12 +105,21 @@ This page covers what the user guide leaves out.
 - **Live reading.** `read_value` answers what the check being set up reads
   on the newest frame, or why that frame cannot be read, in the check's own
   words (`CheckError`), which the box under the check shows in place of a
-  reading. A reference being taught is read by the reader its labels teach
-  (`CheckSpec::Characters`), never by the text reader, and the runtime
-  builds the same reader from the saved file
-  (`check_spec/round_trip.rs`). The region is read where it was drawn,
-  whatever size the live window has, so a window resized since its
-  screenshot shows another spot there.
+  reading. The live check is the value the check would save
+  (`owner/live.rs`): `set_check` converts the page's description to its
+  saved form with `check_spec::to_saved` and reads it back with
+  `saved::build`, as a save does, so no second implementation of a check
+  exists for the two to disagree in. The owner then places the value at
+  each frame's window size with `SavedValue::at`, as the runtime does: the
+  drawing made at that size, the first drawing scaled to it while the
+  application's window changes size often, or nothing, and then the box
+  says that the value is not read at that size and why. A reference being
+  taught (`CharactersSpec`, `set_characters`) is never read by the text
+  reader: its labels become the reference's saved form, pictures included,
+  and `saved::reader` learns it as the runtime learns the saved file. It
+  reads as a number in its region, which scales with the window, and with
+  only the characters of the number it is made for, when that number
+  chooses some.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
@@ -488,7 +497,8 @@ review without keeping, and review's edits stay for the next one.
 ### Finding more like it
 
 [Find more like it](References.md#find-more-like-it) searches the screenshot
-the user labels for more text like the region shows (`recording/find.rs`). It
+the selected box is on for more text like the box shows
+(`recording/find.rs`). It
 marks each pixel as ink with the reference's color and tolerance, as
 `DigitReader` does, and takes the band of inked rows with the most ink in the
 region, as the reader segments it. It joins touching ink, corners included,
@@ -513,11 +523,17 @@ forgets it; reads already
 queued for a forgotten search still run, and their text is dropped. Pictures
 of finds are asked for by the search's number, so an answer for a replaced
 search is empty. The UI lists
-the finds, polls while text is still being read, and asks which kept finds the
-reference cannot learn (`found_problems`), learning them after the draft's own
-labels the way review learns recorded readings. Added finds become labels with
-a `region` of their own on their screenshot, which the reference cuts instead
-of the spec's region, so they save as samples like any labeled screenshot.
+the finds that may show the characters the reference needs (`fitsNeeds` in
+`lib/found.ts`), polls while text is still being read, and asks which kept
+finds the reference cannot learn (`found_problems`), learning them after the
+draft's own boxes the way review learns recorded readings. **Reread**
+(`reread_found`) cuts the named finds' ink again from the pixels the search
+kept, with the color and tolerance the draft has now, and sends it to the
+text reader; the reader is deterministic, so only a changed color or
+tolerance changes what it reads. Added finds become boxes of the draft
+(`lib/boxes.ts`), each a label with a `region` of its own on its screenshot,
+which the reference cuts instead of the spec's region, so they save as
+samples like any box the user drew.
 
 ### Recording looks
 
@@ -776,8 +792,8 @@ does a character the reference has yet to learn. A check that names
 characters names at least one, or the file does not load; a value whose
 reference, or whose fix's reference, knows none of them is not read. The
 setup app writes each character once, the digits first, then the rest by
-code point. Its live check builds the same glyphs the runtime reads with
-(`check_spec::build`).
+code point. Its live check reads with the same glyphs, since `saved::build` chooses
+them for both.
 
 A reference's `expects` is the characters the user says it needs to know,
 and is left out when the user chose none. Only the setup app reads it, to

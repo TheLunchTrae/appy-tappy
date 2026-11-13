@@ -211,13 +211,19 @@ impl DigitReader {
         self.glyphs.iter().any(|glyph| glyph.character == character)
     }
 
-    /// The reader with only its glyphs for `characters`, in the order it
-    /// learned them, or `None` when it has learned none of them. It reads
-    /// as if it had learned nothing else, so a shape matches the closest of
-    /// those glyphs alone: a reader of digits cannot read a `0` as the `O`
-    /// its font also has, and any other character it sees is unknown to it.
+    /// The reader a number check reads with when it names `characters`, as
+    /// `CheckDef::Number` does: with only its glyphs for them, in the order
+    /// it learned them, or `None` when it has learned none of them. It then
+    /// reads as if it had learned nothing else, so a shape matches the
+    /// closest of those glyphs alone: a reader of digits cannot read a `0`
+    /// as the `O` its font also has, and any other character it sees is
+    /// unknown to it. A check that names no characters reads with the
+    /// reader as it is.
     #[must_use]
-    pub fn reading_only(mut self, characters: &str) -> Option<Self> {
+    pub fn reading(mut self, characters: Option<&str>) -> Option<Self> {
+        let Some(characters) = characters else {
+            return Some(self);
+        };
         self.glyphs
             .retain(|glyph| characters.contains(glyph.character));
         (!self.glyphs.is_empty()).then_some(self)
@@ -1295,13 +1301,17 @@ mod tests {
                 read: read_text("O")
             })
         );
-        let digits = reader.clone().reading_only("0123456789").unwrap();
+        let digits = reader.clone().reading(Some("0123456789")).unwrap();
         assert!(digits.knows('0'));
         assert!(!digits.knows('O'));
         assert_eq!(digits.read(&letter, false), Ok(Number::new(0.0).unwrap()));
         // The glyphs kept stay in the order they were learned.
-        assert_eq!(reader.clone().reading_only("0 O"), Some(reader.clone()));
-        assert_eq!(reader.reading_only("%"), None);
+        assert_eq!(reader.clone().reading(Some("0 O")), Some(reader.clone()));
+        assert_eq!(reader.clone().reading(Some("%")), None);
+        // A check that names none reads with them all, even before any.
+        assert_eq!(reader.clone().reading(None), Some(reader));
+        let blank = DigitReader::new(WHITE, 0);
+        assert_eq!(blank.clone().reading(None), Some(blank));
     }
 
     #[test]

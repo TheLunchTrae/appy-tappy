@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ReferenceDef, ReferenceRef, ValueDef } from '../lib/bindings.ts';
+import type { ReferenceDef, ReferenceRef, TrialSpec, ValueDef } from '../lib/bindings.ts';
 import {
   editValue,
   errorText,
@@ -10,6 +10,7 @@ import {
   saveFix,
   saveReference,
   saveValue,
+  tryEdit,
 } from '../lib/api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
@@ -18,11 +19,9 @@ import {
   boxBlocked,
   buildCharacters,
   buildSpec,
-  CHECK_KINDS,
   EMPTY_DRAFT,
   fixDraft,
   fromReference,
-  KIND_NAMES,
   newestOfSize,
   findBlocked as findBlockedBy,
   onPicture,
@@ -32,22 +31,27 @@ import {
   settingsDiffer,
   toReference,
   withFixRegion,
-  withKind,
+  withReference,
   withState,
 } from '../lib/check.ts';
-import { boxNumber, boxOf, boxesOn, changedBox, withBoxes, withoutBox } from '../lib/boxes.ts';
+import { boxNumber, boxOf } from '../lib/boxes.ts';
 import { type Placed, useLiveDraw } from '../lib/liveDraw.ts';
 import { BoxList } from './BoxList.tsx';
+import { DraftButtons } from './capture/DraftButtons.tsx';
+import { ReadWith } from './capture/ReadWith.tsx';
+import { ScreenshotStrip } from './capture/ScreenshotStrip.tsx';
+import { ReviewActions, StageBar, WindowActions } from './capture/StageBar.tsx';
+import { Stepper, nextFromWhere, stepTabs } from './capture/Stepper.tsx';
+import { WhereFields } from './capture/WhereFields.tsx';
 import { discovery } from '../lib/discovery.ts';
 import { agreedFixes, editStart, keepsStates, placedOn, saveable } from '../lib/edit.ts';
 import { TOO_MANY, coverage, startingExpected, tooMany } from '../lib/expected.ts';
 import { knownCharacters, readers } from '../lib/reference.ts';
 import { BarDetect, BarReadings } from './BarFields.tsx';
-import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
+import { type ColorTarget, ColorFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
 import { ReadingDetailsBox } from './ReadingDetails.tsx';
 import { FoundMarks, FoundPanel } from './Found.tsx';
-import { Question, useQuestion } from './Question.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
 import type { Choice } from './Picker.tsx';
@@ -55,24 +59,20 @@ import { colorAt } from '../lib/pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { LookPanel } from './LookRecording.tsx';
 import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
-import { clock } from '../lib/review.ts';
 import { type Point, type Size, scaleRect } from '../lib/region.ts';
 import { CaptureOutlineNote, CaptureOutlines, useCaptureOutline } from './CaptureOutlines.tsx';
-import { type OtherBox, RegionSurface } from './RegionSurface.tsx';
+import { RegionSurface } from './RegionSurface.tsx';
 import { ZoomView } from './ZoomView.tsx';
-import { PinPicker } from './PinPicker.tsx';
-import { DeleteDraft } from './Drafts.tsx';
 import { PinGuides } from './PinGuides.tsx';
-import { MovingContentField } from './MovingContentField.tsx';
 import { Hint } from './Hint.tsx';
-import { MatchOverlay, MatchPreviewField, SelectedPixelsField } from './MatchPreview.tsx';
-import { AREA_DRAW_HINT, fixNote, isReadingArea, movingContent, regionLabel } from '../lib/moving.ts';
+import { MatchOverlay, MatchPreviewField } from './MatchPreview.tsx';
+import { fixNote, isReadingArea, movingContent, regionLabel } from '../lib/moving.ts';
+import { type Drawing, stageHint } from '../lib/stageHint.ts';
 import { pinChoiceAfterRegion, pinOfView, pinView } from '../lib/pin.ts';
-import { FIX_HINT, READ_WITH_HINT, sameSize, sizeText } from '../lib/sizes.ts';
+import { FIX_HINT, sameSize, sizeText } from '../lib/sizes.ts';
 import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
-import { EditIntro, EditOutcome, SavedStates } from './ValueEdit.tsx';
-import { CHECK_HINT, DRAFT_HINT } from '../lib/hints.ts';
+import { EditOutcome, SavedStates } from './ValueEdit.tsx';
 import {
   type CaptureKept,
   type CaptureSetup,
@@ -89,8 +89,9 @@ import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useBarSetup } from '../lib/useBarSetup.ts';
+import { useBoxes } from '../lib/useBoxes.ts';
 import { useFound } from '../lib/useFound.ts';
-import { trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
+import { type Trial, trialOf, tryCharacters, tryCheck, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
 import { useMatchPreview, useSelectedPreview } from '../lib/useMatchPreview.ts';
 import { useRecording } from '../lib/useRecording.ts';
@@ -103,62 +104,8 @@ import { useValueEdit } from '../lib/useValueEdit.ts';
 /** The widest live frame asked for, which keeps a large window's preview cheap. */
 const LIVE_MAX_WIDTH = 1600;
 
-/** No characters needed, which filters no find. */
+/** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
 const NO_NEEDS: readonly string[] = [];
-
-/** What the stage draws: the value's region, over the live window too, or a reference's boxes. */
-type Drawing = 'region' | 'live' | 'boxes';
-
-function viewHint(
-  recording: 'readings' | 'looks' | null,
-  selected: number | null,
-  shotCount: number,
-  picking: boolean,
-  liveError: string | null,
-  shortcut: string,
-  tool: SelectTool,
-  area: boolean,
-  otherSize: boolean,
-  drawing: Drawing,
-  /** Why no box can go on the screenshot shown, or null. */
-  boxBlock: string | null,
-): string {
-  if (selected === null && liveError !== null) {
-    return liveError;
-  }
-  if (recording !== null && selected === null) {
-    return recording === 'readings'
-      ? 'Recording. Use the application; a reading is kept for each new shape.'
-      : 'Recording. Use the application; a screenshot is kept of each different look.';
-  }
-  if (selected === null && drawing === 'live') {
-    return `Drag over the window where the value shows; that takes the screenshot. Or take one (${shortcut}).`;
-  }
-  if (selected === null) {
-    return shotCount === 0
-      ? `Take a screenshot (${shortcut}) when the window shows what to read.`
-      : 'Select a screenshot to draw on it.';
-  }
-  if (picking) {
-    return 'Click the color to pick it.';
-  }
-  if (drawing === 'boxes') {
-    return (
-      boxBlock ??
-      'Drag to draw a box around some characters. Press a box to select it, drag it to move it, or press Delete to remove it.'
-    );
-  }
-  if (otherSize) {
-    return 'The region shows on screenshots of the size the value was drawn at.';
-  }
-  if (tool === 'snap') {
-    return 'Drag a rough box around the thing to snap to it.';
-  }
-  if (tool === 'click') {
-    return 'Click the thing to select it.';
-  }
-  return area ? AREA_DRAW_HINT : 'Drag to draw a region. Drag inside it to move it, or drag a corner to resize it.';
-}
 
 /**
  * What the capture screen makes: a value; a reference, new or saved, on the References page; a fix, a saved value
@@ -302,8 +249,6 @@ export function Capture({
     setStart((began) => ({ ...began, editing: refreshedEditing(began.editing, file.references) }));
   }, [file]);
   const [picking, setPicking] = useState<ColorTarget | null>(null);
-  // The reference's box that the stage shows selected, moves, and finds more like.
-  const [chosenBox, setChosenBox] = useState<number | null>(null);
   const [tool, setTool] = useState<SelectTool>('box');
   const [valueName, setValueName] = useState(start.valueName);
   const fixing = mode.kind === 'fix' ? mode.value : null;
@@ -318,6 +263,7 @@ export function Capture({
   const takeShotRef = useRef<() => Promise<unknown>>(screenshots.take);
   const { shots, full, selected, setSelected, position } = screenshots;
   const shortcut = useScreenshotShortcut(async () => takeShotRef.current());
+  const boxes = useBoxes(draft, setDraft, selected);
   const recorder = useRecording();
   const recording = recorder.view;
   const looks = useLookRecording(screenshots.adopt);
@@ -367,8 +313,6 @@ export function Capture({
       live = false;
     };
   }, [appId]);
-  const [leavingWindow, setLeavingWindow] = useState(false);
-  const leaveQuestion = useQuestion<HTMLButtonElement>(leavingWindow);
 
   // The saved reference the editor adds to, or null for a new one or while no editor is open.
   const existingId = editing?.existing?.id ?? null;
@@ -377,10 +321,14 @@ export function Capture({
     [existingId, appId],
   );
   const isEditing = editing !== null;
-  const built: Built = useMemo(
-    () => (isEditing ? buildCharacters(draft, editingRef) : buildSpec(draft, appId)),
-    [isEditing, draft, editingRef, appId],
+  // The characters the reference editor teaches while it is open, and the check of the value it was opened from.
+  const characters = useMemo(
+    () => (isEditing ? buildCharacters(draft, editingRef) : null),
+    [isEditing, draft, editingRef],
   );
+  const valueCheck = useMemo(() => buildSpec(draft, appId), [draft, appId]);
+  const built: Built<unknown> = characters ?? valueCheck;
+  const builtKind = characters === null ? (valueCheck.ok ? valueCheck.spec.kind : 'none') : 'characters';
   const missing = captureMissing(setup, built, fixing !== null);
   // An edit changes a saved value in place and is never a draft.
   const drafting = useDraft(
@@ -414,34 +362,17 @@ export function Capture({
   const losesRecording = recording !== null || draft.recorded.size > 0 || looks.view?.recording === true;
   const draftButton =
     mode.kind === 'edit' ? null : (
-      <>
-        {resumed === null ? null : (
-          <DeleteDraft
-            changes={mode.kind === 'fix' || (mode.kind === 'reference' && mode.existing !== null)}
-            disabled={busy}
-            onDelete={drafting.discard}
-          />
-        )}
-        <span className="with-hint">
-          <button
-            type="button"
-            className="btn"
-            disabled={holds !== 'unsaved'}
-            aria-describedby="hint-draft"
-            onClick={() => {
-              background(drafting.saveAndClose());
-            }}
-          >
-            Save as draft
-          </button>
-          <Hint topic="Save as draft" id="hint-draft">
-            {DRAFT_HINT}
-            {losesRecording
-              ? ' A draft keeps the screenshots, those a recording kept too, but not a recording that runs or the readings kept from one.'
-              : ''}
-          </Hint>
-        </span>
-      </>
+      <DraftButtons
+        resumed={resumed !== null}
+        changes={mode.kind === 'fix' || (mode.kind === 'reference' && mode.existing !== null)}
+        busy={busy}
+        unsaved={holds === 'unsaved'}
+        losesRecording={losesRecording}
+        onDelete={drafting.discard}
+        onSave={() => {
+          background(drafting.saveAndClose());
+        }}
+      />
     );
   const draftError =
     drafting.error === null ? null : (
@@ -458,17 +389,22 @@ export function Capture({
     step === 'how' && editing === null && fixing === null,
   );
   const review = useReview(recording, draft, setDraft, editingRef);
-  // Every text the reference being edited learns from already, which tells a find's letters apart from a misread.
+  // What the reference being edited learns from: its saved pictures, its boxes with text, and its kept readings.
   const savedSamples = editing?.existing?.samples;
-  const learnedTexts = useMemo(
-    () => [
-      ...(savedSamples ?? []).map((sample) => sample.text),
-      ...draft.boxes.map((box) => box.text).filter((text) => text.trim() !== ''),
-      ...draft.recorded.values(),
-    ],
+  const taught = useMemo(
+    () => ({
+      saved: (savedSamples ?? []).map((sample) => sample.text),
+      labeled: draft.boxes.map((box) => box.text).filter((text) => text.trim() !== ''),
+      recorded: [...draft.recorded.values()],
+    }),
     [savedSamples, draft.boxes, draft.recorded],
   );
-  const finder = useFound(draft, setDraft, editingRef, learnedTexts, editing?.expects ?? NO_NEEDS);
+  // Every text it learns from already, which tells a find's letters apart from a misread.
+  const learnedTexts = useMemo(() => [...taught.saved, ...taught.labeled, ...taught.recorded], [taught]);
+  // The characters it needs, and how the ones it learns from compare with them.
+  const needs = editing?.expects ?? NO_NEEDS;
+  const covered = coverage(needs, knownCharacters(learnedTexts));
+  const finder = useFound(draft, setDraft, editingRef, learnedTexts, needs);
   const { reviewing } = review;
   const recordError = recorder.commandError ?? review.error ?? recorder.pollError;
 
@@ -601,7 +537,27 @@ export function Capture({
     readingArea: isReadingArea(moving),
     sizes: full,
   });
-  const trial = useMemo(() => trialOf(built, edit.built), [built, edit.built]);
+  const { drawnOn } = draft;
+  const fixPin = fixing?.screen.pin;
+  // A reference made for a number is tried with the characters that number reads, once it has any.
+  const reads = draft.characters === null || draft.characters.length === 0 ? null : draft.characters.join('');
+  const trial = useMemo((): Trial => {
+    if (characters !== null) {
+      return trialOf(characters, async (spec) => tryCharacters(spec, reads));
+    }
+    if (edit.built !== null) {
+      return trialOf(edit.built, tryEdit);
+    }
+    if (!valueCheck.ok) {
+      return valueCheck;
+    }
+    if (drawnOn === null) {
+      return { ok: false, next: 'Draw a region on a screenshot.' };
+    }
+    // A value is tried as it would be saved, which a fix does at its value's side.
+    const spec: TrialSpec = { app: appId, check: valueCheck.spec, screenshot: drawnOn, pin: fixPin ?? pin };
+    return trialOf({ ok: true, spec }, tryCheck);
+  }, [characters, reads, edit.built, valueCheck, drawnOn, appId, fixPin, pin]);
   const check = useLiveCheck(trial, edit.again);
   const dropFixes = agreedFixes(check.preview, edit.lost);
   // The size of the screenshot the region would show over, when an edited value was drawn at another: its region
@@ -613,7 +569,7 @@ export function Capture({
   // The preview is for the color fields the inspector shows now.
   const colorFields = step === 'how' && fixing === null && (draft.kind === 'barFill' || draft.kind === 'color');
   // While a reference is taught, the region its pixels are counted in is the selected box on the screenshot shown.
-  const chosenOnShown = editing === null ? null : boxOf(boxesOn(draft.boxes, selected), chosenBox);
+  const chosenOnShown = editing === null ? null : boxes.onShown;
   const previewDraft = editing === null ? draft : { ...draft, region: chosenOnShown?.region ?? null };
   const preview = useMatchPreview(
     editing !== null ? 'ink' : colorFields ? draft.kind : null,
@@ -648,10 +604,10 @@ export function Capture({
       return changes.ok ? async () => editValue(changes.spec, dropFixes) : null;
     }
     const screenshot = draft.drawnOn;
-    if (!built.ok || screenshot === null) {
+    if (!valueCheck.ok || screenshot === null) {
       return null;
     }
-    const { spec } = built;
+    const { spec } = valueCheck;
     if (fixing !== null) {
       return async () => saveFix({ app: choice.app, value: fixing.id, check: spec, screenshot });
     }
@@ -684,7 +640,7 @@ export function Capture({
 
   const recordingBlocked = editing === null ? null : recordBlocked(draft);
   // The selected box, which Find more like it samples.
-  const chosen = boxOf(draft.boxes, chosenBox);
+  const chosen = boxes.selected;
   const findBlocked = findBlockedBy(draft, chosen);
   // Where the reference being taught reads, and the size of the screenshot that is on, which its boxes keep to.
   const reading = readingOf(draft);
@@ -785,7 +741,7 @@ export function Capture({
   const openEditor = async (existing: ReferenceDef | null, like: ReferenceDef | null): Promise<void> => {
     setEditing({ existing, name: existing?.name ?? '', expects: startingExpected(existing, like) });
     setDraft((current) => toReference(current, existing));
-    setChosenBox(null);
+    boxes.select(null);
     setPicking(null);
     setSaveError(null);
     await looks.discard();
@@ -819,13 +775,13 @@ export function Capture({
     }
     setEditing(null);
     setPicking(null);
-    setChosenBox(null);
+    boxes.select(null);
     finder.dismiss();
     setDraft(fromReference);
   };
 
   const saveRef = async (): Promise<void> => {
-    if (editing === null || !built.ok || built.spec.kind !== 'characters') {
+    if (editing === null || characters === null || !characters.ok) {
       return;
     }
     setSaving(true);
@@ -833,7 +789,7 @@ export function Capture({
       const saved = await saveReference({
         app: appId,
         referenceName: editing.name.trim(),
-        check: built.spec,
+        characters: characters.spec,
         expects: editing.expects.join(''),
       });
       setSaveError(null);
@@ -842,9 +798,14 @@ export function Capture({
         onSaved({ app: saved.app, value: null });
         return;
       }
-      await appFile.reload();
+      const references = (await appFile.reload())?.references ?? [];
       closeEditor();
-      setDraft((current) => ({ ...current, kind: 'number', reference: saved.reference }));
+      // A value's choice of characters follows its reference, as when one is picked. A fix reads its value's.
+      setDraft((current) =>
+        fixing === null
+          ? withReference({ ...current, kind: 'number' }, saved.reference, references)
+          : { ...current, kind: 'number', reference: saved.reference },
+      );
     } catch (error: unknown) {
       setSaveError(errorText(error));
     } finally {
@@ -917,18 +878,7 @@ export function Capture({
   const fixedCheck = fixing?.screen.check;
   const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
   const editedName = editing === null || editing.name.trim() === '' ? 'New reference' : editing.name.trim();
-  // What the reference being edited learns from, and how the characters in it compare with the ones it needs.
-  const taught = {
-    saved: editing?.existing?.samples.map((sample) => sample.text) ?? [],
-    labeled: draft.boxes.map((box) => box.text).filter((text) => text.trim() !== ''),
-    recorded: [...draft.recorded.values()],
-  };
-  const covered = coverage(
-    editing?.expects ?? [],
-    knownCharacters([...taught.saved, ...taught.labeled, ...taught.recorded]),
-  );
   // What the recording found, against what the reference needs and knows without it.
-  const needs = editing?.expects ?? [];
   const found = discovery(
     needs,
     knownCharacters([...taught.saved, ...taught.labeled]),
@@ -955,183 +905,103 @@ export function Capture({
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
   const placeShot = draft.drawnOn ?? selected;
   const stripShots = setsPlace ? shots.filter((shot) => shot.index === placeShot) : shots;
-  const others: readonly OtherBox[] = boxesOn(draft.boxes, selected)
-    .filter((box) => box.id !== chosenOnShown?.id)
-    .map((box) => ({ id: box.id, rect: box.region, label: `${boxNumber(draft.boxes, box.id)}` }));
-  const stepTabs: readonly { readonly step: Step; readonly name: string }[] = threeSteps
-    ? [
-        { step: 'where', name: 'Where to read' },
-        { step: 'how', name: 'Characters' },
-        { step: 'check', name: 'Check and save' },
-      ]
-    : [
-        { step: 'where', name: 'Where to read' },
-        { step: 'how', name: 'How to read it' },
-      ];
-  const stepDone = (tab: Step): boolean =>
-    tab === 'where' ? whereDone : tab === 'how' ? threeSteps && draft.reference !== null : false;
   // While a reference is taught, the steps show where the value is, and wait until the reference is saved or discarded.
   const stepper = (
-    <div className="stepper" role="group" aria-label="Steps">
-      {stepTabs.map((tab, number) => {
-        const current = editing === null ? shownStep === tab.step : tab.step === 'how';
-        const done = !current && stepDone(tab.step);
-        return (
-          <button
-            key={tab.step}
-            type="button"
-            className="step-tab"
-            aria-current={current ? 'step' : undefined}
-            disabled={editing !== null}
-            onClick={() => {
-              setStep(tab.step);
-            }}
-          >
-            <span className={done ? 'num done' : 'num'}>{done ? '✓' : `${number + 1}`}</span>
-            {tab.name}
-          </button>
-        );
-      })}
-    </div>
+    <Stepper
+      tabs={stepTabs(threeSteps)}
+      current={editing === null ? shownStep : 'how'}
+      done={(tab) => (tab === 'where' ? whereDone : tab === 'how' ? threeSteps && draft.reference !== null : false)}
+      locked={editing !== null}
+      onStep={setStep}
+    />
+  );
+  // A number reads with a reference, which its second step picks, teaches, or records readings for.
+  const referencePicker = (
+    <ReferencePicker
+      appName={choice.name}
+      file={file}
+      selected={draft.reference}
+      hasRegion={draft.region !== null}
+      whole={draft.whole}
+      characters={draft.characters}
+      onSelect={(reference) => {
+        setDraft((current) => withReference(current, reference, file?.references ?? []));
+      }}
+      onEdit={(id) => {
+        background(openEditor(file?.references.find((reference) => reference.id === id) ?? null, null));
+      }}
+      drafted={drafted}
+      onNew={() => {
+        background(openEditor(null, null));
+      }}
+      onRecord={() => {
+        background(recordReadings());
+      }}
+      onWhole={(whole) => {
+        setDraft((current) => ({ ...current, whole }));
+      }}
+      onCharacters={(characters) => {
+        setDraft((current) => ({ ...current, characters }));
+      }}
+    />
+  );
+  const nextFromFirst = (
+    <button
+      type="button"
+      className="btn primary"
+      onClick={() => {
+        setStep('how');
+      }}
+    >
+      {nextFromWhere(threeSteps)}
+    </button>
   );
 
   return (
     <main className="capture">
       <section className="stage" aria-label="Capture">
-        <div className="bar">
-          <span className="crumb">
-            {trail.join(' / ')}
-            {mode.kind !== 'reference' && editing !== null ? ` / ${flowName}` : ''} /{' '}
-            {reviewing ? (
-              <>
-                {editedName} / <b>Review recording</b>
-              </>
-            ) : (
-              <b>{editing === null ? flowName : editedName}</b>
-            )}
-          </span>
-          {recordingNow !== null ? (
-            <span className="pill recording">
-              <span className="dot" />
-              Recording {clock(recordingNow.elapsedMs)}
-            </span>
-          ) : reviewing && recording !== null ? (
-            <span className="pill">
-              {recording.readings.length === 1 ? '1 reading' : `${recording.readings.length} readings`} from{' '}
-              {clock(recording.elapsedMs)}
-            </span>
-          ) : (
-            <span className="pill">
-              <span className="dot live" />
-              Live · {choice.name}
-            </span>
-          )}
-          {native === undefined || reviewing ? null : (
-            <span className="pill">
-              {native.width} × {native.height}
-            </span>
-          )}
+        <StageBar
+          path={[
+            ...trail,
+            ...(mode.kind !== 'reference' && editing !== null ? [flowName] : []),
+            ...(reviewing ? [editedName] : []),
+          ]}
+          current={reviewing ? 'Review recording' : editing === null ? flowName : editedName}
+          status={
+            recordingNow !== null
+              ? { kind: 'recording', elapsedMs: recordingNow.elapsedMs }
+              : reviewing && recording !== null
+                ? { kind: 'reviewing', recording }
+                : { kind: 'live', appName: choice.name }
+          }
+          size={reviewing ? null : (native ?? null)}
+        >
           {reviewing ? (
-            <div className="end">
-              <button type="button" className="btn" onClick={review.close}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  background(discard());
-                }}
-              >
-                Discard recording
-              </button>
-              {settingsChanged ? (
-                <button type="button" className="btn" onClick={useSettings}>
-                  Use its settings
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn"
-                  data-record-more
-                  disabled={recordingBlocked !== null}
-                  onClick={() => {
-                    background(record(true));
-                  }}
-                >
-                  Record more
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn primary"
-                disabled={review.keepBlocked !== null}
-                aria-describedby={
-                  review.keepBlocked === null && review.untaught.readings.length === 0 ? undefined : 'keep-blocked'
-                }
-                onClick={review.keep}
-              >
-                {review.keeping.length === 1 ? 'Keep 1 reading' : `Keep ${review.keeping.length} readings`}
-              </button>
-            </div>
+            <ReviewActions
+              review={review}
+              settingsChanged={settingsChanged}
+              recordBlocked={recordingBlocked}
+              onDiscard={() => {
+                background(discard());
+              }}
+              onUseSettings={useSettings}
+              onRecordMore={() => {
+                background(record(true));
+              }}
+            />
           ) : (
-            <div className="end">
-              {leavingWindow ? (
-                <Question
-                  refs={leaveQuestion.refs}
-                  label="Change window?"
-                  keepLabel="Keep this window"
-                  actLabel="Change window"
-                  busy={busy}
-                  onKeep={() => {
-                    setLeavingWindow(false);
-                  }}
-                  onAct={onChangeWindow}
-                >
-                  {holds === 'unsaved'
-                    ? 'Change window? The screenshots, everything set up on them, and any recording are lost.'
-                    : 'Change window? This starts over on the new window. The draft stays as it is unless you save it again.'}
-                </Question>
-              ) : (
-                <button
-                  ref={leaveQuestion.control}
-                  type="button"
-                  className="btn"
-                  disabled={busy}
-                  onClick={() => {
-                    // Finishing a draft starts on its screenshots, which the new window leaves behind.
-                    if (holds === 'unsaved' || resumed !== null) {
-                      setLeavingWindow(true);
-                    } else {
-                      onChangeWindow();
-                    }
-                  }}
-                >
-                  Change window
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn small"
-                aria-pressed={shortcut.choosing}
-                onClick={shortcut.toggle}
-                onBlur={shortcut.cancel}
-                onKeyDown={shortcut.onKeyDown}
-              >
-                Change shortcut
-              </button>
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => {
-                  background(takeShot());
-                }}
-              >
-                Take screenshot<span className="kbd">{shortcut.label}</span>
-              </button>
-            </div>
+            <WindowActions
+              busy={busy}
+              // Finishing a draft starts on its screenshots, which the new window leaves behind.
+              loses={holds === 'unsaved' ? 'unsaved' : resumed === null ? 'nothing' : 'draft'}
+              shortcut={shortcut}
+              onChangeWindow={onChangeWindow}
+              onTake={() => {
+                background(takeShot());
+              }}
+            />
           )}
-        </div>
+        </StageBar>
         <p className="note" role="status">
           {shortcut.choosing ? 'Press the new shortcut, or Esc to keep this one.' : null}
         </p>
@@ -1161,19 +1031,19 @@ export function Capture({
           picture={layoutSize}
           zoomable={shownPicture !== null}
           hidden={reviewing}
-          hint={viewHint(
-            recordingNow === null ? null : recordingNow === recording ? 'readings' : 'looks',
+          hint={stageHint({
+            recording: recordingNow === null ? null : recordingNow === recording ? 'readings' : 'looks',
             selected,
-            shots.length,
-            picking !== null,
+            shotCount: shots.length,
+            picking: picking !== null,
             liveError,
-            shortcut.label,
-            selecting,
+            shortcut: shortcut.label,
+            tool: selecting,
             area,
-            otherSize !== null,
+            otherSize: otherSize !== null,
             drawing,
             boxBlock,
-          )}
+          })}
         >
           {({ space, shown }) => (
             <>
@@ -1225,29 +1095,14 @@ export function Capture({
                     label={chosenOnShown === null ? '' : `Box ${boxNumber(draft.boxes, chosenOnShown.id)}`}
                     editable={boxBlock === null || picking !== null}
                     picking={picking !== null}
-                    others={others}
-                    onSelectOther={setChosenBox}
+                    others={boxes.others}
+                    onSelectOther={boxes.select}
                     onDelete={() => {
                       if (chosenOnShown !== null) {
-                        setDraft((current) => ({ ...current, boxes: withoutBox(current.boxes, chosenOnShown.id) }));
-                        setChosenBox(null);
+                        boxes.remove(chosenOnShown.id);
                       }
                     }}
-                    onRegion={(region, made) => {
-                      if (selected === null) {
-                        return;
-                      }
-                      if (made === 'adjusted' && chosenOnShown !== null) {
-                        setDraft((current) => ({
-                          ...current,
-                          boxes: changedBox(current.boxes, chosenOnShown.id, { region }),
-                        }));
-                        return;
-                      }
-                      const added = withBoxes(draft.boxes, [{ screenshot: selected, region, text: '' }]);
-                      setDraft((current) => ({ ...current, boxes: added.boxes }));
-                      setChosenBox(added.first);
-                    }}
+                    onRegion={boxes.draw}
                     onPick={pick}
                   />
                 )
@@ -1291,62 +1146,23 @@ export function Capture({
             </>
           )}
         </ZoomView>
-        <div className="strip" hidden={reviewing}>
-          <button
-            type="button"
-            className="thumb"
-            aria-pressed={selected === null}
-            onClick={() => {
-              setSelected(null);
+        <ScreenshotStrip
+          shots={stripShots}
+          selected={selected}
+          position={position}
+          hidden={reviewing}
+          unremovable={unremovable}
+          onePicture={setsPlace}
+          onSelect={(index) => {
+            setSelected(index);
+            if (index === null) {
               setPicking(null);
-            }}
-          >
-            <span className="shot">
-              <span className="dot live" />
-            </span>
-            Live
-          </button>
-          {stripShots.map((shot) => (
-            <button
-              key={shot.index}
-              type="button"
-              className="thumb"
-              aria-pressed={selected === shot.index}
-              onClick={() => {
-                setSelected(shot.index);
-              }}
-            >
-              <span className="shot">
-                {shot.thumb === null ? null : <PictureCanvas picture={shot.thumb} label="" />}
-              </span>
-              <span className="when">
-                {shot.recorded ? <span className="dot" role="img" aria-label="Recorded" /> : null}
-                {position(shot.index)} · {shot.time}
-              </span>
-            </button>
-          ))}
-          {selected === null ? null : (
-            <button
-              type="button"
-              className="btn small"
-              aria-disabled={unremovable !== null}
-              aria-describedby={unremovable === null ? undefined : 'remove-blocked'}
-              onClick={() => {
-                // A refused removal keeps the focus, so its reason is heard.
-                if (unremovable === null) {
-                  background(screenshots.remove([selected]));
-                }
-              }}
-            >
-              Remove screenshot {position(selected)}
-            </button>
-          )}
-          <span className="note">
-            {unremovable === null ? null : <span id="remove-blocked">{unremovable} </span>}
-            Screenshots last until you remove them or change the window.
-            {setsPlace ? ' The value needs one screenshot; take another to draw on a newer one.' : ''}
-          </span>
-        </div>
+            }
+          }}
+          onRemove={(index) => {
+            background(screenshots.remove([index]));
+          }}
+        />
         {outline === null || reviewing ? null : <CaptureOutlineNote outline={outline} />}
       </section>
       {editing === null ? (
@@ -1376,82 +1192,30 @@ export function Capture({
                   Discard
                 </button>
                 {draftButton}
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => {
-                    setStep('how');
-                  }}
-                >
-                  {threeSteps ? 'Next: characters' : 'Next: how to read it'}
-                </button>
+                {nextFromFirst}
               </div>
             </>
           ) : shownStep === 'where' ? (
             <>
-              {edited === null ? null : <EditIntro value={edited} shown={otherSize} />}
-              <div className="field">
-                <label htmlFor="value-name">Value name</label>
-                <input
-                  id="value-name"
-                  className="input"
-                  placeholder="Progress"
-                  value={valueName}
-                  onChange={(event) => {
-                    setValueName(event.target.value);
-                  }}
-                />
-              </div>
-              <div className="field">
-                <span className="name">
-                  <span id="check-kind">Check</span>
-                  <Hint topic="Check">{CHECK_HINT}</Hint>
-                </span>
-                <div className="seg" role="group" aria-labelledby="check-kind">
-                  {CHECK_KINDS.map((kind) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      aria-pressed={draft.kind === kind}
-                      onClick={() => {
-                        setDraft((current) => withKind(current, kind));
-                        setPicking(null);
-                      }}
-                    >
-                      {KIND_NAMES[kind]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {draft.kind === 'state' ? (
-                <SelectFields
-                  tool={tool}
-                  colorMatch={draft.colorMatch}
-                  canSelect={shownPicture !== null}
-                  preview={<SelectedPixelsField preview={selectedPreview} />}
-                  onTool={(next) => {
-                    setTool(next);
-                    setPicking(null);
-                  }}
-                  onColorMatch={(value) => {
-                    setDraft((current) => ({ ...current, colorMatch: value }));
-                  }}
-                />
-              ) : null}
-              <RegionFields
-                region={draft.region}
-                locked={edited !== null && draft.drawnOn === null}
-                onRegion={(region) => {
-                  // Typed pixels keep to the screenshot the region was drawn on.
-                  setDraft((current) => ({ ...current, region, drawnOn: current.drawnOn ?? shownOn }));
-                }}
-              />
-              <MovingContentField moving={moving} appName={choice.name} onMayMove={setMayMove} />
-              <PinPicker
-                view={staysAt}
+              <WhereFields
+                edited={edited}
+                otherSize={otherSize}
+                valueName={valueName}
+                draft={draft}
+                tool={tool}
+                canSelect={shownPicture !== null}
+                selectedPreview={selectedPreview}
+                shownOn={shownOn}
+                moving={moving}
+                appName={choice.name}
+                staysAt={staysAt}
                 scales={file?.sizeChanges !== 'rarely'}
-                onChoice={(pinChoice) => {
-                  setDraft((current) => ({ ...current, pin: pinChoice }));
+                onValueName={setValueName}
+                onDraft={setDraft}
+                onTool={setTool}
+                onMayMove={setMayMove}
+                onStopPicking={() => {
+                  setPicking(null);
                 }}
               />
               <div className="sep" />
@@ -1461,46 +1225,12 @@ export function Capture({
                   Discard
                 </button>
                 {draftButton}
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => {
-                    setStep('how');
-                  }}
-                >
-                  {threeSteps ? 'Next: characters' : 'Next: how to read it'}
-                </button>
+                {nextFromFirst}
               </div>
             </>
           ) : shownStep === 'how' && threeSteps ? (
             <>
-              <ReferencePicker
-                appName={choice.name}
-                file={file}
-                selected={draft.reference}
-                hasRegion={draft.region !== null}
-                whole={draft.whole}
-                characters={draft.characters}
-                onSelect={(reference) => {
-                  setDraft((current) => ({ ...current, reference }));
-                }}
-                onEdit={(id) => {
-                  background(openEditor(file?.references.find((reference) => reference.id === id) ?? null, null));
-                }}
-                drafted={drafted}
-                onNew={() => {
-                  background(openEditor(null, null));
-                }}
-                onRecord={() => {
-                  background(recordReadings());
-                }}
-                onWhole={(whole) => {
-                  setDraft((current) => ({ ...current, whole }));
-                }}
-                onCharacters={(characters) => {
-                  setDraft((current) => ({ ...current, characters }));
-                }}
-              />
+              {referencePicker}
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
               <div className="sep" />
               {draftError}
@@ -1529,88 +1259,21 @@ export function Capture({
           ) : (
             <>
               {fixing !== null && draft.kind === 'number' && sharedReference !== null ? (
-                <fieldset className="choices" aria-describedby="hint-read-with">
-                  <legend className="group-title">
-                    <span>Read with</span>
-                    <Hint topic="Read with" id="hint-read-with">
-                      {READ_WITH_HINT}
-                    </Hint>
-                  </legend>
-                  <label className="choice" aria-label="Shared reference">
-                    <input
-                      type="radio"
-                      name="read-with"
-                      aria-describedby="read-with-shared"
-                      checked={draft.reference === sharedReference}
-                      onChange={() => {
-                        setDraft((current) => ({ ...current, reference: sharedReference }));
-                      }}
-                    />
-                    <span>
-                      <span className="choice-name">
-                        {file?.references.find((reference) => reference.id === sharedReference)?.name ??
-                          'Its reference'}
-                      </span>
-                      <small id="read-with-shared" className="note">
-                        The reference it reads with at every size.
-                      </small>
-                    </span>
-                  </label>
-                  <label className="choice" aria-label="Learn a reference at this size">
-                    <input
-                      type="radio"
-                      name="read-with"
-                      aria-describedby="read-with-own"
-                      checked={draft.reference !== sharedReference}
-                      onChange={() => {
-                        background(
-                          openEditor(null, file?.references.find((saved) => saved.id === sharedReference) ?? null),
-                        );
-                      }}
-                    />
-                    <span>
-                      <span className="choice-name">
-                        {draft.reference === sharedReference
-                          ? 'Learn a reference at this size'
-                          : (file?.references.find((reference) => reference.id === draft.reference)?.name ??
-                            'A reference learned at this size')}
-                      </span>
-                      <small id="read-with-own" className="note">
-                        Teach the characters again from this size&apos;s screenshots.
-                      </small>
-                    </span>
-                  </label>
-                </fieldset>
+                <ReadWith
+                  references={file?.references ?? null}
+                  shared={sharedReference}
+                  selected={draft.reference}
+                  onShared={() => {
+                    setDraft((current) => ({ ...current, reference: sharedReference }));
+                  }}
+                  onLearn={(like) => {
+                    background(openEditor(null, like));
+                  }}
+                />
               ) : fixing !== null && (draft.kind === 'barFill' || draft.kind === 'color') ? (
                 <p className="note">At this size it reads with the colors of its first drawing.</p>
               ) : threeSteps ? null : draft.kind === 'number' ? (
-                <ReferencePicker
-                  appName={choice.name}
-                  file={file}
-                  selected={draft.reference}
-                  hasRegion={draft.region !== null}
-                  whole={draft.whole}
-                  characters={draft.characters}
-                  onSelect={(reference) => {
-                    setDraft((current) => ({ ...current, reference }));
-                  }}
-                  onEdit={(id) => {
-                    background(openEditor(file?.references.find((reference) => reference.id === id) ?? null, null));
-                  }}
-                  drafted={drafted}
-                  onNew={() => {
-                    background(openEditor(null, null));
-                  }}
-                  onRecord={() => {
-                    background(recordReadings());
-                  }}
-                  onWhole={(whole) => {
-                    setDraft((current) => ({ ...current, whole }));
-                  }}
-                  onCharacters={(characters) => {
-                    setDraft((current) => ({ ...current, characters }));
-                  }}
-                />
+                referencePicker
               ) : edited !== null && keepsStates(draft, edited.screen) ? (
                 <SavedStates
                   value={edited}
@@ -1673,10 +1336,7 @@ export function Capture({
                 <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
               )}
               {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
-              <ReadingDetailsBox
-                key={built.ok ? built.spec.kind : 'none'}
-                ask={check.state.kind === 'set' ? explainReading : null}
-              />
+              <ReadingDetailsBox key={builtKind} ask={check.state.kind === 'set' ? explainReading : null} />
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}
               <p className="note">
@@ -1744,39 +1404,26 @@ export function Capture({
             boxes={
               <BoxList
                 boxes={draft.boxes}
-                selected={chosenBox}
+                selected={boxes.selectedId}
                 full={full}
                 position={position}
                 blocked={boxBlock}
                 onSelect={(id) => {
                   const box = boxOf(draft.boxes, id);
-                  setChosenBox(id);
+                  boxes.select(id);
                   if (box !== null) {
                     setSelected(box.screenshot);
                   }
                 }}
-                onText={(id, text) => {
-                  setDraft((current) => ({ ...current, boxes: changedBox(current.boxes, id, { text }) }));
-                }}
-                onDelete={(id) => {
-                  setDraft((current) => ({ ...current, boxes: withoutBox(current.boxes, id) }));
-                  if (chosenBox === id) {
-                    setChosenBox(null);
-                  }
-                }}
+                onText={boxes.retype}
+                onDelete={boxes.remove}
               />
             }
             findPanel={
               chosen === null && finder.view === null ? null : (
                 <FoundPanel
-                  view={finder.view}
-                  rows={finder.rows}
-                  flags={finder.flags}
-                  crops={finder.crops}
+                  finder={finder}
                   findBlocked={findBlocked}
-                  addBlocked={finder.blocked}
-                  error={finder.error}
-                  searching={finder.searching}
                   onFind={() => {
                     if (chosen !== null) {
                       setPicking(null);
@@ -1784,10 +1431,6 @@ export function Capture({
                       background(finder.search(chosen));
                     }
                   }}
-                  onEntry={finder.edit}
-                  onKeepAll={finder.keepAll}
-                  onAdd={finder.add}
-                  onDismiss={finder.dismiss}
                 />
               )
             }
@@ -1831,10 +1474,7 @@ export function Capture({
             problem={check.problem}
           />
           {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
-          <ReadingDetailsBox
-            key={built.ok ? built.spec.kind : 'none'}
-            ask={check.state.kind === 'set' ? explainReading : null}
-          />
+          <ReadingDetailsBox key={builtKind} ask={check.state.kind === 'set' ? explainReading : null} />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
           {overLimit ? <p className="warn">{TOO_MANY}</p> : null}

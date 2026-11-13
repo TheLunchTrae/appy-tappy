@@ -24,7 +24,7 @@ use tokio::sync::oneshot;
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
-use crate::check_spec::{CheckSpec, ColorSpec, Label, RegionSpec};
+use crate::check_spec::{CharactersSpec, ColorSpec, Label, RegionSpec};
 use crate::debug::bundle::BundleSpec;
 use crate::debug::outline::CaptureOutline;
 use crate::debug::trace_file::TraceFile;
@@ -37,7 +37,7 @@ use crate::overlay::{Card, OverlayView};
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
     FixSpec, FoundClick, FoundView, Live, Message, Owner, Reading, ReferenceSaveSpec, Run,
-    SaveSpec, SavedReferenceId, SavedValue,
+    SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
 };
 use crate::recording::RecordingView;
 use crate::recording::looks::LookRecordingView;
@@ -215,10 +215,25 @@ pub(crate) async fn match_pixels(
     .await
 }
 
-/// Sets up the check the live reading uses.
+/// Makes the value `trial` would save the check the live reading uses,
+/// read where and how the runtime would read it at the window's size.
 #[tauri::command]
-pub(crate) async fn set_check(app: AppHandle, spec: CheckSpec) -> Result<(), String> {
-    try_ask(&app, "set_check", move |owner| owner.set_check(&spec)).await
+pub(crate) async fn set_check(app: AppHandle, trial: TrialSpec) -> Result<(), String> {
+    try_ask(&app, "set_check", move |owner| owner.set_check(&trial)).await
+}
+
+/// Makes the reference `spec` teaches the check the live reading uses,
+/// reading only the characters `reads` when it has any.
+#[tauri::command]
+pub(crate) async fn set_characters(
+    app: AppHandle,
+    spec: CharactersSpec,
+    reads: Option<String>,
+) -> Result<(), String> {
+    try_ask(&app, "set_characters", move |owner| {
+        owner.set_characters(&spec, reads.as_deref())
+    })
+    .await
 }
 
 /// What the check reads on the newest frame, if a check and a frame exist.
@@ -670,20 +685,17 @@ pub(crate) async fn overlay_card(
     .await
 }
 
-/// Records `region` of the picked window, drawn on `screenshot`, keeping
-/// each reading it shows. With `more`, goes on with the stopped recording;
-/// otherwise starts a new one.
+/// Records the region of the picked window that `spec`'s characters were
+/// drawn in, keeping each reading it shows in their color. With `more`,
+/// goes on with the stopped recording; otherwise starts a new one.
 #[tauri::command]
 pub(crate) async fn start_recording(
     app: AppHandle,
-    region: RegionSpec,
-    ink: ColorSpec,
-    tolerance: u8,
-    screenshot: usize,
+    spec: CharactersSpec,
     more: bool,
 ) -> Result<(), String> {
     try_ask(&app, "start_recording", move |owner| {
-        owner.start_recording(region, ink, tolerance, screenshot, more)
+        owner.start_recording(&spec, more)
     })
     .await
 }
@@ -749,12 +761,12 @@ pub(crate) async fn recorded_reading(
     .map(pixels)
 }
 
-/// Why the number check `spec` describes cannot learn each of its recorded
+/// Why the reference `spec` teaches cannot learn each of its recorded
 /// readings, in order: `None` for one it can.
 #[tauri::command]
 pub(crate) async fn review_problems(
     app: AppHandle,
-    spec: CheckSpec,
+    spec: CharactersSpec,
 ) -> Result<Vec<Option<String>>, String> {
     try_ask(&app, "review_problems", move |owner| {
         owner.review_problems(&spec)
@@ -802,6 +814,23 @@ pub(crate) async fn found_picture(
     .map(pixels)
 }
 
+/// Has the text reader read finds `indexes` of search `search` again, with
+/// the characters' color `ink` within `tolerance`; `None` when that search
+/// was replaced or forgotten.
+#[tauri::command]
+pub(crate) async fn reread_found(
+    app: AppHandle,
+    search: u64,
+    indexes: Vec<usize>,
+    ink: ColorSpec,
+    tolerance: u8,
+) -> Result<Option<FoundView>, String> {
+    ask(&app, "reread_found", move |owner| {
+        owner.reread_found(search, &indexes, ink, tolerance)
+    })
+    .await
+}
+
 /// Forgets the search.
 #[tauri::command]
 pub(crate) async fn forget_found(app: AppHandle) -> Result<(), String> {
@@ -813,7 +842,7 @@ pub(crate) async fn forget_found(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub(crate) async fn found_problems(
     app: AppHandle,
-    spec: CheckSpec,
+    spec: CharactersSpec,
     found: Vec<Label>,
 ) -> Result<Vec<Option<String>>, String> {
     try_ask(&app, "found_problems", move |owner| {
