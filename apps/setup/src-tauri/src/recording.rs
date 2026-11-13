@@ -30,6 +30,7 @@
 //! A digit, a `%`, and a `.` are all shapes the same way: whatever the
 //! check's own sampling makes one character is one shape here.
 
+pub(crate) mod character;
 pub(crate) mod find;
 mod ink;
 mod lifecycle;
@@ -45,6 +46,7 @@ use appytappy_sources::screen::{Image, Region, Size};
 use appytappy_sources::system::Rgb;
 use serde::{Deserialize, Serialize};
 
+use self::character::CharacterView;
 use self::ink::Ink;
 pub(crate) use self::ink::Line;
 pub(crate) use self::lifecycle::Lifecycle;
@@ -73,6 +75,9 @@ pub(crate) struct Kept {
     /// Each of its characters' shapes, left to right, as an index into the
     /// recording's shapes.
     shapes: Vec<usize>,
+    /// Where each of its characters is in the picture, with its shape's
+    /// name.
+    characters: Vec<CharacterView>,
     /// When it first showed, from the start of the recording.
     pub(crate) first: Duration,
     /// How many frames showed exactly this reading.
@@ -447,6 +452,7 @@ impl Recording {
         let line = Ink::of(&crop, &self.reader).line()?;
         let index = self.readings.len();
         self.readings.push(Kept {
+            characters: character::of(&crop, &self.reader),
             image: crop,
             shapes,
             first: self.life.elapsed(at),
@@ -531,6 +537,8 @@ impl Recording {
                     seen: kept.seen,
                     text: kept.text.clone(),
                     shapes: kept.shapes.clone(),
+                    width: kept.image.size().width,
+                    characters: kept.characters.clone(),
                 })
                 .collect(),
             shapes: self.sightings.view(),
@@ -671,6 +679,12 @@ pub(crate) struct ReadingView {
     /// Each of its characters' shapes, left to right, as an index into the
     /// recording's shapes.
     pub(crate) shapes: Vec<usize>,
+    /// How wide its picture is, in pixels.
+    pub(crate) width: u32,
+    /// Where each of its characters is in its picture, left to right, with
+    /// a name for its shape that a find's character of the same shape
+    /// shares.
+    pub(crate) characters: Vec<CharacterView>,
 }
 
 #[cfg(test)]
@@ -1153,15 +1167,20 @@ mod tests {
         assert_eq!(going.elapsed_ms, 6000);
         recording.read(0, Text::Read("12".to_owned()));
         recording.read(5, Text::Read("lost".to_owned()));
+        let reading = &going.readings[0];
         assert_eq!(
-            going.readings[0],
-            ReadingView {
-                first_ms: 1000,
-                seen: 1,
-                text: Text::Pending,
-                shapes: vec![0],
-            }
+            (reading.first_ms, reading.seen, &reading.text),
+            (1000, 1, &Text::Pending)
         );
+        assert_eq!(reading.shapes, [0]);
+        // Its one character covers the two inked columns of its 8.
+        assert_eq!(reading.width, 8);
+        let columns: Vec<(u32, u32)> = reading
+            .characters
+            .iter()
+            .map(|character| (character.left, character.right))
+            .collect();
+        assert_eq!(columns, [(0, 2)]);
         assert_eq!(
             recording.view(start).readings[0].text,
             Text::Read("12".to_owned())

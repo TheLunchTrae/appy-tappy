@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { type FoundRow, keptState, listed } from '../lib/found.ts';
-import { FIND_LIKE_HINT, FOUND_HINT, REREAD_HINT } from '../lib/hints.ts';
+import { CHECK_CHARACTERS_HINT, FIND_LIKE_HINT, FOUND_HINT, REREAD_HINT } from '../lib/hints.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { background } from '../lib/repeat.ts';
 import type { Finder } from '../lib/useFound.ts';
@@ -15,6 +15,8 @@ interface PanelProps {
   readonly findBlocked: string | null;
   /** Starts the search, from the selected box. */
   readonly onFind: () => void;
+  /** Opens the check of the finds' characters, or null while it is open. */
+  readonly onCheck: (() => void) | null;
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -64,7 +66,7 @@ function KeepAll({
 }
 
 /** The inspector's part for finding more text like the selected box, and adding what the user ticks as boxes. */
-export function FoundPanel({ finder, findBlocked, onFind }: PanelProps) {
+export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps) {
   const { view, blocked: addBlocked, error, searching, flags, crops } = finder;
   // Finds that show characters the reference does not need are left out of the list.
   const rows = listed(finder.rows);
@@ -196,6 +198,20 @@ export function FoundPanel({ finder, findBlocked, onFind }: PanelProps) {
               {reread.blocked}
             </p>
           )}
+          <div className="row">
+            <button
+              type="button"
+              className="btn small"
+              disabled={onCheck === null}
+              aria-describedby="hint-check-finds"
+              onClick={onCheck ?? undefined}
+            >
+              Check characters
+            </button>
+            <Hint topic="Check characters" id="hint-check-finds">
+              {CHECK_CHARACTERS_HINT}
+            </Hint>
+          </div>
           <ul aria-label="Found text">
             {rows.map((row) => {
               const number = row.index + 1;

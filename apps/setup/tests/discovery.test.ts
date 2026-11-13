@@ -4,7 +4,14 @@ import type { RecordedReading } from '../src/lib/bindings.ts';
 import { discovery } from '../src/lib/discovery.ts';
 
 /** A reading of `shapes`; what the text reader read does not matter here, only review's entry does. */
-const reading = (...shapes: number[]): RecordedReading => ({ firstMs: 0, seen: 1, text: { kind: 'pending' }, shapes });
+const reading = (...shapes: number[]): RecordedReading => ({
+  firstMs: 0,
+  seen: 1,
+  text: { kind: 'pending' },
+  shapes,
+  width: 0,
+  characters: [],
+});
 const kept = (text: string) => ({ keep: true, text });
 const DIGITS = Array.from('0123456789');
 

@@ -84,6 +84,10 @@ export const FIND_LIKE_HINT =
 export const FOUND_HINT =
   'Each find listed is outlined on the screenshot under the same number, with what the text reader made of it. A find that is skipped keeps its number, so the numbers can have gaps. Tick the ones to add, or Select all, and fix any text it misread. A flagged one needs its text typed, or leaving out, before you can add them; Deselect flagged leaves out every flagged one at once.';
 
+/** What Check characters steps through, and what an answer changes. */
+export const CHECK_CHARACTERS_HINT =
+  'Goes through the characters one at a time, across the finds listed and the readings a recording keeps. Each step shows one character and every place it appears, and asks once whether that is what it is. Your answer fixes the text of every place that shows it, so a character the text reader misread the same way everywhere needs one fix. You can still change any text by hand.';
+
 /** What Reread reads again, and when that changes anything. */
 export const REREAD_HINT =
   "Has the text reader read again the finds it could not read, and the flagged ones whose text you have not typed, with the characters' color and tolerance as they are set now. Your ticks and the text you typed stay. The same color and tolerance read the same text, so Reread waits for you to change one of them, unless the text reader could not read a find at all.";

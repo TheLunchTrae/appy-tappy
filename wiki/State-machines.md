@@ -2152,6 +2152,117 @@ stateDiagram-v2
   the list. A failed check of which finds the reference can learn flags
   none, since the save learns the text again.
 
+### Character check
+
+The check of a reference's characters one at a time
+(`apps/setup/src/lib/confirm.ts`, held by `useCharacterCheck.ts`) is closed, or
+a `Guide`: the answers given so far, by shape, the places it left out, and a
+cursor. `turn` is its pure `(state, event)` transition, and it answers with
+the next guide and the edits of the places' texts and ticks.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Closed
+    Closed --> Character: Check characters, and a step still asks
+    Closed --> Unfitted: Check characters, and only text that fits no step is left
+    Closed --> Done: Check characters, and nothing is left to ask
+    Character --> Character: Yes, Skip, or Back to another step
+    Character --> Character: a shape is retyped, and the step has shapes left
+    Character --> Character: Not a character, or It is a character
+    Character --> Character: a retyped shape was the step's last, and a step follows
+    Character --> Unfitted: Yes, Skip, or the last shape retyped on the last step, while text fits no step
+    Character --> Done: Yes, Skip, or the last shape retyped on the last step
+    Unfitted --> Character: Back
+    Unfitted --> Done: Next
+    Done --> Unfitted: Back, while text fits no step
+    Done --> Character: Back
+    Character --> Closed: Back to the screenshot, Back to review, or Escape
+    Unfitted --> Closed: Back to the screenshot, Back to review, or Escape
+    Done --> Closed: Done, or Escape
+```
+
+- The places are every [found text](#found-text) the list holds, ticked or
+  not, and every [recording](#recording) reading (`checkPlaces`). The check
+  asks about the finds and the readings that review keeps. A reading that
+  review leaves out joins no step and never changes its keep; it only gets
+  the answers, so its text does not disagree with the kept ones. Each place
+  carries where its characters are in its picture and a name for each one's
+  shape (`recording/character.rs`), which is the same for the same shape in
+  a find and in a reading.
+- The steps follow from the places' texts and the answers (`steps`); the
+  guide holds neither. A place whose text has one character for each of its
+  shapes gives each shape that character. A shape goes with its answer, or
+  else with the character most places give it. The characters the reference
+  needs come first.
+- **Yes** answers each unanswered shape of the step with the step's
+  character and goes on. A character typed under a shape, and committed with
+  Enter or by leaving the field, answers that shape with it and stays on the
+  step while it has shapes left; when it was the last, the check goes to the
+  stop that follows. **Not a character** answers that a shape is none, and
+  the kept places that show it are left out and remembered in `left`. The
+  shape stays in its step, where **It is a character** takes the answer back
+  and keeps those places again, unless another of their shapes is no
+  character. **Skip** and **Back** move without answering and stop at the
+  ends.
+- Each answer edits the places through the same edits the list of finds and
+  review make (`changes`), in the turn that gives it and only for the shapes
+  that turn answers: every place that shows one gets the answer at that
+  shape's character, and the rest of its text stays. A place the check asks
+  about is ticked or kept once all its shapes have answers, and left out
+  when one is no character. A tick the user changes afterward stays.
+- **Text that fits no step.** A place whose text has another number of
+  characters than its picture has shapes joins no step. Once every one of
+  its shapes has an answer, the answers are its text. One still left is the
+  `Unfitted` stop, where the user types its text or leaves it out. The stop
+  names its places when the check comes to it and lists those until it
+  leaves, so a text that fits by now stays while the user types it. **Next**
+  takes each listed text that fits as the answer for its shapes that had
+  none, and goes to `Done`.
+- Escape closes the check, or review when the check is not open over it:
+  one listener on the window decides for both (`escapeCloses` in
+  `useCharacterCheck.ts`), so review never closes underneath the check. It
+  hears the key after whatever has focus, and skips one that a question, a
+  hint, or a shortcut being chosen took and marked with `preventDefault`.
+- A character typed under a shape commits when the field loses focus, which
+  pressing a button causes, and can move the check to its next stop before
+  the button is let go. Each step has its own buttons
+  (`CharacterCheck.tsx`), so that click lands on no button and answers for
+  nothing.
+- Closing forgets the answers. The texts and ticks they wrote stay with the
+  finds and with review.
+
+The check has no failure state of its own: it makes no request, and every
+turn is an edit the list of finds or review takes. What goes wrong is that
+the places change under an open check, and each case recovers on the next
+render (`settle`) or the next answer:
+
+- **A text disagrees with an answer.** The user types over a text by hand,
+  or the text reader's text arrives after the answer. The text stays as it
+  is. The shape counts as unanswered again, so its step shows the other
+  character the text has and asks once more, and the next answer writes
+  every place that shows the shape.
+- **A place is still being read.** It has no text, so it joins no step and
+  is not on the `Unfitted` stop. `Done` says how many are not checked yet.
+  When its text arrives it joins the steps, and the cursor stays where it
+  is: the user reaches the step with **Back**, or by opening the check
+  again, which starts at the first step that still asks.
+- **The step under the cursor is gone.** An edit by hand leaves no place
+  that gives a shape the step's character, or a search or a recording is
+  replaced or forgotten. The cursor moves to the first step that still
+  asks, or to `Unfitted` or `Done`. The same holds for an `Unfitted` stop
+  none of whose places is left.
+- **No places at all.** The check is `Done` and says there is nothing to
+  check.
+
+#### Open problems
+
+- [#327](https://github.com/TheLunchTrae/appy-tappy/issues/327): an answer
+  is written only in the turn that gives it, so a place that arrives later
+  does not get it. A place that appears while the check is open and shows a
+  shape answered **Not a character** is not left out. A reading that review
+  leaves out, whose text arrives after an answer and disagrees with it,
+  joins no step, so the step does not ask again and review flags the clash.
+
 ### Bar detection
 
 Detecting a bar's colors (`apps/setup/src/lib/detect.ts`, driven by

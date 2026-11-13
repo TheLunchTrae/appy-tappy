@@ -70,6 +70,7 @@ import { ReferencePicker } from './ReferencePicker.tsx';
 import type { Choice } from './Picker.tsx';
 import { colorAt } from '../lib/pixels.ts';
 import { RecordPanel, RecordingSpots, ReviewSheet } from './Recording.tsx';
+import { CharacterCheckSheet } from './CharacterCheck.tsx';
 import { LookPanel } from './LookRecording.tsx';
 import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
 import { type Point, type Size, scaleRect } from '../lib/region.ts';
@@ -108,6 +109,8 @@ import { useFound } from '../lib/useFound.ts';
 import { type Trial, trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
 import { useMatchPreview, useSelectedPreview } from '../lib/useMatchPreview.ts';
+import { useCharacterCheck } from '../lib/useCharacterCheck.ts';
+import { progress } from '../lib/confirm.ts';
 import { useRecording } from '../lib/useRecording.ts';
 import { useReview } from '../lib/useReview.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
@@ -422,6 +425,11 @@ export function Capture({
   const covered = coverage(needs, knownCharacters(learnedTexts));
   const finder = useFound(draft, boxes.add, editingRef, learnedTexts, needs);
   const { reviewing } = review;
+  const guided = useCharacterCheck(finder, review, recorder, needs);
+  // The check, like review, shows in place of the window's picture.
+  const checking = guided.guide !== null;
+  const sheeted = reviewing || checking;
+  const checkStep = guided.guide === null ? null : progress(guided.guide, guided.places, needs);
   const recordError = recorder.commandError ?? review.error ?? recorder.pollError;
 
   const [liveSize, setLiveSize] = useState<Size | null>(null);
@@ -936,7 +944,7 @@ export function Capture({
     draft.region === null &&
     liveSize !== null &&
     recordingNow === null &&
-    !reviewing &&
+    !sheeted &&
     picking === null;
   const drawing: Drawing = drawsLive ? 'live' : editing !== null ? 'boxes' : 'region';
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
@@ -1006,19 +1014,28 @@ export function Capture({
           path={[
             ...trail,
             ...(mode.kind !== 'reference' && editing !== null ? [flowName] : []),
-            ...(reviewing ? [editedName] : []),
+            ...(sheeted ? [editedName] : []),
+            ...(checking && reviewing ? ['Review recording'] : []),
           ]}
-          current={reviewing ? 'Review recording' : editing === null ? flowName : editedName}
+          current={
+            checking ? 'Check characters' : reviewing ? 'Review recording' : editing === null ? flowName : editedName
+          }
           status={
             recordingNow !== null
               ? { kind: 'recording', elapsedMs: recordingNow.elapsedMs }
-              : reviewing && recording !== null
-                ? { kind: 'reviewing', recording }
-                : { kind: 'live', appName: choice.name }
+              : checking
+                ? { kind: 'checking', step: checkStep }
+                : reviewing && recording !== null
+                  ? { kind: 'reviewing', recording }
+                  : { kind: 'live', appName: choice.name }
           }
-          size={reviewing ? null : (native ?? null)}
+          size={sheeted ? null : (native ?? null)}
         >
-          {reviewing ? (
+          {checking ? (
+            <button type="button" className="btn" onClick={guided.close}>
+              {reviewing ? 'Back to review' : 'Back to the screenshot'}
+            </button>
+          ) : reviewing ? (
             <ReviewActions
               review={review}
               settingsChanged={settingsChanged}
@@ -1051,7 +1068,17 @@ export function Capture({
         {shortcut.saveError === null ? null : <p className="warn">{shortcut.saveError}</p>}
         {screenshots.error === null ? null : <p className="warn">{screenshots.error}</p>}
         {selection.error === null ? null : <p className="warn">{selection.error}</p>}
-        {reviewing && recording !== null ? (
+        {guided.guide !== null ? (
+          <CharacterCheckSheet
+            guide={guided.guide}
+            places={guided.places}
+            needs={needs}
+            picture={guided.picture}
+            onTurn={guided.act}
+            onEdit={guided.edit}
+            onClose={guided.close}
+          />
+        ) : reviewing && recording !== null ? (
           <ReviewSheet
             view={recording}
             found={found}
@@ -1066,13 +1093,14 @@ export function Capture({
             error={recordError}
             onEntry={review.edit}
             onKeepAll={review.keepAll}
+            onCheck={guided.places.length === 0 ? null : guided.open}
           />
         ) : null}
         {/* Hidden rather than removed during review, so the view keeps its measured size. */}
         <ZoomView
           picture={layoutSize}
           zoomable={shownPicture !== null}
-          hidden={reviewing}
+          hidden={sheeted}
           hint={stageHint({
             recording: recordingNow === null ? null : recordingNow === recording ? 'readings' : 'looks',
             selected,
@@ -1089,7 +1117,7 @@ export function Capture({
         >
           {({ space, shown }) => (
             <>
-              {reviewing ? null : selected === null && heldPicture !== null ? (
+              {sheeted ? null : selected === null && heldPicture !== null ? (
                 <PictureCanvas picture={heldPicture} label="The screenshot the region goes on" />
               ) : selected === null ? (
                 <LiveCanvas
@@ -1207,7 +1235,7 @@ export function Capture({
           shots={stripShots}
           selected={selected}
           position={position}
-          hidden={reviewing}
+          hidden={sheeted}
           unremovable={unremovable}
           onePicture={setsPlace}
           onSelect={(index) => {
@@ -1220,7 +1248,7 @@ export function Capture({
             background(screenshots.remove([index]));
           }}
         />
-        {outline === null || reviewing ? null : <CaptureOutlineNote outline={outline} />}
+        {outline === null || sheeted ? null : <CaptureOutlineNote outline={outline} />}
       </section>
       {editing === null ? (
         <aside className="inspector" aria-label="Value">
@@ -1483,6 +1511,7 @@ export function Capture({
                 <FoundPanel
                   finder={finder}
                   findBlocked={findBlocked}
+                  onCheck={checking ? null : guided.open}
                   onFind={() => {
                     if (chosen !== null) {
                       setPicking(null);

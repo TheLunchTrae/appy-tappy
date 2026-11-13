@@ -150,22 +150,6 @@ export function useReview(
     focusRecordPanel();
   };
 
-  // Escape leaves review without keeping; its edits stay for the next review.
-  useEffect(() => {
-    if (!reviewing) {
-      return undefined;
-    }
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        close();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-    };
-  });
-
   const forget = (): void => {
     setEdits(new Map());
     setDecided(new Map());

@@ -858,7 +858,13 @@ ink: ColorSpec,
 /**
  * The tolerance its ink was last cut with.
  */
-tolerance: number, }>;
+tolerance: number,
+/**
+ * Where each of its characters is in its region, left to right, as
+ * that color and tolerance split them, with a name for its shape that
+ * a recorded reading's character of the same shape shares.
+ */
+characters: Array<ShownCharacter>, }>;
 
 /**
  * A value drawn again at one window size, which it reads there exactly
@@ -1364,7 +1370,17 @@ text: RecordedText,
  * Each of its characters' shapes, left to right, as an index into the
  * recording's shapes.
  */
-shapes: Array<number>, }>;
+shapes: Array<number>,
+/**
+ * How wide its picture is, in pixels.
+ */
+width: number,
+/**
+ * Where each of its characters is in its picture, left to right, with
+ * a name for its shape that a find's character of the same shape
+ * shares.
+ */
+characters: Array<ShownCharacter>, }>;
 
 /**
  * How often one shape showed, as the UI shows it. These are counts of
@@ -1819,6 +1835,24 @@ settings: SettingsFile,
  * the defaults and saving replaces the file.
  */
 problem: string | null, }>;
+
+/**
+ * One character of a picture.
+ */
+export type ShownCharacter = DeepReadonly<{
+/**
+ * A name for its shape, which two characters share exactly when their
+ * shapes are the same, whichever recording or search they are from.
+ */
+shape: string,
+/**
+ * The first column of the picture it covers.
+ */
+left: number,
+/**
+ * The column after the last it covers.
+ */
+right: number, }>;
 
 /**
  * How often an application's window changes size, as the user answered.

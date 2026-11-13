@@ -22,6 +22,8 @@ import {
   untaughtNote,
 } from '../src/lib/review.ts';
 
+/** Where a reading's characters are in its picture, which review does not look at. */
+const cut = { width: 0, characters: [] };
 // Most tests are of a reference that does not say which characters it needs, with nothing decided and no clash.
 const NO_NEEDS: readonly string[] = [];
 type Entries = ReadonlyMap<number, review.ReviewEntry>;
@@ -61,6 +63,7 @@ const read = (text: string, shapes: readonly number[] = shapesOf(text), firstMs 
   seen: 1,
   text: { kind: 'read', text },
   shapes,
+  ...cut,
 });
 /** A reading of `shapes` still being read. */
 const unread = (shapes: readonly number[]): RecordedReading => ({
@@ -68,10 +71,17 @@ const unread = (shapes: readonly number[]): RecordedReading => ({
   seen: 1,
   text: { kind: 'pending' },
   shapes,
+  ...cut,
 });
 const keeps = (all: readonly { readonly keep: boolean }[]): boolean[] => all.map((entry) => entry.keep);
-const pending: RecordedReading = { firstMs: 0, seen: 1, text: { kind: 'pending' }, shapes: [1] };
-const failed: RecordedReading = { firstMs: 0, seen: 1, text: { kind: 'failed', text: 'No model.' }, shapes: [2] };
+const pending: RecordedReading = { firstMs: 0, seen: 1, text: { kind: 'pending' }, shapes: [1], ...cut };
+const failed: RecordedReading = {
+  firstMs: 0,
+  seen: 1,
+  text: { kind: 'failed', text: 'No model.' },
+  shapes: [2],
+  ...cut,
+};
 
 describe('clock and seen', () => {
   test('show minutes and seconds, and how often', () => {
