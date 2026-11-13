@@ -720,11 +720,13 @@ a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
 as black text on white with a margin, whatever the application's colors,
 cut to the rows the number reader takes as the line of text
-(`Ink::line`), so a stray pixel above or below the text does
-not stretch the line (`recording/ink.rs`). The cut keeps the inked rows
-that at most a quarter of the line's height in blank rows, and at least one,
-sets apart from it, which hold the dots of an i or a j and the accents that
-the text reader needs to tell letters apart. Text for a recording or a search the user discarded or
+(`Ink::line`) and the nearest mark on each side of them (`recording/ink.rs`).
+A mark is a short block of inked rows, such as the dot of an i or an accent
+that the text reader needs to tell letters apart: no taller than half the
+line's height, and no more than a quarter of the line's height, and at least
+one row, of blank rows away. Only the nearest mark on each side joins, so
+another line of text or a column of stray pixels does not stretch the line.
+Text for a recording or a search the user discarded or
 replaced is dropped by its number, and a queued job of a recording or search
 that a newer one of the same kind replaced is skipped without reading it. Only the setup app uses it; the runtime reads
 numbers with the shapes the user's labels and kept readings taught it ([Screen
@@ -893,7 +895,8 @@ in a [shared file](#sharing).
   set up on: the one its region is drawn on, or one a state's picture is
   taken from (`check_spec::origin`). `Screenshots` in `screenshots.rs` holds
   which screenshots a recording kept, and a [draft](#drafts) keeps that with
-  them, so a value finished from a draft is `recording` too.
+  them, so a value finished from a draft on such a screenshot is
+  `recording` too.
 - An edit that keeps a value's region keeps its `origin`, and one that draws
   the region again sets it as for a new value. A fix leaves it alone.
 - A reference is `recording` once a recorded reading, or a box on a

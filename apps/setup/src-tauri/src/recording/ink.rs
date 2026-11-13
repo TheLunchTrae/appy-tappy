@@ -55,29 +55,69 @@ impl Line {
 }
 
 /// The rows of the line of text in `ink`: the rows the number reader takes,
-/// [`Ink::line`], with the inked rows above and below them that no more than
-/// a quarter of their height in blank rows, and at least one, sets apart.
+/// [`Ink::line`], with the nearest mark on each side of them. A mark is a
+/// block of inked rows no taller than half the letters' height, at most a
+/// quarter of their height of blank rows from them, and at least one row.
 /// Those hold the dots of an i or a j and the accents, which the number
 /// reader has no use for and the text reader needs to tell the letters
-/// apart. A dot sits about a tenth to a fifth of the letters' height above
-/// them, and the next line of text, or a stray pixel, usually further.
+/// apart. A dot sits about a tenth to a fifth of the letters' height from
+/// them. A line of text nearby is taller, and only the nearest mark joins,
+/// so neither another line nor a column of stray pixels stretches the line.
 /// `None` without ink.
 fn rows(ink: &Ink) -> Option<Range<u32>> {
     let size = ink.size();
     let letters = ink.line(0..size.width, 0..size.height)?;
-    let gap = (letters.end.saturating_sub(letters.start) / 4).max(1);
-    let inked = |&y: &u32| (0..size.width).any(|x| ink.at(x, y));
-    let mut start = letters.start;
-    while let Some(above) = (start.saturating_sub(gap.saturating_add(1))..start).rfind(inked) {
-        start = above;
-    }
-    let mut end = letters.end;
-    while let Some(below) =
-        (end..end.saturating_add(gap).saturating_add(1).min(size.height)).find(inked)
-    {
-        end = below.saturating_add(1);
-    }
+    let height = letters.end.saturating_sub(letters.start);
+    let near = Near {
+        gap: (height / 4).max(1),
+        tallest: (height / 2).max(1),
+    };
+    let inked = |y: u32| (0..size.width).any(|x| ink.at(x, y));
+    let start = near
+        .mark((0..letters.start).rev(), inked)
+        .unwrap_or(letters.start);
+    let end = near
+        .mark(letters.end..size.height, inked)
+        .map_or(letters.end, |last| last.saturating_add(1));
     Some(start..end)
+}
+
+/// How near the letters, and how small, a mark is that joins their line.
+#[derive(Debug, Clone, Copy)]
+struct Near {
+    /// The most blank rows between the letters and a mark.
+    gap: u32,
+    /// The most rows a mark takes.
+    tallest: u32,
+}
+
+impl Near {
+    /// The row furthest from the letters of the mark that `outward`, the
+    /// rows past one side of them going away from them, holds first, or
+    /// `None` when the first inked rows there are too far or too tall.
+    fn mark(self, outward: impl Iterator<Item = u32>, inked: impl Fn(u32) -> bool) -> Option<u32> {
+        let mut blank = 0_u32;
+        let mut mark: Option<(u32, u32)> = None;
+        for y in outward {
+            match (inked(y), mark) {
+                (false, None) => {
+                    blank = blank.saturating_add(1);
+                    if blank > self.gap {
+                        return None;
+                    }
+                },
+                (true, None) => mark = Some((y, 1)),
+                (true, Some((_, rows))) => {
+                    if rows >= self.tallest {
+                        return None;
+                    }
+                    mark = Some((y, rows.saturating_add(1)));
+                },
+                (false, Some((last, _))) => return Some(last),
+            }
+        }
+        mark.map(|(last, _)| last)
+    }
 }
 
 #[cfg(test)]
@@ -149,6 +189,81 @@ mod tests {
             .filter_map(|(index, &pixel)| (pixel == 0).then_some(index))
             .collect();
         assert_eq!(black, [24, 38, 45, 52, 66], "the dot and the mark show");
+    }
+
+    /// The rows of the line in ink drawn as `#`, one string a row.
+    fn rows_in(drawn: &[&str]) -> Option<Range<u32>> {
+        let size = Size {
+            width: u32::try_from(drawn[0].len()).expect("narrow"),
+            height: u32::try_from(drawn.len()).expect("short"),
+        };
+        let pixels = drawn
+            .iter()
+            .flat_map(|row| row.bytes())
+            .flat_map(|cell| {
+                if cell == b'#' {
+                    [255; 4]
+                } else {
+                    [0, 0, 0, 255]
+                }
+            })
+            .collect();
+        let image = Image::new(size, pixels).expect("matching length");
+        let white = Rgb {
+            red: 255,
+            green: 255,
+            blue: 255,
+        };
+        rows(&DigitReader::new(white, 0).ink(&image))
+    }
+
+    #[test]
+    fn a_dot_or_an_accent_near_the_letters_joins_the_line() {
+        let two_rows_one_blank_row_above = [
+            ".#.", ".#.", "...", "###", "#.#", "#.#", "###", //
+        ];
+        assert_eq!(rows_in(&two_rows_one_blank_row_above), Some(0..7));
+        // A quarter of eight rows is two.
+        let two_blank_rows_above_eight = [
+            ".#.", "...", "...", "###", "#.#", "#.#", "#.#", "#.#", "#.#", "#.#", "###",
+        ];
+        assert_eq!(rows_in(&two_blank_rows_above_eight), Some(0..11));
+    }
+
+    #[test]
+    fn a_nearby_line_of_text_stays_out_of_the_line() {
+        let letters = ["###"; 8];
+        let lighter = ["..#"; 5];
+        for blank in [1, 2] {
+            let below: Vec<&str> = letters
+                .iter()
+                .chain(&["..."; 2][..blank])
+                .chain(&lighter)
+                .copied()
+                .collect();
+            assert_eq!(rows_in(&below), Some(0..8), "{blank} blank rows below");
+            let above: Vec<&str> = lighter
+                .iter()
+                .chain(&["..."; 2][..blank])
+                .chain(&letters)
+                .copied()
+                .collect();
+            let first = u32::try_from(blank).expect("small").saturating_add(5);
+            assert_eq!(
+                rows_in(&above),
+                Some(first..first.saturating_add(8)),
+                "{blank} blank rows above"
+            );
+        }
+    }
+
+    #[test]
+    fn a_column_of_specks_adds_only_the_nearest() {
+        let specks = [
+            "#..", "...", "#..", "...", "#..", "...", "#..", "...", "###", "###", "###", "###",
+            "...", "#..", "...", "#..",
+        ];
+        assert_eq!(rows_in(&specks), Some(6..14));
     }
 
     #[test]
