@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use std::io;
 
 use super::saved::{AtSize, Unread};
-use super::{Frame, Image, Layout, OutsideWindow, Size};
+use super::{Frame, Image, Layout, OutsideWindow, Region, Size};
 
 /// What a frame means to a capture that reads at one window size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,8 +125,8 @@ impl Placed {
 
     /// The pixels of the value at `position` in `image`, a readable frame's
     /// image, or `None` for a value that does not read at the size. A value
-    /// whose place is the whole image, as that of the only value that reads
-    /// is, borrows it; any other is copied out of it.
+    /// whose place is the whole image, such as the only value that reads,
+    /// borrows it; any other is copied out of it.
     #[must_use]
     pub fn cropped<'image>(
         &self,
@@ -134,7 +134,7 @@ impl Placed {
         image: &'image Image,
     ) -> Option<Cow<'image, Image>> {
         let region = self.layout.as_ref()?.packed(position)?;
-        if (region.x(), region.y(), region.size()) == (0, 0, image.size()) {
+        if Region::whole(image.size()) == Some(region) {
             Some(Cow::Borrowed(image))
         } else {
             image.crop(region).map(Cow::Owned)
@@ -148,9 +148,9 @@ mod tests {
 
     use appytappy_config::app_file::{PinDef, SizeChangesDef};
 
+    use super::super::Rgb;
     use super::super::check::{Check, ColorMatch};
     use super::super::saved::{SavedCheck, SavedValue};
-    use super::super::{Region, Rgb};
     use super::*;
 
     const WINDOW: Size = Size {
