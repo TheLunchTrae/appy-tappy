@@ -28,30 +28,32 @@ export interface Taken {
   readonly size: Size;
 }
 
-/** A screenshot's pixels: small for its thumbnail, and at its own size. */
-export interface Pixels {
-  readonly thumb: Picture;
-  readonly picture: Picture;
-}
-
 /** Fetches the screenshot `index` small for its thumbnail and at its own pixels. */
 async function fetchShot(index: number): Promise<readonly [Picture | null, Picture | null]> {
   return Promise.all([screenshot(index, THUMB_WIDTH), screenshot(index, FULL_WIDTH)]);
 }
 
 /**
- * The pixels of the screenshot `index`, as `fetch` gets them. Rejects when either does not arrive, so a screenshot
- * is listed only once it has them.
+ * The screenshot `index` to list, with its pixels, once `fetch` gets both its thumbnail and its own pixels. When
+ * either does not arrive, it calls `release` once and rejects, so a screenshot is listed only once it has them.
  */
-export async function arrive(
+export async function arrived(
   index: number,
+  recorded: boolean,
+  release: (index: number) => void,
   fetch: (index: number) => Promise<readonly [Picture | null, Picture | null]> = fetchShot,
-): Promise<Pixels> {
-  const [thumb, picture] = await fetch(index);
-  if (thumb === null || picture === null) {
-    throw new Error("The screenshot's pixels did not arrive.");
+): Promise<{ readonly shot: Shot; readonly picture: Picture }> {
+  const time = new Date().toLocaleTimeString();
+  try {
+    const [thumb, picture] = await fetch(index);
+    if (thumb === null || picture === null) {
+      throw new Error("The screenshot's pixels did not arrive.");
+    }
+    return { shot: { index, time, thumb, recorded }, picture };
+  } catch (failure: unknown) {
+    release(index);
+    throw failure;
   }
-  return { thumb, picture };
 }
 
 /**
@@ -100,14 +102,12 @@ export function useScreenshots(restored: readonly DraftShot[] = []): {
   // Fetches the pixels of the screenshot `index` and then lists it. One whose pixels do not arrive is released and
   // never listed, so the strip shows no blank tile for it.
   const list = useCallback(async (index: number, recorded: boolean): Promise<Picture> => {
-    const time = new Date().toLocaleTimeString();
-    const { thumb, picture } = await arrive(index).catch((failure: unknown) => {
-      removed.current.add(index);
-      background(removeScreenshots([index]));
-      throw failure;
+    const { shot, picture } = await arrived(index, recorded, (failed) => {
+      removed.current.add(failed);
+      background(removeScreenshots([failed]));
     });
     if (!removed.current.has(index)) {
-      setShots((current) => withShot(current, { index, time, thumb, recorded }));
+      setShots((current) => withShot(current, shot));
       setFull((current) => new Map(current).set(index, picture));
     }
     return picture;
