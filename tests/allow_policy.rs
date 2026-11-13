@@ -2981,8 +2981,12 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     };
 
     assert!(
-        check.contains("\"rust:mutants:diff\"") && !check.contains("\"rust:mutants\""),
-        "the Rust standards gate must run the diff mutation lane, not the full one"
+        check.contains("\"rust:mutants:diff\""),
+        "the Rust standards gate must run the diff mutation lane"
+    );
+    assert!(
+        !check.contains("\"rust:mutants\""),
+        "the Rust standards gate must not run the full mutation lane"
     );
     // A copied target/ must not catch another Cargo task's build half written.
     assert!(

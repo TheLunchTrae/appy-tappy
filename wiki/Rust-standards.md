@@ -105,8 +105,8 @@ fail the lane; stage them with `git add -N`. A diff that selects no mutants
 passes.
 
 `rust:standards:check` runs the diff lane, locally and in the quality workflow,
-so the gate fits the quality job's time limit. CI diffs against the base that
-`.github/workflows/quality.yml` sets for each event: a pull request diffs
+so the gate finishes in minutes rather than hours. CI diffs against the base
+that `.github/workflows/quality.yml` sets for each event: a pull request diffs
 against its base branch and a push to main against the previous tip, which with
 squash merges is exactly the merged pull request.
 
