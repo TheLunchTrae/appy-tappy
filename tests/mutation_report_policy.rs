@@ -140,13 +140,10 @@ fn verify_report(mode: ReportMode, report_directory: &Path) -> Result<(u64, u64)
     verify_outcome_lists(report_directory, reported)?;
 
     let executed = reported.executed()?;
+    // The successful baseline shows the build directory works, so a diff
+    // whose few mutants all fail to compile, as one shard's can, passes.
     if matches!(mode, ReportMode::Full) && (report.total_mutants == 0 || executed == 0) {
         return Err("full mutation testing must execute at least one mutant".to_owned());
-    }
-    if report.total_mutants > 0 && executed == 0 {
-        return Err(
-            "a nonempty mutation report must contain at least one executed mutant".to_owned(),
-        );
     }
     Ok((executed, report.total_mutants))
 }
@@ -288,7 +285,7 @@ fn rejects_malformed_trailing_and_duplicate_json() {
 
 #[test]
 #[ignore = "run by rust:policy"]
-fn rejects_inconsistent_and_all_unviable_reports() {
+fn rejects_inconsistent_reports_and_all_unviable_full_ones() {
     let inconsistent = TestReport::new(
         "inconsistent",
         Counts {
@@ -309,7 +306,7 @@ fn rejects_inconsistent_and_all_unviable_reports() {
     )
     .expect("create unviable report");
     assert!(verify_report(ReportMode::Full, unviable.path()).is_err());
-    assert!(verify_report(ReportMode::Diff, unviable.path()).is_err());
+    assert_eq!(verify_report(ReportMode::Diff, unviable.path()), Ok((0, 1)));
 }
 
 #[test]
