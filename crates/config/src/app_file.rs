@@ -906,18 +906,25 @@ impl AppFile {
     /// another format says so rather than naming whichever of its fields
     /// this format lacks.
     pub fn parse(json: &str) -> Result<Self, AppFileError> {
-        let invalid = |error: serde_json::Error| AppFileError::Json(error.to_string());
-        // Any file's format version, whatever else it holds. JSON without a
-        // version it can hold is left for the file's own reading to refuse.
-        let any: serde_json::Value = serde_json::from_str(json).map_err(invalid)?;
-        let format = any
-            .get("format")
-            .and_then(serde_json::Value::as_u64)
+        /// Any file's format version, whatever else it holds. Every other
+        /// field is skipped as it is read, so the peek keeps nothing of a
+        /// file that someone else made, however large.
+        #[derive(Deserialize)]
+        struct Versioned {
+            format: Option<u64>,
+        }
+        // JSON the peek cannot read, or without a version this format's
+        // number can hold, is left for the file's own reading to refuse, so
+        // the message names the file and not the peek.
+        let format = serde_json::from_str::<Versioned>(json)
+            .ok()
+            .and_then(|peek| peek.format)
             .and_then(|format| u32::try_from(format).ok());
         if let Some(format) = format.filter(|format| *format != FORMAT) {
             return Err(AppFileError::Format(format));
         }
-        let file: Self = serde_json::from_str(json).map_err(invalid)?;
+        let file: Self =
+            serde_json::from_str(json).map_err(|error| AppFileError::Json(error.to_string()))?;
         file.check()?;
         Ok(file)
     }
@@ -1719,6 +1726,16 @@ mod tests {
             )),
             "the message names the file, not how it is read"
         );
+        // A version no format's number holds is the file's own to refuse.
+        for format in ["\"2\"", "4294967296", "null"] {
+            let odd = dash()
+                .to_json()
+                .replace("\"format\": 1", &format!("\"format\": {format}"));
+            assert!(
+                matches!(AppFile::parse(&odd), Err(AppFileError::Json(message)) if !message.contains("Versioned")),
+                "{format}"
+            );
+        }
     }
 
     #[test]
