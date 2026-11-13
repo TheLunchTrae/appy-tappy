@@ -81,19 +81,18 @@ jobs:
             target/
           key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
-  # The diff mutation lane, split over four runners so that a large diff, such
-  # as a stack of pull requests that lands on main as one squash, still fits
-  # each job's time limit. Each shard tests a quarter of the mutants the diff
-  # selects, so together they test every one. The lane mutation-tests only the
-  # code each event changes, so the checkout is not shallow. A pull request
-  # diffs against the fetched base branch, not the event's base.sha. That sha
-  # can be an older tip than the one the checked-out merge sits on, and a diff
-  # from it would also hold everything merged to the base branch since then. A
-  # push to main diffs against the previous tip, which with squash merges is
-  # exactly the merged pull request or stack; a push with no previous tip falls
-  # back to the parent commit. A manual run diffs against origin/main.
+  # The diff mutation lane, one shard of the selected mutants on each runner;
+  # wiki/Rust-standards.md#mutation-testing says why. The lane mutation-tests
+  # only the code each event changes, so the checkout is not shallow. A pull
+  # request diffs against the fetched base branch, not the event's base.sha.
+  # That sha can be an older tip than the one the checked-out merge sits on,
+  # and a diff from it would also hold everything merged to the base branch
+  # since then. A push to main diffs against the previous tip, which with
+  # squash merges is exactly the merged pull request or stack; a push with no
+  # previous tip falls back to the parent commit. A manual run diffs against
+  # origin/main.
   mutants:
-    name: mutants ${{ matrix.shard }}/4
+    name: mutants ${{ strategy.job-index }}/${{ strategy.job-total }}
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     strategy:
@@ -107,7 +106,7 @@ jobs:
       # Tasks would otherwise install every tool, not only install_args.
       MISE_TASK_RUN_AUTO_INSTALL: 'false'
       MUTANTS_COPY_TARGET: 'true'
-      MUTANTS_SHARD: ${{ matrix.shard }}/4
+      MUTANTS_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
       MUTANTS_BASE_REF: >-
         ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref)
         || github.event_name == 'merge_group' && github.event.merge_group.base_sha
@@ -130,8 +129,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
-      # Reads the quality job's cache, which holds the same Linux builds, and
-      # never saves one.
+      # Reads the quality job's cache, which holds the same Linux builds. The
+      # shards never save a cache, so they can always start from an older one.
       - name: Restore the Rust build cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -141,7 +140,7 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: rust-${{ runner.os }}-quality-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}
-          restore-keys: ${{ github.event_name != 'push' && format('rust-{0}-quality-', runner.os) || '' }}
+          restore-keys: rust-${{ runner.os }}-quality-
       # The setup app's Rust side embeds the built UI, so the UI builds first.
       - name: Build the setup UI
         run: mise run ui:build

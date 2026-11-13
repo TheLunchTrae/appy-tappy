@@ -3082,6 +3082,8 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     // a current one.
     let steps = [
         "acquire_mutants_task_lock diff",
+        "cargo mutants --list ",
+        "if [ -z \"$selected\" ]; then",
         "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then",
         "run_mutants_task_child cargo test --no-run --workspace --all-features --locked",
         "rm -rf mutants.out",
@@ -3097,7 +3099,7 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         .collect();
     assert!(
         positions.is_sorted(),
-        "the diff mutation task must, under its lock, bring a copied target/ up to date, clear the previous report, then run and verify cargo-mutants"
+        "the diff mutation task must, under its lock, list the selected mutants and stop when there are none, bring a copied target/ up to date, clear the previous report, then run and verify cargo-mutants"
     );
     // The in-place build matches the build cargo-mutants runs for each
     // mutant, so the mutant builds reuse it.
@@ -3118,16 +3120,27 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
             flag.trim()
         );
     }
-    let no_report = diff.find("if [ ! -d mutants.out ]; then").expect(
-        "the diff mutation task must pass without a report when the diff selects no mutants",
-    );
-    let diff_run = diff
-        .find("run_mutants_task_child cargo mutants ")
-        .expect("the diff mutation task should run cargo-mutants");
-    assert!(
-        diff_run < no_report,
-        "the diff mutation task must check for a report only after cargo-mutants runs"
-    );
+    // cargo-mutants writes a report with no outcomes when the diff or the
+    // shard selects no mutants, so the list must select the same mutants as
+    // the run.
+    let Some(mutants_list) = diff
+        .lines()
+        .find(|line| line.contains("cargo mutants --list "))
+    else {
+        panic!("the diff mutation task should list the selected mutants");
+    };
+    for flag in [
+        " --workspace ",
+        " --all-features ",
+        " ${MUTANTS_SHARD:+\"--shard=$MUTANTS_SHARD\"} ",
+        " --in-diff \"$diff_file\"",
+    ] {
+        assert!(
+            mutants_list.contains(flag) && mutants_run.contains(flag),
+            "the diff mutation task's list and run must both pass {}",
+            flag.trim()
+        );
+    }
     let untracked_guard = diff
         .find("git ls-files --others --exclude-standard")
         .expect("the diff mutation task should inspect untracked files");
