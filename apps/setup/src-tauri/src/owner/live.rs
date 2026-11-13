@@ -13,11 +13,11 @@
 //! then placed there once. The capture copies the whole window, so it
 //! goes on at every size.
 
+use std::time::Instant;
+
 use appytappy_config::app_file::{PinDef, RegionDef, ScreenDef, SizeDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::check::Check;
-use std::time::Instant;
-
 use appytappy_sources::screen::saved::{AtSize, SavedCheck, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Size};
@@ -659,6 +659,61 @@ mod tests {
         harness.deliver(&mut handler, Ok(&showing("37%", 2)));
         assert_eq!(harness.ask(Owner::reading), Ok(None));
         fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn settling_where_a_fix_reads_forgets_the_size_it_was_not_read_at() {
+        use appytappy_config::app_file::PinDef;
+        use appytappy_sources::screen::check::ColorMatch;
+        use appytappy_sources::screen::saved::SavedFix;
+        use appytappy_sources::screen::{Region, Size};
+        use appytappy_sources::system::Rgb;
+
+        let size = |width| Size { width, height: 4 };
+        let (drawn, fixed, unread) = (size(8), size(10), size(12));
+        let region = Region::new(0, 0, 2, 2).expect("not empty");
+        let value = SavedValue {
+            drawn: SavedCheck {
+                window_size: drawn,
+                region,
+                check: Check::Color(ColorMatch {
+                    color: Rgb {
+                        red: 0,
+                        green: 0,
+                        blue: 0,
+                    },
+                    tolerance: 0,
+                }),
+            },
+            fixes: vec![SavedFix {
+                window_size: fixed,
+                region,
+                check: None,
+            }],
+            pin: PinDef::TopLeft,
+            size_changes: SizeChangesDef::Rarely,
+        };
+        let frame = |size: Size| {
+            let pixels = usize::try_from(size.width * size.height).expect("small");
+            Image::new(size, vec![0; pixels * 4]).expect("matching length")
+        };
+        let start = Instant::now();
+        let mut live = LiveCheck::new(value, drawn);
+        live.saw(unread, start);
+        live.saw(unread, start + SETTLE);
+        assert!(
+            live.region_of(&frame(unread)).is_err(),
+            "the size it is not read at says why"
+        );
+        // Settled where the fix reads, it is placed there, and the size it
+        // was not read at is only another size again.
+        live.saw(fixed, start + SETTLE);
+        live.saw(fixed, start + SETTLE * 2);
+        assert!(matches!(live.region_of(&frame(fixed)), Ok(Some(_))));
+        assert_eq!(
+            live.region_of(&frame(unread)).map(|read| read.is_some()),
+            Ok(false)
+        );
     }
 
     #[test]

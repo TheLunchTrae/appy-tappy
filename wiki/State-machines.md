@@ -1301,6 +1301,10 @@ the value there with `SavedValue::at`, once. A value placed where it reads
 stays placed there when it does not read at the settled size, which the
 owner keeps as `unread`: a read answers why while frames show that size,
 and reads again with the first frame of the size the value is placed at.
+Settling at a size where the value reads places it there and forgets
+`unread`. Each new trial places its value at the newest frame's size at
+once, so an edit that the page tries again on a size change reads there
+without waiting for the size to settle.
 Its state is `state`, a `CheckState`; `read`, the reading or the problem shown;
 `preview`, what saving an edit would do; `tried`, the number of the newest
 trial; and `inForce`, the number of the trial the owner reads with, or none.
