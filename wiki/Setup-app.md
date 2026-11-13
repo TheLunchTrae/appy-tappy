@@ -953,6 +953,14 @@ saved file is held to and takes nothing else from it:
 - A zip file with two entries of one name is refused, since which one is
   read would be the zip reader's choice.
 - A picture the file names and the zip file lacks is refused by name.
+- Each picture's size comes from its PNG header as it is read, and nothing
+  is decoded until all of them together hold no more pixels than
+  `LARGEST_PICTURE`, 7680 by 4320, the most one picture may hold
+  ([Saved pictures](Screen-regions.md#saved-pictures)). A picture's pixels
+  can cost thousands of times its file's bytes, so the 16 MB budget bounds
+  none of them. One whole window of the largest display is far more than a
+  definition's crops of a window hold. A picture without a PNG header, or
+  larger than AppyTappy reads, is refused by name.
 - Each picture takes the name the setup app gives it: `sample_name` for a
   reference's samples in order, and `state_image_name` for a value's states,
   with each fix's pictures in the set of its place among the fixes. The file's
@@ -966,7 +974,7 @@ saved file is held to and takes nothing else from it:
 
 `Shared::of` holds an application to the same rules, and `pack` reads back
 what it packed with `unpack` and refuses what that refuses, such as an
-application whose pictures hold more than an import reads. So an application
+application whose pictures hold more bytes or pixels than an import reads. So an application
 that AppyTappy exports is one it imports; a property test packs and unpacks
 generated definitions.
 

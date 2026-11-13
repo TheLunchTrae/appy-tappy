@@ -9,10 +9,11 @@
 //! holds runs until the user makes an automation of their own.
 //!
 //! An imported file is a trust boundary. [`Shared::unpack`] takes only what
-//! `app.json` names, reads no more than [`MAX_SHARED_BYTES`], and holds the
-//! file to the rules a saved file is held to: [`AppFile::parse`], then
-//! `saved::build` for each value and `saved::reader` for each reference, as
-//! the runtime reads them. Each picture takes the name the setup app gives
+//! `app.json` names, reads no more than [`MAX_SHARED_BYTES`], decodes no
+//! picture until every picture's header says that together they hold no
+//! more pixels than [`LARGEST_PICTURE`], and holds the file to the rules a
+//! saved file is held to: [`AppFile::parse`], then `saved::build` for each
+//! value and `saved::reader` for each reference, as the runtime reads them. Each picture takes the name the setup app gives
 //! it, whatever the file calls it, so no two values or references share a
 //! picture and a later save in the setup app replaces only its own.
 //! [`Shared::of`] holds an application to the same rules before it is
@@ -29,6 +30,7 @@ use appytappy_config::app_file::{
 };
 use appytappy_config::store::APP_FILE;
 use appytappy_sources::screen::saved::{self, SavedError};
+use appytappy_sources::screen::{Image, ImageError, LARGEST_PICTURE};
 use zip::ZipArchive;
 use zip::result::ZipError;
 
@@ -109,6 +111,11 @@ impl Shared {
     /// in the set of its place among the fixes. A file made elsewhere can
     /// name a picture anything a folder can hold, such as another value's
     /// next picture, which a later save would overwrite.
+    ///
+    /// Each picture's size is read from its header as it is taken, and none
+    /// is decoded unless all of them together hold no more pixels than
+    /// [`LARGEST_PICTURE`]: a picture's pixels cost many times the bytes of
+    /// a file that compresses them, so the file's own limit bounds none.
     fn new(
         mut file: AppFile,
         mut picture: impl FnMut(&str) -> Result<Vec<u8>, ShareError>,
@@ -118,8 +125,18 @@ impl Shared {
             from.clear();
         }
         let mut pictures = BTreeMap::new();
+        let mut pixels = 0_u64;
         let mut take = |image: &mut String, name: String| {
-            pictures.insert(name.clone(), picture(image)?);
+            let bytes = picture(image)?;
+            let size = Image::png_size(&bytes).map_err(|source| ShareError::Picture {
+                name: image.clone(),
+                source,
+            })?;
+            pixels = pixels.saturating_add(size.pixels());
+            if pixels > LARGEST_PICTURE.pixels() {
+                return Err(ShareError::TooManyPixels);
+            }
+            pictures.insert(name.clone(), bytes);
             *image = name;
             Ok(())
         };
@@ -238,6 +255,16 @@ pub(crate) enum ShareError {
     File(AppFileError),
     /// A picture `app.json` names is not with it.
     NoPicture(String),
+    /// A picture's header cannot be read, or says it is larger than
+    /// AppyTappy reads.
+    Picture {
+        /// The picture's file name.
+        name: String,
+        /// Why.
+        source: ImageError,
+    },
+    /// The pictures together hold more pixels than [`LARGEST_PICTURE`].
+    TooManyPixels,
     /// A picture or an entry cannot be read.
     Read(io::Error),
     /// The zip file cannot be made.
@@ -279,6 +306,21 @@ impl fmt::Display for ShareError {
             Self::NoAppFile => write!(formatter, "it holds no {APP_FILE}"),
             Self::File(error) => write!(formatter, "{error}"),
             Self::NoPicture(name) => write!(formatter, "the picture {name} is missing"),
+            Self::Picture {
+                name,
+                source: ImageError::TooLarge { size },
+            } => write!(
+                formatter,
+                "the picture {name} is {size}, larger than AppyTappy reads"
+            ),
+            Self::Picture { name, .. } => write!(
+                formatter,
+                "the picture {name} is not a PNG file AppyTappy can read"
+            ),
+            Self::TooManyPixels => write!(
+                formatter,
+                "its pictures together hold more pixels than one {LARGEST_PICTURE} picture"
+            ),
             Self::Read(error) => write!(formatter, "it cannot be read ({error})"),
             Self::Pack(error) => write!(formatter, "its file cannot be made ({error})"),
             Self::Value { name, source } => {
@@ -297,8 +339,13 @@ impl Error for ShareError {
             Self::Zip(error) => Some(error),
             Self::File(error) => Some(error),
             Self::Read(error) | Self::Pack(error) => Some(error),
+            Self::Picture { source, .. } => Some(source),
             Self::Value { source, .. } | Self::Reference { source, .. } => Some(source),
-            Self::TooLarge | Self::SameName | Self::NoAppFile | Self::NoPicture(_) => None,
+            Self::TooLarge
+            | Self::SameName
+            | Self::NoAppFile
+            | Self::NoPicture(_)
+            | Self::TooManyPixels => None,
         }
     }
 }
@@ -493,16 +540,30 @@ mod tests {
             refusal(&zip_of(&[(APP_FILE, json.as_bytes())])),
             "the picture status-1.png is missing"
         );
+        let unread = Shared::unpack(&zip_of(&[(APP_FILE, json.as_bytes()), (&image, b"text")]))
+            .expect_err("not a PNG file");
         assert_eq!(
-            refusal(&zip_of(&[(APP_FILE, json.as_bytes()), (&image, b"text")])),
+            unread.to_string(),
+            "the picture status-1.png is not a PNG file AppyTappy can read"
+        );
+        assert!(
+            unread.source().is_some_and(<dyn Error>::is::<ImageError>),
+            "the cause is kept"
+        );
+        assert_eq!(
+            refusal(&zip_of(&[
+                (APP_FILE, json.as_bytes()),
+                (&image, &header(2, 2))
+            ])),
             "the value Value status cannot be read: its picture status-1.png is not a PNG file \
-             it can read"
+             it can read",
+            "a header with no pixels after it"
         );
         let mut taught = app("Example App");
         taught.references.push(digits(1));
         let unread = Shared::unpack(&zip_of(&[
             (APP_FILE, taught.to_json().as_bytes()),
-            ("ref-digits-1.png", b"text"),
+            ("ref-digits-1.png", &header(2, 2)),
         ]))
         .expect_err("a reference no value reads with is read too");
         assert_eq!(
@@ -556,6 +617,102 @@ mod tests {
             (&second_image, &picture),
         ]);
         Shared::unpack(&one).expect("one such picture fits");
+    }
+
+    /// A PNG file whose header says its picture is `width` by `height`
+    /// pixels, of 8-bit gray, with no pixels after it.
+    fn header(width: u32, height: u32) -> Vec<u8> {
+        let chunk = |kind: &[u8; 4], data: &[u8]| {
+            let mut crc = flate2::Crc::new();
+            crc.update(kind);
+            crc.update(data);
+            let length = u32::try_from(data.len()).expect("short");
+            [
+                &length.to_be_bytes()[..],
+                kind,
+                data,
+                &crc.sum().to_be_bytes(),
+            ]
+            .concat()
+        };
+        let size = [width.to_be_bytes(), height.to_be_bytes()].concat();
+        [
+            &b"\x89PNG\r\n\x1a\n"[..],
+            &chunk(b"IHDR", &[&size[..], &[8, 0, 0, 0, 0]].concat()),
+            &chunk(b"IEND", &[]),
+        ]
+        .concat()
+    }
+
+    /// What importing state values with pictures of `sizes` says, whose
+    /// headers alone give their sizes.
+    fn refusal_of_sizes(sizes: &[(u32, u32)]) -> String {
+        let mut file = app("Example App");
+        let mut pictures = Vec::new();
+        for (number, &(width, height)) in sizes.iter().enumerate() {
+            let (value, image) = state_value(&format!("value_{number}"), width, height);
+            file.values.push(value);
+            pictures.push((image, header(width, height)));
+        }
+        let json = file.to_json();
+        let entries: Vec<(&str, &[u8])> = std::iter::once((APP_FILE, json.as_bytes()))
+            .chain(
+                pictures
+                    .iter()
+                    .map(|(name, bytes)| (name.as_str(), bytes.as_slice())),
+            )
+            .collect();
+        refusal(&zip_of(&entries))
+    }
+
+    const TOO_MANY_PIXELS: &str =
+        "its pictures together hold more pixels than one 7680x4320 picture";
+
+    #[test]
+    fn no_picture_is_decoded_past_the_pixels_one_picture_may_hold() {
+        // Two halves of the largest picture are read, and found to have no
+        // pixels after their headers.
+        assert_eq!(
+            refusal_of_sizes(&[(7680, 2160), (7680, 2160)]),
+            "the value Value value_0 cannot be read: its picture value_0-1.png is not a PNG \
+             file it can read"
+        );
+        // One row more is refused before either is decoded.
+        assert_eq!(
+            refusal_of_sizes(&[(7680, 2160), (7680, 2161)]),
+            TOO_MANY_PIXELS
+        );
+        // Each picture is held to what AppyTappy reads, whatever the total.
+        let wide = Shared::unpack(&{
+            let (mut file, image, _picture) = with_status();
+            file.values[0].screen.window_size.width = 8193;
+            file.values[0].screen.region.width = 8193;
+            zip_of(&[
+                (APP_FILE, file.to_json().as_bytes()),
+                (&image, &header(8193, 2)),
+            ])
+        })
+        .expect_err("wider than AppyTappy reads");
+        assert_eq!(
+            wide.to_string(),
+            "the picture status-1.png is 8193x2, larger than AppyTappy reads"
+        );
+        assert!(wide.source().is_some(), "the cause is kept");
+    }
+
+    proptest! {
+        #[test]
+        fn an_import_is_refused_when_its_pictures_hold_more_pixels_than_one_may(
+            sizes in prop::collection::vec((1_u32..=7680, 1_u32..=4320), 1..4),
+        ) {
+            let pixels = sizes.iter().try_fold(0_u64, |sum, &(width, height)| {
+                u64::from(width)
+                    .checked_mul(u64::from(height))
+                    .and_then(|pixels| sum.checked_add(pixels))
+            });
+            let over = pixels.expect("fits") > LARGEST_PICTURE.pixels();
+            prop_assert_eq!(refusal_of_sizes(&sizes) == TOO_MANY_PIXELS, over);
+        }
     }
 
     #[test]
