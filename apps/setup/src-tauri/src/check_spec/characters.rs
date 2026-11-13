@@ -120,6 +120,9 @@ pub(crate) struct Taught {
     pub(crate) reference: ReferenceDef,
     /// The pictures of its new samples.
     pub(crate) pictures: Pictures,
+    /// The pictures of the saved reference's samples, as the session had
+    /// them.
+    pub(crate) kept: Pictures,
     /// The reader `saved::reader` learns from the two.
     pub(crate) reader: DigitReader,
 }
@@ -194,12 +197,13 @@ impl CharactersSpec {
         let id = id
             .or_else(|| self.reference.as_ref().map(|saved| saved.id.as_str()))
             .unwrap_or(UNSAVED);
-        let (mut samples, kept, made): (Vec<SampleDef>, Pictures, OriginDef) =
-            saved.map_or_else(Default::default, |saved| {
+        let (mut samples, kept, made, saved_name): (Vec<SampleDef>, Pictures, OriginDef, _) = saved
+            .map_or_else(Default::default, |saved| {
                 (
                     saved.reference.samples,
                     saved.pictures,
                     saved.reference.origin,
+                    Some(saved.reference.name),
                 )
             });
         // A recording that teaches a reference made by hand makes it one a
@@ -266,12 +270,21 @@ impl CharactersSpec {
                 .map(|(_, png)| png.clone())
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
         })
-        .map_err(|error| sample_problem(error, &reference))?;
+        .map_err(|error| match sample_problem(error, &reference) {
+            // Only a saved sample can be missing, so the problem names the
+            // saved reference, whatever the one taught here is called.
+            SpecError::MissingSample { picture, .. } => SpecError::MissingSample {
+                reference: saved_name.unwrap_or_else(|| reference.name.clone()),
+                picture,
+            },
+            problem => problem,
+        })?;
         Ok(Taught {
             region,
             window_size,
             reference,
             pictures,
+            kept,
             reader,
         })
     }

@@ -526,13 +526,14 @@ mod tests {
             .ask(|owner| owner.save_reference(&reference("example", "Small", None)))
             .expect("saves a second reference");
         let png = std::fs::read(&picture).expect("the saved picture");
-        // Each ask says the picture is missing, in its own words.
+        // Each ask says the picture of the saved reference is missing.
         let missing = |answers: [Result<(), String>; 3]| {
-            answers.iter().all(|answer| {
-                answer
-                    .as_ref()
-                    .is_err_and(|error| error.contains("is missing its picture ref-digits-1.png"))
-            })
+            let error = Err::<(), _>(
+                "The reference Digits is missing its picture ref-digits-1.png. Remove the values \
+                 that read with it, then delete the reference and make it again."
+                    .to_owned(),
+            );
+            answers == [error.clone(), error.clone(), error]
         };
 
         // A reference that cannot be read whole is not kept: each ask reads
