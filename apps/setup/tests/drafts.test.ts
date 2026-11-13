@@ -72,7 +72,6 @@ const EMPTY_SETUP: CaptureSetup = {
   mayMove: false,
   editing: null,
   draft: EMPTY_DRAFT,
-  recordedShots: [],
 };
 
 function def(kind: DraftKind, state: unknown, changes: string | null = null, app: string | null = null): DraftDef {
@@ -163,7 +162,6 @@ describe('what a draft keeps', () => {
         expects: ['1', '2', '%'],
       },
       draft,
-      recordedShots: [2],
     };
     const made: Readonly<Record<string, unknown>> = { ...setup };
     for (const [key, start] of Object.entries(EMPTY_SETUP)) {
@@ -178,7 +176,7 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(2);
+    expect(DRAFT_FORMAT).toBe(3);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -208,7 +206,7 @@ describe('the shape a draft keeps', () => {
       'target',
     ]);
     const stored = storeSetup(EMPTY_SETUP);
-    expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'mayMove', 'recordedShots', 'step', 'valueName']);
+    expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'mayMove', 'step', 'valueName']);
     expect(Object.keys(stored.draft).sort()).toEqual([
       'boxes',
       'characters',

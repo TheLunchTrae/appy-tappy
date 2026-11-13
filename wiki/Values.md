@@ -770,9 +770,6 @@ it by hand on screenshots you took:
 A value you edit keeps what it says while its region stays where it is.
 Draw the region again and the value says how you make it now.
 
-A screenshot that a recording kept counts as one you took once it comes back
-from a [draft](Drafts.md).
-
 ## Delete a value
 
 Select **Delete** next to a value, then confirm. A value that an automation

@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ReferenceDef, ReferenceRef, ReferenceTrial, TrialSpec, ValueDef } from '../lib/bindings.ts';
+import type { DraftShot, ReferenceDef, ReferenceRef, ReferenceTrial, TrialSpec, ValueDef } from '../lib/bindings.ts';
 import {
   editValue,
   errorText,
@@ -123,10 +123,10 @@ function draftName(mode: Exclude<CaptureMode, { readonly kind: 'edit' }>, setup:
 /** What came back from the draft the capture finishes when its window was picked. */
 export interface Restored {
   /**
-   * Which of the draft's screenshots are this session's again, by index, or null once the window changed, which
-   * starts the capture again without what the draft kept.
+   * Which of the draft's screenshots are this session's again, each with whether a recording of looks kept it, or null
+   * once the window changed, which starts the capture again without what the draft kept.
    */
-  readonly screenshots: readonly number[] | null;
+  readonly screenshots: readonly DraftShot[] | null;
 }
 
 /** What the capture starts with: what the draft `resumed` kept, when `restored` brought it back, or what `mode` makes. */
@@ -148,14 +148,13 @@ function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restor
         }
       : null;
   if (mode.kind === 'edit') {
-    return { step: 'where', editing, recordedShots: [], ...editStart(mode.value) };
+    return { step: 'where', editing, ...editStart(mode.value) };
   }
   return {
     valueName: '',
     step: 'where',
     mayMove: false,
     editing,
-    recordedShots: [],
     draft:
       mode.kind === 'fix'
         ? fixDraft(mode.value.screen.check)
@@ -200,14 +199,10 @@ export function Capture({
   onDraft,
 }: Props) {
   // What the capture opens with: what its draft kept, or else what its mode makes.
-  const [opening] = useState(() => {
-    const setup = startSetup(mode, resumed, restored);
-    const recorded = new Set(setup.recordedShots);
-    return {
-      setup,
-      shots: (restored?.screenshots ?? []).map((index) => ({ index, recorded: recorded.has(index) })),
-    };
-  });
+  const [opening] = useState(() => ({
+    setup: startSetup(mode, resumed, restored),
+    shots: restored?.screenshots ?? [],
+  }));
   // What the capture shows before the user does anything, which leaving it loses nothing of. A fix and an edit
   // open on a screenshot the capture takes itself, and start from there.
   const [start, setStart] = useState(() => ({
@@ -267,7 +262,6 @@ export function Capture({
     mayMove,
     editing,
     draft,
-    recordedShots: shots.filter((shot) => shot.recorded).map((shot) => shot.index),
   };
   // The application's references that have a draft of changes. Drafts change only in flows, and this is the open
   // one, so reading them once is enough; when they cannot be read, every reference can be edited.

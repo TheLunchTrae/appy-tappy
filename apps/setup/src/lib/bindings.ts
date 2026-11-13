@@ -746,6 +746,12 @@ state: unknown, }>;
 export type DraftKind = DeepReadonly<"automation" | "application" | "value" | "fix" | "reference">;
 
 /**
+ * A screenshot a draft keeps: the index it had in its capture, and whether
+ * a recording of looks kept it there rather than the user taking it.
+ */
+export type DraftShot = DeepReadonly<{ index: number, recorded: boolean, }>;
+
+/**
  * A saved draft, as the lists show it.
  */
 export type DraftSummary = DeepReadonly<{ id: string,
@@ -1677,7 +1683,9 @@ app: string,
 characters: CharactersSpec,
 /**
  * The characters the number it is made for reads of it, or `None`
- * for every character it is taught, as [`CheckDef::Number`] has them.
+ * for every character it is taught, as
+ * [`CheckDef::Number`](appytappy_config::app_file::CheckDef::Number)
+ * has them.
  */
 reads: string | null,
 /**

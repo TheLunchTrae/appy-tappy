@@ -1,13 +1,15 @@
 //! The session's screenshots: whole frames of the picked window, kept in
 //! memory from when each is taken or recorded until it is removed or the
 //! capture ends. Only a draft writes them to disk, in its own folder
-//! ([`crate::drafts`]). The session remembers which of them a recording of
-//! looks kept, so a value set up on one says that a recording made it. A
-//! draft does not keep that: a restored screenshot counts as taken by hand.
+//! ([`crate::drafts`]), which keeps which of them a recording of looks kept,
+//! so a value or reference set up on one says that a recording made it,
+//! whether it is finished now or from the draft.
 
 use std::collections::BTreeSet;
 
 use appytappy_sources::screen::Image;
+
+use crate::drafts::DraftShot;
 
 /// Where a check the UI describes finds the screenshots it names by index.
 pub(crate) trait Shots {
@@ -68,28 +70,41 @@ impl Screenshots {
     }
 
     /// The screenshots a draft kept, each under the index it had when the
-    /// draft was saved; the indexes between them are empty, as after a
-    /// removal.
-    pub(crate) fn restored(kept: Vec<(usize, Image)>) -> Self {
-        let mut slots = Vec::new();
-        for (index, image) in kept {
-            if slots.len() <= index {
-                slots.resize_with(index.saturating_add(1), || None);
+    /// draft was saved and marked recorded if it was then; the indexes
+    /// between them are empty, as after a removal.
+    pub(crate) fn restored(kept: Vec<(DraftShot, Image)>) -> Self {
+        let mut restored = Self::new();
+        for (shot, image) in kept {
+            if restored.slots.len() <= shot.index {
+                restored
+                    .slots
+                    .resize_with(shot.index.saturating_add(1), || None);
             }
-            if let Some(slot) = slots.get_mut(index) {
+            if let Some(slot) = restored.slots.get_mut(shot.index) {
                 *slot = Some(image);
             }
+            if shot.recorded {
+                restored.recorded.insert(shot.index);
+            }
         }
-        Self {
-            slots,
-            recorded: BTreeSet::new(),
-        }
+        restored
     }
 
     /// Every index given out so far, in order: the screenshot kept under
     /// it, or `None` for one that was removed.
     pub(crate) fn slots(&self) -> &[Option<Image>] {
         &self.slots
+    }
+
+    /// The screenshots still kept, each with what a draft keeps of it.
+    pub(crate) fn kept(&self) -> impl Iterator<Item = (DraftShot, &Image)> {
+        self.slots.iter().enumerate().filter_map(|(index, slot)| {
+            let shot = DraftShot {
+                index,
+                recorded: self.recorded.contains(&index),
+            };
+            slot.as_ref().map(|image| (shot, image))
+        })
     }
 
     /// The screenshots still kept, in the order they were kept.
@@ -160,13 +175,27 @@ mod tests {
     }
 
     #[test]
-    fn restored_screenshots_keep_their_indexes() {
-        let mut screenshots = Screenshots::restored(vec![(2, pixel(3)), (0, pixel(1))]);
+    fn restored_screenshots_keep_their_indexes_and_marks() {
+        let shot = |index, recorded| DraftShot { index, recorded };
+        let mut screenshots =
+            Screenshots::restored(vec![(shot(2, true), pixel(3)), (shot(0, false), pixel(1))]);
         assert_eq!(screenshots.get(0), Some(&pixel(1)));
         assert_eq!(screenshots.get(1), None);
         assert_eq!(screenshots.get(2), Some(&pixel(3)));
+        assert!(!screenshots.is_recorded(0));
+        assert!(screenshots.is_recorded(2), "a recording kept it");
         assert_eq!(screenshots.push(pixel(4)), 3, "the next takes a new index");
-        let packed = Screenshots::restored(vec![(0, pixel(1)), (1, pixel(2))]);
+        assert_eq!(
+            screenshots.kept().collect::<Vec<_>>(),
+            [
+                (shot(0, false), &pixel(1)),
+                (shot(2, true), &pixel(3)),
+                (shot(3, false), &pixel(4)),
+            ],
+            "a draft keeps each with its mark, and skips the empty index"
+        );
+        let packed =
+            Screenshots::restored(vec![(shot(0, false), pixel(1)), (shot(1, false), pixel(2))]);
         assert_eq!(packed.slots(), [Some(pixel(1)), Some(pixel(2))]);
         assert_eq!(Screenshots::restored(Vec::new()).slots(), []);
     }
