@@ -59,7 +59,7 @@ function KeepAll({
     }
   }, [state]);
   return (
-    <label className="check">
+    <label className="select-all">
       <input
         ref={box}
         type="checkbox"
