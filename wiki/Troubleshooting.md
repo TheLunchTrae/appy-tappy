@@ -56,6 +56,10 @@ after a wait, which starts at 1 second and gets longer, up to 30 seconds,
 each time it happens again soon after. Its automations stay as
 they were meanwhile. Include both log lines when you report the problem.
 
+If the log says that reading a frame panicked, AppyTappy has a bug as well.
+It reads the application's values again after the same kind of wait. Include
+the log line when you report the problem.
+
 ## A number reads in setup but the automation does nothing
 
 What you see while you make a reference isn't all the reference's reading.
