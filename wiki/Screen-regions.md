@@ -8,7 +8,8 @@ information, and choose a check. The code lives in `appytappy-sources`:
 capture packs the regions it copies, `screen/placed.rs` values placed at
 one window size and what a frame means to their capture,
 `screen/capture.rs` the capture trait
-and where a window's content lies in its frame,
+and where a window's content lies in its frame, `screen/frames.rs` the
+capture's frame loop,
 `screen/check.rs` and `screen/digits.rs` the checks, `screen/detect.rs` the
 proposal of a bar's colors, `screen/mask.rs` and
 `screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
@@ -445,7 +446,12 @@ definition, with an override for one binding, belongs to
 
 Capture is the one part that needs the operating system, so it sits behind the
 `Capture` trait. Windows Graphics Capture, the API screen recorders use, is the
-only implementation. The system pushes a frame when the window's content
+only implementation. Its thread runs `run_frames`
+(`crates/sources/src/screen/frames.rs`), which decides when a frame is read,
+which one, and what ends the capture, as the
+[capture frame loop](State-machines.md#capture-frame-loop) describes; the
+Windows code (`crates/sources/src/win/capture.rs`) only makes the system calls
+the loop asks for, as its `FrameSource`. The system pushes a frame when the window's content
 changes, so a window that does not change costs nothing. The capture also asks
 the system for no more frames than its handler reads: after a read that waits 64
 ms or more, it sets the session's minimum update interval to that wait, never
@@ -467,8 +473,7 @@ thread unheard (`run_capture` in `crates/sources/src/screen/capture.rs`). A
 closed window and a lost device stop frames rather than fail them, so every
 `HEALTH_CHECK`, 2 seconds, whatever arrives meanwhile, the capture checks that
 its window is still there and still belongs to the process that owned it at
-the start, and that its device still works
-(`crates/sources/src/win/capture.rs`). It does not use the capture item's own
+the start, and that its device still works. It does not use the capture item's own
 Closed event, which would say sooner that the window closed: registering a
 handler for it left a thread handle, events and thread pool waits open after
 every capture, even once the handler was removed.

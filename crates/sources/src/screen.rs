@@ -22,6 +22,7 @@ pub mod settle;
 pub mod workings;
 
 mod capture;
+mod frames;
 mod image;
 mod layout;
 mod placed;
@@ -31,6 +32,7 @@ pub use capture::{
     Capture, CaptureSession, Crop, Frame, FrameHandler, NoSession, content, content_on_screen,
     grab, in_frame, run_capture,
 };
+pub use frames::{FrameSource, Handler, NO_MORE_FRAMES, Wake, composed_ago, run_frames};
 pub use image::{FrameBuffer, Image, ImageError, LARGEST_PICTURE, OutsideWindow, Region, Size};
 pub use layout::{Layout, Placement};
 pub use placed::{FrameMeaning, Placed};
