@@ -55,11 +55,10 @@ impl ClickSearch {
         wanted
             .fits_picture(size.width, size.height)
             .map_err(ClickPictureError::Misfit)?;
-        let area = wanted.search;
         // `fits_picture` has already refused an empty area, since no picture
         // fits one, so this fallback is only defensive.
-        let area = Region::new(area.x, area.y, area.width, area.height)
-            .ok_or(ClickPictureError::Misfit(InvalidClick::Area))?;
+        let area = Region::try_from(wanted.search)
+            .map_err(|_empty| ClickPictureError::Misfit(InvalidClick::Area))?;
         // A decoded picture's mask has the picture's size.
         let search = PictureSearch::new(picture, mask.as_ref(), wanted.tolerance)
             .map_err(|error| ClickPictureError::Read(ImageError::Mask(error)))?;
@@ -137,7 +136,7 @@ impl Error for ClickPictureError {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::click::Area;
+    use appytappy_config::app_file::RegionDef;
 
     use super::*;
 
@@ -176,12 +175,12 @@ mod tests {
             .unwrap()
     }
 
-    fn wanted(search: Area, press: (u32, u32)) -> ClickPicture {
+    fn wanted(search: RegionDef, press: (u32, u32)) -> ClickPicture {
         ClickPicture::new("patch-1.png", (20, 10), search, press, 0).unwrap()
     }
 
-    fn area(x: u32, y: u32, width: u32, height: u32) -> Area {
-        Area {
+    fn area(x: u32, y: u32, width: u32, height: u32) -> RegionDef {
+        RegionDef {
             x,
             y,
             width,

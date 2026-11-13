@@ -146,8 +146,9 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Instant;
 
+    use appytappy_config::app_file::RegionDef;
     use appytappy_config::app_file::{BuildDef, FallbackDef, MustMatchDef, WindowDef};
-    use appytappy_config::click::{Area, ClickPicture, Corner};
+    use appytappy_config::click::{ClickPicture, Corner};
 
     use super::*;
     use crate::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Region};
@@ -314,13 +315,13 @@ mod tests {
 
     /// The search for [`patch_png`] in `search` of a window `window` in
     /// size, pressed at `press`.
-    fn picture(window: (u32, u32), search: Area, press: (u32, u32)) -> ClickSearch {
+    fn picture(window: (u32, u32), search: RegionDef, press: (u32, u32)) -> ClickSearch {
         let wanted = ClickPicture::new("patch-1.png", window, search, press, 0).unwrap();
         ClickSearch::new(&wanted, &patch_png()).unwrap()
     }
 
-    fn area(x: u32, y: u32, width: u32, height: u32) -> Area {
-        Area {
+    fn area(x: u32, y: u32, width: u32, height: u32) -> RegionDef {
+        RegionDef {
             x,
             y,
             width,
