@@ -121,7 +121,10 @@ screenshot of the window at the size you play at.
 or record more readings, so that every digit the number can show appears on at
 least one of them, and check the characters' color.
 [**Characters still missing**](References.md#choose-what-it-needs) lists what
-is left to teach. Some text the **Number**
+is left to teach. If it reads a digit as a letter that looks like it, such as
+`0` as `O`, set the value's
+[**Characters it reads**](Values.md#characters-a-number-reads) to the
+characters it shows. Some text the **Number**
 check cannot read; [Checks](Values.md#checks) says what it can't, and what to
 use instead.
 

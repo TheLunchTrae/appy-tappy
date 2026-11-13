@@ -1,0 +1,63 @@
+import { describe, expect, test } from 'bun:test';
+
+import { readChoice, readChoices, savedCharacters, withCharacter, withReadChoice } from '../src/lib/charactersRead.ts';
+import { checkSummary } from '../src/lib/describe.ts';
+
+const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+/** A reference that knows some digits, two symbols, and two letters. */
+const known = ['0', '1', '2', '%', '.', 'L', 'v'];
+
+describe('the characters a number reads', () => {
+  test('a preset sets them, and reads itself back from them', () => {
+    expect(withReadChoice('all', known, ['1'])).toBeNull();
+    expect(readChoice(null, known)).toBe('all');
+    // All ten digits, learned or not, so a digit learned later is read too.
+    expect(withReadChoice('digits', known, null)).toEqual(digits);
+    expect(readChoice(digits, known)).toBe('digits');
+    expect(readChoice(digits.toReversed(), known)).toBe('digits');
+    // The symbols the reference knows, and none of its letters.
+    expect(withReadChoice('digitsAndSymbols', known, null)).toEqual([...digits, '%', '.']);
+    expect(readChoice([...digits, '%', '.'], known)).toBe('digitsAndSymbols');
+    expect(readChoice([...digits, '%'], known)).toBe('choose');
+    expect(readChoice([...digits, '%', 'L'], known)).toBe('choose');
+    expect(readChoice([], known)).toBe('choose');
+  });
+
+  test('choosing starts from what is read so far', () => {
+    expect(withReadChoice('choose', known, null)).toEqual(known);
+    expect(withReadChoice('choose', known, digits)).toEqual(digits);
+  });
+
+  test('digits and symbols is offered only for a reference that knows a symbol', () => {
+    expect(readChoices(known)).toEqual(['all', 'digits', 'digitsAndSymbols', 'choose']);
+    expect(readChoices(['1', 'L'])).toEqual(['all', 'digits', 'choose']);
+    // Without a symbol its set would be the digits, which Digits names.
+    expect(readChoice(digits, ['1', 'L'])).toBe('digits');
+  });
+
+  test('a character turns on in order, and off', () => {
+    expect(withCharacter(['%', '2'], '1', true)).toEqual(['1', '2', '%']);
+    expect(withCharacter(['1', '2', '%'], '2', true)).toEqual(['1', '2', '%']);
+    expect(withCharacter(['1', '2', '%'], '2', false)).toEqual(['1', '%']);
+  });
+
+  test('a saved check names them once each, or names none', () => {
+    expect(savedCharacters(undefined)).toBeNull();
+    expect(savedCharacters('% 1 01')).toEqual(['0', '1', '%']);
+  });
+
+  test("show in a saved check's summary", () => {
+    const reference = {
+      id: 'percent',
+      name: 'Percent font',
+      ink: { red: 255, green: 255, blue: 255 },
+      tolerance: 40,
+      samples: [],
+    };
+    const check = { kind: 'number', reference: 'percent', whole: true } as const;
+    expect(checkSummary(check, [reference]).name).toBe('Number, read with Percent font, whole only');
+    expect(checkSummary({ ...check, characters: '0123456789%' }, [reference]).name).toBe(
+      'Number, read with Percent font, whole only, reading 0123456789%',
+    );
+  });
+});

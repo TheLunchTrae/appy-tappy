@@ -815,6 +815,7 @@ mod tests {
         let count = CheckDef::Number {
             reference: "digits".to_owned(),
             whole: true,
+            characters: None,
         };
         let mut example = app("Example App", vec![value("count", count)]);
         example.references.push(ReferenceDef {

@@ -368,6 +368,7 @@ fn a_number_reads_with_its_saved_reference() {
         region: left(),
         reference: digits_ref(),
         whole,
+        characters: None,
     };
     let built = build(&spec(true), session(&[], None)).expect("a saved reference");
     let red_square = screenshot().crop(built.region).expect("inside");
@@ -387,6 +388,7 @@ fn a_number_reads_with_its_saved_reference() {
         CheckDef::Number {
             reference: "digits".to_owned(),
             whole: true,
+            characters: None,
         }
     );
     assert!(
@@ -404,6 +406,7 @@ fn a_number_reads_with_its_saved_reference() {
             id: "gone".to_owned(),
         },
         whole: false,
+        characters: None,
     };
     let error = build(&gone, session(&[], None)).expect_err("not saved");
     assert_eq!(
@@ -411,6 +414,42 @@ fn a_number_reads_with_its_saved_reference() {
         SpecError::Reference("That reference is not saved.".to_owned())
     );
     assert_eq!(error.to_string(), "That reference is not saved.");
+}
+
+#[test]
+fn a_number_reads_and_saves_the_characters_it_is_told_to() {
+    let reading = |characters: &str| CheckSpec::Number {
+        region: left(),
+        reference: digits_ref(),
+        whole: false,
+        characters: Some(characters.to_owned()),
+    };
+    let built = build(&reading("1%"), session(&[], None)).expect("it knows the 1");
+    let red_square = screenshot().crop(built.region).expect("inside");
+    assert_eq!(
+        built.check.read(&red_square),
+        Ok(Value::Number(Number::new(1.0).expect("finite")))
+    );
+    assert_eq!(
+        to_saved(&reading("1%"), session(&[], None), "app", "progress").map(|saved| saved.check),
+        Ok(CheckDef::Number {
+            reference: "digits".to_owned(),
+            whole: false,
+            characters: Some("1%".to_owned()),
+        })
+    );
+    // Nothing is saved that would read nothing.
+    for none in ["2", ""] {
+        assert_eq!(
+            to_saved(&reading(none), session(&[], None), "app", "progress"),
+            Err(SpecError::NoCharacters),
+            "{none:?}"
+        );
+    }
+    assert_eq!(
+        SpecError::NoCharacters.to_string(),
+        "The reference knows none of the characters this value reads. Choose characters it knows."
+    );
 }
 
 #[test]
@@ -631,6 +670,7 @@ fn the_ui_describes_checks_in_camel_case_json() {
             region: left(),
             reference: digits_ref(),
             whole: true,
+            characters: None,
         }
     );
 }

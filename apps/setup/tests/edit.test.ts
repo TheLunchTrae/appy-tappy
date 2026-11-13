@@ -152,6 +152,13 @@ describe('buildEdit', () => {
     expect(edit(editDraft(number.screen), number)).toMatchObject({
       spec: { drawing: { kind: 'kept', check: { kind: 'number', reference: 'percent', whole: true } } },
     });
+    // The characters a number reads are part of its check, saved with it and left out while it reads them all.
+    const digits = value({ kind: 'number', reference: 'percent', whole: true, characters: '0123456789' });
+    expect(edit(editDraft(digits.screen), digits)).toMatchObject({
+      spec: { drawing: { kind: 'kept', check: digits.screen.check } },
+    });
+    const all = edit({ ...editDraft(digits.screen), characters: null }, digits);
+    expect(all.ok && all.spec.drawing).toEqual({ kind: 'kept', check: number.screen.check });
     const color = { ...withKind(editDraft(bar.screen), 'color'), color: red };
     expect(edit(color, bar)).toMatchObject({
       spec: { drawing: { kind: 'kept', check: { kind: 'color', color: red, tolerance: DEFAULT_TOLERANCE.color } } },

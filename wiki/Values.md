@@ -233,7 +233,10 @@ instant can then be missed.
   after **Missing**; it still reads the characters it knows.
   **Record readings** teaches the picked one, or a new one, from
   what the region shows while you use the application, as
-  [Record screenshots](#record-screenshots) describes. Turn on
+  [Record screenshots](#record-screenshots) describes.
+  **Characters it reads** says which of the reference's characters the value
+  reads, as [Characters a number reads](#characters-a-number-reads)
+  describes. Turn on
   **Whole number only** to ignore every digit after the
   decimal point, so `87.5%` reads as 87. The reference still has to know the
   point, so teach it on a screenshot that shows one.
@@ -272,6 +275,42 @@ instant can then be missed.
 
 State names are up to 32 characters, with no space at either end. Two states
 cannot share a name, ignoring case, and none can be named `none`.
+
+### Characters a number reads
+
+A reference can know a whole font: digits, signs, and letters. A value that
+shows only some of them reads better when it reads only those, since it can
+then no longer take one character for a lookalike, such as a `0` for an `O`
+or a `2` for a `Z`. Under the reference you picked, **Characters it reads**
+chooses them:
+
+- **All it knows** reads every character the reference knows, and any it
+  learns later. A new value starts with it.
+- **Digits** reads `0` to `9` and nothing else. A digit the reference learns
+  later is read too.
+- **Digits and symbols** reads the digits and each character the reference
+  knows that is neither a digit nor a letter, such as `%`, `.`, `,`, `:`,
+  `/`, `-`, and `+`. It shows while the reference knows such a character. A
+  symbol the reference learns later is not added: choose
+  **Digits and symbols** again to read it.
+- **Choose…** shows each character the reference knows with a box. Turn on
+  the ones the value shows, at least one.
+
+Under the list, the value shows the characters it reads. The choice belongs
+to the value. The reference keeps every character it knows, so another value
+can read more of the same reference, and the References page still lists them
+all.
+
+The value reads as if its reference knew nothing else. A character it does
+not read counts as one the reference has not learned, so the value reads
+nothing while its region shows one before or inside the number. Choose
+**Digits** for a region that shows only a number, and add what else it shows,
+such as the `L`, `v`, and `.` of `Lv.5`. Text after the number, such as the
+`HP` in `37 HP`, needs no characters. To read `87.5%`, the value reads the
+`.` as well as the digits, with **Whole number only** on too.
+
+A [fix](#fix-a-value-at-one-size) that reads with its own reference reads the
+same characters of that reference.
 
 ### Show matching pixels
 

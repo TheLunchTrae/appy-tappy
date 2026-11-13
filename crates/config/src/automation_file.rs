@@ -837,6 +837,7 @@ mod tests {
                     CheckDef::Number {
                         reference: "percent".to_owned(),
                         whole: false,
+                        characters: None,
                     },
                 ),
                 value(
