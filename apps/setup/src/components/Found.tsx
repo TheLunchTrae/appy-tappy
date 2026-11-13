@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-import { type FoundRow, keptState, rereadable } from '../lib/found.ts';
+import { type FoundRow, keptState, listed } from '../lib/found.ts';
 import { FIND_LIKE_HINT, FOUND_HINT, REREAD_HINT } from '../lib/hints.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { background } from '../lib/repeat.ts';
@@ -67,7 +67,8 @@ function KeepAll({
 export function FoundPanel({ finder, findBlocked, onFind }: PanelProps) {
   const { view, blocked: addBlocked, error, searching, flags, crops } = finder;
   // Finds that show characters the reference does not need are left out of the list.
-  const rows = finder.rows.filter((row) => row.fits);
+  const rows = listed(finder.rows);
+  const reread = finder.rereadOffer;
   const unlisted = finder.rows.length - rows.length;
   const title = useRef<HTMLHeadingElement>(null);
   const find = useRef<HTMLButtonElement>(null);
@@ -128,7 +129,7 @@ export function FoundPanel({ finder, findBlocked, onFind }: PanelProps) {
   const skipped = [
     unlisted === 0
       ? null
-      : `Skipped ${plural(unlisted, 'find that shows', 'finds that show')} characters the reference does not need.`,
+      : `Skipped ${plural(unlisted, 'find that shows', 'finds that show')} characters the reference does not need. A find you ticked before its text was read is skipped the same way.`,
     view.otherSizes === 0 ? null : `Skipped ${plural(view.otherSizes, 'run', 'runs')} of other sizes.`,
     view.more === 0 ? null : `${plural(view.more, 'more was', 'more were')} left out; add these, then find again.`,
   ].filter((part) => part !== null);
@@ -166,13 +167,18 @@ export function FoundPanel({ finder, findBlocked, onFind }: PanelProps) {
                 Deselect flagged
               </button>
             )}
-            {rereadable(rows, flags).length === 0 ? null : (
+            {reread === null ? null : (
               <span className="with-hint">
                 <button
                   type="button"
                   className="btn small"
-                  aria-describedby="hint-reread"
+                  // Not disabled while it waits, so it keeps focus and a screen reader reads why.
+                  aria-disabled={reread.blocked !== null}
+                  aria-describedby={reread.blocked === null ? 'hint-reread' : 'hint-reread reread-blocked'}
                   onClick={() => {
+                    if (reread.blocked !== null) {
+                      return;
+                    }
                     background(finder.reread());
                     title.current?.focus();
                   }}
@@ -185,6 +191,11 @@ export function FoundPanel({ finder, findBlocked, onFind }: PanelProps) {
               </span>
             )}
           </div>
+          {reread === null || reread.blocked === null ? null : (
+            <p id="reread-blocked" className="note">
+              {reread.blocked}
+            </p>
+          )}
           <ul aria-label="Found text">
             {rows.map((row) => {
               const number = row.index + 1;

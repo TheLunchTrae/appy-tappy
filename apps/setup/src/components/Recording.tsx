@@ -358,7 +358,7 @@ export function ReviewSheet(props: SheetProps) {
           </h2>
           <p>
             Check each reading&apos;s text and fix any the reader got wrong. Kept readings teach the number check its
-            characters, like labeled screenshots. A reading is kept for the characters no other kept reading shows.
+            characters, as the boxes you draw do. A reading is kept for the characters no other kept reading shows.
           </p>
           {view.readings.length === 0 ? null : <Discovered found={found} needs={needs} ink={view.settings.ink} />}
           {/* Keep is described by why it waits, or else by what keeping now would leave untaught. */}

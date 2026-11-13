@@ -72,7 +72,7 @@ This page covers what the user guide leaves out.
   one that names a screenshot of another session. The draft keeps
   the screenshot its region was drawn on, and a value saves that screenshot's
   window size. The owner refuses a check or a save that cuts the region from
-  a labeled screenshot, a recording, or a compared screenshot of another
+  a screenshot a box is on, a recording, or a compared screenshot of another
   window size, and names which (`check_spec::drawn_size`). The screenshot
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
@@ -489,10 +489,11 @@ conflict such as one shape typed as `l` in one reading and `1` in another is
 flagged on the reading that causes it. **Record more** goes on with the stopped
 recording only when the region, color, tolerance, and window size are the
 ones it was recorded with, and otherwise says so rather than start over. The
-UI then offers **Use its settings**, which puts the recording's region, color,
-and tolerance back on the draft. The region stays on the screenshot it was
-drawn on when that one has the recording's window size, and otherwise moves to
-the newest screenshot of that size. Kept readings are lost only on a discard,
+UI then offers **Use its settings**, which puts the recording's color and
+tolerance back on the draft. A reference taught by itself reads at its first
+box, so its recorded box also goes back where the recording read
+([Recording](State-machines.md#recording)); the value's region is never
+changed from the reference editor. Kept readings are lost only on a discard,
 on **Change window**, or when the flow is left; a closed window keeps them
 for review. **Back** and Escape leave
 review without keeping, and review's edits stay for the next one.
@@ -533,7 +534,9 @@ draft's own boxes the way review learns recorded readings. **Reread**
 (`reread_found`) cuts the named finds' ink again from the pixels the search
 kept, with the color and tolerance the draft has now, and sends it to the
 text reader; the reader is deterministic, so only a changed color or
-tolerance changes what it reads. Added finds become boxes of the draft
+tolerance changes what it reads. Each find's view carries the color and
+tolerance it was last read with, and the UI reads a find again only when
+the draft's differ or its read failed (`rereadOffer`). Added finds become boxes of the draft
 (`lib/boxes.ts`), each a label with a `region` of its own on its screenshot,
 which the reference cuts instead of the spec's region, so they save as
 samples like any box the user drew.

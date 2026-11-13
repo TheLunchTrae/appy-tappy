@@ -108,7 +108,7 @@ impl<H: Host> Owner<H> {
             },
             Some(Recorder::Readings(recording)) if more => {
                 return Err(format!(
-                    "Recording more needs the settings it was recorded with: the same region, \
+                    "Recording more needs the settings it was recorded with: the same place, \
                      the characters' color, a tolerance of {}, and a screenshot of the same \
                      window size. Use its settings, or discard the recording to start a new one.",
                     recording.view(now).settings.tolerance
@@ -445,7 +445,7 @@ mod tests {
         assert_eq!(
             harness.ask(start_recording(200, true)),
             Err(
-                "Recording more needs the settings it was recorded with: the same region, the \
+                "Recording more needs the settings it was recorded with: the same place, the \
                  characters' color, a tolerance of 0, and a screenshot of the same window size. \
                  Use its settings, or discard the recording to start a new one."
                     .to_owned()

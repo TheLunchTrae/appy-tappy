@@ -1,10 +1,10 @@
 // Finding more text like a box a reference learns from, and adding what the user confirms to the draft as boxes.
 
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FoundView, ReferenceRef } from './bindings.ts';
 import { errorText, findLike, forgetFound, foundPicture, foundProblems, foundState, rereadFound } from './api.ts';
-import { type Box, boxesOn, withBoxes } from './boxes.ts';
+import { type Box, type NewBox, boxesOn } from './boxes.ts';
 import { type Draft, taughtSpec } from './check.ts';
 import {
   type FoundEntry,
@@ -16,7 +16,7 @@ import {
   foundRows,
   keepAll,
   keptFound,
-  rereadable,
+  rereadOffer,
   rowFlags,
   withoutFlagged,
 } from './found.ts';
@@ -51,8 +51,13 @@ export interface Finder {
   /** Leaves out every ticked find that is flagged. */
   readonly leaveOutFlagged: () => void;
   /**
+   * Whether Reread is offered, and with `blocked` why it waits: every find it would read again was last read with
+   * the characters' color and tolerance the draft has now.
+   */
+  readonly rereadOffer: { readonly blocked: string | null } | null;
+  /**
    * Has the text reader read again, with the characters' color as the draft has it now, the finds it could not read
-   * and the flagged ones whose text is its guess. Ticks and typed text stay.
+   * and the flagged ones whose text is its guess and was read with another. Ticks and typed text stay.
    */
   readonly reread: () => Promise<void>;
   /** Adds the kept finds to the draft and forgets the search. */
@@ -63,13 +68,13 @@ export interface Finder {
 
 /**
  * The search for text like a box of the reference `draft` teaches, which adds to `reference`, if any: its finds with
- * the user's edits, their pictures, and which ones the reference cannot learn. `learned` is every text the reference
- * learns from already, and `needs` the characters it needs, which the finds listed may only show. Leaving the
- * component that uses it forgets the search.
+ * the user's edits, their pictures, and which ones the reference cannot learn. `addBoxes` adds the kept finds to the
+ * draft as boxes. `learned` is every text the reference learns from already, and `needs` the characters it needs,
+ * which the finds listed may only show. Leaving the component that uses it forgets the search.
  */
 export function useFound(
   draft: Draft,
-  setDraft: Dispatch<SetStateAction<Draft>>,
+  addBoxes: (added: readonly NewBox[]) => void,
   reference: ReferenceRef | null,
   learned: readonly string[],
   needs: readonly string[],
@@ -176,6 +181,8 @@ export function useFound(
   const checked = key === '' || problems.key === key;
   const flags = rowFlags(rows, checked ? problems.found : new Map());
 
+  const offer = rereadOffer(rows, flags, draft.ink, draft.tolerance);
+
   const forget = (): void => {
     turn.current += 1;
     setView(null);
@@ -236,8 +243,9 @@ export function useFound(
     leaveOutFlagged: () => {
       setEdits((current) => new Map([...current, ...withoutFlagged(rows, flags)]));
     },
+    rereadOffer: offer,
     reread: async () => {
-      const again = rereadable(rows, flags);
+      const again = offer?.indexes ?? [];
       if (view === null || draft.ink === null || again.length === 0) {
         return;
       }
@@ -260,8 +268,7 @@ export function useFound(
       if (view === null) {
         return;
       }
-      const kept = keptFound(view.screenshot, rows);
-      setDraft((current) => ({ ...current, boxes: withBoxes(current.boxes, kept).boxes }));
+      addBoxes(keptFound(view.screenshot, rows));
       forget();
     },
     dismiss: forget,

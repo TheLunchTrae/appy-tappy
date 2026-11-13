@@ -29,8 +29,8 @@ back to the automation with the value picked.
    AppyTappy where the value is, in one of two ways:
    - **Drag over the live window.** While the window shows what to read, drag
      a box around it. The drag takes the screenshot as it starts, the
-     picture holds still while you drag, and the region goes on that
-     screenshot.
+     picture holds still while you drag and gives way to the screenshot once
+     it is taken, and the region goes on that screenshot.
    - **Take a screenshot and draw on it.** Select **Take screenshot**, or
      press the screenshot shortcut, `F9` at first, then drag a box on the
      screenshot, as [Draw the region](#draw-the-region) describes. The
@@ -317,16 +317,21 @@ chooses them:
 - **Digits and symbols** reads the digits and each character the reference
   knows that is neither a digit nor a letter, such as `%`, `.`, `,`, `:`,
   `/`, `-`, and `+`. It shows while the reference knows such a character. A
-  symbol the reference learns later is not added: the value then shows
+  symbol the reference learns later from another value or the References
+  page is not added: the value then shows
   **Choose…** with the characters it reads turned on, and choosing
   **Digits and symbols** again adds the new symbol.
 - **Choose…** shows each character the reference knows with a box, with the
   ones the value reads so far turned on. Turn on the ones the value shows, at
-  least one.
+  least one. A character the value reads that the reference has yet to learn
+  shows too, outlined: it reads once the reference learns it, and you can
+  turn it off.
 
 Picking another reference keeps **All it knows** and **Digits**, takes
-**Digits and symbols** from the new reference's symbols, and keeps of a
-**Choose…** set the characters the new reference knows.
+**Digits and symbols** from the new reference's symbols, and takes out of a
+**Choose…** set the characters that only the old reference knows. Teaching
+the reference from this value, with **Edit** or **Record readings**, adds a
+new symbol to **Digits and symbols** and changes no other choice.
 
 Under the list, the value shows the characters it reads. The choice belongs
 to the value. The reference keeps every character it knows, so another value

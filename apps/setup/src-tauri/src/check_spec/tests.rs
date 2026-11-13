@@ -561,15 +561,15 @@ fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
     let error = teach(&labeled_both, session(&screenshots, None)).expect_err("two sizes");
     assert_eq!(
         error.to_string(),
-        "Screenshot 2 is 2x2, but the region was drawn on screenshot 1, which is 4x2. Clear \
-         its label, or draw the region on it instead."
+        "Screenshot 2, which a box is on, is 2x2, but the reference reads on screenshot 1, \
+         which is 4x2. Delete its boxes, or draw them on a screenshot of that size."
     );
     let recorded_elsewhere = characters(left(), None, one(0), kept.clone());
     assert_eq!(
         teach(&recorded_elsewhere, session(&screenshots, Some(&recording)))
             .expect_err("recorded at another size")
             .to_string(),
-        "The recording is of a window of 2x2, but the region was drawn on screenshot 1, \
+        "The recording is of a window of 2x2, but the reference reads on screenshot 1, \
          which is 4x2. Use its settings, or discard the recording."
     );
     let drawn_on_small = CharactersSpec {
@@ -871,7 +871,8 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
     assert_eq!(error, SpecError::RecordedElsewhere);
     assert_eq!(
         error.to_string(),
-        "The region changed since it was recorded. Put it back, or record it again."
+        "The reference reads another place than the recording recorded. Use its settings, or record \
+         again."
     );
 }
 

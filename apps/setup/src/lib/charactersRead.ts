@@ -82,15 +82,20 @@ export function withReadChoice(
 
 /**
  * What a value that read `characters` of a reference that knows `from` reads once it reads with one that knows `to`
- * instead, so its choice stays the one that was picked: all of it and the digits as they are, the digits and the new
- * reference's symbols, or of a chosen set the characters the new reference knows.
+ * instead, so its choice stays the one that was picked: all of it and the digits as they are, or the digits and the
+ * new reference's symbols. A chosen set loses only the characters that the old reference knew and the new one does
+ * not, so a reference that was taught more in place takes nothing from it. `from` is what the reference knew when the
+ * choice was made, since the set is a preset's only against that.
  */
 export function forReference(
   characters: readonly string[] | null,
   from: readonly string[],
   to: readonly string[],
 ): readonly string[] | null {
-  return withReadChoice(readChoice(characters, from), to, characters);
+  const choice = readChoice(characters, from);
+  return characters !== null && choice === 'choose'
+    ? characters.filter((character) => to.includes(character) || !from.includes(character))
+    : withReadChoice(choice, to, characters);
 }
 
 /** `characters` with `character` when `on`, or without it. */
