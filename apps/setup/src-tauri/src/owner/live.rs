@@ -15,15 +15,15 @@
 
 use std::time::Instant;
 
-use appytappy_config::app_file::{PinDef, RegionDef, ScreenDef, SizeDef};
+use appytappy_config::app_file::{CheckDef, PinDef, RegionDef, ScreenDef, SizeDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::check::Check;
-use appytappy_sources::screen::saved::{AtSize, SavedCheck, SavedValue, Unread};
+use appytappy_sources::screen::saved::{AtSize, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Size};
 use serde::Deserialize;
 
-use crate::check_spec::{self, CharactersSpec, CheckSpec, SpecError};
+use crate::check_spec::{self, CharactersSpec, CheckSpec};
 use crate::reading::at_size;
 
 use super::Owner;
@@ -73,6 +73,10 @@ pub(crate) struct ReferenceTrial {
 /// The ID a value is tried under before it is saved under its own. It
 /// names only pictures that are never written.
 const TRIED: &str = "tried";
+
+/// What a reference that is being taught is called where its live check
+/// says what to fix, since it may have no name yet.
+const TAUGHT: &str = "The reference";
 
 /// A value as it would be saved, placed at the window size its frames
 /// settled at.
@@ -212,52 +216,41 @@ impl<H: Host> Owner<H> {
 
     /// Makes the reference `trial` teaches the check the live frame is
     /// read with: a number read with it in the region the characters were
-    /// drawn in, placed as a value of its application is. The number is the
-    /// one the reference is made for, where it is made for one: it reads
-    /// only that number's characters, as `saved::build` has the saved value
-    /// read, whole when that number is, and stays at its side.
+    /// drawn in, read back as [`Self::set_check`] reads a value's check
+    /// back. The number is the one the reference is made for, where it is
+    /// made for one: it reads only that number's characters, whole when that
+    /// number is, and stays at its side.
     pub(crate) fn set_characters(&mut self, trial: &ReferenceTrial) -> Result<(), String> {
-        let size_changes = self.stores()?.app(&trial.app)?.file.size_changes;
+        let mut found = self.stores()?.app(&trial.app)?;
         let taught = self
-            .with_session(|session| trial.characters.teach(session, None, "", ""))
+            .with_session(|session| trial.characters.teach(session, None, TAUGHT, ""))
             .map_err(|error| error.to_string())?;
-        let reads = trial.reads.as_deref();
-        let reader = taught.reader.reading(reads).ok_or_else(|| {
-            SpecError::NoCharacters {
-                reference: "The reference".to_owned(),
-                characters: reads.unwrap_or_default().to_owned(),
-            }
-            .to_string()
-        })?;
-        let size = taught.window_size;
         let region = taught.region.size();
-        let pin = trial.pin.unwrap_or_else(|| {
-            PinDef::guess(
-                RegionDef {
-                    x: taught.region.x(),
-                    y: taught.region.y(),
-                    width: region.width,
-                    height: region.height,
-                },
-                SizeDef {
-                    width: size.width,
-                    height: size.height,
-                },
-            )
-        });
-        self.go_live(SavedValue {
-            drawn: SavedCheck {
-                window_size: size,
-                region: taught.region,
-                check: Check::Number {
-                    reader,
-                    whole: trial.whole,
-                },
+        let screen = ScreenDef {
+            window_size: SizeDef {
+                width: taught.window_size.width,
+                height: taught.window_size.height,
             },
+            region: RegionDef {
+                x: taught.region.x(),
+                y: taught.region.y(),
+                width: region.width,
+                height: region.height,
+            },
+            check: CheckDef::Number {
+                reference: taught.reference.id.clone(),
+                whole: trial.whole,
+                characters: trial.reads.clone(),
+            },
+            pin: trial.pin,
+            reading_area: false,
             fixes: Vec::new(),
-            pin,
-            size_changes,
-        });
+        };
+        // The number reads with the reference as it is taught here, not as
+        // the application's file has it.
+        found.file.references = vec![taught.reference];
+        let value = read_back(&screen, &found, &taught.pictures)?;
+        self.go_live(value);
         Ok(())
     }
 
@@ -285,7 +278,7 @@ mod tests {
     use std::time::Duration;
 
     use appytappy_config::app_file::{CheckDef, SizeChangesDef, ValueDef};
-    use appytappy_sources::screen::saved;
+    use appytappy_sources::screen::saved::{self, SavedCheck};
     use appytappy_sources::screen::settle::SETTLE;
 
     use crate::check_spec::{CharactersSpec, CheckSpec};
@@ -810,6 +803,14 @@ mod tests {
                  one of them, or change which characters the value reads."
                     .to_owned()
             )
+        );
+        // The file's own rule for a number holds here as it does at a save.
+        assert_eq!(
+            harness.ask(|owner| owner.set_characters(&ReferenceTrial {
+                reads: Some(String::new()),
+                ..teaching(taught.clone())
+            })),
+            Err("Choose at least one character for the value to read.".to_owned())
         );
         harness
             .ask(|owner| owner.set_characters(&teaching(taught.clone())))

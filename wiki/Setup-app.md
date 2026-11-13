@@ -118,7 +118,8 @@ This page covers what the user guide leaves out.
   size means meanwhile. A reference being
   taught (`CharactersSpec`, `set_characters`) is never read by the text
   reader: its labels become the reference's saved form, pictures included,
-  and `saved::reader` learns it as the runtime learns the saved file. It
+  and the owner reads a number check that names it back with `saved::build`,
+  as `set_check` does, so every rule of a saved number holds for it. It
   reads as a number in its region, placed as a value of its application
   is. A reference opened from a number is tried as that number will read
   with it once both are saved (`ReferenceTrial`): whole when the number
