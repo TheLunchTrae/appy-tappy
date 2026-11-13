@@ -11,7 +11,7 @@ use appytappy_sources::screen::{Image, Size};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use crate::check_spec::CheckSpec;
+use crate::check_spec::{CharactersSpec, CheckSpec};
 use crate::overlay::{FrameRead, Purpose};
 use crate::recording::Text;
 use crate::window_list::{WindowFit, WindowList};
@@ -95,6 +95,25 @@ pub(crate) enum Seen {
     },
     /// A window of this size, which the region lies outside.
     Outside(Size),
+}
+
+/// A value's check to try on the live window before it is saved, as the UI
+/// describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TrialSpec {
+    /// The saved application the value is for, whose references it reads
+    /// with and whose window's size changes say where it reads.
+    pub(crate) app: String,
+    /// The check, with the session's screenshots it names.
+    pub(crate) check: CheckSpec,
+    /// The screenshot the region was drawn on, whose size the value would
+    /// keep.
+    pub(crate) screenshot: usize,
+    /// The side of the window the region stays at as the window changes
+    /// size, or `None` before one is picked, for the side it is nearest.
+    pub(crate) pin: Option<PinDef>,
 }
 
 /// A value to save, as the UI describes it.
@@ -205,9 +224,9 @@ pub(crate) struct ReferenceSaveSpec {
     pub(crate) app: String,
     /// The reference's name, such as `Percent font`.
     pub(crate) reference_name: String,
-    /// The characters it is taught, as a [`CheckSpec::Characters`] that
-    /// names the reference when it is saved already.
-    pub(crate) check: CheckSpec,
+    /// The characters it is taught, which name the reference when it is
+    /// saved already.
+    pub(crate) characters: CharactersSpec,
     /// The characters the user says it needs to know, or empty when the
     /// user chose none. The save lists each once, in order, refuses more
     /// than a reference saves, and replaces what the saved reference

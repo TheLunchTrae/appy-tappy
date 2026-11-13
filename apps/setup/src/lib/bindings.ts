@@ -387,6 +387,45 @@ best: GlyphView | null,
 runnerUp: GlyphView | null, }>;
 
 /**
+ * The characters a reference is being taught, as the UI describes them:
+ * the saved samples of `reference`, when it is saved, then `labels`, then
+ * `recorded`, all in the color `ink` within `tolerance`.
+ */
+export type CharactersSpec = DeepReadonly<{
+/**
+ * Where the characters show, which a recording records and the live
+ * window is read at.
+ */
+region: RegionSpec,
+/**
+ * The screenshot the region was drawn on. Every labeled screenshot
+ * and the recording must have its window size, since the region
+ * means another spot on a window of another size.
+ */
+screenshot: number,
+/**
+ * The saved reference these characters add to, or `None` for a new
+ * one.
+ */
+reference: ReferenceRef | null,
+/**
+ * The characters' color.
+ */
+ink: ColorSpec,
+/**
+ * How far from `ink` a pixel of a character may be.
+ */
+tolerance: number,
+/**
+ * The labeled screenshots.
+ */
+labels: Array<Label>,
+/**
+ * Readings of the session's recording, which must be of `region`.
+ */
+recorded: Array<RecordedLabel>, }>;
+
+/**
  * How many times fall in each bar of a chart.
  */
 export type Chart = DeepReadonly<{
@@ -450,23 +489,13 @@ states: Array<StateDef>,
 tolerance: number, }>;
 
 /**
- * A check as the UI describes it.
+ * A value's check as the UI describes it.
  */
 export type CheckSpec = DeepReadonly<{ "kind": "number", region: RegionSpec, reference: ReferenceRef,
 /**
  * Whether digits after the decimal point are ignored.
  */
-whole: boolean, } | { "kind": "characters", region: RegionSpec,
-/**
- * The screenshot the region was drawn on. Every labeled screenshot
- * and the recording must have its window size, since the region
- * means another spot on a window of another size.
- */
-screenshot: number, reference: ReferenceRef | null, ink: ColorSpec, tolerance: number, labels: Array<Label>,
-/**
- * Readings of the session's recording, which must be of `region`.
- */
-recorded: Array<RecordedLabel>, } | { "kind": "barFill", region: RegionSpec, filled: ColorSpec, empty: ColorSpec, } | { "kind": "color", region: RegionSpec, color: ColorSpec, tolerance: number, } | { "kind": "state", region: RegionSpec,
+whole: boolean, } | { "kind": "barFill", region: RegionSpec, filled: ColorSpec, empty: ColorSpec, } | { "kind": "color", region: RegionSpec, color: ColorSpec, tolerance: number, } | { "kind": "state", region: RegionSpec,
 /**
  * The screenshot the region was drawn on; every state's screenshot
  * must have its window size.
@@ -1432,10 +1461,10 @@ app: string,
  */
 referenceName: string,
 /**
- * The characters it is taught, as a [`CheckSpec::Characters`] that
- * names the reference when it is saved already.
+ * The characters it is taught, which name the reference when it is
+ * saved already.
  */
-check: CheckSpec,
+characters: CharactersSpec,
 /**
  * The characters the user says it needs to know, or empty when the
  * user chose none. The save lists each once, in order, refuses more
@@ -2015,6 +2044,31 @@ partial: boolean,
  * The newest rows, oldest first.
  */
 newest: Array<TraceRow>, }>;
+
+/**
+ * A value's check to try on the live window before it is saved, as the UI
+ * describes it.
+ */
+export type TrialSpec = DeepReadonly<{
+/**
+ * The saved application the value is for, whose references it reads
+ * with and whose window's size changes say where it reads.
+ */
+app: string,
+/**
+ * The check, with the session's screenshots it names.
+ */
+check: CheckSpec,
+/**
+ * The screenshot the region was drawn on, whose size the value would
+ * keep.
+ */
+screenshot: number,
+/**
+ * The side of the window the region stays at as the window changes
+ * size, or `None` before one is picked, for the side it is nearest.
+ */
+pin: PinDef | null, }>;
 
 /**
  * A newer release the user can install.

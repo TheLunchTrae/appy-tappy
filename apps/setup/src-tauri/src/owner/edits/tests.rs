@@ -7,7 +7,7 @@ use appytappy_config::app_file::{
 use appytappy_config::automation_file::AutomationDef;
 use appytappy_config::window_match::WindowFacts;
 use appytappy_sources::screen::check::Check;
-use appytappy_sources::screen::{FrameHandler, Size};
+use appytappy_sources::screen::{FrameHandler, Image, Size};
 
 use crate::applications::AppSpec;
 use crate::owner::messages::{FixSpec, Reading, ReferenceSaveSpec};
@@ -683,8 +683,8 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
             app: "example".to_owned(),
             reference_name: name.to_owned(),
             expects: String::new(),
-            check: serde_json::from_str(&format!(
-                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":2,"height":2}},
+            characters: serde_json::from_str(&format!(
+                r#"{{"region":{{"x":0,"y":0,"width":2,"height":2}},
                     "screenshot":0,"reference":null,"ink":{{"red":255,"green":0,"blue":0}},
                     "tolerance":0,"labels":[{{"screenshot":0,"text":"{text}"}}]}}"#
             ))
@@ -879,10 +879,7 @@ fn the_region_moves_only_on_a_screenshot_of_the_size_the_value_was_drawn_at() {
     );
     assert_eq!(
         save(&mut harness, &unread, &[]),
-        Err(
-            "AppyTappy could not read this value as saved: its reference gone is not saved."
-                .to_owned()
-        )
+        Err("Example App no longer has that reference.".to_owned())
     );
     let mut elsewhere = edit("icon_visible", "Icon visible", KEPT_COLOR);
     "gone".clone_into(&mut elsewhere.app);

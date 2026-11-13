@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { EditPreview, EditSpec } from './bindings.ts';
-import { errorText, readValue, setCheck, tryEdit } from './api.ts';
+import type { CharactersSpec, EditPreview, TrialSpec } from './bindings.ts';
+import { errorText, readValue, setCharacters, setCheck } from './api.ts';
 import type { Built, CheckState } from './check.ts';
 import { afterRead, type InForce, type LiveRead, type ReadAnswer } from './liveCheck.ts';
 import { useRepeat } from './repeat.ts';
@@ -28,22 +28,25 @@ const NOTHING_READ: LiveRead = { reading: null, problem: null };
  */
 export type Trial = Built<() => Promise<EditPreview | null>>;
 
-/** The trial of `edit`, a saved value's edit, or of `check` while the capture edits no saved value. */
-export function trialOf(check: Built, edit: Built<EditSpec> | null): Trial {
-  if (edit !== null) {
-    const { ok } = edit;
-    return ok ? { ok, spec: async () => tryEdit(edit.spec) } : edit;
+/** The trial of `built` that `attempt` makes on the live window, or what `built` still needs. */
+export function trialOf<Spec>(built: Built<Spec>, attempt: (spec: Spec) => Promise<EditPreview | null>): Trial {
+  if (!built.ok) {
+    return built;
   }
-  if (!check.ok) {
-    return check;
-  }
-  return {
-    ok: true,
-    spec: async () => {
-      await setCheck(check.spec);
-      return null;
-    },
-  };
+  const { spec } = built;
+  return { ok: true, spec: async () => attempt(spec) };
+}
+
+/** Sets the reference `spec` teaches as the check the live window is read with. */
+export async function tryCharacters(spec: CharactersSpec): Promise<null> {
+  await setCharacters(spec);
+  return null;
+}
+
+/** Sets the value `trial` would save as the check the live window is read with. */
+export async function tryCheck(trial: TrialSpec): Promise<null> {
+  await setCheck(trial);
+  return null;
 }
 
 /**

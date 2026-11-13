@@ -115,7 +115,6 @@ function fileCheck(spec: CheckSpec): CheckDef | null {
     case 'color':
       return { kind: 'color', color: spec.color, tolerance: spec.tolerance };
     case 'state':
-    case 'characters':
       return null;
   }
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ReferenceDef, ReferenceRef, ValueDef } from '../lib/bindings.ts';
+import type { ReferenceDef, ReferenceRef, TrialSpec, ValueDef } from '../lib/bindings.ts';
 import {
   editValue,
   errorText,
@@ -10,6 +10,7 @@ import {
   saveFix,
   saveReference,
   saveValue,
+  tryEdit,
 } from '../lib/api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
@@ -90,7 +91,7 @@ import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useBarSetup } from '../lib/useBarSetup.ts';
 import { useFound } from '../lib/useFound.ts';
-import { trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
+import { type Trial, trialOf, tryCharacters, tryCheck, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
 import { useMatchPreview, useSelectedPreview } from '../lib/useMatchPreview.ts';
 import { useRecording } from '../lib/useRecording.ts';
@@ -377,10 +378,14 @@ export function Capture({
     [existingId, appId],
   );
   const isEditing = editing !== null;
-  const built: Built = useMemo(
-    () => (isEditing ? buildCharacters(draft, editingRef) : buildSpec(draft, appId)),
-    [isEditing, draft, editingRef, appId],
+  // The characters the reference editor teaches while it is open, and the check of the value it was opened from.
+  const characters = useMemo(
+    () => (isEditing ? buildCharacters(draft, editingRef) : null),
+    [isEditing, draft, editingRef],
   );
+  const valueCheck = useMemo(() => buildSpec(draft, appId), [draft, appId]);
+  const built: Built<unknown> = characters ?? valueCheck;
+  const builtKind = characters === null ? (valueCheck.ok ? valueCheck.spec.kind : 'none') : 'characters';
   const missing = captureMissing(setup, built, fixing !== null);
   // An edit changes a saved value in place and is never a draft.
   const drafting = useDraft(
@@ -601,7 +606,25 @@ export function Capture({
     readingArea: isReadingArea(moving),
     sizes: full,
   });
-  const trial = useMemo(() => trialOf(built, edit.built), [built, edit.built]);
+  const { drawnOn } = draft;
+  const fixPin = fixing?.screen.pin;
+  const trial = useMemo((): Trial => {
+    if (characters !== null) {
+      return trialOf(characters, tryCharacters);
+    }
+    if (edit.built !== null) {
+      return trialOf(edit.built, tryEdit);
+    }
+    if (!valueCheck.ok) {
+      return valueCheck;
+    }
+    if (drawnOn === null) {
+      return { ok: false, next: 'Draw a region on a screenshot.' };
+    }
+    // A value is tried as it would be saved, which a fix does at its value's side.
+    const spec: TrialSpec = { app: appId, check: valueCheck.spec, screenshot: drawnOn, pin: fixPin ?? pin };
+    return trialOf({ ok: true, spec }, tryCheck);
+  }, [characters, edit.built, valueCheck, drawnOn, appId, fixPin, pin]);
   const check = useLiveCheck(trial, edit.again);
   const dropFixes = agreedFixes(check.preview, edit.lost);
   // The size of the screenshot the region would show over, when an edited value was drawn at another: its region
@@ -648,10 +671,10 @@ export function Capture({
       return changes.ok ? async () => editValue(changes.spec, dropFixes) : null;
     }
     const screenshot = draft.drawnOn;
-    if (!built.ok || screenshot === null) {
+    if (!valueCheck.ok || screenshot === null) {
       return null;
     }
-    const { spec } = built;
+    const { spec } = valueCheck;
     if (fixing !== null) {
       return async () => saveFix({ app: choice.app, value: fixing.id, check: spec, screenshot });
     }
@@ -825,7 +848,7 @@ export function Capture({
   };
 
   const saveRef = async (): Promise<void> => {
-    if (editing === null || !built.ok || built.spec.kind !== 'characters') {
+    if (editing === null || characters === null || !characters.ok) {
       return;
     }
     setSaving(true);
@@ -833,7 +856,7 @@ export function Capture({
       const saved = await saveReference({
         app: appId,
         referenceName: editing.name.trim(),
-        check: built.spec,
+        characters: characters.spec,
         expects: editing.expects.join(''),
       });
       setSaveError(null);
@@ -1665,10 +1688,7 @@ export function Capture({
                 <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
               )}
               {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
-              <ReadingDetailsBox
-                key={built.ok ? built.spec.kind : 'none'}
-                ask={check.state.kind === 'set' ? explainReading : null}
-              />
+              <ReadingDetailsBox key={builtKind} ask={check.state.kind === 'set' ? explainReading : null} />
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}
               <p className="note">
@@ -1823,10 +1843,7 @@ export function Capture({
             problem={check.problem}
           />
           {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
-          <ReadingDetailsBox
-            key={built.ok ? built.spec.kind : 'none'}
-            ask={check.state.kind === 'set' ? explainReading : null}
-          />
+          <ReadingDetailsBox key={builtKind} ask={check.state.kind === 'set' ? explainReading : null} />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
           {overLimit ? <p className="warn">{TOO_MANY}</p> : null}

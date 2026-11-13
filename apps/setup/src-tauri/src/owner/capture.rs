@@ -5,12 +5,11 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use appytappy_config::app_file::WindowDef;
-use appytappy_config::signal::Value;
 use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
 use crate::check_spec::bar::{self, BarDetection, BarMeasure};
-use crate::check_spec::{self, CheckSpec, ColorSpec, RegionCheck, RegionSpec};
+use crate::check_spec::{self, ColorSpec, RegionSpec};
 use crate::debug::workings::{self, ReadingDetails};
 use crate::match_preview::{self, MatchRule, MatchView};
 use crate::pixels;
@@ -38,18 +37,6 @@ fn preview_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Me
             },
         },
     }
-}
-
-/// What `check` reads on `frame`, or why it cannot be read there, for the
-/// user.
-fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
-    let cropped = frame.crop(check.region).ok_or_else(|| {
-        "The region reaches past the edge of the window. Draw it inside the window.".to_owned()
-    })?;
-    check
-        .check
-        .read(&cropped)
-        .map_err(|error| format!("Not read on the live window now: {error}."))
 }
 
 impl<H: Host> Owner<H> {
@@ -133,6 +120,9 @@ impl<H: Host> Owner<H> {
         }
         self.failure = None;
         self.record(&image, received);
+        if let Some(check) = &mut self.check {
+            check.place(image.size());
+        }
         self.latest = Some(image);
         self.latest_at = Some(received);
     }
@@ -194,7 +184,7 @@ impl<H: Host> Owner<H> {
         let (Some(check), Some(latest)) = (&self.check, &self.latest) else {
             return Ok(None);
         };
-        read(check, latest).map(|value| Some(value.into()))
+        check.read(latest).map(|value| Some(value.into()))
     }
 
     /// How the check reads the newest frame, for the debug details: `None`
@@ -205,11 +195,9 @@ impl<H: Host> Owner<H> {
         else {
             return Ok(None);
         };
-        let region = latest.crop(check.region).ok_or_else(|| {
-            "The region reaches past the edge of the window. Draw it inside the window.".to_owned()
-        })?;
+        let (check, region) = check.region_of(latest)?;
         let age = self.host.now().saturating_duration_since(arrived);
-        Ok(Some(workings::details(&check.check, &region, age)))
+        Ok(Some(workings::details(check, &region, age)))
     }
 
     /// The newest frame's pixels, at most `max_width` wide, or `None`
@@ -282,15 +270,6 @@ impl<H: Host> Owner<H> {
             .map_err(|error| error.to_string())
     }
 
-    /// Makes `spec` the check the live frame is read with.
-    pub(crate) fn set_check(&mut self, spec: &CheckSpec) -> Result<(), String> {
-        let check = self
-            .with_session(|session| check_spec::build(spec, session))
-            .map_err(|error| error.to_string())?;
-        self.check = Some(check);
-        Ok(())
-    }
-
     /// The running windows that `window` matches, the one a new session
     /// would read first.
     pub(crate) fn match_windows(&self, window: &WindowDef) -> Result<Vec<WindowFit>, String> {
@@ -335,14 +314,14 @@ impl<H: Host> Owner<H> {
 #[cfg(test)]
 mod tests {
     use appytappy_config::app_file::WindowDef;
-    use appytappy_sources::screen::Size;
     use tokio::sync::oneshot;
 
-    use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
-    use crate::debug::workings::WorkingsView;
+    use crate::check_spec::{ColorSpec, RegionSpec};
     use crate::owner::messages::Run;
     use crate::owner::run;
-    use crate::owner::test_support::{FakeHost, Harness, STATE, frame_image, harness};
+    use crate::owner::test_support::{
+        FakeHost, Harness, STATE, capturing, characters_in, frame_image, harness, trial,
+    };
     use crate::pixels;
     use crate::window_list::WindowFit;
 
@@ -600,41 +579,6 @@ mod tests {
     }
 
     #[test]
-    fn the_check_reads_the_live_frame() {
-        let mut harness = harness(false);
-        let mut handler = harness.pick();
-        assert_eq!(harness.ask(|owner| owner.reading()), Ok(None));
-        let spec: CheckSpec = serde_json::from_str(
-            r#"{"kind":"barFill","region":{"x":0,"y":0,"width":4,"height":2},
-                "filled":{"red":255,"green":0,"blue":0},"empty":{"red":40,"green":40,"blue":40}}"#,
-        )
-        .expect("valid JSON");
-        harness
-            .ask(|owner| owner.set_check(&spec))
-            .expect("valid check");
-        assert_eq!(harness.ask(|owner| owner.reading()), Ok(None));
-        assert_eq!(harness.ask(|owner| owner.explain_reading()), Ok(None));
-        harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Ok(Some(Reading::Number(50.0)))
-        );
-        harness.wait(Duration::from_millis(30));
-        let details = harness
-            .ask(|owner| owner.explain_reading())
-            .expect("explains")
-            .expect("a frame arrived");
-        assert_eq!(details.frame_age_ms, 30, "by the owner's clock");
-        assert!(
-            matches!(
-                details.workings,
-                Some(WorkingsView::BarFill { filled, counted }) if filled * 2 == counted
-            ),
-            "{details:?}"
-        );
-    }
-
-    #[test]
     fn the_reading_s_details_wait_for_a_check_and_a_frame() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
@@ -644,95 +588,6 @@ mod tests {
             harness.ask(|owner| owner.explain_reading()),
             Ok(None),
             "no check yet"
-        );
-    }
-
-    #[test]
-    fn a_region_outside_the_live_frame_is_reported() {
-        let mut harness = harness(false);
-        let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
-        let spec: CheckSpec = serde_json::from_str(
-            r#"{"kind":"color","region":{"x":0,"y":0,"width":4,"height":2},
-                "color":{"red":255,"green":0,"blue":0},"tolerance":0}"#,
-        )
-        .expect("valid JSON");
-        harness
-            .ask(|owner| owner.set_check(&spec))
-            .expect("valid check");
-        let small = Image::new(
-            Size {
-                width: 1,
-                height: 1,
-            },
-            vec![0, 0, 255, 0],
-        )
-        .expect("matching length");
-        harness.deliver(&mut handler, Ok(&small));
-        assert!(
-            harness
-                .ask(|owner| owner.reading())
-                .expect_err("outside")
-                .contains("past the edge")
-        );
-        assert!(
-            harness
-                .ask(|owner| owner.explain_reading())
-                .expect_err("outside")
-                .contains("past the edge")
-        );
-    }
-
-    #[test]
-    fn a_live_frame_the_check_cannot_read_says_which_stage_failed() {
-        let mut harness = harness(false);
-        let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        // A reference taught that the screenshot's red half is a 1.
-        let spec: CheckSpec = serde_json::from_str(
-            r#"{"kind":"characters","region":{"x":0,"y":0,"width":4,"height":2},"screenshot":0,
-                "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
-                "labels":[{"screenshot":0,"text":"1"}]}"#,
-        )
-        .expect("valid JSON");
-        harness
-            .ask(|owner| owner.set_check(&spec))
-            .expect("valid check");
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Ok(Some(Reading::Number(1.0)))
-        );
-        let gray = Image::new(
-            Size {
-                width: 4,
-                height: 2,
-            },
-            [40, 40, 40, 0].repeat(8),
-        )
-        .expect("matching length");
-        harness.deliver(&mut handler, Ok(&gray));
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Err(
-                "Not read on the live window now: no pixel in the region has the characters' \
-                 color."
-                    .to_owned()
-            )
-        );
-    }
-
-    #[test]
-    fn a_check_that_cannot_be_built_says_what_to_fix() {
-        let mut harness = harness(false);
-        let spec: CheckSpec = serde_json::from_str(
-            r#"{"kind":"color","region":{"x":0,"y":0,"width":0,"height":2},
-                "color":{"red":255,"green":0,"blue":0},"tolerance":0}"#,
-        )
-        .expect("valid JSON");
-        assert_eq!(
-            harness.ask(|owner| owner.set_check(&spec)),
-            Err("Draw a region on the screenshot first.".to_owned())
         );
     }
 
@@ -807,20 +662,17 @@ mod tests {
 
     #[test]
     fn stopping_closes_the_capture_and_releases_every_picture_it_held() {
-        let mut harness = harness(false);
-        let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let (mut harness, mut handler, root) = capturing("capture-stop");
         let left: RegionSpec =
             serde_json::from_str(r#"{"x":0,"y":0,"width":2,"height":2}"#).expect("valid JSON");
         let red: ColorSpec =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         harness
-            .ask(|owner| owner.start_recording(left, red, 0, 0, false))
+            .ask(|owner| owner.start_recording(&characters_in(left, red), false))
             .expect("records");
         harness.deliver(&mut handler, Ok(&frame_image()));
         harness
-            .ask(|owner| owner.set_check(&serde_json::from_str(STATE).expect("valid JSON")))
+            .ask(|owner| owner.set_check(&trial(STATE)))
             .expect("a valid check");
         // What the page can ask for of the picked window: the newest frame,
         // a screenshot, a recorded reading, the recording, and what the
@@ -851,6 +703,7 @@ mod tests {
             harness.ask(Owner::screenshot),
             Err("No frame has arrived from the window yet.".to_owned())
         );
+        std::fs::remove_dir_all(root).expect("clean up");
     }
 
     #[test]

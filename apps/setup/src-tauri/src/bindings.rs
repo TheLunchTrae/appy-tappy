@@ -61,8 +61,9 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
+use crate::check_spec::characters::expected_characters;
 use crate::check_spec::{
-    CheckSpec, ColorSpec, Label, MAX_EXPECTED_CHARACTERS, RegionSpec, expected_characters,
+    CharactersSpec, CheckSpec, ColorSpec, Label, MAX_EXPECTED_CHARACTERS, RegionSpec,
 };
 use crate::debug::bundle::BundleSpec;
 use crate::debug::outline::CaptureOutline;
@@ -77,7 +78,7 @@ use crate::overlay::window::label;
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
     FoundClick, FoundView, Live, Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId,
-    SavedValue,
+    SavedValue, TrialSpec,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;
@@ -890,11 +891,12 @@ fn highest_of<S, T: Highest>(_read: fn(&S) -> Option<&T>) -> u64 {
 fn max_tolerance() -> u64 {
     let each = [
         highest_of(|check: &CheckSpec| match check {
-            CheckSpec::Color { tolerance, .. }
-            | CheckSpec::State { tolerance, .. }
-            | CheckSpec::Characters { tolerance, .. } => Some(tolerance),
+            CheckSpec::Color { tolerance, .. } | CheckSpec::State { tolerance, .. } => {
+                Some(tolerance)
+            },
             CheckSpec::Number { .. } | CheckSpec::BarFill { .. } => None,
         }),
+        highest_of(|characters: &CharactersSpec| Some(&characters.tolerance)),
         highest_of(|reference: &ReferenceDef| Some(&reference.tolerance)),
         highest_of(|selection: &SelectionSpec| Some(&selection.tolerance)),
         highest_of(|at: &ClickAtDef| match at {
@@ -902,7 +904,7 @@ fn max_tolerance() -> u64 {
             ClickAtDef::Spot { .. } => None,
         }),
     ];
-    let highest = each.iter().copied().max().expect("four fields");
+    let highest = each.iter().copied().max().expect("five fields");
     assert!(
         each.iter().all(|&one| one == highest),
         "the tolerances differ in range; give the page a limit for each"

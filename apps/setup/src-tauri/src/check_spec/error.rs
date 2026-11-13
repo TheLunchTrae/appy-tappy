@@ -1,4 +1,5 @@
-//! Why a check the UI described cannot be built, in words the UI shows.
+//! Why a check the UI described cannot be saved or read, in words the UI
+//! shows.
 
 use std::error::Error;
 use std::fmt;
@@ -6,6 +7,7 @@ use std::fmt;
 use appytappy_config::app_file::{CheckDefError, MAX_STATES};
 use appytappy_sources::screen::Size;
 use appytappy_sources::screen::digits::LearnError;
+use appytappy_sources::screen::saved::SavedError;
 
 use super::MAX_EXPECTED_CHARACTERS;
 
@@ -28,7 +30,12 @@ pub(crate) enum Cut {
     State(usize),
 }
 
-/// A check the UI described cannot be built.
+/// A check the UI described cannot be saved, or cannot be read as saved.
+///
+/// The session's own problems are its own variants: a screenshot, a
+/// recording, or a selection that the saved form cannot be made from. What
+/// `saved::build` refuses arrives [from a `SavedError`](From), which keeps
+/// the UI's words for the problems the user can fix on the page.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SpecError {
     /// The region has no width or no height.
@@ -66,13 +73,20 @@ pub(crate) enum SpecError {
     },
     /// A picture could not be encoded as PNG.
     Picture,
-    /// A saved reference the check names cannot be had, and why.
+    /// A saved reference being taught cannot be had, and why.
     Reference(String),
+    /// A saved reference lacks a sample's picture, or cannot decode it.
+    MissingSample {
+        /// The reference's name.
+        reference: String,
+        /// The picture's file name.
+        picture: String,
+    },
     /// A value's reference belongs to another application.
     OtherApplication,
-    /// Characters still being taught were saved as a value, or something
-    /// other than characters as a reference.
-    NotAValue,
+    /// The saved form cannot be read for a reason the page has no words of
+    /// its own for, in `saved::build`'s.
+    Unreadable(String),
     /// A reference is to expect more than [`MAX_EXPECTED_CHARACTERS`]
     /// characters.
     TooManyExpected,
@@ -157,7 +171,14 @@ impl fmt::Display for SpecError {
             Self::OtherApplication => formatter.write_str(
                 "That reference belongs to another application. Pick one of this application's.",
             ),
-            Self::NotAValue => formatter.write_str("Pick a reference to read the number with."),
+            Self::MissingSample { reference, picture } => write!(
+                formatter,
+                "The reference {reference} is missing its picture {picture}. Remove the values \
+                 that read with it, then delete the reference and make it again."
+            ),
+            Self::Unreadable(why) => {
+                write!(formatter, "AppyTappy could not read this value as saved: {why}.")
+            },
             Self::TooManyExpected => write!(
                 formatter,
                 "A reference needs at most {MAX_EXPECTED_CHARACTERS} characters. Remove some."
@@ -165,6 +186,18 @@ impl fmt::Display for SpecError {
             Self::Learn { text, source } => {
                 write!(formatter, "Could not learn from \"{text}\": {source}")
             },
+        }
+    }
+}
+
+impl From<SavedError> for SpecError {
+    fn from(error: SavedError) -> Self {
+        match error {
+            SavedError::EmptyRegion => Self::EmptyRegion,
+            SavedError::OutsideWindow { .. } => Self::Outside,
+            SavedError::Check(broken) => Self::Check(broken),
+            SavedError::StateName(invalid) => Self::StateName(sentence(&invalid.to_string())),
+            other => Self::Unreadable(other.to_string()),
         }
     }
 }

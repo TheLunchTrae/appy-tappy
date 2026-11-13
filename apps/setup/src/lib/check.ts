@@ -1,6 +1,7 @@
 // The check the user is setting up, and when it is complete enough to try.
 
 import {
+  type CharactersSpec,
   type CheckDef,
   type CheckSpec,
   LIMITS,
@@ -17,9 +18,6 @@ import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { sameSize, sizeText } from './sizes.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
-
-/** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
-type CharactersSpec = Extract<CheckSpec, { readonly kind: 'characters' }>;
 
 /** The kinds of check, in the order the capture screen offers them. */
 export const CHECK_KINDS = ['number', 'barFill', 'color', 'state'] as const;
@@ -233,7 +231,6 @@ export function reviewSpec(
     return null;
   }
   return {
-    kind: 'characters',
     region,
     screenshot: drawnOn,
     reference,

@@ -185,7 +185,6 @@ describe('buildCharacters', () => {
     expect(buildCharacters(draft, null)).toEqual({
       ok: true,
       spec: {
-        kind: 'characters',
         // With no value's region, the reference reads where its first box is.
         region,
         screenshot: 2,
@@ -264,7 +263,6 @@ test('reviewSpec waits for the region and color, and names the reference', () =>
   expect(reviewSpec({ ...EMPTY_DRAFT, region, ink: red }, [], null)).toBeNull();
   const kept = [{ reading: 0, text: '5' }];
   expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1, ink: red }, kept, percent)).toEqual({
-    kind: 'characters',
     region,
     screenshot: 1,
     reference: percent,
