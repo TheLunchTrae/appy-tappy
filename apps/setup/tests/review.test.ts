@@ -23,6 +23,9 @@ import {
   unrelated,
   untaughtNote,
   withCrop,
+  cropAskFailed,
+  cropsToAsk,
+  NO_CROP_ASKS,
 } from '../src/lib/review.ts';
 
 /** Where a reading's characters are in its picture, which review does not look at. */
@@ -492,4 +495,16 @@ test("a late picture of a replaced recording leaves the newest recording's pictu
     ]),
   );
   expect(withCrop(first, 3, 3, 0, picture(5))).toEqual({ id: 3, pictures: new Map([[0, picture(5)]]) });
+});
+
+test('a reading whose picture ask failed is asked for again, and each other reading once', () => {
+  const first = cropsToAsk(NO_CROP_ASKS, 2, 3);
+  expect(first.indexes).toEqual([0, 1, 2]);
+  expect(cropsToAsk(first.asks, 2, 4).indexes).toEqual([3]);
+  // The ask for reading 1 failed; a failure reported for another recording changes nothing.
+  expect(cropAskFailed(first.asks, 1, 1)).toBe(first.asks);
+  const failed = cropAskFailed(first.asks, 2, 1);
+  expect(cropsToAsk(failed, 2, 3).indexes).toEqual([1]);
+  // Another recording's readings are all asked for.
+  expect(cropsToAsk(failed, 3, 2).indexes).toEqual([0, 1]);
 });
