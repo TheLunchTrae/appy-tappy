@@ -405,7 +405,10 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
   },
 };
 
-/** The kinds of check, in the order the capture screen offers them, which is the table's. */
+/**
+ * The kinds of check, in the order the capture screen offers them, which is the table's. Every key is a kind; the
+ * filter is there only to give the keys their type, which `Object.keys` leaves as `string`.
+ */
 export const CHECK_KINDS: readonly CheckKind[] = Object.keys(CHECKS).filter(
   (kind): kind is CheckKind => kind in CHECKS,
 );

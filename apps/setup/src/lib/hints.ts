@@ -98,7 +98,7 @@ export const CHECK_CHARACTERS_HINT =
 
 /** The keys that answer a step of Check characters. */
 export const CHECK_KEYS_HINT =
-  'Enter presses the highlighted button: Yes, Next, or Done. To fix a shape, type the right character: it goes in It is under the first shape not checked yet, and Enter there makes it your answer. Alt+S skips the step, Alt+B goes back, and Escape closes the check. A text field or a button that has focus keeps Enter for itself.';
+  'While the check has focus, Enter presses the highlighted button: Yes, Next, or Done. To fix a shape, type the right character: it goes in It is under the first shape not checked yet, or under the first shape once all are checked, and Enter there makes it your answer. Alt+S skips the step and Alt+B goes back; with a character typed and not entered yet, either first makes it your answer. Escape closes the check. A text field keeps Enter and what you type, a button that has focus keeps Enter, and neither Enter nor typing answers a step while something outside the check has focus.';
 
 /** Why the reference editor offers Check characters before a save, and that the save does not wait for it. */
 export const CHECK_OFFER_HINT =
