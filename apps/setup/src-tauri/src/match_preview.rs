@@ -3,7 +3,7 @@
 //!
 //! Each rule asks the function its reader asks: a reference's characters
 //! [`DigitReader::is_ink`], a bar [`BarFill::classify`], and a color check
-//! [`ColorMatch::near`]. So the tint shows what the reader will take, at the
+//! [`Rgb::near`]. So the tint shows what the reader will take, at the
 //! tolerance's edge too.
 //!
 //! A color check compares its region's average color, not each pixel, so its
