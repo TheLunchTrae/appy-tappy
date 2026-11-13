@@ -69,7 +69,7 @@ use super::{WindowsSystem, client_on_screen, frame_on_screen};
 use crate::schedule::{ReadClock, frame_interval};
 use crate::screen::{
     Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Placement,
-    Region, Size, content, in_frame,
+    Region, Size, content, in_frame, run_capture,
 };
 
 /// The frame pool's buffers: one the thread may hold until its next read,
@@ -85,6 +85,9 @@ const HEALTH_CHECK: Duration = Duration::from_secs(2);
 
 /// Windows time spans count 100-nanosecond ticks.
 const TICKS_PER_SECOND: i128 = 10_000_000;
+
+/// The frame handler as [`run_capture`] lends it to the capture's work.
+type Handler<'handler> = dyn FnMut(io::Result<Frame<'_>>) -> Duration + 'handler;
 
 /// What wakes the capture thread.
 enum Event {
@@ -232,7 +235,11 @@ fn run(
         reason = "a send fails only when `start` stopped waiting, and nobody is left to tell"
     )]
     let _ = ready.send(Ok(()));
-    capture.handle_frames(&crop, &mut handler, events);
+    // A panic while it handles frames reaches the handler as the capture's
+    // end, and `stop` still releases what the capture holds.
+    run_capture(&mut handler, |handler| {
+        capture.handle_frames(&crop, handler, events);
+    });
     capture.stop();
 }
 
@@ -373,7 +380,7 @@ impl Capturer {
     /// Waits for frames and hands the newest to `handler` whenever its last
     /// wait has ended, until the session stops or the capture ends; an
     /// ending reaches the handler as a [`io::ErrorKind::NotConnected`] error.
-    fn handle_frames(&mut self, crop: &Crop, handler: &mut FrameHandler, events: &Receiver<Event>) {
+    fn handle_frames(&mut self, crop: &Crop, handler: &mut Handler<'_>, events: &Receiver<Event>) {
         let mut held: Option<Held> = None;
         let mut clock = ReadClock::new(Instant::now());
         let mut checked = Instant::now();
@@ -457,7 +464,7 @@ impl Capturer {
 
     /// Copies `crop` of one frame and passes it to `handler`, returning the
     /// handler's wait, or `None` when the capture ended.
-    fn read(&mut self, held: Held, crop: &Crop, handler: &mut FrameHandler) -> Option<Duration> {
+    fn read(&mut self, held: Held, crop: &Crop, handler: &mut Handler<'_>) -> Option<Duration> {
         let copied = self.copy(&held.frame, crop);
         close(&held.frame);
         match copied {
@@ -781,7 +788,7 @@ fn ended(why: &str) -> io::Error {
 
 /// Tells `handler` that its capture ended. Its wait is moot: nothing more
 /// will arrive.
-fn end(handler: &mut FrameHandler, error: io::Error) {
+fn end(handler: &mut Handler<'_>, error: io::Error) {
     let _wait = handler(Err(error));
 }
 
