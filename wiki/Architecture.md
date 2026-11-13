@@ -722,9 +722,10 @@ design enforces the block in three places:
    application decodes a reference's pictures once however many values read
    with it. `CheckDef::check` in `config` owns how many states a state
    check has, that each name passes `StateName::new` and no two are alike,
-   and that a bar's two colors differ, so a file that breaks one does not
-   load; `saved::build` and the setup
-   app's check editor report its error. A value that breaks a rule that
+   that a bar's two colors differ, and that a number check told which
+   characters to read reads at least one, so a file that breaks one does
+   not load; `saved::build` and the setup app's check editor report its
+   error, with the state's position for a bad name. A value that breaks a rule that
    `saved::build` checks itself, such as a region that fits or a picture of
    the region's size, stops only itself.
 

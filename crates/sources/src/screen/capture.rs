@@ -134,8 +134,9 @@ pub type FrameHandler = Box<dyn FnMut(io::Result<Frame<'_>>) -> NextFrame + Send
 ///
 /// A panic outside the handler reaches it as a
 /// [`io::ErrorKind::NotConnected`] error with the panic's message, as for
-/// any capture that cannot go on, unless it wanted no more frames. Unwound, the panic would end the thread,
-/// and the handler would hear nothing until the capture closed. A panic in
+/// any capture that cannot go on, unless it wanted no more frames.
+/// Unwound, the panic would end the thread, and the handler would hear
+/// nothing until the capture closed. A panic in
 /// the handler itself unwinds on, because a handler that panicked is not
 /// called again.
 pub fn run_capture(
