@@ -26,8 +26,8 @@ use std::io;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
+use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
 use appytappy_platform::WindowEvent;
 use appytappy_sources::system::{Pick, ProcessEntry, WindowEntry, session_window};
@@ -35,16 +35,19 @@ use appytappy_sources::system::{Pick, ProcessEntry, WindowEntry, session_window}
 use crate::trace::{Detail, Record, Trace, What};
 
 /// How long after the first window event of a burst the snapshot runs.
-pub(crate) const SETTLE: Duration = Duration::from_millis(250);
+const SETTLE: Duration = Duration::from_millis(250);
 
 /// How often a snapshot runs while an app runs or snapshots fail.
-pub(crate) const RESCAN: Duration = Duration::from_secs(5);
+const RESCAN: Duration = Duration::from_secs(5);
 
 /// How long a session keeps a process that owned one of the app's best
 /// windows after it owns none, while another process does. An app that
 /// goes full screen replaces its window, and the snapshot after the old
-/// one closed may not list the new one yet.
-pub(crate) const OWNER_GRACE: Duration = RESCAN;
+/// one closed may not list the new one yet. It is one [`RESCAN`], so the
+/// grace lasts until the periodic snapshot that follows the one where the
+/// process owned no window, and a change to how often snapshots run moves
+/// it too.
+const OWNER_GRACE: Duration = RESCAN;
 
 /// The apps to watch: each app's ID and how to find its window, whose
 /// executable pattern names its processes, such as `Example.exe` or

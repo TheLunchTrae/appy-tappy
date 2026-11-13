@@ -51,13 +51,14 @@ pub(crate) fn outline(
     size: Size,
     picture: impl FnMut(&str) -> io::Result<Vec<u8>> + Clone,
 ) -> CaptureOutline {
+    let mut readers = saved::Readers::new(&file.references);
     let placed: Vec<(bool, Result<Region, String>)> = file
         .values
         .iter()
         .map(|value| {
             let region = saved::build(
                 &value.screen,
-                &file.references,
+                &mut readers,
                 file.size_changes,
                 picture.clone(),
             )
@@ -126,6 +127,7 @@ mod tests {
         ValueDef {
             id: id.to_owned(),
             name: id.to_uppercase(),
+            origin: OriginDef::ByHand,
             screen: ScreenDef {
                 window_size: SizeDef {
                     width: WINDOW.width,
@@ -160,7 +162,6 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             references: Vec::new(),
             values,
         }

@@ -17,9 +17,9 @@ use std::time::{Duration, Instant};
 use appytappy_actions::Watched;
 use appytappy_config::action::Action;
 use appytappy_config::rule::Restore;
+use appytappy_config::settings_file::ReadInterval;
 use appytappy_config::signal::Value;
 use appytappy_engine::{Effect, RuleIndex, Session};
-use appytappy_sources::schedule::ReadInterval;
 
 use crate::click::ClickTargets;
 use crate::lifecycle::Change;
@@ -595,8 +595,8 @@ fn acts(
 mod tests {
     use std::time::Duration;
 
-    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::app_file::BuildDef;
+    use appytappy_config::process::ProcessId;
     use appytappy_config::rule::{Comparison, Condition, Restore, Rule};
     use appytappy_engine::RuleIndex;
 

@@ -83,7 +83,9 @@ impl<H: Host> Owner<H> {
         applications::check_name_free(&saved, None, name)?;
         name.clone_into(&mut file.name);
         file.anti_cheat = spec.anti_cheat;
-        file.origin = OriginDef::Imported { file: from.clone() };
+        for origin in file.origins_mut() {
+            *origin = OriginDef::Imported { file: from.clone() };
+        }
         let id = self
             .stores()?
             .apps
@@ -91,7 +93,7 @@ impl<H: Host> Owner<H> {
             .map_err(|error| {
                 format!("AppyTappy cannot import {from}: it could not be saved ({error}).")
             })?;
-        self.tell(Changed::Values);
+        self.tell(&id, Changed::Values);
         Ok(id)
     }
 }
@@ -102,9 +104,6 @@ fn cannot_export(name: &str, error: &ShareError) -> String {
     let change = match error {
         ShareError::TooManyPixels => {
             " Draw smaller regions or fewer states or fixes, then export it again."
-        },
-        ShareError::DecodesTooMuch => {
-            " Teach its references with smaller pictures, then export it again."
         },
         _ => "",
     };
@@ -159,9 +158,10 @@ fn file_label(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use appytappy_config::app_file::OverlayModeDef;
+    use appytappy_sources::screen::{Image, Size};
 
     use crate::check_spec::ColorSpec;
-    use crate::owner::messages::ReferenceSaveSpec;
+    use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
         BAR, FakeHost, Harness, STATE, capturing, characters_in, frame_image, spec,
     };
@@ -211,6 +211,9 @@ mod tests {
     #[test]
     fn an_exported_application_imports_as_a_new_one_with_the_class_the_user_picked() {
         let (mut harness, root) = with_values("share-round-trip");
+        harness
+            .ask(|owner| owner.save_reference(&reference("Digits", None, LABEL, "")))
+            .expect("saves");
         let exported = saved(&mut harness, "example");
         assert!(exported.file.checked.is_some(), "the build is recorded");
         let bytes = harness
@@ -242,9 +245,16 @@ mod tests {
         "Friend's app".clone_into(&mut expected.name);
         expected.anti_cheat = AntiCheatDef::Unknown;
         expected.overlay = None;
-        expected.origin = OriginDef::Imported {
+        let from = OriginDef::Imported {
             file: "friend's.zip".to_owned(),
         };
+        assert!(!expected.values.is_empty() && !expected.references.is_empty());
+        for value in &mut expected.values {
+            value.origin = from.clone();
+        }
+        for reference in &mut expected.references {
+            reference.origin = from.clone();
+        }
         assert_eq!(imported.file, expected);
         for picture in exported.file.images() {
             assert_eq!(
@@ -255,15 +265,24 @@ mod tests {
         let again = harness
             .ask(|owner| owner.export_app("example-2"))
             .expect("exports");
+        let again = harness
+            .ask(|owner| owner.read_shared(&again, "again.zip"))
+            .expect("reads")
+            .file;
+        let origins: Vec<&OriginDef> = again
+            .values
+            .iter()
+            .map(|value| &value.origin)
+            .chain(again.references.iter().map(|reference| &reference.origin))
+            .collect();
         assert_eq!(
-            harness
-                .ask(|owner| owner.read_shared(&again, "again.zip"))
-                .expect("reads")
-                .file
-                .origin,
-            OriginDef::Imported {
-                file: String::new()
-            },
+            origins,
+            vec![
+                &OriginDef::Imported {
+                    file: String::new()
+                };
+                origins.len()
+            ],
             "the name of the user's own file stays with them"
         );
         assert_eq!(
@@ -355,12 +374,6 @@ mod tests {
              one 7680x4320 picture. Draw smaller regions or fewer states or fixes, then export it again."
         );
         assert_eq!(
-            cannot_export("Example App", &ShareError::DecodesTooMuch),
-            "AppyTappy cannot export Example App: its values read their references' pictures \
-             so many times that reading them would decode more pixels than four 7680x4320 \
-             pictures. Teach its references with smaller pictures, then export it again."
-        );
-        assert_eq!(
             cannot_export("Example App", &ShareError::NoAppFile),
             "AppyTappy cannot export Example App: it holds no app.json.",
             "nothing to change"
@@ -381,28 +394,52 @@ mod tests {
         assert_eq!(file_label(&long), "é".repeat(MAX_FROM_CHARS));
     }
 
-    #[test]
-    fn a_reference_a_recording_taught_marks_how_the_application_was_made() {
-        let (mut harness, mut handler, root) = capturing("share-origin");
-        let reference = |name: &str, labels: &str, recorded: &str| ReferenceSaveSpec {
+    /// The reference `name` of `Example App`, new or the saved one
+    /// `editing`, taught the whole 4 by 2 frame's red by `labels` and the
+    /// recorded readings `recorded`, in the UI's JSON.
+    fn reference(
+        name: &str,
+        editing: Option<&str>,
+        labels: &str,
+        recorded: &str,
+    ) -> ReferenceSaveSpec {
+        let editing = editing.map_or_else(String::new, |id| {
+            format!(r#""reference":{{"app":"example","id":"{id}"}},"#)
+        });
+        ReferenceSaveSpec {
             app: "example".to_owned(),
             reference_name: name.to_owned(),
             expects: String::new(),
             characters: serde_json::from_str(&format!(
-                r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,
+                r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,{editing}
                     "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,
                     "labels":[{labels}],"recorded":[{recorded}]}}"#
             ))
             .expect("valid JSON"),
+        }
+    }
+
+    const LABEL: &str = r#"{"screenshot":0,"text":"1"}"#;
+    const READING: &str = r#"{"reading":0,"text":"1"}"#;
+
+    #[test]
+    fn a_reference_says_whether_a_recording_taught_it() {
+        let (mut harness, mut handler, root) = capturing("share-origin");
+        let origins = |harness: &mut Harness| -> Vec<(String, OriginDef)> {
+            saved(harness, "example")
+                .file
+                .references
+                .into_iter()
+                .map(|reference| (reference.id, reference.origin))
+                .collect()
         };
-        let by_hand = reference("By hand", r#"{"screenshot":0,"text":"1"}"#, "");
-        harness
-            .ask(|owner| owner.save_reference(&by_hand))
-            .expect("saves");
-        assert_eq!(
-            saved(&mut harness, "example").file.origin,
-            OriginDef::ByHand
-        );
+        let save = |harness: &mut Harness, spec: ReferenceSaveSpec| {
+            harness
+                .ask(|owner| owner.save_reference(&spec))
+                .expect("saves");
+        };
+        save(&mut harness, reference("By hand", None, LABEL, ""));
+        save(&mut harness, reference("Other", None, LABEL, ""));
         let region = serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("JSON");
         let ink: ColorSpec =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("JSON");
@@ -410,33 +447,79 @@ mod tests {
             .ask(|owner| owner.start_recording(characters_in(region, ink), false))
             .expect("records");
         harness.deliver(&mut handler, Ok(&frame_image()));
-        let recorded = reference("Recorded", "", r#"{"reading":0,"text":"1"}"#);
-        harness
-            .ask(|owner| owner.save_reference(&recorded))
-            .expect("saves");
+        save(&mut harness, reference("Recorded", None, "", READING));
         assert_eq!(
-            saved(&mut harness, "example").file.origin,
-            OriginDef::Recording
+            origins(&mut harness),
+            [
+                ("by_hand".to_owned(), OriginDef::ByHand),
+                ("other".to_owned(), OriginDef::ByHand),
+                ("recorded".to_owned(), OriginDef::Recording),
+            ],
+            "each says it of itself"
         );
-        // Where it was imported from outlasts what is taught in it later.
-        let mut imported = saved(&mut harness, "example").file;
-        imported.origin = OriginDef::Imported {
+        // A recording that adds to one made by hand makes it a recorded
+        // one, and labels added by hand leave a recorded one recorded.
+        save(
+            &mut harness,
+            reference("By hand", Some("by_hand"), "", READING),
+        );
+        save(
+            &mut harness,
+            reference("Recorded", Some("recorded"), LABEL, ""),
+        );
+        // Where one was imported from outlasts what is taught in it later.
+        let mut file = saved(&mut harness, "example").file;
+        let imported = OriginDef::Imported {
             file: "friend.zip".to_owned(),
         };
+        file.references[1].origin = imported.clone();
         harness
             .ask(|owner| {
                 owner
                     .stores()?
                     .apps
-                    .save("example", &imported, &[])
+                    .save("example", &file, &[])
                     .map_err(|error| error.to_string())
             })
             .expect("saves");
-        let again = reference("Recorded again", "", r#"{"reading":0,"text":"1"}"#);
+        save(&mut harness, reference("Other", Some("other"), "", READING));
+        assert_eq!(
+            origins(&mut harness),
+            [
+                ("by_hand".to_owned(), OriginDef::Recording),
+                ("other".to_owned(), imported),
+                ("recorded".to_owned(), OriginDef::Recording),
+            ]
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_label_on_a_screenshot_a_recording_of_looks_kept_counts_as_recorded() {
+        let (mut harness, mut handler, root) = capturing("share-origin-looks");
+        let region = serde_json::from_str(r#"{"x":2,"y":0,"width":2,"height":2}"#).expect("JSON");
         harness
-            .ask(|owner| owner.save_reference(&again))
+            .ask(|owner| owner.start_look_recording(region, 0, 0))
+            .expect("records");
+        // The right half is red here and gray on screenshot 0, so the
+        // recording keeps this frame as screenshot 1.
+        let red = Image::new(
+            Size {
+                width: 4,
+                height: 2,
+            },
+            [0, 0, 255, 0].repeat(8),
+        )
+        .expect("matching length");
+        harness.deliver(&mut handler, Ok(&red));
+        let label = r#"{"screenshot":1,"text":"1"}"#;
+        harness
+            .ask(|owner| owner.save_reference(&reference("Looks", None, label, "")))
             .expect("saves");
-        assert_eq!(saved(&mut harness, "example").file.origin, imported.origin);
+        assert_eq!(
+            saved(&mut harness, "example").file.references[0].origin,
+            OriginDef::Recording
+        );
         std::fs::remove_dir_all(root).expect("clean up");
     }
 }

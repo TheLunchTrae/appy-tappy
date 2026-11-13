@@ -10,7 +10,8 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use appytappy_config::app_file::{ReferenceDef, SampleDef, is_label_character, sample_name};
+use appytappy_config::app_file::{OriginDef, ReferenceDef, SampleDef, is_label_character};
+use appytappy_config::names::sample_name;
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::saved::{self, SavedError};
 use appytappy_sources::screen::{Image, Region, Size};
@@ -18,10 +19,11 @@ use serde::Deserialize;
 
 use crate::recording::Recording;
 use crate::screenshots::Shots;
+use crate::words::sentence;
 
 use super::{
-    ColorSpec, Cut, Pictures, ReferenceRef, RegionSpec, SpecError, cut, drawn, same_size, sentence,
-    size_of, to_region,
+    ColorSpec, Cut, Pictures, ReferenceRef, RegionSpec, SpecError, cut, drawn, same_size, size_of,
+    to_region,
 };
 
 /// The most characters a reference is saved as expecting: room for the
@@ -118,6 +120,9 @@ pub(crate) struct Taught {
     pub(crate) reference: ReferenceDef,
     /// The pictures of its new samples.
     pub(crate) pictures: Pictures,
+    /// The pictures of the saved reference's samples, as the session had
+    /// them.
+    pub(crate) kept: Pictures,
     /// The reader `saved::reader` learns from the two.
     pub(crate) reader: DigitReader,
 }
@@ -192,10 +197,28 @@ impl CharactersSpec {
         let id = id
             .or_else(|| self.reference.as_ref().map(|saved| saved.id.as_str()))
             .unwrap_or(UNSAVED);
-        let (mut samples, kept): (Vec<SampleDef>, Pictures) = saved
+        let (mut samples, kept, made, saved_name): (Vec<SampleDef>, Pictures, OriginDef, _) = saved
             .map_or_else(Default::default, |saved| {
-                (saved.reference.samples, saved.pictures)
+                (
+                    saved.reference.samples,
+                    saved.pictures,
+                    saved.reference.origin,
+                    Some(saved.reference.name),
+                )
             });
+        // A recording that teaches a reference made by hand makes it one a
+        // recording made. One that says where it was imported from goes on
+        // saying so.
+        let by_recording = !recorded.is_empty()
+            || self
+                .labels
+                .iter()
+                .any(|label| session.screenshots.is_recorded(label.screenshot));
+        let origin = if made == OriginDef::ByHand && by_recording {
+            OriginDef::Recording
+        } else {
+            made
+        };
         let labeled = self.labels.iter().map(|label| {
             let image = label_image(session.screenshots, region, label)?;
             Ok((image, label.text.as_str()))
@@ -233,6 +256,7 @@ impl CharactersSpec {
         let reference = ReferenceDef {
             id: id.to_owned(),
             name: name.to_owned(),
+            origin,
             ink: self.ink.into(),
             tolerance: self.tolerance,
             samples,
@@ -246,12 +270,21 @@ impl CharactersSpec {
                 .map(|(_, png)| png.clone())
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
         })
-        .map_err(|error| sample_problem(error, &reference))?;
+        .map_err(|error| match sample_problem(error, &reference) {
+            // Only a saved sample can be missing, so the problem names the
+            // saved reference, whatever the one taught here is called.
+            SpecError::MissingSample { picture, .. } => SpecError::MissingSample {
+                reference: saved_name.unwrap_or_else(|| reference.name.clone()),
+                picture,
+            },
+            problem => problem,
+        })?;
         Ok(Taught {
             region,
             window_size,
             reference,
             pictures,
+            kept,
             reader,
         })
     }

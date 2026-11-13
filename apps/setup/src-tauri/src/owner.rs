@@ -3,9 +3,11 @@
 //! Tauri runs commands on its own threads, and the capture hands frames over
 //! on another. None of them touches the state: each sends a [`Message`] here.
 //! A command sends a [`Run`], work that runs on this thread with the state
-//! and answers on a oneshot channel. The state is
-//! the picked window's capture, its newest frame, the session's screenshots,
-//! what it records, and the check the user is setting up.
+//! and answers on a oneshot channel. The state is the one capture slot,
+//! which holds the picked window's capture with its newest frame, the
+//! session's screenshots, what it records, and the check the user is setting
+//! up, or the automation editor's watch; the overlays; and what the Debug
+//! page reads.
 //!
 //! This file keeps the state and the thread's loop, and the one way each
 //! save of an application reaches the runtime, the overlays and their
@@ -13,6 +15,7 @@
 //! each command calls live in modules below it, and `test_support` holds the
 //! stand-ins the tests share.
 
+mod apps;
 mod automations;
 mod capture;
 mod clicks;
@@ -42,34 +45,36 @@ use std::collections::BTreeMap;
 use std::io;
 use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{AppFile, BuildDef};
-use appytappy_sources::screen::{CaptureSession, Image};
+use appytappy_config::process::ProcessId;
 
-use crate::check_spec::Pictures;
+use crate::check_spec::{Pictures, ReferenceRef, SavedReference};
 use crate::debug::log::SetupLog;
 use crate::debug::trace_file::TraceTail;
 use crate::debug::trace_view::TraceView;
-use crate::overlay::{Overlays, Purpose};
-use crate::recording::{Recorder, look, ocr};
-use crate::screenshots::Screenshots;
+use crate::overlay::{Overlays, Places, Purpose};
+use crate::recording::{look, ocr};
 use crate::stores::{SavedApp, Stores};
+use crate::ticket::{Ticket, Tickets};
 use crate::updates::Downloaded;
 
+pub(crate) use self::apps::{AppSummary, AppWindows};
+use self::capture::Capture;
 pub(crate) use self::clicks::{ClickPictureView, ClickSent, ClickSpec, FoundClick};
+pub(crate) use self::edits::{EditPreview, EditSpec};
+pub(crate) use self::fixes::FixSpec;
 pub(crate) use self::found::FoundView;
 pub(crate) use self::host::{Desktop, Host};
-use self::live::LiveCheck;
-use self::messages::CaptureFailure;
-pub(crate) use self::messages::{
-    AppSummary, AppWindows, EditPreview, EditSpec, FixSpec, Live, Message, Reading, RecordSpec,
-    ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
-    at_size,
-};
+pub(crate) use self::live::{ReferenceTrial, TrialSpec};
+pub(crate) use self::messages::{Event, Message, Run};
+pub(crate) use self::recording::RecordSpec;
+pub(crate) use self::references::{ReferenceSaveSpec, SavedReferenceId};
 pub(crate) use self::sharing::{ImportSpec, SharedView};
-use self::watch::Watched;
+pub(crate) use self::values::{SaveSpec, SavedValue};
+pub(crate) use self::watch::Live;
+use self::watch::Watching;
 
 /// The shortest time between two frames the preview takes: about 30 a
 /// second, smooth to the eye at a fraction of an application's frame rate.
@@ -90,36 +95,20 @@ pub(crate) struct Owner<H: Host> {
     own_process: u32,
     /// A sender for this thread's messages, handed to each capture.
     messages: Sender<Message<H>>,
-    /// Counts captures, so a frame from a window the user left is dropped.
-    generation: u64,
-    session: Option<H::Session>,
-    latest: Option<Image>,
-    /// When `latest` arrived.
-    latest_at: Option<Instant>,
-    /// Why the picked window's capture failed, until a good frame arrives.
-    failure: Option<CaptureFailure>,
-    screenshots: Screenshots,
-    /// The check the capture screen is setting up, which the live frame is
-    /// read with.
-    check: Option<LiveCheck>,
-    /// What the capture records: the readings a number's region shows or
-    /// the looks a value's region shows, one recording at a time.
-    recording: Option<Recorder>,
-    /// Counts recordings of both kinds, so text read for one the user
-    /// discarded or replaced is dropped.
-    recording_id: u64,
-    /// The text found like a reference's sample, until the user adds it or
-    /// moves on.
-    found: Option<found::Found>,
-    /// Counts searches, so text read for one the user dismissed or replaced
-    /// is dropped.
-    search_id: u64,
+    /// Hands out the ticket of each capture, recording, and search, so a
+    /// message about one the user left is dropped.
+    tickets: Tickets,
+    /// The one capture the capture screen and the automation editor share,
+    /// with what it keeps.
+    capture: Capture<H::Session>,
+    /// The saved reference the reference editor's characters add to, as
+    /// read when its editor first asked about them, until an application
+    /// is written: [`Owner::keep_reference`].
+    kept_reference: Option<(ReferenceRef, SavedReference)>,
     /// Sends new readings to the text reader's thread.
     ocr: Sender<ocr::Job>,
     /// Where whole-window recordings send the frames to look over.
     looks: Sender<look::Job>,
-    /// The saved value the automation editor watches.
-    watched: Option<Watched>,
     /// The overlays that show, each with a capture of its own.
     overlays: Overlays<H::Session>,
     /// The Values page's readings of the application it shows, with a
@@ -153,20 +142,11 @@ impl<H: Host> Owner<H> {
             host,
             own_process,
             messages,
-            generation: 0,
-            session: None,
-            latest: None,
-            latest_at: None,
-            failure: None,
-            screenshots: Screenshots::new(),
-            check: None,
-            recording: None,
-            recording_id: 0,
-            found: None,
-            search_id: 0,
+            tickets: Tickets::default(),
+            capture: Capture::Idle,
+            kept_reference: None,
             ocr,
             looks,
-            watched: None,
             overlays: Overlays::new(Purpose::Overlay),
             live: Overlays::new(Purpose::ValuesPage),
             update: None,
@@ -185,97 +165,75 @@ impl<H: Host> Owner<H> {
     pub(crate) fn handle(&mut self, message: Message<H>) -> ControlFlow<()> {
         match message {
             Message::Run(run) => run.run(self),
-            Message::Frame {
-                generation,
-                image,
-                received,
-            } => {
-                if generation == self.generation {
-                    self.frame(image, received);
+            Message::Sent { ticket, event } => {
+                if self.is_current(ticket, &event) {
+                    self.apply(event);
                 }
             },
-            Message::Recognized {
-                recording,
-                index,
-                text,
-            } => {
-                if let Some(current) = self
-                    .readings_mut()
-                    .filter(|current| current.id == recording)
-                {
-                    current.read(index, text);
+            Message::Shutdown => return ControlFlow::Break(()),
+        }
+        ControlFlow::Continue(())
+    }
+
+    /// Whether the work `event` is about still holds `ticket`: the one
+    /// guard every late message from a capture or a worker thread passes.
+    /// It drops what the picked window's capture sent after the user left
+    /// it, what a watch's capture sent after it stopped or started again,
+    /// text and looks for a recording or a search that was discarded or
+    /// replaced, and readings from an overlay capture that closed.
+    fn is_current(&self, ticket: Ticket, event: &Event) -> bool {
+        let current = match event {
+            Event::Frame { .. } | Event::CaptureFailed(_) => self.capture.picked_ticket(),
+            Event::Watch(_) => self.capture.watching().and_then(Watching::ticket),
+            Event::Recognized { .. } | Event::Looked { .. } => {
+                self.readings().map(|recording| recording.id)
+            },
+            Event::FoundText { .. } => self.found().map(|found| found.id),
+            Event::Overlay { purpose, app, .. } => self.overlays_for(*purpose).ticket(app),
+        };
+        current == Some(ticket)
+    }
+
+    /// Applies `event`, which [`Owner::is_current`] passed.
+    fn apply(&mut self, event: Event) {
+        match event {
+            Event::Frame { image, received } => self.frame(image, received),
+            Event::CaptureFailed(failure) => self.capture_failed(failure),
+            Event::Watch(seen) => self.watch_sent(seen),
+            Event::Recognized { index, text } => {
+                if let Some(recording) = self.readings_mut() {
+                    recording.read(index, text);
                 }
             },
-            Message::Looked {
-                recording,
-                at,
-                seen,
-            } => self.looked(recording, at, seen),
-            Message::FoundText {
-                search,
-                index,
-                text,
-            } => self.found_text(search, index, text),
-            Message::CaptureFailed {
-                generation,
-                failure,
-            } => {
-                if generation == self.generation {
-                    self.capture_failed(failure);
-                }
-            },
-            Message::Watch { generation, seen } => {
-                if let Some(watched) = self
-                    .watched
-                    .as_mut()
-                    .filter(|_| generation == self.generation)
-                {
-                    match seen {
-                        Ok(seen) => self.watch_seen(seen),
-                        Err(error) => {
-                            watched.failure = Some(error);
-                            // The editor watches again, so nothing needs this
-                            // capture, even if it would go on.
-                            #[expect(
-                                clippy::let_underscore_must_use,
-                                reason = "the capture already failed, and the editor shows why"
-                            )]
-                            let _ = self.close();
-                        },
-                    }
-                }
-            },
-            Message::Overlay {
-                purpose,
-                app,
-                generation,
-                read,
-            } => {
-                let overlays = match purpose {
-                    Purpose::Overlay => &mut self.overlays,
-                    Purpose::ValuesPage => &mut self.live,
-                };
+            Event::Looked { at, seen } => self.looked(at, seen),
+            Event::FoundText { index, text } => self.found_text(index, text),
+            Event::Overlay { purpose, app, read } => {
+                let now = self.host.now();
                 // The overlay or the Values page shows why its capture
                 // stopped, and looks for the window again.
                 #[expect(
                     clippy::let_underscore_must_use,
                     reason = "the capture already failed, and the overlay shows why"
                 )]
-                let _ = overlays.read(&app, generation, read, self.host.now());
+                let _ = self.overlays_mut(purpose).read(&app, read, now);
             },
-            Message::PanelPlaced { app, panel } => self.overlays.placed(&app, panel),
-            Message::Shutdown => return ControlFlow::Break(()),
         }
-        ControlFlow::Continue(())
     }
 
-    /// Stops the capture, if one runs.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error the capture's thread ended with.
-    pub(crate) fn close(&mut self) -> io::Result<()> {
-        self.session.take().map_or(Ok(()), CaptureSession::close)
+    /// The captures that read for `purpose`.
+    const fn overlays_for(&self, purpose: Purpose) -> &Overlays<H::Session> {
+        match purpose {
+            Purpose::Overlay => &self.overlays,
+            Purpose::ValuesPage => &self.live,
+        }
+    }
+
+    /// The captures that read for `purpose`, to change them.
+    const fn overlays_mut(&mut self, purpose: Purpose) -> &mut Overlays<H::Session> {
+        match purpose {
+            Purpose::Overlay => &mut self.overlays,
+            Purpose::ValuesPage => &mut self.live,
+        }
     }
 
     /// Saves where each panel is, closes the overlays, and stops the
@@ -286,18 +244,18 @@ impl<H: Host> Owner<H> {
     /// Returns the error the capture's thread ended with. An overlay's
     /// capture that ended with an error already showed it.
     pub(crate) fn shut_down(&mut self) -> io::Result<()> {
-        self.save_panels(true);
+        self.save_panels(Places::All);
         #[expect(
             clippy::let_underscore_must_use,
             reason = "an overlay's capture error already showed in its window, which is closing"
         )]
-        let _ = self.overlays.close(None);
+        let _ = self.overlays.close_all();
         #[expect(
             clippy::let_underscore_must_use,
             reason = "the Values page showed its capture's error already, and it is closing"
         )]
-        let _ = self.live.close(None);
-        self.close()
+        let _ = self.live.close_all();
+        self.end_capture()
     }
 
     /// Where the applications', automations' and settings files live, or
@@ -329,24 +287,21 @@ impl<H: Host> Owner<H> {
     }
 
     /// Writes `write` to the folder of the application `app`, then tells who
-    /// reads what `changed` names, removes the pictures the file as saved
-    /// does not name, and opens or closes the overlay windows to match when
-    /// `changed` can change which show. Answers why an overlay window could
-    /// not open or close, if one could not.
+    /// reads what `changed` names, and opens or closes the overlay windows
+    /// to match when `changed` can change which show. Answers why an overlay
+    /// window could not open or close, if one could not.
     ///
-    /// A save that failed changed nothing anyone reads, so no one is told,
-    /// and the pictures it wrote before it failed go, since the file still
-    /// saved does not name them. A removal that failed partway may have
-    /// removed some of the application's files, so they are read again
-    /// either way. No one reads a picture the file does not name, so a
-    /// failure to remove one changes nothing they read, and the save
-    /// stands; the application's next save tries again.
+    /// A save that failed changed nothing anyone reads, so no one is told.
+    /// A removal that failed partway may have removed some of the
+    /// application's files, so they are read again either way.
     pub(super) fn write_app(
         &mut self,
         app: &str,
         changed: Changed,
         write: Write<'_>,
     ) -> Result<Option<String>, String> {
+        // Whatever the write does, a reference kept from before it is old.
+        self.kept_reference = None;
         let apps = &self.stores()?.apps;
         let written = match write {
             Write::Save(file, pictures) => apps.save(app, file, pictures),
@@ -354,14 +309,7 @@ impl<H: Host> Owner<H> {
         }
         .map_err(|error| error.to_string());
         if written.is_ok() || matches!(write, Write::Remove) {
-            self.tell(changed);
-        }
-        if let Write::Save(..) = write {
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "no one reads a picture the saved file does not name, and the next save tries again"
-            )]
-            let _ = self.prune_saved(app);
+            self.tell(app, changed);
         }
         written?;
         let windows = changed
@@ -375,51 +323,33 @@ impl<H: Host> Owner<H> {
     /// with `save`, and has the runtime read the saved files again once it
     /// worked.
     pub(crate) fn update_runtime<T>(
-        &mut self,
+        &self,
         save: impl FnOnce(&Stores) -> Result<T, String>,
     ) -> Result<T, String> {
         let saved = self.stores().and_then(save)?;
-        self.tell(Changed::Runtime);
+        self.host.reload_runtime();
         Ok(saved)
     }
 
-    /// Removes the pictures of the application `app` that `file` does not
-    /// name, of those AppyTappy named.
-    pub(super) fn prune(&self, app: &str, file: &AppFile) -> Result<(), String> {
-        self.stores()?
-            .apps
-            .prune(app, file)
-            .map_err(|error| error.to_string())
-    }
-
-    /// Removes the pictures of the application `app` that its file, as it
-    /// is saved now, does not name: the new file after a save that worked,
-    /// and the one before it after a save that failed, whose pictures no
-    /// file names. An application whose saved file cannot be read keeps
-    /// every picture, since nothing says which it names.
-    fn prune_saved(&self, app: &str) -> Result<(), String> {
-        let saved = self.stores()?.app(app)?;
-        self.prune(app, &saved.file)
-    }
-
-    /// Does what follows from a change to the saved files: each overlay
-    /// reads again what `changed` names, and the runtime reads the saved
-    /// files again when it reads what changed.
-    fn tell(&mut self, changed: Changed) {
+    /// Does what follows from a change to the saved files of the
+    /// application `app`: its overlay reads them again when it reads what
+    /// `changed` names, and so does the runtime. The other applications'
+    /// overlays go on as they were.
+    pub(super) fn tell(&mut self, app: &str, changed: Changed) {
         if changed.overlays() {
-            // Each overlay reads its values again from their saved files,
+            // The overlay reads its values again from their saved files,
             // after keeping where the user just put its panel.
-            self.save_panels(true);
+            self.save_panels(Places::Of(app));
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a capture that ended with an error stopped already, and the next poll starts another"
             )]
-            let _ = self.overlays.close(None);
+            let _ = self.overlays.reopen(app);
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a capture that ended with an error stopped already, and the next poll starts another"
             )]
-            let _ = self.live.close(None);
+            let _ = self.live.reopen(app);
         }
         if changed.runtime() {
             self.host.reload_runtime();
@@ -520,7 +450,7 @@ mod tests {
 
     use crate::overlay::OverlayWindow;
 
-    use super::test_support::{Harness, STATE, spec, with_saved_bar};
+    use super::test_support::{Harness, STATE, add_other_bar, spec, with_saved_bar};
     use super::*;
 
     /// The folder of `Example App`, holding the state `Icon visible` with
@@ -707,7 +637,44 @@ mod tests {
     }
 
     #[test]
-    fn a_removal_that_fails_still_tells_who_reads_the_files() {
+    fn a_change_to_the_values_restarts_only_that_applications_values_page_readings() {
+        let (mut harness, root) = with_saved_bar("changed-live");
+        add_other_bar(&mut harness);
+        for app in ["example", "example-2"] {
+            harness
+                .ask(|owner| owner.live_values(app))
+                .expect("the Values page reads");
+            harness.handlers.try_recv().expect("its capture started");
+        }
+        let other = harness.owner.live.ticket("example-2");
+        assert!(other.is_some(), "reads");
+        harness.closed.try_iter().for_each(drop);
+
+        harness
+            .ask(|owner| {
+                owner.update_app("example", Changed::Values, |_owner, found| {
+                    "Renamed".clone_into(&mut found.file.name);
+                    Ok(Edit::Save((), Vec::new()))
+                })
+            })
+            .expect("saves");
+        assert_eq!(harness.closed.try_recv(), Ok(7), "one capture closes");
+        assert!(harness.closed.try_recv().is_err(), "only one");
+        assert_eq!(
+            harness.owner.live.ticket("example"),
+            None,
+            "the changed application's readings start again on the next poll"
+        );
+        assert_eq!(
+            harness.owner.live.ticket("example-2"),
+            other,
+            "the other application's readings go on"
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_removal_that_fails_still_tells_the_runtime_and_leaves_other_overlays() {
         let (mut harness, root) = with_saved_bar("changed-removal");
         harness
             .ask(|owner| owner.set_overlay("example", true, OverlayModeDef::Overlay))
@@ -717,15 +684,19 @@ mod tests {
             .expect("shows");
         harness.forget_reloads();
         harness.synced.try_iter().for_each(drop);
-        // Part of the folder may be gone, so the runtime and the overlays
-        // read again whether or not the removal finished.
+        // Part of the folder may be gone, so the runtime reads again
+        // whether or not the removal finished. So would that application's
+        // overlay; another application's goes on as it was.
         assert!(
             harness
                 .ask(|owner| owner.write_app("Not An Id", Changed::Applications, Write::Remove))
                 .is_err()
         );
         assert_eq!(harness.reloads(), 1, "the runtime reads again");
-        assert!(harness.closed.try_recv().is_ok(), "the overlay reads again");
+        assert!(
+            harness.closed.try_recv().is_err(),
+            "the overlay of an application that did not change goes on"
+        );
         assert!(
             harness.synced.try_recv().is_err(),
             "the windows stay until a removal is done"

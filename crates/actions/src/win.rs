@@ -46,7 +46,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use appytappy_config::action::{Key, MediaCommand, Modifier, OpenTarget, VolumeLevel};
-use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::process::ProcessId;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
@@ -94,7 +94,8 @@ use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
 use crate::{
-    Backoff, Controls, Input, MediaSession, MouseButton, MouseMessage, Press, Stroke, Volume, pack,
+    Backoff, Controls, Executables, Input, MediaSession, MouseButton, MouseMessage, Press, Stroke,
+    Volume, pack,
 };
 
 /// How long a media request may take before it counts as failed, so an app
@@ -177,11 +178,6 @@ impl PartialEq for VolumeKey {
         same_kind && self.id == other.id
     }
 }
-
-/// Lists the running processes' executable names with their process IDs.
-/// It must not open any process: the controls rely on that so that no
-/// action opens a watched app's process.
-pub type Executables = Box<dyn Fn() -> io::Result<Vec<(ProcessId, String)>>>;
 
 /// The Windows implementation of [`Controls`].
 ///
@@ -1247,8 +1243,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use appytappy_config::action::OpenTarget;
-    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::click::{ClickButton, ClickDelivery};
+    use appytappy_config::process::ProcessId;
     use windows::Win32::Foundation::{
         ERROR_ACCESS_DENIED, ERROR_INVALID_WINDOW_HANDLE, ERROR_TIMEOUT, HINSTANCE, HWND, LPARAM,
         LRESULT, POINT, WIN32_ERROR, WPARAM,

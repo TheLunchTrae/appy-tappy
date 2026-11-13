@@ -12,16 +12,17 @@ use crate::check_spec::{CharactersSpec, ColorSpec, Label, RegionSpec};
 use crate::pixels;
 use crate::recording::character::{self, CharacterView};
 use crate::recording::{Line, Text, find, ocr};
+use crate::ticket::Ticket;
 
 use super::Owner;
 use super::host::Host;
 
 /// The text a search found, kept until the user adds it or moves on.
 #[derive(Debug)]
-pub(crate) struct Found {
+pub(super) struct Found {
     /// Its number in the session; the text reader's guesses for an earlier
     /// search are dropped.
-    id: u64,
+    pub(super) id: Ticket,
     /// The screenshot it searched.
     screenshot: usize,
     /// Each find's region, pixels, and text.
@@ -87,7 +88,7 @@ pub(crate) struct FindView {
 impl Found {
     fn view(&self) -> FoundView {
         FoundView {
-            id: self.id,
+            id: self.id.number(),
             screenshot: self.screenshot,
             finds: self
                 .items
@@ -120,9 +121,10 @@ impl<H: Host> Owner<H> {
         ink: ColorSpec,
         tolerance: u8,
     ) -> Result<FoundView, String> {
-        self.found = None;
+        self.forget_found();
         let image = self
-            .screenshots
+            .capture
+            .screenshots()
             .get(screenshot)
             .ok_or_else(|| "Take a screenshot first.".to_owned())?;
         let region = Region::try_from(region)
@@ -142,8 +144,7 @@ impl<H: Host> Owner<H> {
             "The box shows no characters in that color. Pick the characters' color first."
                 .to_owned()
         })?;
-        self.search_id = self.search_id.wrapping_add(1);
-        let id = self.search_id;
+        let id = self.tickets.next();
         let mut items = Vec::with_capacity(search.finds.len());
         for found in search.finds {
             let Some(cropped) = image.crop(found.region) else {
@@ -167,13 +168,15 @@ impl<H: Host> Owner<H> {
             other_sizes: search.other_sizes,
         };
         let view = found.view();
-        self.found = Some(found);
+        if let Some(picked) = self.capture.picked_mut() {
+            picked.found = Some(found);
+        }
         Ok(view)
     }
 
     /// Sends `line`, the ink of find `index` of search `search`, to the text
     /// reader, and answers what the find's text is until the reader does.
-    fn read(&self, search: u64, index: usize, line: Option<Line>) -> Text {
+    fn read(&self, search: Ticket, index: usize, line: Option<Line>) -> Text {
         let Some(line) = line else {
             return Text::Failed("Type what this shows.".to_owned());
         };
@@ -204,8 +207,9 @@ impl<H: Host> Owner<H> {
         tolerance: u8,
     ) -> Option<FoundView> {
         let reader = DigitReader::new(ink.into(), tolerance);
+        let found = self.search(search)?;
+        let id = found.id;
         let lines: Vec<(usize, Option<Line>)> = {
-            let found = self.found.as_ref().filter(|found| found.id == search)?;
             let named: BTreeSet<usize> = indexes.iter().copied().collect();
             named
                 .into_iter()
@@ -217,10 +221,9 @@ impl<H: Host> Owner<H> {
                 .collect()
         };
         for (index, line) in lines {
-            let text = self.read(search, index, line);
+            let text = self.read(id, index, line);
             if let Some(item) = self
-                .found
-                .as_mut()
+                .found_mut()
                 .and_then(|found| found.items.get_mut(index))
             {
                 item.text = text;
@@ -231,22 +234,39 @@ impl<H: Host> Owner<H> {
         self.found_state()
     }
 
-    /// Keeps the text reader's guess for find `index` of search `search`,
-    /// unless the user moved on from it.
-    pub(super) fn found_text(&mut self, search: u64, index: usize, text: Text) {
+    /// Keeps the text reader's guess for find `index` of the search.
+    pub(super) fn found_text(&mut self, index: usize, text: Text) {
         if let Some(item) = self
-            .found
-            .as_mut()
-            .filter(|found| found.id == search)
+            .found_mut()
             .and_then(|found| found.items.get_mut(index))
         {
             item.text = text;
         }
     }
 
+    /// The search, if there is one.
+    pub(super) fn found(&self) -> Option<&Found> {
+        self.capture
+            .picked()
+            .and_then(|picked| picked.found.as_ref())
+    }
+
+    /// The search, to change it.
+    fn found_mut(&mut self) -> Option<&mut Found> {
+        self.capture
+            .picked_mut()
+            .and_then(|picked| picked.found.as_mut())
+    }
+
+    /// The search the UI knows by the number `search`; `None` when that
+    /// search was replaced or forgotten.
+    fn search(&self, search: u64) -> Option<&Found> {
+        self.found().filter(|found| found.id.number() == search)
+    }
+
     /// The search as the UI shows it, or `None` without one.
     pub(crate) fn found_state(&self) -> Option<FoundView> {
-        self.found.as_ref().map(Found::view)
+        self.found().map(Found::view)
     }
 
     /// Find `index`'s pixels of search `search`, at most `max_width` wide;
@@ -257,16 +277,16 @@ impl<H: Host> Owner<H> {
         index: usize,
         max_width: u32,
     ) -> Option<Vec<u8>> {
-        self.found
-            .as_ref()
-            .filter(|found| found.id == search)
+        self.search(search)
             .and_then(|found| found.items.get(index))
             .map(|item| pixels::rgba(&item.image, max_width))
     }
 
     /// Forgets the search.
     pub(crate) fn forget_found(&mut self) {
-        self.found = None;
+        if let Some(picked) = self.capture.picked_mut() {
+            picked.found = None;
+        }
     }
 
     /// The characters the box `region` of screenshot `screenshot` shows, as
@@ -282,7 +302,8 @@ impl<H: Host> Owner<H> {
         tolerance: u8,
     ) -> Vec<CharacterView> {
         let reader = DigitReader::new(ink.into(), tolerance);
-        self.screenshots
+        self.capture
+            .screenshots()
             .get(screenshot)
             .zip(Region::try_from(region).ok())
             .and_then(|(image, region)| image.crop(region))
@@ -294,10 +315,11 @@ impl<H: Host> Owner<H> {
     /// it, or `None` when it can; an error when `spec`'s own labels cannot
     /// be learned.
     pub(crate) fn found_problems(
-        &self,
+        &mut self,
         spec: &CharactersSpec,
         found: &[Label],
     ) -> Result<Vec<Option<String>>, String> {
+        self.keep_reference(spec.reference.as_ref());
         self.with_session(|session| spec.label_problems(session, found))
             .map_err(|error| error.to_string())
     }
@@ -307,8 +329,7 @@ impl<H: Host> Owner<H> {
 mod tests {
     use appytappy_sources::screen::{FrameHandler, Size};
 
-    use crate::owner::messages::Message;
-    use crate::owner::test_support::{FakeHost, Harness, harness};
+    use crate::owner::test_support::{FakeHost, Harness, found_text, harness};
 
     use super::*;
 
@@ -349,6 +370,15 @@ mod tests {
     }
 
     /// A harness with screenshot 0 of [`marks`].
+    /// The numbers of the first and second searches of a [`searchable`]
+    /// harness, whose capture took the ticket before them.
+    const FIRST: u64 = 2;
+    const SECOND: u64 = 3;
+
+    fn first() -> ocr::Source {
+        ocr::Source::Search(Ticket::numbered(FIRST))
+    }
+
     fn searchable() -> (Harness, FrameHandler) {
         let mut harness = harness(false);
         let mut handler = harness.pick();
@@ -367,7 +397,7 @@ mod tests {
     fn a_search_finds_the_other_marks_and_has_each_read() {
         let (mut harness, _handler) = searchable();
         let found = harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
-        assert_eq!(found.id, 1);
+        assert_eq!(found.id, FIRST);
         assert_eq!(found.screenshot, 0);
         let regions: Vec<RegionSpec> = found.finds.iter().map(|find| find.region).collect();
         assert_eq!(
@@ -396,19 +426,14 @@ mod tests {
             .try_iter()
             .map(|job| (job.source, job.index))
             .collect();
-        assert_eq!(
-            jobs,
-            [(ocr::Source::Search(1), 0), (ocr::Source::Search(1), 1)]
-        );
-        for (search, text) in [(0, "stale"), (1, "7")] {
+        assert_eq!(jobs, [(first(), 0), (first(), 1)]);
+        // Text under another ticket than the search's, here its
+        // capture's, is dropped.
+        for (search, text) in [(FIRST - 1, "stale"), (FIRST, "7")] {
             assert!(
                 harness
                     .owner
-                    .handle(Message::FoundText {
-                        search,
-                        index: 1,
-                        text: Text::Read(text.to_owned()),
-                    })
+                    .handle(found_text(search, 1, Text::Read(text.to_owned())))
                     .is_continue()
             );
         }
@@ -421,9 +446,16 @@ mod tests {
         let crop = marks()
             .crop(Region::new(0, 6, 4, 5).expect("not empty"))
             .expect("inside");
-        assert_eq!(harness.ask(pixels_of(1, 1)), Some(pixels::rgba(&crop, 20)));
-        assert_eq!(harness.ask(pixels_of(1, 2)), None);
-        assert_eq!(harness.ask(pixels_of(0, 1)), None, "an earlier search's");
+        assert_eq!(
+            harness.ask(pixels_of(FIRST, 1)),
+            Some(pixels::rgba(&crop, 20))
+        );
+        assert_eq!(harness.ask(pixels_of(FIRST, 2)), None);
+        assert_eq!(
+            harness.ask(pixels_of(FIRST - 1, 1)),
+            None,
+            "an earlier search's"
+        );
     }
 
     #[test]
@@ -445,15 +477,11 @@ mod tests {
         let (mut harness, _handler) = searchable();
         harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
         let again = harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
-        assert_eq!(again.id, 2);
+        assert_eq!(again.id, SECOND);
         assert!(
             harness
                 .owner
-                .handle(Message::FoundText {
-                    search: 1,
-                    index: 0,
-                    text: Text::Read("1".to_owned()),
-                })
+                .handle(found_text(FIRST, 0, Text::Read("1".to_owned())))
                 .is_continue()
         );
         assert_eq!(
@@ -512,11 +540,7 @@ mod tests {
             assert!(
                 harness
                     .owner
-                    .handle(Message::FoundText {
-                        search: 1,
-                        index,
-                        text,
-                    })
+                    .handle(found_text(FIRST, index, text))
                     .is_continue()
             );
         }
@@ -526,7 +550,7 @@ mod tests {
     #[test]
     fn a_reread_sends_the_named_finds_again_and_leaves_the_rest() {
         let (mut harness, _handler) = answered();
-        let view = harness.ask(reread(1, &[0, 5], red())).expect("kept");
+        let view = harness.ask(reread(FIRST, &[0, 5], red())).expect("kept");
         assert_eq!(view.finds[0].text, Text::Pending);
         assert_eq!(
             view.finds[1].text,
@@ -538,23 +562,19 @@ mod tests {
             .try_iter()
             .map(|job| (job.source, job.index))
             .collect();
-        assert_eq!(jobs, [(ocr::Source::Search(1), 0)]);
-        harness.ask(reread(1, &[0, 1], red())).expect("kept");
+        assert_eq!(jobs, [(first(), 0)]);
+        harness.ask(reread(FIRST, &[0, 1], red())).expect("kept");
         let indexes: Vec<usize> = harness.jobs.try_iter().map(|job| job.index).collect();
         assert_eq!(indexes, [1], "a find the reader has yet to answer waits");
         for index in 0..2 {
             assert!(
                 harness
                     .owner
-                    .handle(Message::FoundText {
-                        search: 1,
-                        index,
-                        text: Text::Read("7".to_owned()),
-                    })
+                    .handle(found_text(FIRST, index, Text::Read("7".to_owned())))
                     .is_continue()
             );
         }
-        harness.ask(reread(1, &[1, 0, 1], red())).expect("kept");
+        harness.ask(reread(FIRST, &[1, 0, 1], red())).expect("kept");
         let indexes: Vec<usize> = harness.jobs.try_iter().map(|job| job.index).collect();
         assert_eq!(indexes, [0, 1], "a find named twice is read once");
     }
@@ -565,7 +585,7 @@ mod tests {
         let green: ColorSpec =
             serde_json::from_str(r#"{"red":0,"green":255,"blue":0}"#).expect("valid JSON");
         let view = harness
-            .ask(move |owner: &mut Owner<FakeHost>| owner.reread_found(1, &[1], green, 9))
+            .ask(move |owner: &mut Owner<FakeHost>| owner.reread_found(FIRST, &[1], green, 9))
             .expect("kept");
         assert_eq!(view.finds[0].characters.len(), 1);
         assert_eq!(
@@ -594,20 +614,20 @@ mod tests {
             assert!(
                 harness
                     .owner
-                    .handle(Message::FoundText {
-                        search: 2,
-                        index,
-                        text: Text::Read("3".to_owned()),
-                    })
+                    .handle(found_text(SECOND, index, Text::Read("3".to_owned())))
                     .is_continue()
             );
         }
         let before = harness.ask(|owner| owner.found_state());
-        assert_eq!(harness.ask(reread(1, &[0, 1], red())), None);
+        assert_eq!(harness.ask(reread(FIRST, &[0, 1], red())), None);
         assert_eq!(harness.jobs.try_iter().count(), 0, "nothing is read");
         assert_eq!(harness.ask(|owner| owner.found_state()), before);
         harness.ask(Owner::forget_found);
-        assert_eq!(harness.ask(reread(2, &[0], red())), None, "a forgotten one");
+        assert_eq!(
+            harness.ask(reread(SECOND, &[0], red())),
+            None,
+            "a forgotten one"
+        );
     }
 
     #[test]
@@ -615,7 +635,7 @@ mod tests {
         let (mut harness, _handler) = answered();
         let green: ColorSpec =
             serde_json::from_str(r#"{"red":0,"green":255,"blue":0}"#).expect("valid JSON");
-        let view = harness.ask(reread(1, &[1], green)).expect("kept");
+        let view = harness.ask(reread(FIRST, &[1], green)).expect("kept");
         assert_eq!(
             view.finds[1].text,
             Text::Failed("Type what this shows.".to_owned()),
@@ -624,7 +644,7 @@ mod tests {
         assert_eq!(harness.jobs.try_iter().count(), 0);
         let (closed, _) = std::sync::mpsc::channel();
         harness.owner.ocr = closed;
-        let view = harness.ask(reread(1, &[1], red())).expect("kept");
+        let view = harness.ask(reread(FIRST, &[1], red())).expect("kept");
         assert_eq!(
             view.finds[1].text,
             Text::Failed("The text reader stopped. Type what this shows.".to_owned())

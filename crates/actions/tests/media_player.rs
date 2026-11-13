@@ -24,7 +24,7 @@ use appytappy_actions::{Actions, Controls, Watched};
 use appytappy_config::action::{
     Action, AppName, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
 };
-use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::process::ProcessId;
 use appytappy_config::rule::Restore;
 use appytappy_sources::system::{System, executables};
 use appytappy_sources::win::WindowsSystem;

@@ -35,6 +35,7 @@ use appytappy_sources::screen::{Image, Region, Size};
 use serde::Serialize;
 
 use crate::screenshots::Screenshots;
+use crate::ticket::Ticket;
 
 use super::{Lifecycle, cut, millis};
 
@@ -54,7 +55,7 @@ pub(crate) const REST: u32 = 4;
 #[derive(Debug)]
 pub(crate) struct LookRecording {
     /// Its number in the session, so the UI tells it from one it replaced.
-    id: u64,
+    id: Ticket,
     /// The region of the window it records.
     region: Region,
     /// How far, on average, a crop may be from a look and still be that
@@ -81,7 +82,7 @@ impl LookRecording {
     /// a crop within `tolerance` of a look is that look. The looks it knows
     /// already are the region on each of `screenshots` of that window size.
     pub(crate) fn new(
-        id: u64,
+        id: Ticket,
         region: Region,
         tolerance: u8,
         window_size: Size,
@@ -141,7 +142,7 @@ impl LookRecording {
             .any(|look| look.matches(&crop) == Ok(true))
         {
             self.looks.push(ImageMatch::whole(crop, self.tolerance));
-            self.kept.push(screenshots.push(frame.clone()));
+            self.kept.push(screenshots.push_recorded(frame.clone()));
             if self.kept.len() >= MAX_LOOKS {
                 self.life.fail(
                     arrived,
@@ -161,7 +162,7 @@ impl LookRecording {
     /// What the UI shows of it at `now`.
     pub(crate) fn view(&self, now: Instant) -> LookRecordingView {
         LookRecordingView {
-            id: self.id,
+            id: self.id.number(),
             recording: self.life.is_recording(),
             elapsed_ms: millis(self.life.elapsed(now)),
             problem: self.life.problem().map(str::to_owned),
@@ -217,7 +218,14 @@ mod tests {
             width: 2,
             height: 1,
         };
-        LookRecording::new(1, region, 10, size, &Screenshots::new(), started)
+        LookRecording::new(
+            Ticket::numbered(1),
+            region,
+            10,
+            size,
+            &Screenshots::new(),
+            started,
+        )
     }
 
     #[test]

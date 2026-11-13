@@ -11,6 +11,7 @@
 //! Every write goes to a temporary file first and then replaces the old file
 //! in one step, so a reader never sees half a file.
 
+use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -18,8 +19,12 @@ use std::process;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::app_file::{AppFile, is_image_name, is_own_image_name};
+use crate::app_file::AppFile;
 use crate::automation_file::AutomationsFile;
+use crate::names::{
+    click_picture_name, click_picture_number, is_app_id, is_image_name, is_own_image_name,
+    new_app_id,
+};
 use crate::settings_file::SettingsFile;
 
 /// The authoring file's name in an application's folder.
@@ -43,9 +48,6 @@ const RENAME_WAIT: Duration = Duration::from_millis(50);
 /// removes it: far longer than any write takes, so a write that another copy
 /// of the program still has under way is never removed.
 const LEFTOVER_AGE: Duration = Duration::from_mins(10);
-
-/// The longest application ID, in bytes.
-const MAX_ID_LEN: usize = 48;
 
 /// How many IDs [`AppStore::create`] tries when each one's folder turns out
 /// to be there already. One stray file or folder takes one try, so this
@@ -145,8 +147,18 @@ impl AppStore {
 
     /// Writes `pictures` and then `file` into the application `id`'s folder,
     /// creating it. The pictures come first, so the file never names a
-    /// picture that is not there yet. Temporary files that an earlier run
-    /// left there go too.
+    /// picture that is not there yet.
+    ///
+    /// Then the pictures the folder's file does not name go: those of a
+    /// value, a fix or a reference that `file` leaves out, and, when a write
+    /// failed, those this call wrote that the file from before it does not
+    /// name. Only a file named as AppyTappy names a picture goes, a
+    /// reference's sample or a state's picture, so a file the user put in
+    /// the folder stays. After a write that failed, a folder whose file
+    /// cannot be read keeps every picture, since nothing says which it
+    /// names. No one reads a picture the file does not name, so one that
+    /// cannot be removed fails nothing, and the next save tries again.
+    /// Temporary files that an earlier run left there go too.
     ///
     /// # Errors
     ///
@@ -157,17 +169,35 @@ impl AppStore {
             return Err(invalid(format!("{id:?} is not a valid application ID")));
         }
         file.check().map_err(|error| invalid(error.to_string()))?;
+        if let Some((name, _bytes)) = pictures.iter().find(|(name, _bytes)| !is_image_name(name)) {
+            return Err(invalid(format!("{name:?} is not a valid picture name")));
+        }
         let folder = self.folder(id);
         fs::create_dir_all(&folder)?;
-        for (name, bytes) in pictures {
-            if !is_image_name(name) {
-                return Err(invalid(format!("{name:?} is not a valid picture name")));
-            }
-            write_atomic(&folder.join(name), bytes)?;
+        let written = pictures
+            .iter()
+            .try_for_each(|(name, bytes)| write_atomic(&folder.join(name), bytes))
+            .and_then(|()| write_atomic(&folder.join(APP_FILE), file.to_json().as_bytes()));
+        // The file the folder holds now: `file`, or the one from before.
+        let before = if written.is_ok() {
+            None
+        } else {
+            read_app(&folder).ok()
+        };
+        let saved = if written.is_ok() {
+            Some(file)
+        } else {
+            before.as_ref()
+        };
+        if let Some(saved) = saved {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "no one reads a picture the saved file does not name, and the next save tries again"
+            )]
+            let _ = prune_folder(&folder, &saved.images(), is_own_image_name);
         }
-        write_atomic(&folder.join(APP_FILE), file.to_json().as_bytes())?;
         remove_leftovers(&folder);
-        Ok(())
+        written
     }
 
     /// Saves a new application as [`AppStore::save`] does, in a folder this
@@ -237,20 +267,6 @@ impl AppStore {
             removed => removed,
         }
     }
-
-    /// Removes the pictures in the application `id`'s folder that `file`
-    /// does not name: those of a value, a fix or a reference that was
-    /// removed or replaced, and those a save wrote before it failed or the
-    /// program ended. Only a file named as AppyTappy names a picture goes,
-    /// a reference's sample or a state's picture, so a file the user put in
-    /// the folder stays. A folder that does not exist holds none.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error from listing the folder or removing a picture.
-    pub fn prune(&self, id: &str, file: &AppFile) -> io::Result<()> {
-        remove_unnamed(&self.folder(id), &file.images(), is_own_image_name)
-    }
 }
 
 /// The file that holds every automation.
@@ -276,12 +292,7 @@ impl AutomationStore {
     /// Returns the error from reading the file, or an invalid-data error
     /// saying why the file as a whole is broken.
     pub fn load(&self) -> io::Result<AutomationsFile> {
-        match fs::read_to_string(&self.path) {
-            Ok(json) => AutomationsFile::parse(&json)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string())),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(AutomationsFile::default()),
-            Err(error) => Err(error),
-        }
+        read_or_default(&self.path, AutomationsFile::parse)
     }
 
     /// The folder of the pictures clicks look for.
@@ -318,13 +329,13 @@ impl AutomationStore {
         let mut highest = 0_u32;
         for entry in fs::read_dir(&folder)? {
             let name = entry?.file_name();
-            let number = name.to_str().and_then(click_number);
+            let number = name.to_str().and_then(click_picture_number);
             highest = highest.max(number.unwrap_or(0));
         }
         let next = highest
             .checked_add(1)
             .ok_or_else(|| invalid("every click picture name is taken".to_owned()))?;
-        let name = format!("click-{next}.png");
+        let name = click_picture_name(next);
         write_atomic(&folder.join(&name), bytes)?;
         Ok(name)
     }
@@ -344,7 +355,7 @@ impl AutomationStore {
         let mut named = file.images();
         named.extend(keep.iter().map(String::as_str));
         let folder = self.pictures();
-        remove_unnamed(&folder, &named, |name| click_number(name).is_some())?;
+        prune_folder(&folder, &named, |name| click_picture_number(name).is_some())?;
         remove_leftovers(&folder);
         Ok(())
     }
@@ -360,15 +371,7 @@ impl AutomationStore {
     /// [`AutomationsFile::check`] or a write fails.
     pub fn save(&self, file: &AutomationsFile) -> io::Result<()> {
         file.check().map_err(|error| invalid(error.to_string()))?;
-        let folder = self.path.parent();
-        if let Some(folder) = folder {
-            fs::create_dir_all(folder)?;
-        }
-        write_atomic(&self.path, file.to_json().as_bytes())?;
-        if let Some(folder) = folder {
-            remove_leftovers(folder);
-        }
-        Ok(())
+        replace_file(&self.path, file.to_json().as_bytes())
     }
 }
 
@@ -392,12 +395,7 @@ impl SettingsStore {
     /// Returns the error from reading the file, or an invalid-data error
     /// saying why the file is broken.
     pub fn load(&self) -> io::Result<SettingsFile> {
-        match fs::read_to_string(&self.path) {
-            Ok(json) => SettingsFile::parse(&json)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string())),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(SettingsFile::default()),
-            Err(error) => Err(error),
-        }
+        read_or_default(&self.path, SettingsFile::parse)
     }
 
     /// Replaces the settings with `file`, creating the folder it lives in.
@@ -409,15 +407,7 @@ impl SettingsStore {
     /// not pass [`SettingsFile::check`], or the error from a write.
     pub fn save(&self, file: &SettingsFile) -> io::Result<()> {
         file.check().map_err(|error| invalid(error.to_string()))?;
-        let folder = self.path.parent();
-        if let Some(folder) = folder {
-            fs::create_dir_all(folder)?;
-        }
-        write_atomic(&self.path, file.to_json().as_bytes())?;
-        if let Some(folder) = folder {
-            remove_leftovers(folder);
-        }
-        Ok(())
+        replace_file(&self.path, file.to_json().as_bytes())
     }
 }
 
@@ -454,28 +444,9 @@ impl EnabledStore {
     ///
     /// Returns the error from a write.
     pub fn save(&self, enabled: bool) -> io::Result<()> {
-        let folder = self.path.parent();
-        if let Some(folder) = folder {
-            fs::create_dir_all(folder)?;
-        }
         let line = if enabled { "on\n" } else { "off\n" };
-        write_atomic(&self.path, line.as_bytes())?;
-        if let Some(folder) = folder {
-            remove_leftovers(folder);
-        }
-        Ok(())
+        replace_file(&self.path, line.as_bytes())
     }
-}
-
-/// The number in the name [`AutomationStore::add_picture`] gives a click
-/// picture, such as 3 in `click-3.png`, or `None` for any other name.
-fn click_number(name: &str) -> Option<u32> {
-    let digits = name.strip_prefix("click-")?.strip_suffix(".png")?;
-    digits
-        .bytes()
-        .all(|byte| byte.is_ascii_digit())
-        .then(|| digits.parse().ok())
-        .flatten()
 }
 
 /// Removes the files in `folder` whose names `own` takes and `named` does
@@ -486,7 +457,7 @@ fn click_number(name: &str) -> Option<u32> {
 ///
 /// Returns the error from listing the folder or from the first removal
 /// that fails, which leaves the rest for the next time.
-fn remove_unnamed(folder: &Path, named: &[&str], own: impl Fn(&str) -> bool) -> io::Result<()> {
+fn prune_folder(folder: &Path, named: &[&str], own: impl Fn(&str) -> bool) -> io::Result<()> {
     let entries = match fs::read_dir(folder) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         entries => entries?,
@@ -505,54 +476,42 @@ fn remove_unnamed(folder: &Path, named: &[&str], own: impl Fn(&str) -> bool) -> 
     Ok(())
 }
 
-/// Whether `id` can name an application's folder.
+/// What the file at `path` holds as `parse` reads it, or the default when
+/// there is no such file yet.
 ///
-/// That is lowercase ASCII letters, digits, hyphens, and underscores,
-/// starting with a letter or digit, so it is the same folder on every file
-/// system and never leaves the store.
-#[must_use]
-pub fn is_app_id(id: &str) -> bool {
-    id.len() <= MAX_ID_LEN
-        && id
-            .chars()
-            .next()
-            .is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit())
-        && id.chars().all(|character| {
-            character.is_ascii_lowercase()
-                || character.is_ascii_digit()
-                || character == '-'
-                || character == '_'
-        })
+/// # Errors
+///
+/// Returns the error from reading the file, or an invalid-data error with
+/// what `parse` says is wrong with it.
+fn read_or_default<T: Default, E: fmt::Display>(
+    path: &Path,
+    parse: impl FnOnce(&str) -> Result<T, E>,
+) -> io::Result<T> {
+    match fs::read_to_string(path) {
+        Ok(json) => parse(&json)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(T::default()),
+        Err(error) => Err(error),
+    }
 }
 
-/// An application ID made from an executable's name that no folder in
-/// `taken` uses yet, such as `example` from `Example.exe`, or
-/// `example-2` when that is taken.
-#[must_use]
-pub fn new_app_id(executable: &str, taken: &[&str]) -> String {
-    let stem = executable
-        .rsplit_once('.')
-        .map_or(executable, |(stem, _extension)| stem);
-    let mut base: String = stem
-        .chars()
-        .flat_map(char::to_lowercase)
-        .filter(|character| {
-            character.is_ascii_lowercase() || character.is_ascii_digit() || *character == '-'
-        })
-        .collect();
-    let base_limit = MAX_ID_LEN.saturating_sub(4);
-    base.truncate(base_limit);
-    let base = base.trim_start_matches('-');
-    let base = if base.is_empty() { "app" } else { base };
-    let free = |candidate: &str| is_app_id(candidate) && !taken.contains(&candidate);
-    if free(base) {
-        return base.to_owned();
+/// Replaces the file at `path` with `bytes` as [`write_atomic`] does,
+/// creating the folder it lives in, and removes the temporary files an
+/// earlier run left beside it.
+///
+/// # Errors
+///
+/// Returns the error from creating the folder or from the write.
+fn replace_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let folder = path.parent();
+    if let Some(folder) = folder {
+        fs::create_dir_all(folder)?;
     }
-    // `taken` is finite, so one of its length plus one numbers is free.
-    (2_usize..=taken.len().saturating_add(2))
-        .map(|number| format!("{base}-{number}"))
-        .find(|candidate| free(candidate))
-        .unwrap_or_else(|| base.to_owned())
+    write_atomic(path, bytes)?;
+    if let Some(folder) = folder {
+        remove_leftovers(folder);
+    }
+    Ok(())
 }
 
 /// Writes `bytes` to `path` so that a reader sees the old file or the whole
@@ -682,10 +641,10 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             values: vec![ValueDef {
                 id: "icon_visible".to_owned(),
                 name: "Icon visible".to_owned(),
+                origin: OriginDef::ByHand,
                 screen: ScreenDef {
                     window_size: SizeDef {
                         width: 100,
@@ -828,7 +787,7 @@ mod tests {
             ("icon_visible.png".to_owned(), vec![1]),
             ("../x.png".to_owned(), Vec::new()),
         ];
-        // The first picture is written before the second is refused.
+        // Every name is checked before any picture is written.
         let failed = store.create(&good, &pictures).expect_err("refused");
         assert!(failed.to_string().contains("not a valid picture name"));
         assert_eq!(names_in(&root), [""; 0], "nothing of it stays");
@@ -919,29 +878,33 @@ mod tests {
     }
 
     #[test]
-    fn prune_removes_only_its_own_pictures_that_the_file_does_not_name() {
+    fn a_save_removes_only_its_own_pictures_that_the_file_does_not_name() {
         let root = scratch("prune");
         let store = AppStore::new(root.clone());
-        store
-            .prune("app", &file("status-1.png"))
-            .expect("no folder holds no pictures");
-        // What a removed value, fix and reference leave behind, or a save
-        // that stopped before it wrote the file.
+        // A picture this save writes and the file does not name goes too.
         let pictures = [
             ("status-1.png".to_owned(), vec![1]),
             ("status-2.png".to_owned(), vec![2]),
-            ("status-1-1.png".to_owned(), vec![3]),
-            ("ref-digits-1.png".to_owned(), vec![4]),
         ];
         store
             .save("app", &file("status-1.png"), &pictures)
             .expect("saves");
         let folder = store.folder("app");
-        // The user's own files, and a folder named like a picture.
-        fs::write(folder.join("notes.txt"), "mine").expect("write");
-        fs::write(folder.join("holiday.png"), "mine").expect("write");
+        assert_eq!(names_in(&folder), ["app.json", "status-1.png"]);
+        // What a removed fix and reference leave behind, the user's own
+        // files, and a folder named like a picture.
+        for name in [
+            "status-1-1.png",
+            "ref-digits-1.png",
+            "notes.txt",
+            "holiday.png",
+        ] {
+            fs::write(folder.join(name), "x").expect("write");
+        }
         fs::create_dir(folder.join("status-9.png")).expect("create");
-        store.prune("app", &file("status-1.png")).expect("prunes");
+        store
+            .save("app", &file("status-1.png"), &[])
+            .expect("saves");
         assert_eq!(
             names_in(&folder),
             [
@@ -954,11 +917,61 @@ mod tests {
         );
         // A picture the file names stays whatever its name, as after a
         // hand edit.
-        store.prune("app", &file("holiday.png")).expect("prunes");
+        store.save("app", &file("holiday.png"), &[]).expect("saves");
         assert_eq!(
             names_in(&folder),
             ["app.json", "holiday.png", "notes.txt", "status-9.png"]
         );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_save_that_fails_removes_what_it_wrote_that_the_file_before_it_does_not_name() {
+        let root = scratch("failed-save");
+        let store = AppStore::new(root.clone());
+        let old = [("status-1.png".to_owned(), vec![1])];
+        store
+            .save("app", &file("status-1.png"), &old)
+            .expect("saves");
+        let folder = store.folder("app");
+        // A folder where the second picture goes makes its write fail.
+        fs::create_dir(folder.join("status-3.png")).expect("create");
+        let pictures = [
+            ("status-1.png".to_owned(), vec![7]),
+            ("status-2.png".to_owned(), vec![2]),
+            ("status-3.png".to_owned(), vec![3]),
+        ];
+        store
+            .save("app", &file("status-2.png"), &pictures)
+            .expect_err("a folder is in the way");
+        assert_eq!(
+            names_in(&folder),
+            ["app.json", "status-1.png", "status-3.png"],
+            "the picture only the failed save named is gone"
+        );
+        assert_eq!(
+            store.load_one("app").expect("loads").expect("there").file,
+            Ok(file("status-1.png"))
+        );
+        // With no file to say which pictures are named, every one stays.
+        fs::remove_file(folder.join(APP_FILE)).expect("remove");
+        store
+            .save("app", &file("status-2.png"), &pictures)
+            .expect_err("a folder is in the way");
+        assert_eq!(
+            names_in(&folder),
+            ["status-1.png", "status-2.png", "status-3.png"]
+        );
+        // A bad picture name is refused before anything is written.
+        fs::remove_dir(folder.join("status-3.png")).expect("remove");
+        let bad = [
+            ("status-4.png".to_owned(), vec![4]),
+            ("../escape.png".to_owned(), vec![5]),
+        ];
+        store
+            .save("app", &file("status-4.png"), &bad)
+            .expect_err("a bad name");
+        assert_eq!(names_in(&folder), ["status-1.png", "status-2.png"]);
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -1312,45 +1325,5 @@ mod tests {
         // It waited between every attempt before giving up.
         assert!(started.elapsed() >= RENAME_WAIT * (RENAME_ATTEMPTS - 1));
         fs::remove_dir_all(root).expect("clean up");
-    }
-
-    #[test]
-    fn app_ids_are_plain_folder_names() {
-        for id in ["example", "app64", "my-app_2", "9lives"] {
-            assert!(is_app_id(id), "{id}");
-        }
-        let longest = "a".repeat(48);
-        assert!(is_app_id(&longest));
-        let long = "a".repeat(49);
-        for id in [
-            "",
-            "-a",
-            "_a",
-            "A",
-            "a b",
-            "a/b",
-            "..",
-            "a.b",
-            long.as_str(),
-        ] {
-            assert!(!is_app_id(id), "{id:?}");
-        }
-    }
-
-    #[test]
-    fn new_ids_come_from_the_executable_and_avoid_taken_ones() {
-        assert_eq!(new_app_id("Example.exe", &[]), "example");
-        assert_eq!(new_app_id("Example.exe", &["example"]), "example-2");
-        assert_eq!(
-            new_app_id("Example.exe", &["example", "example-2"]),
-            "example-3"
-        );
-        assert_eq!(new_app_id("My-Example-App64.exe", &[]), "my-example-app64");
-        assert_eq!(new_app_id("app64", &[]), "app64");
-        assert_eq!(new_app_id("--.exe", &[]), "app");
-        assert_eq!(new_app_id("プレイ.exe", &[]), "app");
-        let long = new_app_id(&format!("{}.exe", "a".repeat(80)), &[]);
-        assert_eq!(long.len(), 44);
-        assert!(is_app_id(&long));
     }
 }

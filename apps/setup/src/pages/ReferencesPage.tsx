@@ -5,6 +5,7 @@ import { deleteReference, errorText } from '../lib/api.ts';
 import { referenceCoverage } from '../lib/expected.ts';
 import { andList, readers, referenceCharacters } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
+import { originText } from '../lib/sharing.ts';
 import { CharacterChips, MissingNote } from '../components/CharacterChips.tsx';
 import type { SavedRef } from '../lib/flow.ts';
 import { type Resumed, draftOfSaved, draftProblem, draftsOf } from '../lib/drafts.ts';
@@ -159,6 +160,9 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                             {' '}
                             <DraftPill changes />
                           </>
+                        )}
+                        {reference.origin.kind === 'byHand' ? null : (
+                          <span className="note origin">{originText(reference.origin)}</span>
                         )}
                       </td>
                       <td>

@@ -5,17 +5,78 @@
 //! unusable removes them only with the user's word for it.
 
 use appytappy_config::app_file::{CheckDef, FixDef, PinDef, ScreenDef, SizeDef, ValueDef};
+use serde::{Deserialize, Serialize};
 
 use crate::automations;
-use crate::check_spec::{self, Pictures};
+use crate::check_spec::{self, CheckSpec, Pictures};
 use crate::stores::SavedApp;
 
 use super::fixes::free_picture_number;
 use super::host::Host;
-use super::messages::{EditDrawing, EditPreview, EditSpec, SavedValue};
 use super::references::and_list;
-use super::values::{named_apart, read_back};
+use super::values::{SavedValue, named_apart, read_back};
 use super::{Changed, Edit, Owner};
+
+/// A saved value changed in place, as the UI describes it. The value keeps
+/// its ID and the window size it was drawn at.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EditSpec {
+    /// The saved application.
+    pub(crate) app: String,
+    /// The value's ID.
+    pub(crate) value: String,
+    /// The value's name, the one it has or a new one.
+    pub(crate) value_name: String,
+    /// The side of the window the region stays at as the window changes
+    /// size.
+    pub(crate) pin: PinDef,
+    /// Whether the region is a reading area, larger than what it reads.
+    /// Only a check that reads anywhere in its region may have one.
+    pub(crate) reading_area: bool,
+    /// Where the value is read and how.
+    pub(crate) drawing: EditDrawing,
+}
+
+/// Where an edited value is read and how.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum EditDrawing {
+    /// Its region stays where it is saved, so no screenshot is needed and
+    /// the window may have any size.
+    Kept {
+        /// The check as the file spells it. A state check names the
+        /// pictures the value has, in their order, each under the name the
+        /// state has now.
+        check: CheckDef,
+    },
+    /// Its region is drawn again, on a screenshot of the window size the
+    /// value was drawn at.
+    Drawn {
+        /// The check, with the session's screenshots it names. A state
+        /// check takes every state's picture again.
+        check: CheckSpec,
+        /// The screenshot the region was drawn on.
+        screenshot: usize,
+    },
+}
+
+/// What saving an edit would do, which the editor shows before the save.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EditPreview {
+    /// Why the edited value is not read at the window's size now, or `None`
+    /// when the live reading reads it there.
+    pub(crate) unread: Option<String>,
+    /// The window sizes of the fixes the edit removes, since they no longer
+    /// suit how the value reads. The save needs the user's word for it.
+    pub(crate) dropped_fixes: Vec<SizeDef>,
+    /// Why the save is refused: the automations the edit would break.
+    pub(crate) refused: Option<String>,
+}
 
 /// A saved value as an edit leaves it, before anything is saved.
 #[derive(Debug)]
@@ -47,8 +108,10 @@ impl<H: Host> Owner<H> {
         let tried = self.tried(spec);
         // An edit that cannot be tried reads nothing, rather than what the
         // edit before it read.
-        if tried.is_err() {
-            self.check = None;
+        if tried.is_err()
+            && let Some(picked) = self.capture.picked_mut()
+        {
+            picked.check = None;
         }
         tried
     }
@@ -56,7 +119,8 @@ impl<H: Host> Owner<H> {
     /// The size of the picked window on its newest frame, which an edit is
     /// tried at, or `None` before a frame arrived.
     pub(crate) fn window_size(&self) -> Option<SizeDef> {
-        self.latest.as_ref().map(|frame| frame.size().into())
+        let (frame, _arrived) = self.capture.picked()?.latest.as_ref()?;
+        Some(frame.size().into())
     }
 
     /// Tries `spec` as [`Owner::try_edit`] describes.
@@ -67,7 +131,7 @@ impl<H: Host> Owner<H> {
         // A value that is not read at the window's size stays the live
         // check: the answer says why, as each read does until a frame has
         // a size it is read at.
-        let unread = self.go_live(value).unread();
+        let unread = self.go_live(value);
         Ok(EditPreview {
             unread,
             dropped_fixes: edited.dropped,
@@ -125,16 +189,21 @@ impl<H: Host> Owner<H> {
             .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
         named_apart(file, Some(&saved.id), name)?;
         let drawn = saved.screen.window_size;
-        let (region, check, pictures) = match &spec.drawing {
+        let (region, check, pictures, origin) = match &spec.drawing {
             EditDrawing::Kept { check } => {
                 keeps_pictures(&saved.screen.check, check)?;
-                (saved.screen.region, check.clone(), Vec::new())
+                (
+                    saved.screen.region,
+                    check.clone(),
+                    Vec::new(),
+                    saved.origin.clone(),
+                )
             },
             EditDrawing::Drawn { check, screenshot } => {
-                if self.screenshots.get(*screenshot).is_none() {
+                if self.capture.screenshots().get(*screenshot).is_none() {
                     return Err("Take a screenshot first.".to_owned());
                 }
-                let size = check_spec::drawn_size(check, &self.screenshots, *screenshot)
+                let size = check_spec::drawn_size(check, self.capture.screenshots(), *screenshot)
                     .map_err(|error| error.to_string())?;
                 if (size.width, size.height) != (drawn.width, drawn.height) {
                     return Err(format!(
@@ -154,13 +223,18 @@ impl<H: Host> Owner<H> {
                 let number = free_picture_number(&saved.id, saved.screen.images());
                 let built = check_spec::to_saved_fix(
                     check,
-                    &self.screenshots,
+                    self.capture.screenshots(),
                     &spec.app,
                     &saved.id,
                     Some(number),
                 )
                 .map_err(|error| error.to_string())?;
-                (built.region, built.check, built.pictures)
+                (
+                    built.region,
+                    built.check,
+                    built.pictures,
+                    check_spec::origin(check, self.capture.screenshots(), *screenshot),
+                )
             },
         };
         let (fixes, dropped) = if fixes_suit(&saved.screen.check, &check) {
@@ -194,6 +268,7 @@ impl<H: Host> Owner<H> {
         let value = ValueDef {
             id: saved.id.clone(),
             name: name.to_owned(),
+            origin,
             screen: ScreenDef {
                 window_size: drawn,
                 region,

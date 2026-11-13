@@ -41,6 +41,7 @@ const pauseMusic: AutomationDef = {
 const progress: ValueDef = {
   id: 'progress',
   name: 'Progress',
+  origin: { kind: 'byHand' } as const,
   screen: {
     windowSize: { width: 100, height: 50 },
     region: { x: 0, y: 0, width: 10, height: 10 },
@@ -239,7 +240,14 @@ describe('the breadcrumb', () => {
     expect(trail(applicationFor(fixing, 'example', example, null))).toEqual(['Values', 'Fix Progress']);
     const edited: ValueFlow = { ...fixing, changing: { app: 'example', value: progress, how: 'edit' } };
     expect(trail(applicationFor(edited, 'example', example, null))).toEqual(['Values', 'Edit Progress']);
-    const percent = { id: 'percent', name: 'Percent', ink: { red: 0, green: 0, blue: 0 }, tolerance: 0, samples: [] };
+    const percent = {
+      id: 'percent',
+      name: 'Percent',
+      origin: { kind: 'byHand' } as const,
+      ink: { red: 0, green: 0, blue: 0 },
+      tolerance: 0,
+      samples: [],
+    };
     const changing = { ...reference, existing: { app: 'example', reference: percent } };
     expect(trail(applicationFor(changing, 'example', example, null))).toEqual(['References', 'Percent']);
   });
@@ -440,7 +448,14 @@ describe('an automation saved as a draft', () => {
 });
 
 describe('a draft opens the flow that finishes it', () => {
-  const percent = { id: 'percent', name: 'Percent', ink: { red: 0, green: 0, blue: 0 }, tolerance: 0, samples: [] };
+  const percent = {
+    id: 'percent',
+    name: 'Percent',
+    origin: { kind: 'byHand' } as const,
+    ink: { red: 0, green: 0, blue: 0 },
+    tolerance: 0,
+    samples: [],
+  };
   const saved: AppSummary = {
     ...example,
     file: {
@@ -455,7 +470,6 @@ describe('a draft opens the flow that finishes it', () => {
       },
       sizeChanges: 'often',
       antiCheat: 'unknown',
-      origin: { kind: 'byHand' },
       values: [progress],
       references: [percent],
     },

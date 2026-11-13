@@ -42,9 +42,9 @@ parts fit.
   are the same when the region's pixels differ by no more than a tolerance on
   average, the way a state check compares a region with a state's whole
   picture. A look takes no account of what a state selects in the region.
-- **Origin.** How an application's definition was made: by hand, with a
-  recording, or imported, and from which file. Saved beside the build its
-  values were checked against. Nothing reads with it.
+- **Origin.** How a value or a reference was made: by hand, with a
+  recording, or imported, and from which file. Each value and reference
+  keeps its own. Nothing reads with it.
 - **Pin.** The side of the window, a corner, an edge's middle, or the center,
   that a region keeps its scaled distance from as the window changes size.
   The UI calls it **Stays at**.

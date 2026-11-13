@@ -8,7 +8,6 @@ import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/describe.ts';
 import { ANTI_CHEAT_HINT, OVERLAY_HINT } from '../lib/hints.ts';
 import { type AppKept, matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
-import { originText } from '../lib/sharing.ts';
 import { ExportApp } from '../components/ExportApp.tsx';
 import { ImportApp } from '../components/ImportApp.tsx';
 import {
@@ -376,9 +375,6 @@ export function ApplicationsPage({
                         <DraftPill changes />
                       </>
                     )}
-                    {file.origin.kind === 'imported' ? (
-                      <span className="note origin">{originText(file.origin)}</span>
-                    ) : null}
                   </td>
                   <td className="recog">
                     <span>{summary.must}</span>

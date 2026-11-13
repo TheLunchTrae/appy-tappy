@@ -137,6 +137,43 @@ pub enum TraceCategory {
     Lifecycle,
 }
 
+/// The bounds on the time between two reads of a value: the read interval.
+/// The fastest wait is never longer than the slowest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadInterval {
+    min: Duration,
+    max: Duration,
+}
+
+impl ReadInterval {
+    /// The bounds the settings start with: at most about 60 reads a
+    /// second, and while the value holds still, a wait of at most half a
+    /// second before the next frame is read.
+    pub const DEFAULT: Self = Self {
+        min: Duration::from_millis(16),
+        max: Duration::from_millis(500),
+    };
+
+    /// Waits between reads of at least `min` and at most `max`, or `None`
+    /// when `min` is longer than `max`.
+    #[must_use]
+    pub fn new(min: Duration, max: Duration) -> Option<Self> {
+        (min <= max).then_some(Self { min, max })
+    }
+
+    /// The shortest time between two reads.
+    #[must_use]
+    pub const fn min(self) -> Duration {
+        self.min
+    }
+
+    /// The longest time between two reads.
+    #[must_use]
+    pub const fn max(self) -> Duration {
+        self.max
+    }
+}
+
 /// How often the runtime reads a value: as often as `fastest_ms` allows while
 /// it changes, and at least every `slowest_ms` while it holds still.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,27 +187,49 @@ pub struct ReadIntervalDef {
 }
 
 impl ReadIntervalDef {
-    /// The shortest wait between two reads.
-    #[must_use]
-    pub fn fastest(self) -> Duration {
-        Duration::from_millis(self.fastest_ms.into())
+    /// The read interval these waits make.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SettingsError::Setting`] with what to fix when a wait is
+    /// outside [`FASTEST_READ_MS`] to [`SLOWEST_READ_MS`], or the fastest
+    /// wait is longer than the slowest.
+    pub fn checked(self) -> Result<ReadInterval, SettingsError> {
+        let range = FASTEST_READ_MS..=SLOWEST_READ_MS;
+        if !range.contains(&self.fastest_ms) || !range.contains(&self.slowest_ms) {
+            return Err(SettingsError::Setting(format!(
+                "Reads must wait between {FASTEST_READ_MS} and {SLOWEST_READ_MS} ms."
+            )));
+        }
+        ReadInterval::new(
+            Duration::from_millis(self.fastest_ms.into()),
+            Duration::from_millis(self.slowest_ms.into()),
+        )
+        .ok_or_else(|| {
+            SettingsError::Setting(
+                "The fastest read cannot wait longer than the slowest.".to_owned(),
+            )
+        })
     }
+}
 
-    /// The longest wait between two reads.
-    #[must_use]
-    pub fn slowest(self) -> Duration {
-        Duration::from_millis(self.slowest_ms.into())
+impl From<ReadInterval> for ReadIntervalDef {
+    /// The interval in whole milliseconds. A wait too long to write is
+    /// written as the longest a file can hold, which
+    /// [`ReadIntervalDef::checked`] refuses.
+    fn from(interval: ReadInterval) -> Self {
+        let millis = |wait: Duration| u32::try_from(wait.as_millis()).unwrap_or(u32::MAX);
+        Self {
+            fastest_ms: millis(interval.min),
+            slowest_ms: millis(interval.max),
+        }
     }
 }
 
 impl Default for ReadIntervalDef {
-    /// At most about 60 reads a second, and while the value holds still, a
-    /// read at least every half second.
+    /// [`ReadInterval::DEFAULT`].
     fn default() -> Self {
-        Self {
-            fastest_ms: 16,
-            slowest_ms: 500,
-        }
+        ReadInterval::DEFAULT.into()
     }
 }
 
@@ -211,21 +270,7 @@ impl SettingsFile {
         if self.format != FORMAT {
             return Err(SettingsError::Format(self.format));
         }
-        let ReadIntervalDef {
-            fastest_ms,
-            slowest_ms,
-        } = self.read_interval;
-        let range = FASTEST_READ_MS..=SLOWEST_READ_MS;
-        if !range.contains(&fastest_ms) || !range.contains(&slowest_ms) {
-            return Err(SettingsError::Setting(format!(
-                "Reads must wait between {FASTEST_READ_MS} and {SLOWEST_READ_MS} ms."
-            )));
-        }
-        if fastest_ms > slowest_ms {
-            return Err(SettingsError::Setting(
-                "The fastest read cannot wait longer than the slowest.".to_owned(),
-            ));
-        }
+        self.read_interval.checked()?;
         if self.trace.record.is_empty() {
             return Err(SettingsError::Setting(
                 "A trace must record at least one thing.".to_owned(),
@@ -446,10 +491,33 @@ mod tests {
     }
 
     #[test]
-    fn the_read_interval_reads_as_durations() {
-        let interval = ReadIntervalDef::default();
-        assert_eq!(interval.fastest(), Duration::from_millis(16));
-        assert_eq!(interval.slowest(), Duration::from_millis(500));
+    fn a_checked_read_interval_holds_the_saved_waits() {
+        assert_eq!(
+            with_interval(40, 2_000).read_interval.checked(),
+            Ok(ReadInterval::new(Duration::from_millis(40), Duration::from_secs(2)).unwrap())
+        );
+    }
+
+    #[test]
+    fn the_saved_default_is_the_default_read_interval() {
+        let saved = ReadIntervalDef::default();
+        assert_eq!(saved.checked(), Ok(ReadInterval::DEFAULT));
+        let long = ReadInterval::new(Duration::ZERO, Duration::MAX).unwrap();
+        assert_eq!(
+            ReadIntervalDef::from(long),
+            ReadIntervalDef {
+                fastest_ms: 0,
+                slowest_ms: u32::MAX
+            }
+        );
+    }
+
+    #[test]
+    fn the_minimum_cannot_exceed_the_maximum() {
+        let millis = Duration::from_millis;
+        assert_eq!(ReadInterval::new(millis(2), millis(1)), None);
+        let interval = ReadInterval::new(millis(1), millis(1)).unwrap();
+        assert_eq!((interval.min(), interval.max()), (millis(1), millis(1)));
     }
 
     #[test]

@@ -44,11 +44,11 @@ const apps: readonly AppSummary[] = [
       },
       sizeChanges: 'often',
       antiCheat: 'unknown',
-      origin: { kind: 'byHand' },
       values: [
         {
           id: 'progress',
           name: 'Progress',
+          origin: { kind: 'byHand' } as const,
           screen: {
             windowSize: { width: 100, height: 50 },
             region: { x: 0, y: 0, width: 10, height: 10 },
@@ -72,7 +72,6 @@ const EMPTY_SETUP: CaptureSetup = {
   mayMove: false,
   editing: null,
   draft: EMPTY_DRAFT,
-  recordedShots: [],
 };
 
 function def(kind: DraftKind, state: unknown, changes: string | null = null, app: string | null = null): DraftDef {
@@ -163,7 +162,6 @@ describe('what a draft keeps', () => {
         expects: ['1', '2', '%'],
       },
       draft,
-      recordedShots: [2],
     };
     const made: Readonly<Record<string, unknown>> = { ...setup };
     for (const [key, start] of Object.entries(EMPTY_SETUP)) {
@@ -178,7 +176,7 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(2);
+    expect(DRAFT_FORMAT).toBe(3);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -208,7 +206,7 @@ describe('the shape a draft keeps', () => {
       'target',
     ]);
     const stored = storeSetup(EMPTY_SETUP);
-    expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'mayMove', 'recordedShots', 'step', 'valueName']);
+    expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'mayMove', 'step', 'valueName']);
     expect(Object.keys(stored.draft).sort()).toEqual([
       'boxes',
       'characters',
@@ -380,7 +378,14 @@ describe('a draft and what it belongs to', () => {
   });
 
   test('a reference editor a draft kept open goes on from the reference as it is saved now', () => {
-    const saved = { id: 'percent', name: 'Percent', ink: { red: 0, green: 0, blue: 0 }, tolerance: 0, samples: [] };
+    const saved = {
+      id: 'percent',
+      name: 'Percent',
+      origin: { kind: 'byHand' } as const,
+      ink: { red: 0, green: 0, blue: 0 },
+      tolerance: 0,
+      samples: [],
+    };
     const taught = { ...saved, tolerance: 12 };
     const editing = { existing: saved, name: 'Percent', expects: ['1'] };
     expect(refreshedEditing(editing, [taught])).toEqual({ ...editing, existing: taught });

@@ -111,12 +111,7 @@ overlay?: OverlayDef,
  * The build of the application its values were last checked against,
  * or `None` before the setup app saved a value of it.
  */
-checked?: CheckedDef,
-/**
- * How the definition was made, which the setup app shows beside
- * `checked`. [`OriginDef::ByHand`] when the file leaves it out.
- */
-origin: OriginDef, }>;
+checked?: CheckedDef, }>;
 
 /**
  * A saved application with the open windows its match takes.
@@ -389,7 +384,12 @@ best: GlyphView | null,
 /**
  * The closest glyph of another character, if the reference has one.
  */
-runnerUp: GlyphView | null, }>;
+runnerUp: GlyphView | null,
+/**
+ * Whether the value leaves the character out, so it reads as text and
+ * not as a part of the number.
+ */
+leftOut: boolean, }>;
 
 /**
  * The characters a reference is being taught, as the UI describes them:
@@ -744,6 +744,12 @@ state: unknown, }>;
  * What a draft is of, which says which flow finishes it.
  */
 export type DraftKind = DeepReadonly<"automation" | "application" | "value" | "fix" | "reference">;
+
+/**
+ * A screenshot a draft keeps: the index it had in its capture, and whether
+ * a recording of looks kept it there rather than the user taking it.
+ */
+export type DraftShot = DeepReadonly<{ index: number, recorded: boolean, }>;
 
 /**
  * A saved draft, as the lists show it.
@@ -1143,12 +1149,12 @@ title: boolean,
 class: boolean, }>;
 
 /**
- * How an application's definition was made: its provenance.
+ * How a value or a reference was made: its provenance.
  *
  * Setup guidance only. The setup app shows it, so whoever reads a
- * definition can tell where its values came from. Nothing that finds the
- * window or reads a value looks at it, and no rule of the file covers it,
- * whatever file name it holds.
+ * definition can tell where each value and reference came from. Nothing
+ * that finds the window or reads a value looks at it, and no rule of the
+ * file covers it, whatever file name it holds.
  */
 export type OriginDef = DeepReadonly<{ "kind": "byHand" } | { "kind": "recording" } | { "kind": "imported",
 /**
@@ -1594,6 +1600,11 @@ id: string,
  */
 name: string,
 /**
+ * How the reference was made. [`OriginDef::ByHand`] when the file
+ * leaves it out.
+ */
+origin: OriginDef,
+/**
  * The characters' color.
  */
 ink: ColorDef,
@@ -1672,7 +1683,7 @@ app: string,
 characters: CharactersSpec,
 /**
  * The characters the number it is made for reads of it, or `None`
- * for every character it is taught, as [`CheckDef::Number`] has them.
+ * for every character it is taught, as a saved number check has them.
  */
 reads: string | null,
 /**
@@ -2327,6 +2338,11 @@ id: string,
  * The value's name as the user sees it, such as `Progress`.
  */
 name: string,
+/**
+ * How the value was made. [`OriginDef::ByHand`] when the file leaves
+ * it out.
+ */
+origin: OriginDef,
 /**
  * Where on the window the value is read and how.
  */

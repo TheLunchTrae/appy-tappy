@@ -9,15 +9,9 @@ use appytappy_sources::screen::Size;
 use appytappy_sources::screen::digits::LearnError;
 use appytappy_sources::screen::saved::SavedError;
 
-use super::MAX_EXPECTED_CHARACTERS;
+use crate::words::sentence;
 
-/// `text` as a sentence: capitalized, with a full stop.
-pub(crate) fn sentence(text: &str) -> String {
-    let mut characters = text.chars();
-    characters.next().map_or_else(String::new, |first| {
-        format!("{}{}.", first.to_uppercase(), characters.as_str())
-    })
-}
+use super::MAX_EXPECTED_CHARACTERS;
 
 /// What a check cuts at its region besides the screenshot it was drawn on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

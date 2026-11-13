@@ -9,21 +9,22 @@ conversions from and to the saved types, `screen/layout.rs` where a
 capture packs the regions it copies, `screen/placed.rs` values placed at
 one window size and what a frame means to their capture,
 `screen/capture.rs` the capture trait
-and where a window's content lies in its frame,
+and where a window's content lies in its frame, `screen/frames.rs` the
+capture's frame loop,
 `screen/check.rs` and `screen/digits.rs` the checks, `screen/detect.rs` the
 proposal of a bar's colors, `screen/masked.rs` the comparison of a region
 with a saved picture, which a state check and a click's picture search
-share, `screen/mask.rs` and
-`screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
+share, `screen/mask.rs` a state picture's mask, `screen/saved.rs`
 the saved checks, `screen/scale.rs` and `screen/resample.rs` how a value
-reads at another window size, and `schedule.rs` the read interval.
+reads at another window size, and `schedule.rs` the read schedule.
 Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
 
 ## Checks
 
 Each check reads a cropped region and produces a signal value. All four are
-plain Rust over the region's pixels: they call no operating system API, give
-the same answer on every system, and allocate nothing per read.
+plain Rust over the region's pixels: they call no operating system API and
+give the same answer on every system. Only a number allocates as it reads: a
+byte for each pixel of its region, for which of them are ink.
 
 - **Number** reads digits, a decimal point, and a minus sign, with a reference
   of the application's: the characters' color and tolerance, and pictures
@@ -38,11 +39,11 @@ the same answer on every system, and allocate nothing per read.
   other character ends the number, so `12/50` reads as 12, and so does a `,`
   that is not followed by exactly three digits, so `12,5` reads as 12 rather
   than guessing that the `,` is a decimal point. A read finds the ink (pixels
-  near the text color), splits it into characters at blank columns, and
-  scales each one to a fixed grid by the height of the text line. The text
-  line is the band of rows with the most ink, so a stray speck elsewhere in
-  the region does not throw it off. Each character takes the closest learned
-  shape, if the two are the same but for their edges, as
+  near the text color) once, as `digits::Ink`, splits it into characters at
+  blank columns, and scales each one to a fixed grid by the height of the
+  text line. The text line is the band of rows with the most ink, so a stray
+  speck elsewhere in the region does not throw it off. Each character takes
+  the closest learned shape, if the two are the same but for their edges, as
   [Matching](#matching) describes. A character it has not learned fails the
   read rather than being guessed, unless the number has already ended, as in
   the "HP" of "37% HP", and a read that fails
@@ -51,12 +52,24 @@ the same answer on every system, and allocate nothing per read.
   text's color; those need a different check. A character drawn as marks
   with blank columns between them, as some fonts draw `%`, is one character
   for each mark. A value may name the characters it reads, `characters` in
-  its check, and then reads with only its reference's glyphs for them, as if
-  the reference had learned nothing else: a shape takes the closest of those
-  glyphs, so a value of digits cannot read a `0` as the `O` its font also
-  has, and any other character counts as not learned. `DigitReader::reading`
-  drops the other glyphs once, when `saved::build` builds the check, so a
-  read matches against fewer glyphs and does nothing more. Characters the
+  its check, and then takes its number from its reference's glyphs for them
+  alone: a shape takes the closest of those glyphs first, so a value of
+  digits cannot read a `0` as the `O` its font also has. A shape that
+  matches none of them is matched against the reference's other glyphs, the
+  ones the value leaves out, and one that matches is text: it ends the
+  number or comes before it, so a value of digits reads `53%` as 53. A
+  letter left out still keeps a `.` after it out of the number, as in
+  `Lv.5`. The read also takes the number as it is with the left-out
+  characters, and fails when that is another number: a left-out `-`, `.`,
+  `,`, or digit that is a part of the number, as in `-5`, `.5`, `87.5`, and
+  `1,234` for a value of digits, is never dropped without a word. A
+  character the value reads that is drawn far enough off to match only a
+  left-out lookalike is text too, so `105` whose `0` matches only a
+  left-out `O` reads as 1; that takes a shape more than 1 cell in 32 from
+  every glyph of its own character and within that of another's, which is
+  rare. `DigitReader::reading` sorts the glyphs once, when
+  `saved::build` builds the check, so a read matches a character the value
+  reads against those glyphs alone. Characters the
   reference has yet to learn are passed over, and a value whose reference
   knows none of its characters is not read (`SavedError::NoCharacters`).
 - **Bar fill** returns how full a bar is, from 0 to 100. The user clicks one
@@ -106,7 +119,7 @@ digits again from pictures that show it.
 
 ### Why a number is not read
 
-A read fails at one of four stages, `ReadError` in `screen/digits.rs`, and
+A read fails at one of five stages, `ReadError` in `screen/digits.rs`, and
 its message says which, in the same words in the setup app and in the
 runtime's log:
 
@@ -116,8 +129,11 @@ runtime's log:
   shows every character the read made out, with a `?` for each unlearned
   one, such as `8 7 ?`, and names the learned character the first of them is
   closest to. No number is made of the characters that did match.
-- **No number.** Every character matched, and they hold no digits, such as
-  `%` alone. The message shows them.
+- **A character left out.** A character the value does not read is a part
+  of the number: with it, the characters hold another number. The message
+  shows the characters.
+- **No number.** Every character matched, and those the value reads hold no
+  digits, such as `%` alone. The message shows them.
 
 The runtime logs each stage a value fails at (`ReadError::stage`) once
 until the value reads again, so a counter that stays unreadable while it
@@ -177,8 +193,9 @@ client area's (`GetWindowInfo`, which gives it in screen pixels whole, also
 for a window the system stretches or one laid out right to left), as the
 capture reads them for each frame it copies, and `screen::in_frame` places
 each region it copies in the frame. `screen::content_on_screen` gives the same
-area on the screen, which `System::content_size` and
-`System::content_bounds` return. Where the client area cannot be read or
+area on the screen, which `System::content_bounds` returns: the one read of
+where a window's content is, for the size the reader places values at and for
+where a click lands. Where the client area cannot be read or
 covers none of the frame, the whole frame is the content.
 
 ## Window sizes
@@ -288,7 +305,8 @@ drawn larger than the content, a reading area, covers every place it shows:
   left to right, so other ink of the text's color beside the number is read
   with it. A shape the reference has not learned fails the read when it
   comes before the number or right after its digits; once a learned
-  character such as `%` has ended the number, a shape after it is skipped.
+  character such as `%` has ended the number, whether the value reads it or
+  leaves it out, a shape after it is skipped.
   The line read is the run of inked rows that holds the most ink, so ink
   above or below the number, with a blank row between, is skipped unless it
   holds more.
@@ -309,7 +327,10 @@ with and without it (`saved::build`).
 
 ## Selection
 
-`screen::select` finds the thing to compare on a screenshot, without a model:
+The setup app's `selection/select.rs` finds the thing to compare on a
+screenshot, without a model. Only the setup app selects, so the code lives
+there and not in `appytappy-sources`; the runtime reads the mask the
+selection saved:
 
 - **Snap** takes a rough box drawn around the thing. The colors along the
   box's edge are the background, the first 256 different ones. Every pixel
@@ -427,10 +448,11 @@ as it does with hand-picked colors.
 
 The runtime reads an application's values in one pass of its reader, so each
 reader keeps one read interval for all of them: a minimum and a maximum time
-between reads. The defaults are 16 ms and 500 ms. A shorter minimum notices
-changes sooner; a longer maximum saves CPU while nothing changes. Reads happen
-only on frames the window draws, so a window that draws nothing new is not read
-at all.
+between reads. The defaults are 16 ms and 500 ms; `ReadInterval` in
+`crates/config/src/settings_file.rs` holds them and the rule that the minimum
+is no longer than the maximum. A shorter minimum notices changes sooner; a
+longer maximum saves CPU while nothing changes. Reads happen only on frames the
+window draws, so a window that draws nothing new is not read at all.
 
 Between the two, the reader adapts. After a read that changed a value, it waits
 the minimum. Each read that changed nothing doubles the wait, up to the maximum.
@@ -446,7 +468,12 @@ definition, with an override for one binding, belongs to
 
 Capture is the one part that needs the operating system, so it sits behind the
 `Capture` trait. Windows Graphics Capture, the API screen recorders use, is the
-only implementation. The system pushes a frame when the window's content
+only implementation. Its thread runs `run_frames`
+(`crates/sources/src/screen/frames.rs`), which decides when a frame is read,
+which one, and what ends the capture, as the
+[capture frame loop](State-machines.md#capture-frame-loop) describes; the
+Windows code (`crates/sources/src/win/capture.rs`) only makes the system calls
+the loop asks for, as its `FrameSource`. The system pushes a frame when the window's content
 changes, so a window that does not change costs nothing. The capture also asks
 the system for no more frames than its handler reads: after a read that waits 64
 ms or more, it sets the session's minimum update interval to that wait, never
@@ -468,8 +495,7 @@ thread unheard (`run_capture` in `crates/sources/src/screen/capture.rs`). A
 closed window and a lost device stop frames rather than fail them, so every
 `HEALTH_CHECK`, 2 seconds, whatever arrives meanwhile, the capture checks that
 its window is still there and still belongs to the process that owned it at
-the start, and that its device still works
-(`crates/sources/src/win/capture.rs`). It does not use the capture item's own
+the start, and that its device still works. It does not use the capture item's own
 Closed event, which would say sooner that the window closed: registering a
 handler for it left a thread handle, events and thread pool waits open after
 every capture, even once the handler was removed.

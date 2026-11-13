@@ -36,8 +36,10 @@ automation and pick the value in it.
   **This content may move**, the check with its colors, states, and
   tolerances, the reference it reads with, the labels, the characters a
   reference needs, and the text you added with **Find more like it**.
-  Screenshots that **Record screenshots** kept are kept like the ones you
-  took.
+  Screenshots that **Record screenshots** kept stay marked as recorded, so a
+  [value](Values.md#how-a-value-was-made) or
+  [reference](References.md#how-a-reference-was-made) you finish on one of
+  them still says it was made with a recording.
 
 A draft doesn't keep these, so finish them before you save it:
 
@@ -78,9 +80,10 @@ A saved item that has a draft of changes shows **Draft changes**, and
 **Finish draft** in place of **Edit**, so you carry on from the draft. To edit
 it as saved instead, finish the draft and select **Delete draft**; the saved
 item stays as it was. For the same reason, a new value can pick a reference
-that has a draft of changes but can't edit it there, and when you choose an
-application for a value or a reference, **Finish draft** takes the place of
-**Change how it's found** for an application that has a draft of changes.
+that has a draft of changes but can't edit it or record readings for it
+there, and when you choose an application for a value or a reference,
+**Finish draft** takes the place of **Change how it's found** for an
+application that has a draft of changes.
 
 Removing an application deletes its drafts with it: those of its values,
 fixes, and references, and its own draft of changes. Deleting a value deletes

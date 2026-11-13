@@ -541,38 +541,54 @@ impl FrameBuffer {
         Ok(&mut image.bgra)
     }
 
-    /// Fills the buffer with a `size` image whose rows lie `pitch` bytes
-    /// apart in `source`, as graphics APIs lay out a mapped texture: each row
-    /// is `size.width * 4` bytes, followed by padding up to the pitch.
+    /// How many bytes a `size` image takes whose rows lie `pitch` bytes
+    /// apart, as graphics APIs lay out a mapped texture: each row is
+    /// `size.width * 4` bytes, followed by padding up to the pitch, which the
+    /// last row leaves out.
     ///
     /// # Errors
     ///
-    /// Returns [`ImageError::Empty`] or [`ImageError::TooLarge`] as
-    /// [`FrameBuffer::prepare`] does, and [`ImageError::Length`] when
-    /// `pitch` is shorter than a row or `source` ends before the last row.
+    /// Returns [`ImageError::Empty`] for a zero width or height,
+    /// [`ImageError::Length`] when `pitch` is shorter than a row, and
+    /// [`ImageError::TooLarge`] when the bytes do not fit in memory.
+    pub fn pitched_len(size: Size, pitch: usize) -> Result<usize, ImageError> {
+        if size.width == 0 || size.height == 0 {
+            return Err(ImageError::Empty);
+        }
+        let too_large = ImageError::TooLarge { size };
+        let row = row_bytes(size).ok_or(too_large)?;
+        if pitch < row {
+            return Err(ImageError::Length { size });
+        }
+        usize::try_from(size.height)
+            .ok()
+            .and_then(|height| height.checked_sub(1))
+            .and_then(|rows| rows.checked_mul(pitch))
+            .and_then(|start| start.checked_add(row))
+            .ok_or(ImageError::TooLarge { size })
+    }
+
+    /// Fills the buffer with a `size` image whose rows lie `pitch` bytes
+    /// apart in `source`, which holds at least
+    /// [`FrameBuffer::pitched_len`] bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns what [`FrameBuffer::pitched_len`] and
+    /// [`FrameBuffer::prepare`] do, and [`ImageError::Length`] when `source`
+    /// ends before the last row.
     pub fn fill_pitched(
         &mut self,
         size: Size,
         source: &[u8],
         pitch: usize,
     ) -> Result<(), ImageError> {
+        let length = Self::pitched_len(size, pitch)?;
+        let source = source.get(..length).ok_or(ImageError::Length { size })?;
+        let row = row_bytes(size).ok_or(ImageError::TooLarge { size })?;
         let target = self.prepare(size)?;
-        let row = usize::try_from(size.width)
-            .ok()
-            .and_then(|width| width.checked_mul(BYTES_PER_PIXEL))
-            .ok_or(ImageError::TooLarge { size })?;
-        if pitch < row {
-            return Err(ImageError::Length { size });
-        }
-        for (index, line) in target.chunks_exact_mut(row).enumerate() {
-            let start = index
-                .checked_mul(pitch)
-                .ok_or(ImageError::Length { size })?;
-            let bytes = start
-                .checked_add(row)
-                .and_then(|end| source.get(start..end))
-                .ok_or(ImageError::Length { size })?;
-            line.copy_from_slice(bytes);
+        for (line, bytes) in target.chunks_exact_mut(row).zip(source.chunks(pitch)) {
+            line.copy_from_slice(bytes.get(..row).ok_or(ImageError::Length { size })?);
         }
         Ok(())
     }
@@ -583,6 +599,14 @@ impl FrameBuffer {
     pub const fn image(&self) -> Option<&Image> {
         self.image.as_ref()
     }
+}
+
+/// The bytes one row of a `size` image takes, or `None` when they do not fit
+/// in memory.
+fn row_bytes(size: Size) -> Option<usize> {
+    usize::try_from(size.width)
+        .ok()?
+        .checked_mul(BYTES_PER_PIXEL)
 }
 
 /// An image could not be built, decoded, or encoded.
@@ -1147,6 +1171,39 @@ mod tests {
             buffer.fill_pitched(size, &source[..9], 6),
             Err(ImageError::Length { .. })
         ));
+    }
+
+    #[test]
+    fn pitched_rows_end_with_the_last_row_s_pixels() {
+        let size = Size {
+            width: 2,
+            height: 3,
+        };
+        assert_eq!(FrameBuffer::pitched_len(size, 8).unwrap(), 24);
+        assert_eq!(FrameBuffer::pitched_len(size, 12).unwrap(), 32);
+        assert!(matches!(
+            FrameBuffer::pitched_len(size, 7),
+            Err(ImageError::Length { .. })
+        ));
+        assert!(matches!(
+            FrameBuffer::pitched_len(size, usize::MAX),
+            Err(ImageError::TooLarge { .. })
+        ));
+        for empty in [
+            Size {
+                width: 0,
+                height: 3,
+            },
+            Size {
+                width: 2,
+                height: 0,
+            },
+        ] {
+            assert!(matches!(
+                FrameBuffer::pitched_len(empty, 8),
+                Err(ImageError::Empty)
+            ));
+        }
     }
 
     /// The setup flow on two screenshots of one fixture layout: a progress bar

@@ -6,8 +6,7 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::app_file::is_image_name;
-use crate::store::is_app_id;
+use crate::names::{is_app_id, is_image_name};
 
 /// The widest or tallest distance a spot or a picture's area may have, in
 /// pixels: wider than any screen, so a bad number fails here and not later.
@@ -270,21 +269,29 @@ pub enum InvalidClick {
 
 impl fmt::Display for InvalidClick {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::App => "a click needs the application it clicks in",
-            Self::Distance => "a click's spot must lie within 16384 pixels of its corner",
-            Self::Image => {
+        match self {
+            Self::App => formatter.write_str("a click needs the application it clicks in"),
+            Self::Distance => write!(
+                formatter,
+                "a click's spot must lie within {MAX_CLICK_DISTANCE} pixels of its corner"
+            ),
+            Self::Image => formatter.write_str(
                 "a click's picture must be a lowercase .png file name of letters, digits, \
-                 hyphens, and underscores"
+                 hyphens, and underscores",
+            ),
+            Self::Area => formatter
+                .write_str("the area a click looks for its picture in must lie inside the window"),
+            Self::LargeArea => write!(
+                formatter,
+                "the area a click looks for its picture in can hold at most {MAX_SEARCH_PIXELS} \
+                 pixels, such as 400 by 400"
+            ),
+            Self::LargePicture => formatter
+                .write_str("a click's picture must fit inside the area it is looked for in"),
+            Self::PressOutside => {
+                formatter.write_str("the place a click presses must lie on its picture")
             },
-            Self::Area => "the area a click looks for its picture in must lie inside the window",
-            Self::LargeArea => {
-                "the area a click looks for its picture in can hold at most 160000 pixels, such as \
-                 400 by 400"
-            },
-            Self::LargePicture => "a click's picture must fit inside the area it is looked for in",
-            Self::PressOutside => "the place a click presses must lie on its picture",
-        })
+        }
     }
 }
 
@@ -432,11 +439,19 @@ mod tests {
 
     #[test]
     fn errors_explain_themselves() {
-        assert!(InvalidClick::Distance.to_string().contains("16384"));
+        assert!(
+            InvalidClick::Distance
+                .to_string()
+                .contains(&format!("within {MAX_CLICK_DISTANCE} pixels"))
+        );
         assert!(InvalidClick::App.to_string().contains("application"));
         assert!(InvalidClick::Image.to_string().contains(".png"));
         assert!(InvalidClick::Area.to_string().contains("inside the window"));
-        assert!(InvalidClick::LargeArea.to_string().contains("160000"));
+        assert!(
+            InvalidClick::LargeArea
+                .to_string()
+                .contains(&format!("at most {MAX_SEARCH_PIXELS} pixels"))
+        );
         assert!(
             InvalidClick::LargePicture
                 .to_string()

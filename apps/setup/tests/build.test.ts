@@ -17,7 +17,6 @@ const file: AppFile = {
   },
   sizeChanges: 'often',
   antiCheat: 'unknown',
-  origin: { kind: 'byHand' },
   values: [],
   references: [],
   checked: { build: checked, at: 1_762_600_000 },

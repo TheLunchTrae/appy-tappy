@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
-import { afterRead, type LiveRead, type ReadAnswer } from '../src/lib/liveCheck.ts';
+import { EMPTY_DRAFT, buildCharacters } from '../src/lib/check.ts';
+import { afterRead, type LiveRead, liveReads, NOTHING_READ, type ReadAnswer } from '../src/lib/liveCheck.ts';
+import { trialOf } from '../src/lib/useLiveCheck.ts';
 
 const shown: LiveRead = { reading: { kind: 'number', value: 87 }, problem: null };
 const failing: LiveRead = { reading: null, problem: 'Not read on the live window now.' };
@@ -32,5 +34,82 @@ describe('afterRead', () => {
     expect(afterRead(shown, null, 2, read)).toBe(shown);
     expect(afterRead(shown, null, 2, failed)).toBe(shown);
     expect(afterRead(shown, null, null, read)).toBe(shown);
+  });
+});
+
+describe('trialOf', () => {
+  const region = { x: 1, y: 2, width: 30, height: 12 };
+  const draft = {
+    ...EMPTY_DRAFT,
+    region,
+    drawnOn: 0,
+    ink: { red: 255, green: 0, blue: 0 },
+    boxes: [{ id: 1, screenshot: 0, region, text: '87%' }],
+  };
+  const set = {
+    set: async (): Promise<void> => {
+      await Promise.resolve();
+    },
+  };
+  const keyOf = (edited: typeof draft, kind: 'characters' | 'check' = 'characters') => {
+    const trial = trialOf(kind, buildCharacters(edited, null), set);
+    return trial.ok ? trial.key : null;
+  };
+
+  test('keys a trial by what its spec holds, so an edit that leaves the spec alone tries nothing again', () => {
+    const key = keyOf(draft);
+    expect(key).not.toBeNull();
+    // An empty box added, the empty box moved, and the same text typed again all teach the same characters.
+    const empty = { id: 2, screenshot: 0, region: { ...region, x: 50 }, text: '' };
+    expect(keyOf({ ...draft, boxes: [...draft.boxes, empty] })).toBe(key);
+    expect(keyOf({ ...draft, boxes: [...draft.boxes, { ...empty, region }] })).toBe(key);
+    expect(keyOf({ ...draft, boxes: [{ id: 1, screenshot: 0, region: { ...region }, text: '87% ' }] })).toBe(key);
+  });
+
+  test('gives another key to another spec, and to the same spec tried another way', () => {
+    const key = keyOf(draft);
+    expect(keyOf({ ...draft, boxes: [{ id: 1, screenshot: 0, region, text: '88%' }] })).not.toBe(key);
+    expect(keyOf({ ...draft, tolerance: draft.tolerance + 1 })).not.toBe(key);
+    expect(keyOf(draft, 'check')).not.toBe(key);
+  });
+
+  test('passes on what the trial still needs', () => {
+    expect(trialOf('characters', buildCharacters(EMPTY_DRAFT, null), set)).toEqual({
+      ok: false,
+      next: 'Draw a box around the characters on a screenshot.',
+    });
+  });
+});
+
+describe('a reading that shows already', () => {
+  test('is the same object after a read that answers it again, reading or problem', () => {
+    expect(afterRead(shown, 2, 2, { ok: true, reading: { kind: 'number', value: 87 } })).toBe(shown);
+    expect(afterRead(failing, 2, 2, { ok: false, problem: 'Not read on the live window now.' })).toBe(failing);
+    expect(afterRead(NOTHING_READ, 2, 2, { ok: true, reading: null })).toBe(NOTHING_READ);
+    // Another value, another kind with the same value, and a reading in place of a problem all show anew.
+    expect(afterRead(shown, 2, 2, read)).not.toBe(shown);
+    const on: LiveRead = { reading: { kind: 'state', value: 'true' }, problem: null };
+    expect(afterRead(on, 2, 2, { ok: true, reading: { kind: 'flag', value: true } })).not.toBe(on);
+    expect(afterRead(failing, 2, 2, { ok: true, reading: null })).toEqual(NOTHING_READ);
+  });
+
+  test('tells no one, so only a reading that changed renders anything', () => {
+    const reads = liveReads();
+    let told = 0;
+    const stop = reads.subscribe(() => {
+      told += 1;
+    });
+    expect(reads.shown()).toBe(NOTHING_READ);
+    reads.change((was) => afterRead(was, 1, 1, read));
+    expect([told, reads.shown()]).toEqual([1, { reading: { kind: 'number', value: 12 }, problem: null }]);
+    // The window reads the same eight times a second.
+    reads.change((was) => afterRead(was, 1, 1, read));
+    reads.change((was) => afterRead(was, 1, 1, read));
+    expect(told).toBe(1);
+    reads.change((was) => afterRead(was, 1, 1, failed));
+    expect(told).toBe(2);
+    stop();
+    reads.change(() => NOTHING_READ);
+    expect([told, reads.shown()]).toEqual([2, NOTHING_READ]);
   });
 });

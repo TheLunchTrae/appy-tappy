@@ -1,12 +1,13 @@
 import { type ComponentProps, type ReactNode, useCallback, useRef, useState } from 'react';
 
 import { errorText } from '../../lib/api.ts';
+import type { DraftShot } from '../../lib/bindings.ts';
 import { liveSizeAfter } from '../../lib/liveDraw.ts';
 import type { Picture } from '../../lib/pixels.ts';
 import type { Size } from '../../lib/region.ts';
 import { background } from '../../lib/repeat.ts';
 import { useScreenshotShortcut } from '../../lib/useScreenshotShortcut.ts';
-import { type RestoredShot, useScreenshots } from '../../lib/useScreenshots.ts';
+import { useScreenshots } from '../../lib/useScreenshots.ts';
 import { LiveCanvas, PictureCanvas } from '../canvas.tsx';
 import { ZoomView } from '../ZoomView.tsx';
 import { ScreenshotStrip } from './ScreenshotStrip.tsx';
@@ -19,7 +20,7 @@ const LIVE_MAX_WIDTH = 1600;
  * What a screenshot stage shows: the session's screenshots, and the live window's size and error as its frames
  * arrive. Those in `restored` came back from a draft.
  */
-export function useScreenshotStage(restored: readonly RestoredShot[] = []) {
+export function useScreenshotStage(restored: readonly DraftShot[] = []) {
   const screenshots = useScreenshots(restored);
   const [liveSize, setLiveSize] = useState<Size | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);

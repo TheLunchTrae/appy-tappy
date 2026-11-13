@@ -17,7 +17,7 @@ pub(crate) use upload::Upload;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, SizeDef, WindowDef};
+use appytappy_config::app_file::{AntiCheatDef, AppFile, OverlayModeDef, SizeDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, ClickAtDef, WhenDef};
 use appytappy_config::settings_file::SettingsFile;
 use tauri::ipc::Response;
@@ -34,20 +34,21 @@ use crate::debug::trace_file::TraceFile;
 use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows};
 use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
-use crate::drafts::{DraftDef, DraftSummary};
+use crate::drafts::{DraftDef, DraftShot, DraftSummary};
 use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
-    FixSpec, FoundClick, FoundView, ImportSpec, Live, Message, Owner, Reading, RecordSpec,
+    FixSpec, FoundClick, FoundView, ImportSpec, Live, Message, Owner, RecordSpec,
     ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, SharedView,
     TrialSpec,
 };
+use crate::reading::Reading;
 use crate::recording::RecordingView;
 use crate::recording::character::CharacterView;
 use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
-use crate::settings::SettingsView;
+use crate::settings::{self, SettingsView};
 use crate::window_list::{WindowFit, WindowList, WindowScore};
 
 /// The UI's way to the owner thread.
@@ -113,9 +114,10 @@ pub(crate) async fn list_windows(app: AppHandle) -> Result<WindowList, String> {
     try_ask(&app, "list_windows", |owner| owner.window_list()).await
 }
 
-/// Starts capturing `window` for the preview.
+/// Starts capturing `window` for the preview, and answers the capture's
+/// number.
 #[tauri::command]
-pub(crate) async fn pick_window(app: AppHandle, window: u64) -> Result<(), String> {
+pub(crate) async fn pick_window(app: AppHandle, window: u64) -> Result<u64, String> {
     try_ask(&app, "pick_window", move |owner| owner.pick(window)).await
 }
 
@@ -127,10 +129,14 @@ pub(crate) async fn preview(app: AppHandle, max_width: u32) -> Result<Response, 
         .map(pixels)
 }
 
-/// Stops capturing and forgets the session's screenshots and check.
+/// Stops capture `capture` and forgets the session's screenshots and
+/// check, unless another capture took its place.
 #[tauri::command]
-pub(crate) async fn stop_capture(app: AppHandle) -> Result<(), String> {
-    ask(&app, "stop_capture", Owner::stop).await
+pub(crate) async fn stop_capture(app: AppHandle, capture: u64) -> Result<(), String> {
+    ask(&app, "stop_capture", move |owner| {
+        owner.stop_capture(capture);
+    })
+    .await
 }
 
 /// Keeps the newest frame as a screenshot and returns its index.
@@ -398,6 +404,19 @@ pub(crate) async fn click_now(app: AppHandle, click: ClickSpec) -> Result<ClickS
 #[tauri::command]
 pub(crate) async fn list_apps(app: AppHandle) -> Result<Vec<AppSummary>, String> {
     try_ask(&app, "list_apps", Owner::apps).await
+}
+
+/// The file of the saved application `application`, read alone; `None`
+/// when it is no longer saved.
+#[tauri::command]
+pub(crate) async fn app_file(
+    app: AppHandle,
+    application: String,
+) -> Result<Option<AppFile>, String> {
+    try_ask(&app, "app_file", move |owner| {
+        owner.stores()?.file(&application)
+    })
+    .await
 }
 
 /// The saved applications and the open windows, with the windows each
@@ -701,7 +720,7 @@ pub(crate) async fn live_values(
 #[tauri::command]
 pub(crate) async fn stop_live_values(app: AppHandle) -> Result<(), String> {
     ask(&app, "stop_live_values", |owner| {
-        owner.stop_live_values(None);
+        owner.stop_live_values();
     })
     .await
 }
@@ -782,16 +801,17 @@ pub(crate) async fn look_recording_state(
     .await
 }
 
-/// A recorded reading, at most `max_width` wide; no bytes for an unknown
-/// index.
+/// A reading of recording `recording`, at most `max_width` wide; no bytes
+/// for an unknown index or a recording that was replaced.
 #[tauri::command]
 pub(crate) async fn recorded_reading(
     app: AppHandle,
+    recording: u64,
     index: usize,
     max_width: u32,
 ) -> Result<Response, String> {
     ask(&app, "recorded_reading", move |owner| {
-        owner.recorded_pixels(index, max_width)
+        owner.recorded_pixels(recording, index, max_width)
     })
     .await
     .map(pixels)
@@ -932,11 +952,13 @@ pub(crate) async fn open_trace_folder(app: AppHandle) -> Result<(), String> {
     try_ask(&app, "open_trace_folder", |owner| owner.open_trace_folder()).await
 }
 
-/// Whether the runtime starts when the user signs in to Windows.
+/// Whether the runtime starts when the user signs in to Windows. It reads
+/// no state of the owner's, and runs on its thread like every command, so
+/// a read and a change reach the registry in the order the user made them.
 #[tauri::command]
 pub(crate) async fn starts_with_windows(app: AppHandle) -> Result<bool, String> {
-    try_ask(&app, "starts_with_windows", |owner| {
-        owner.starts_with_windows()
+    try_ask(&app, "starts_with_windows", |_owner| {
+        settings::starts_with_windows()
     })
     .await
 }
@@ -944,8 +966,8 @@ pub(crate) async fn starts_with_windows(app: AppHandle) -> Result<bool, String> 
 /// Makes the runtime start when the user signs in to Windows, or not.
 #[tauri::command]
 pub(crate) async fn set_starts_with_windows(app: AppHandle, on: bool) -> Result<(), String> {
-    try_ask(&app, "set_starts_with_windows", move |owner| {
-        owner.set_starts_with_windows(on)
+    try_ask(&app, "set_starts_with_windows", move |_owner| {
+        settings::set_starts_with_windows(on)
     })
     .await
 }
@@ -1055,12 +1077,12 @@ pub(crate) async fn save_draft(
 }
 
 /// Makes the screenshots of the draft `id` this session's, and answers the
-/// index each has.
+/// index each has and whether a recording of looks kept it.
 #[tauri::command]
 pub(crate) async fn restore_draft_screenshots(
     app: AppHandle,
     id: String,
-) -> Result<Vec<usize>, String> {
+) -> Result<Vec<DraftShot>, String> {
     try_ask(&app, "restore_draft_screenshots", move |owner| {
         owner.restore_draft_screenshots(&id)
     })

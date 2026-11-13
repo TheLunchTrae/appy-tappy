@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { AppFile } from './bindings.ts';
-import { errorText, listApps } from './api.ts';
+import { appFile, errorText } from './api.ts';
 import { background } from './repeat.ts';
 import { useNewest } from './request.ts';
 
@@ -21,14 +21,16 @@ export function useAppFile(app: string): {
     // A read that a newer one overtook still answers its caller, and leaves what shows to the newer one.
     const current = begin();
     try {
-      const found = (await listApps()).find((summary) => summary.id === app);
+      const file = await appFile(app);
       if (current()) {
-        setFile(found?.file ?? null);
-        setError(found === undefined || found.file !== null ? null : found.error);
+        setFile(file);
+        setError(null);
       }
-      return found?.file ?? null;
+      return file;
     } catch (error: unknown) {
+      // The file cannot be read, so the screen has none, and says why.
       if (current()) {
+        setFile(null);
         setError(errorText(error));
       }
       return null;

@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 import type {
   AntiCheatDef,
+  AppFile,
   AppSpec,
   AppSummary,
   AppWindows,
@@ -22,6 +23,7 @@ import type {
   ColorSpec,
   DebugOverview,
   DraftDef,
+  DraftShot,
   DraftSummary,
   EditPreview,
   EditSpec,
@@ -79,13 +81,17 @@ export async function listWindows(): Promise<WindowList> {
   return invoke<WindowList>('list_windows');
 }
 
-export async function pickWindow(window: number): Promise<void> {
-  await invoke('pick_window', { window });
+/** Starts capturing `window` for the preview, and answers the capture's number. */
+export async function pickWindow(window: number): Promise<number> {
+  return invoke<number>('pick_window', { window });
 }
 
-/** Stops capturing and forgets the session's screenshots and check. */
-export async function stopCapture(): Promise<void> {
-  await invoke('stop_capture');
+/**
+ * Stops capture `capture` and forgets the session's screenshots and check, unless another capture took
+ * its place.
+ */
+export async function stopCapture(capture: number): Promise<void> {
+  await invoke('stop_capture', { capture });
 }
 
 /** The newest frame at most `maxWidth` wide, or null before one arrives. */
@@ -204,9 +210,12 @@ export async function lookRecordingState(): Promise<LookRecordingView | null> {
   return invoke<LookRecordingView | null>('look_recording_state');
 }
 
-/** A recorded reading at most `maxWidth` wide, or null for an unknown index. */
-export async function recordedReading(index: number, maxWidth: number): Promise<Picture | null> {
-  return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { index, maxWidth }));
+/**
+ * A reading of recording `recording` at most `maxWidth` wide, or null for an unknown index or a replaced
+ * recording.
+ */
+export async function recordedReading(recording: number, index: number, maxWidth: number): Promise<Picture | null> {
+  return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { recording, index, maxWidth }));
 }
 
 /**
@@ -355,6 +364,14 @@ export async function listApps(): Promise<ReadonlyArray<AppSummary>> {
 }
 
 /**
+ * The file of the saved application `application`, read without the other applications or the open
+ * windows, or null when it is no longer saved. Rejects with why when its file cannot be read.
+ */
+export async function appFile(application: string): Promise<AppFile | null> {
+  return invoke<AppFile | null>('app_file', { application });
+}
+
+/**
  * The saved applications and the open windows, with the windows each application's match takes, from
  * one listing of the desktop, so the three agree. Rejects when the windows cannot be listed.
  */
@@ -500,10 +517,11 @@ export async function saveDraft(id: string | null, draft: DraftDef, screenshots:
 
 /**
  * Makes the screenshots of the draft `id` the capture's, in place of any it took, so each has the index it
- * had when the draft was saved; returns those indexes, lowest first.
+ * had when the draft was saved and the mark of a recording of looks if it had one; returns each, lowest
+ * index first.
  */
-export async function restoreDraftScreenshots(id: string): Promise<ReadonlyArray<number>> {
-  return invoke<ReadonlyArray<number>>('restore_draft_screenshots', { id });
+export async function restoreDraftScreenshots(id: string): Promise<ReadonlyArray<DraftShot>> {
+  return invoke<ReadonlyArray<DraftShot>>('restore_draft_screenshots', { id });
 }
 
 /** Deletes the draft `id` with its screenshots. One already gone is fine. */

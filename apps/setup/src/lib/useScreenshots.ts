@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { errorText, removeScreenshots, screenshot, takeScreenshot } from './api.ts';
+import type { DraftShot } from './bindings.ts';
 import { withShot } from './looks.ts';
 import type { Picture } from './pixels.ts';
 import type { Size } from './region.ts';
@@ -27,12 +28,6 @@ export interface Taken {
   readonly size: Size | null;
 }
 
-/** A screenshot a draft kept, which is the capture's again: its index, and whether a recording had kept it. */
-export interface RestoredShot {
-  readonly index: number;
-  readonly recorded: boolean;
-}
-
 /** Fetches the screenshot `index` small for its thumbnail and at its own pixels. */
 async function fetchShot(index: number): Promise<readonly [Picture | null, Picture | null]> {
   return Promise.all([screenshot(index, THUMB_WIDTH), screenshot(index, FULL_WIDTH)]);
@@ -42,7 +37,7 @@ async function fetchShot(index: number): Promise<readonly [Picture | null, Pictu
  * The screenshots kept this session, and the one shown, or null while the live view shows. Those in `restored` came
  * back from a draft, so they are listed from the start.
  */
-export function useScreenshots(restored: readonly RestoredShot[] = []): {
+export function useScreenshots(restored: readonly DraftShot[] = []): {
   /** In the order they were kept. */
   readonly shots: readonly Shot[];
   /** Each screenshot at its own pixels, once they arrive. */

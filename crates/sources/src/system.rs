@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
+use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::{WindowFacts, WindowMatch};
 
 use crate::screen::{Rgb, Size};
@@ -70,14 +70,12 @@ pub struct Bounds {
 }
 
 impl Bounds {
-    /// The width and height, or `None` when an edge lies before its
-    /// opposite one.
+    /// The size of the rectangle, or `None` when it is empty.
     #[must_use]
     pub fn size(self) -> Option<Size> {
-        (self.right >= self.left && self.bottom >= self.top).then(|| Size {
-            width: self.right.abs_diff(self.left),
-            height: self.bottom.abs_diff(self.top),
-        })
+        let width = u32::try_from(self.right.checked_sub(self.left)?).ok()?;
+        let height = u32::try_from(self.bottom.checked_sub(self.top)?).ok()?;
+        (width > 0 && height > 0).then_some(Size { width, height })
     }
 }
 
@@ -107,21 +105,17 @@ pub trait System {
     /// Returns the operating system's error.
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
 
-    /// The size of `window`'s content as a capture of it lends it now, or
-    /// `None` once it closed or while it is minimized: see
-    /// [`crate::screen::content`]. A capture can then start for the size its
-    /// first frame has.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn content_size(&self, window: u64) -> io::Result<Option<Size>>;
-
     /// The bounds of `window`'s content on the screen, which a capture of it
     /// lends and a region's coordinates are measured from, or `None` once it
     /// closed: see [`crate::screen::content_on_screen`]. On Windows they
     /// leave out the title bar and borders that [`System::window_place`]'s
     /// bounds take in. This default gives those bounds.
+    ///
+    /// It is the one read of where a window's content is: a click lands by
+    /// its corner, and its [`Bounds::size`] is the size a capture's frames
+    /// have. A minimized window gives its small placeholder, not the size
+    /// it draws at once restored, so a caller that needs the size first
+    /// checks that the window shows, as [`shows`] does.
     ///
     /// # Errors
     ///
@@ -131,14 +125,19 @@ pub trait System {
     }
 
     /// The build of `process`'s executable, read from the file without
-    /// opening the process: see [`crate::build`].
+    /// opening the process: its file version, its size, and when it was
+    /// written.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error, such as for a process that
     /// exited or a file it cannot read.
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef>;
+}
 
+/// Reading the screen itself, which only the MCP server does. It is apart
+/// from [`System`] so that nothing else carries it.
+pub trait ScreenPixels {
     /// Reads one pixel of the screen.
     ///
     /// # Errors
@@ -172,14 +171,12 @@ impl System for Unsupported {
         unsupported()
     }
 
-    fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
-        unsupported()
-    }
-
     fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
         unsupported()
     }
+}
 
+impl ScreenPixels for Unsupported {
     fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
         unsupported()
     }
@@ -520,55 +517,24 @@ mod tests {
     }
 
     #[test]
-    fn bounds_have_a_size_unless_an_edge_is_before_its_opposite() {
-        let bounds = Bounds {
-            left: -10,
-            top: 5,
-            right: 30,
-            bottom: 25,
+    fn bounds_have_a_size_unless_they_are_empty() {
+        let bounds = |left, top, right, bottom| Bounds {
+            left,
+            top,
+            right,
+            bottom,
         };
         assert_eq!(
-            bounds.size(),
+            bounds(10, 20, 30, 60).size(),
             Some(Size {
-                width: 40,
-                height: 20
+                width: 20,
+                height: 40
             })
         );
-        let empty = Bounds {
-            right: -10,
-            bottom: 5,
-            ..bounds
-        };
-        assert_eq!(
-            empty.size(),
-            Some(Size {
-                width: 0,
-                height: 0
-            })
-        );
-        assert_eq!(
-            Bounds {
-                right: -11,
-                ..bounds
-            }
-            .size(),
-            None
-        );
-        assert_eq!(
-            Bounds {
-                bottom: 4,
-                ..bounds
-            }
-            .size(),
-            None
-        );
-        // Two edges may be farther apart than an `i32` holds.
-        let widest = Bounds {
-            left: i32::MIN,
-            right: i32::MAX,
-            ..bounds
-        };
-        assert_eq!(widest.size().map(|size| size.width), Some(u32::MAX));
+        assert_eq!(bounds(10, 20, 10, 60).size(), None);
+        assert_eq!(bounds(10, 20, 30, 20).size(), None);
+        assert_eq!(bounds(30, 20, 10, 60).size(), None);
+        assert_eq!(bounds(i32::MIN, 0, i32::MAX, 1).size(), None);
     }
 
     #[test]
@@ -593,13 +559,7 @@ mod tests {
                     front: false,
                 }))
             }
-            fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
-                unsupported()
-            }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
-                unsupported()
-            }
-            fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
                 unsupported()
             }
         }
@@ -622,12 +582,11 @@ mod tests {
             system.processes().map(drop),
             system.windows().map(drop),
             system.window_place(7).map(drop),
-            system.content_size(7).map(drop),
             system.content_bounds(7).map(drop),
             system.executable_build(ProcessId::new(1)).map(drop),
             system.screen_pixel(0, 0).map(drop),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 7]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 6]);
     }
 }

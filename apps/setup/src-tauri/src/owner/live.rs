@@ -15,23 +15,68 @@
 
 use std::time::Instant;
 
-use appytappy_config::app_file::{PinDef, ScreenDef};
+use appytappy_config::app_file::{CheckDef, PinDef, ScreenDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::check::Check;
-use appytappy_sources::screen::saved::{AtSize, SavedCheck, SavedValue, Unread};
+use appytappy_sources::screen::saved::{AtSize, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Size};
+use serde::Deserialize;
 
-use crate::check_spec::{self, SpecError};
+use crate::check_spec::{self, CharactersSpec, CheckSpec};
+use crate::reading::at_size;
 
 use super::Owner;
 use super::host::Host;
-use super::messages::{ReferenceTrial, TrialSpec, at_size};
 use super::values::read_back;
+
+/// A value's check to try on the live window before it is saved, as the UI
+/// describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TrialSpec {
+    /// The saved application the value is for, whose references it reads
+    /// with and whose window's size changes say where it reads.
+    pub(crate) app: String,
+    /// The check, with the session's screenshots it names.
+    pub(crate) check: CheckSpec,
+    /// The screenshot the region was drawn on, whose size the value would
+    /// keep.
+    pub(crate) screenshot: usize,
+    /// The side of the window the region stays at as the window changes
+    /// size, or `None` before one is picked, for the side it is nearest.
+    pub(crate) pin: Option<PinDef>,
+}
+
+/// A reference being taught to try on the live window before it is saved,
+/// as the UI describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReferenceTrial {
+    /// The saved application the reference is for, whose window's size
+    /// changes say where its region reads.
+    pub(crate) app: String,
+    /// The characters it is taught.
+    pub(crate) characters: CharactersSpec,
+    /// The characters the number it is made for reads of it, or `None`
+    /// for every character it is taught, as a saved number check has them.
+    pub(crate) reads: Option<String>,
+    /// Whether that number ignores digits after the decimal point.
+    pub(crate) whole: bool,
+    /// The side of the window that number's region stays at, or `None`
+    /// for the side the region is nearest.
+    pub(crate) pin: Option<PinDef>,
+}
 
 /// The ID a value is tried under before it is saved under its own. It
 /// names only pictures that are never written.
 const TRIED: &str = "tried";
+
+/// What a reference that is being taught is called where its live check
+/// says what to fix, since it may have no name yet.
+const TAUGHT: &str = "The reference";
 
 /// A value as it would be saved, placed at the window size its frames
 /// settled at.
@@ -147,10 +192,12 @@ impl<H: Host> Owner<H> {
     /// at the window's size now.
     pub(crate) fn set_check(&mut self, trial: &TrialSpec) -> Result<(), String> {
         let found = self.stores()?.app(&trial.app)?;
-        let size = check_spec::drawn_size(&trial.check, &self.screenshots, trial.screenshot)
-            .map_err(|error| error.to_string())?;
-        let saved = check_spec::to_saved(&trial.check, &self.screenshots, &trial.app, TRIED)
-            .map_err(|error| error.to_string())?;
+        let size =
+            check_spec::drawn_size(&trial.check, self.capture.screenshots(), trial.screenshot)
+                .map_err(|error| error.to_string())?;
+        let saved =
+            check_spec::to_saved(&trial.check, self.capture.screenshots(), &trial.app, TRIED)
+                .map_err(|error| error.to_string())?;
         let screen = ScreenDef {
             window_size: size.into(),
             region: saved.region,
@@ -166,50 +213,55 @@ impl<H: Host> Owner<H> {
 
     /// Makes the reference `trial` teaches the check the live frame is
     /// read with: a number read with it in the region the characters were
-    /// drawn in, placed as a value of its application is. The number is the
-    /// one the reference is made for, where it is made for one: it reads
-    /// only that number's characters, as `saved::build` has the saved value
-    /// read, whole when that number is, and stays at its side.
+    /// drawn in, read back as [`Self::set_check`] reads a value's check
+    /// back. The number is the one the reference is made for, where it is
+    /// made for one: it reads only that number's characters, whole when that
+    /// number is, and stays at its side. The saved reference the characters
+    /// add to is kept for the asks that follow.
     pub(crate) fn set_characters(&mut self, trial: &ReferenceTrial) -> Result<(), String> {
-        let size_changes = self.stores()?.app(&trial.app)?.file.size_changes;
+        self.keep_reference(trial.characters.reference.as_ref());
+        let mut found = self.stores()?.app(&trial.app)?;
         let taught = self
-            .with_session(|session| trial.characters.teach(session, None, "", ""))
+            .with_session(|session| trial.characters.teach(session, None, TAUGHT, ""))
             .map_err(|error| error.to_string())?;
-        let reads = trial.reads.as_deref();
-        let reader = taught.reader.reading(reads).ok_or_else(|| {
-            SpecError::NoCharacters {
-                reference: "The reference".to_owned(),
-                characters: reads.unwrap_or_default().to_owned(),
-            }
-            .to_string()
-        })?;
-        let pin = trial
-            .pin
-            .unwrap_or_else(|| PinDef::guess(taught.region.into(), taught.window_size.into()));
-        self.go_live(SavedValue {
-            drawn: SavedCheck {
-                window_size: taught.window_size,
-                region: taught.region,
-                check: Check::Number {
-                    reader,
-                    whole: trial.whole,
-                },
+        let screen = ScreenDef {
+            window_size: taught.window_size.into(),
+            region: taught.region.into(),
+            check: CheckDef::Number {
+                reference: taught.reference.id.clone(),
+                whole: trial.whole,
+                characters: trial.reads.clone(),
             },
+            pin: trial.pin,
+            reading_area: false,
             fixes: Vec::new(),
-            pin,
-            size_changes,
-        });
+        };
+        // The number reads with the reference as it is taught here, not as
+        // the application's file has it, and from the pictures it was
+        // taught with, not the folder's.
+        found.file.references = vec![taught.reference];
+        let mut pictures = taught.pictures;
+        pictures.extend(taught.kept);
+        let value = read_back(&screen, &found, &pictures)?;
+        self.go_live(value);
         Ok(())
     }
 
-    /// Reads the live frame with `value` from now on, placed at the newest
-    /// frame's size, or at the size it was drawn at before a frame arrived.
-    pub(super) fn go_live(&mut self, value: SavedValue) -> &LiveCheck {
-        let size = self
+    /// Reads the live frame of the picked window with `value` from now on,
+    /// placed at the newest frame's size, or at the size it was drawn at
+    /// before a frame arrived, and answers why it is not read at that size,
+    /// if it is not. With no window picked there is no frame to read, so
+    /// the check is not kept.
+    pub(super) fn go_live(&mut self, value: SavedValue) -> Option<String> {
+        let Some(picked) = self.capture.picked_mut() else {
+            let size = value.drawn.window_size;
+            return LiveCheck::new(value, size).unread();
+        };
+        let size = picked
             .latest
             .as_ref()
-            .map_or(value.drawn.window_size, Image::size);
-        self.check.insert(LiveCheck::new(value, size))
+            .map_or(value.drawn.window_size, |(frame, _arrived)| frame.size());
+        picked.check.insert(LiveCheck::new(value, size)).unread()
     }
 }
 
@@ -219,16 +271,17 @@ mod tests {
     use std::time::Duration;
 
     use appytappy_config::app_file::{CheckDef, SizeChangesDef, ValueDef};
-    use appytappy_sources::screen::saved;
+    use appytappy_sources::screen::saved::{self, SavedCheck};
     use appytappy_sources::screen::settle::SETTLE;
 
     use crate::check_spec::{CharactersSpec, CheckSpec};
     use crate::debug::workings::WorkingsView;
-    use crate::owner::messages::{Reading, ReferenceSaveSpec};
+    use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
         BAR, Harness, add_example_app, capturing, characters, harness_with, scratch_store,
         teaching, trial,
     };
+    use crate::reading::Reading;
     use crate::stores::SavedApp;
 
     use super::*;
@@ -393,10 +446,9 @@ mod tests {
     const CHARGE: &str = r#"{"kind":"number","region":{"x":6,"y":2,"width":18,"height":9},
         "reference":{"app":"example","id":"percent"},"whole":false}"#;
 
-    /// What the live box says of `379%` read with the digits alone.
-    const DIGITS_ONLY: &str = "Not read on the live window now: a character has a shape the \
-        reference has not learned: it read `3 7 9 ?`, and character 4 is closest to the `3` it \
-        learned.";
+    /// What the live box says of `379%` read without the `7`.
+    const NO_SEVEN: &str = "Not read on the live window now: the value leaves out a character \
+        its number holds: it read `3 7 9 %`.";
 
     /// A harness whose application `example` changes size as `size_changes`
     /// say, with a window that shows `379%` at [`DRAWN`] on screenshot 0 and
@@ -441,9 +493,12 @@ mod tests {
     /// the frame's size, and read from its region there.
     fn as_the_runtime_reads(app: &SavedApp, value: &ValueDef, frame: &Image) -> Option<Value> {
         let file = &app.file;
-        let built = saved::build(&value.screen, &file.references, file.size_changes, |name| {
-            app.picture(name)
-        })
+        let built = saved::build(
+            &value.screen,
+            &mut saved::Readers::new(&file.references),
+            file.size_changes,
+            |name| app.picture(name),
+        )
         .expect("the runtime reads the saved value");
         let at = built.at(frame.size()).ok()?;
         built.check(&at).read(&frame.crop(at.region)?).ok()
@@ -521,12 +576,20 @@ mod tests {
             harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
-        // Read with the digits alone, the percent sign is a shape the value
-        // does not know, as it is for the runtime.
+        // Read with the digits alone, the percent sign ends the number, as
+        // it does for the runtime.
         harness
             .ask(|owner| owner.set_check(&reading("0123456789")))
             .expect("the reference knows three of them");
-        assert_eq!(harness.ask(Owner::reading), Err(DIGITS_ONLY.to_owned()));
+        assert_eq!(
+            harness.ask(Owner::reading),
+            Ok(Some(Reading::Number(379.0)))
+        );
+        // A digit the value leaves out is not read around.
+        harness
+            .ask(|owner| owner.set_check(&reading("39%")))
+            .expect("the reference knows them");
+        assert_eq!(harness.ask(Owner::reading), Err(NO_SEVEN.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.set_check(&reading("2"))),
             Err(
@@ -722,16 +785,16 @@ mod tests {
             harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
-        let digits = ReferenceTrial {
-            reads: Some("0123456789".to_owned()),
+        let no_seven = ReferenceTrial {
+            reads: Some("39%".to_owned()),
             ..teaching(taught.clone())
         };
-        // Made for a value that reads only digits, it reads as that value
-        // will: the percent sign is a shape it does not know.
+        // Made for a value that reads only some characters, it reads as
+        // that value will: not around a digit the value leaves out.
         harness
-            .ask(|owner| owner.set_characters(&digits))
-            .expect("learns the digits");
-        assert_eq!(harness.ask(Owner::reading), Err(DIGITS_ONLY.to_owned()));
+            .ask(|owner| owner.set_characters(&no_seven))
+            .expect("learns them");
+        assert_eq!(harness.ask(Owner::reading), Err(NO_SEVEN.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.set_characters(&ReferenceTrial {
                 reads: Some("2".to_owned()),
@@ -742,6 +805,14 @@ mod tests {
                  one of them, or change which characters the value reads."
                     .to_owned()
             )
+        );
+        // The file's own rule for a number holds here as it does at a save.
+        assert_eq!(
+            harness.ask(|owner| owner.set_characters(&ReferenceTrial {
+                reads: Some(String::new()),
+                ..teaching(taught.clone())
+            })),
+            Err("Choose at least one character for the value to read.".to_owned())
         );
         harness
             .ask(|owner| owner.set_characters(&teaching(taught.clone())))

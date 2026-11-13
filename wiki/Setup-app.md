@@ -119,7 +119,8 @@ This page covers what the user guide leaves out.
   size means meanwhile. A reference being
   taught (`CharactersSpec`, `set_characters`) is never read by the text
   reader: its labels become the reference's saved form, pictures included,
-  and `saved::reader` learns it as the runtime learns the saved file. It
+  and the owner reads a number check that names it back with `saved::build`,
+  as `set_check` does, so every rule of a saved number holds for it. It
   reads as a number in its region, placed as a value of its application
   is. A reference opened from a number is tried as that number will read
   with it once both are saved (`ReferenceTrial`): whole when the number
@@ -149,7 +150,8 @@ This page covers what the user guide leaves out.
   and drops only its own work.
 - **Selection.** Each state of a state check has its own selection, which travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
-  selection, with one color match for all of them (`selection.rs`). The owner
+  selection, with one color match for all of them (`selection.rs`, with the
+  snap and the grow themselves in `selection/select.rs`). The owner
   replays a state's steps on the screenshot the state is taken from, both to
   answer the UI's `select` command and to build and save the check, so moving
   the slider remakes every selection from the same steps. A new step fits the
@@ -363,6 +365,16 @@ failure as its problem, and a closed window ends it. Starting one kind
 replaces a recording of the other. Recordings of both kinds are numbered from
 one counter.
 
+On the page, the two kinds share one hook for the recording's state, its
+errors, and its commands (`useRecorder` in `lib/useRecorder.ts`), under
+`useRecording` for readings and `useLookRecording` for looks. The capture
+screen (`components/Capture.tsx`) owns the value and its steps. Teaching a
+reference is `useReferenceTeaching` in `lib/useReferenceTeaching.ts`, which
+holds the recording of readings, its review, the finds, and the character
+check, and `components/ReferenceInspector.tsx` shows it. One flow page,
+`pages/CaptureFlow.tsx`, picks the window and opens the capture screen for a
+value and for a reference.
+
 [Recording readings](References.md#record-readings) runs in the reference
 editor. A number value's **Record readings** opens that editor on the value's
 region, for the reference picked or a new one. A saved reference has its
@@ -571,12 +583,12 @@ review without keeping, and review's edits stay for the next one.
 
 [Find more like it](References.md#find-more-like-it) searches the screenshot
 the selected box is on for more text like the box shows
-(`recording/find.rs`). It
-marks each pixel as ink with the reference's color and tolerance, as
-`DigitReader` does, and takes the band of inked rows with the most ink in the
-region, as the reader segments it. It joins touching ink, corners included,
-into blobs, leaving out blobs over twice that band's height, such as a panel in
-the same color. The sample's height is its tallest blob centered in the region,
+(`recording/find.rs`). It reads the screenshot's ink with `DigitReader::ink`,
+the ink a read works from, and takes the band of inked rows with the most ink
+in the region with `Ink::line`, the rule a read finds its line by, so the two
+cannot differ. It joins touching ink, corners included, into blobs, leaving
+out blobs over twice that band's height, such as a panel in the same color.
+The sample's height is its tallest blob centered in the region,
 and a run's is its tallest blob, so a comma or a mark below the characters
 measures neither. Blobs whose rows meet and that start no further than the
 sample's height past each other join into a run of text; runs are looked up by
@@ -632,6 +644,9 @@ A step's keys send the same turns as its buttons: `checkKey` in
 `lib/checkKeys.ts` says what a key answers with, given what has focus and
 which buttons the step shows, and `StepAnswers` in `CharacterCheck.tsx`
 renders the buttons and listens for the keys.
+A character typed in **It is** but not entered is committed first, by Alt+S
+or Alt+B as by a click on **Skip** or **Back**, and the check stays on the
+step.
 
 ### Recording looks
 
@@ -703,10 +718,20 @@ operating system's OCR. Only its recognition model loads: the region holds one
 line, so there is no text to find first. It runs on a thread of its own, because
 a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
-as black text on white with a margin, whatever the application's colors
-(`recording/ink.rs`). Text for a recording or a search the user discarded or
+as black text on white with a margin, whatever the application's colors,
+cut to the rows the number reader takes as the line of text
+(`Ink::line`) and the nearest mark on each side of them (`recording/ink.rs`).
+A mark is a short block of inked rows, such as the dot of an i or an accent
+that the text reader needs to tell letters apart: no taller than half the
+letters' height, with at most a quarter of their height of blank rows, and at
+least one, between it and them. Only the nearest mark on each side joins, so a
+column of stray pixels adds at most one block on each side. Another line of
+text is usually taller and further away, so it stays out, but one that the
+region cuts to a few rows close to the letters joins like a mark, since the
+region is meant to hold one line. Text for a recording or a search the user discarded or
 replaced is dropped by its number, and a queued job of a recording or search
-that a newer one of the same kind replaced is skipped without reading it. Only the setup app uses it; the runtime reads
+that a newer one of the same kind replaced is skipped without reading it. Only
+the setup app uses it; the runtime reads
 numbers with the shapes the user's labels and kept readings taught it ([Screen
 regions](Screen-regions.md#checks)).
 
@@ -788,11 +813,11 @@ saved file still names.
     "build": { "version": "1.4.2.0", "size": 48234496, "modified": 1762500000 },
     "at": 1762600000
   },
-  "origin": { "kind": "imported", "file": "appytappy-example-app.zip" },
   "values": [
     {
       "id": "progress",
       "name": "Progress",
+      "origin": { "kind": "imported", "file": "appytappy-example-app.zip" },
       "screen": {
         "windowSize": { "width": 1920, "height": 1080 },
         "region": { "x": 1146, "y": 14, "width": 74, "height": 38 },
@@ -817,6 +842,7 @@ saved file still names.
     {
       "id": "percent_font",
       "name": "Percent font",
+      "origin": { "kind": "recording" },
       "ink": { "red": 255, "green": 255, "blue": 255 },
       "tolerance": 40,
       "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }],
@@ -863,15 +889,26 @@ build was of the values or the executable that are gone. The Values page shows
 the runtime's log, as [Build detection](Architecture.md#build-detection)
 describes.
 
-An application's `origin` is how its definition was made, and is `byHand`
-when the file leaves it out. Its `kind` is `byHand` for a new application,
-`recording` once a reference of it was saved with a recorded reading, or
+Each value and each reference has an `origin`, how it was made, which is
+`byHand` when the file leaves it out. Its `kind` is `byHand`, `recording`, or
 `imported` with the name of the `file` it was imported from, which is empty
-in a [shared file](#sharing). A recording of
-looks leaves it alone, since the screenshots it keeps are labeled by hand
-like any other. An imported application stays `imported` whatever is changed
-in it later. Only the setup app reads it, to show where an application came
-from, so no rule covers it and a file loads whatever it holds.
+in a [shared file](#sharing).
+
+- A value is `recording` when a recording of looks kept a screenshot it is
+  set up on: the one its region is drawn on, or one a state's picture is
+  taken from (`check_spec::origin`). `Screenshots` in `screenshots.rs` holds
+  which screenshots a recording kept, and a [draft](#drafts) keeps that with
+  them, so a value finished from a draft on such a screenshot is
+  `recording` too.
+- An edit that keeps a value's region keeps its `origin`, and one that draws
+  the region again sets it as for a new value. A fix leaves it alone.
+- A reference is `recording` once a recorded reading, or a box on a
+  screenshot that a recording of looks kept, teaches it. A reference that is
+  `imported` stays so whatever is taught in it later, since most of what it
+  learned still came with the file.
+
+Only the setup app reads an `origin`, to show where a value or a reference
+came from, so no rule covers it and a file loads whatever it holds.
 
 The settings live in `%APPDATA%\AppyTappy\settings.json`. A setting the
 file leaves out takes its default:
@@ -944,7 +981,8 @@ another format says which format it has instead of naming a field this
 format lacks.
 
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
-`settings_file.rs`) and the files (`store.rs`). Each save writes a temporary
+`settings_file.rs`), the IDs and picture file names (`names.rs`), and the
+files (`store.rs`). Each save writes a temporary
 file and renames it over the old one, so a crash never leaves half a file; a
 later save in that folder removes a temporary file that a crash left between the
 two steps, once it is ten minutes old. A file that cannot be read is listed with
@@ -981,9 +1019,9 @@ commands: `export_app`, `read_shared_app`, and `import_app`.
 A shared file is a zip file with the application's folder in it, flat:
 `app.json` and each picture that file names. `Shared` is an application in
 that form. It has no overlay, which holds where a panel is on one machine's
-screens, and it keeps `checked` and `origin`, with an empty `file` for an
-application that was itself imported, since that names a file on its maker's
-machine. `ZipPack` in `zip_pack.rs` packs it, as it packs the
+screens, and it keeps `checked` and each `origin`, with an empty `file` for a value
+or a reference that was itself imported, since that names a file on its
+maker's machine. `ZipPack` in `zip_pack.rs` packs it, as it packs the
 [debug bundle](#debug-page).
 
 An imported file is a trust boundary, so `Shared::unpack` holds it to what a
@@ -1010,21 +1048,20 @@ saved file is held to and takes nothing else from it:
   of a window hold. A picture without a PNG header, or larger than AppyTappy
   reads, is refused with the value or reference that names it, in the words
   a saved file's would be.
-- Reading the values decodes no more than `MAX_DECODED_PIXELS`, four pictures
-  of `LARGEST_PICTURE`, in all. `saved::build` decodes a reference's pictures
-  again for each value and fix that reads with it, so a file that holds few
-  pixels can still ask for many. A reference's text is small, so many values
-  can read with it.
+- Reading the values decodes each picture once, so the pixels the pictures
+  hold are the pixels it decodes. Each picture has one place that names it,
+  and one `saved::Readers` builds each reference's reader once, however many
+  values and fixes read with it.
 - Each picture takes the name the setup app gives it: `sample_name` for a
   reference's samples in order, and `state_image_name` for a value's states,
   with each fix's pictures in the set of its place among the fixes. The file's
   own names only find the entries. A file made elsewhere could name one
   picture for two values, or name a value's picture as another value's next
   one, which a later save would overwrite; after the renaming each picture
-  has one owner, and `AppStore::prune` knows every name.
-- `saved::build` reads each value and `saved::reader` each reference from the
-  pictures, as the runtime does and as saving a value does, so a file with a
-  value the runtime could not read is refused.
+  has one owner, and `AppStore::save` knows every name it may remove.
+- `saved::build` reads each value from the pictures, and `saved::Readers`
+  each reference, as the runtime does and as saving a value does, so a file
+  with a value the runtime could not read is refused.
 
 `Shared::of` holds an application to the same rules, and `pack` reads back
 what it packed with `unpack` and refuses what that refuses, such as an
@@ -1040,7 +1077,8 @@ When the ID's name is taken by something the store does not list, a file or on
 Windows a folder that differs only in case, it takes the next ID, and gives up
 after `NEW_FOLDER_TRIES` of them. The import refuses a name that a saved
 application has. It saves the anti-cheat class the user picked, never the
-file's, and sets `origin` to `imported` with the picked file's name, without
+file's, and sets the `origin` of every value and reference to `imported`
+with the picked file's name, without
 control characters and the format characters that reorder or hide text, which
 can turn a name around on screen, and at most 60 characters long. The page
 offers the file's class in the dialog unless it is `none`, which only the
@@ -1083,8 +1121,10 @@ The setup app keeps each in its own folder under
 `%LOCALAPPDATA%\AppyTappy\drafts\`, named by an ID made from the time it was
 first saved (`apps/setup/src-tauri/src/drafts.rs`). The folder holds
 `draft.json` and, for a value, fix, or reference, the capture's screenshots,
-each as `shot-{index}.png` under the index it has in the capture, so the
-indexes of removed screenshots stay empty. A screenshot larger than
+each under the index it has in the capture, so the indexes of removed
+screenshots stay empty: `recorded-{index}.png` for one a recording of looks
+kept, which `restore_draft_screenshots` marks so again, and `shot-{index}.png`
+for one the user took. A screenshot larger than
 AppyTappy reads back is left out too, and `save_draft` adds a sentence to the
 draft's to-do list to make the window smaller and take it again. The runtime never reads this
 folder, so a draft never runs and the authoring files never hold an
@@ -1099,11 +1139,11 @@ format was saved by another version and can only be deleted.
 
 What each kind keeps in `state`:
 
-| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                                                         | What it does not keep                                                                                                                  |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                                                           | A value or application flow the editor had opened, and what such a flow would hand back                                                |
-| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                                                                      | The window picked in the list                                                                                                          |
-| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference, the characters it reads and **Whole number only**), the reference being edited with the characters it needs, and which screenshots a recording kept | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
+| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                 | What it does not keep                                                                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                   | A value or application flow the editor had opened, and what such a flow would hand back                                                |
+| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                              | The window picked in the list                                                                                                          |
+| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference, the characters it reads and **Whole number only**), the reference being edited with the characters it needs | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
 
 Screenshots follow one rule, however they were kept: every screenshot the
 capture holds when the draft is saved goes into the draft, those a
@@ -1193,13 +1233,14 @@ keeps its value's region of the newest frame.
 
 ### On disk
 
-| File                                 | What it holds                                                                                        |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `apps\{app}\ref-{reference}-{n}.png` | A reference's sample: the region of a labeled screenshot or kept reading, or a find's box            |
-| `apps\{app}\{value}-{n}.png`         | A state's picture: the region, transparent where its selection leaves the background out             |
-| `apps\{app}\{value}-{fix}-{n}.png`   | A state's picture in a fix: the fix's region, the same way                                           |
-| `clicks\click-{n}.png`               | A click's picture: the region the user marked, transparent where its selection leaves out            |
-| `drafts\{draft}\shot-{index}.png`    | A screenshot of a value, fix, or reference draft: the window's whole content, as the capture held it |
+| File                                  | What it holds                                                                                        |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `apps\{app}\ref-{reference}-{n}.png`  | A reference's sample: the region of a labeled screenshot or kept reading, or a find's box            |
+| `apps\{app}\{value}-{n}.png`          | A state's picture: the region, transparent where its selection leaves the background out             |
+| `apps\{app}\{value}-{fix}-{n}.png`    | A state's picture in a fix: the fix's region, the same way                                           |
+| `clicks\click-{n}.png`                | A click's picture: the region the user marked, transparent where its selection leaves out            |
+| `drafts\{draft}\shot-{index}.png`     | A screenshot of a value, fix, or reference draft: the window's whole content, as the capture held it |
+| `drafts\{draft}\recorded-{index}.png` | The same, for a screenshot that a recording of looks kept                                            |
 
 The first four are in `%APPDATA%\AppyTappy\`, and a draft's screenshots in
 `%LOCALAPPDATA%\AppyTappy\`, where the runtime never reads. A draft's
@@ -1230,9 +1271,8 @@ more pixels as ink sees only those within the margin.
 
 ### Removal
 
-- After each save of an application's file, `Owner::write_app` removes the
-  pictures in its folder that the file as saved does not name
-  (`AppStore::prune`). So the pictures of a deleted value, fix, or reference
+- Each save of an application's file removes the pictures in its folder that
+  the file as saved does not name (`AppStore::save`). So the pictures of a deleted value, fix, or reference
   go with it; a save that fails takes back the pictures it wrote, since the
   file still saved does not name them; and pictures left by a save that the
   program ended in the middle of go with the application's next save.

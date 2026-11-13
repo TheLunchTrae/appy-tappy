@@ -18,12 +18,14 @@ function Characters({ workings }: { readonly workings: Extract<WorkingsView, { k
     <>
       <ul className="glyph-scores" aria-label="Characters read">
         {workings.characters.map((character, index) => {
-          const { best, runnerUp } = character;
+          const { best, runnerUp, leftOut } = character;
           return (
             // The characters only ever change as a whole, so their place is their key.
             <li key={index} className={best?.matches === true ? 'glyph-score' : 'glyph-score off'}>
               <span className="glyph-char">{best === null ? '?' : best.character}</span>
-              <span className="glyph-close">{best === null ? 'no glyphs' : distanceText(best)}</span>
+              <span className="glyph-close">
+                {best === null ? 'no glyphs' : `${distanceText(best)}${leftOut ? ', left out' : ''}`}
+              </span>
               <span className="note">
                 {runnerUp === null ? 'no other' : `next: ${runnerUp.character}, ${distanceText(runnerUp)}`}
               </span>
@@ -35,8 +37,9 @@ function Characters({ workings }: { readonly workings: Extract<WorkingsView, { k
         Each character read, how far it is from the closest character of the reference, in cells of the grid both are
         sampled onto, and the closest other character. A cell is apart when one of the two sets it and the other sets
         neither it nor a cell beside it. A character reads while at most 1 in 32 of the cells either sets are apart. A
-        close second means the reference needs more samples of both. A read stops at the first character after the
-        number, so any after it are shown but not read.
+        close second means the reference needs more samples of both. A character the value leaves out reads as text: it
+        ends the number or comes before it, and the read fails when it is a part of the number. A read stops at the
+        first character after the number, so any after it are shown but not read.
       </p>
     </>
   );

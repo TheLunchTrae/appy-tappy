@@ -59,10 +59,11 @@ use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Region, Rgb, Size};
 use serde::{Deserialize, Serialize};
 
+use crate::ticket::Ticket;
+
 use self::character::CharacterView;
 use self::find::{Sizes, TextSize};
 use self::follow::{Follows, Unplaced};
-use self::ink::Ink;
 pub(crate) use self::ink::Line;
 pub(crate) use self::lifecycle::Lifecycle;
 use self::looks::LookRecording;
@@ -250,7 +251,7 @@ enum Gate {
 pub(crate) struct Recording {
     /// Its number in the session, so the UI and the text reader tell it
     /// from one it replaced.
-    pub(crate) id: u64,
+    pub(crate) id: Ticket,
     /// The region of the window it records.
     pub(crate) region: Region,
     /// The characters' color.
@@ -286,7 +287,7 @@ impl Recording {
     /// the window to another size, and is placed at the size it was drawn
     /// at until frames settle at another.
     pub(crate) const fn new(
-        id: u64,
+        id: Ticket,
         region: Region,
         (ink, tolerance): (Rgb, u8),
         (window_size, follows): (Size, Follows),
@@ -603,7 +604,7 @@ impl Recording {
             }
             return None;
         }
-        let line = Ink::of(&crop, &self.reader).line()?;
+        let line = Line::of(&self.reader.ink(&crop))?;
         let index = self.readings.len();
         self.readings.push(Kept {
             characters: character::of(&crop, &self.reader),
@@ -654,7 +655,7 @@ impl Recording {
     /// What the UI shows of it at `now`.
     pub(crate) fn view(&self, now: Instant) -> RecordingView {
         RecordingView {
-            id: self.id,
+            id: self.id.number(),
             recording: self.life.is_recording(),
             elapsed_ms: millis(self.life.elapsed(now)),
             full: self
@@ -876,14 +877,20 @@ mod tests {
     };
 
     fn recording(started: Instant) -> Recording {
-        Recording::new(1, region(), (RED, 0), (size(), Follows::Drawn), started)
+        Recording::new(
+            Ticket::numbered(1),
+            region(),
+            (RED, 0),
+            (size(), Follows::Drawn),
+            started,
+        )
     }
 
     /// A recording of a `width` by `height` window, all of it the region.
     fn recording_of(width: u32, height: u32, started: Instant) -> Recording {
         let region = Region::new(0, 0, width, height).expect("not empty");
         Recording::new(
-            1,
+            Ticket::numbered(1),
             region,
             (RED, 0),
             (Size { width, height }, Follows::Drawn),
@@ -1183,7 +1190,13 @@ mod tests {
             height: 10,
         };
         let region = Region::new(0, 0, 1, 10).expect("not empty");
-        let mut recording = Recording::new(1, region, (RED, 0), (tall, Follows::Drawn), start);
+        let mut recording = Recording::new(
+            Ticket::numbered(1),
+            region,
+            (RED, 0),
+            (tall, Follows::Drawn),
+            start,
+        );
         let line = recording
             .offer(&frame(1, 10, |_, _| true), start)
             .expect("a new reading")
@@ -1293,7 +1306,7 @@ mod tests {
             height: 32,
         };
         Recording::new(
-            1,
+            Ticket::numbered(1),
             region,
             (RED, 0),
             (size, Follows::Scaled(PinDef::TopLeft)),
@@ -1407,7 +1420,13 @@ mod tests {
             height: 32,
         };
         let follows = Follows::Scaled(PinDef::TopLeft);
-        let mut recording = Recording::new(1, region, (RED, 0), (drawn, follows), start);
+        let mut recording = Recording::new(
+            Ticket::numbered(1),
+            region,
+            (RED, 0),
+            (drawn, follows),
+            start,
+        );
         // As tall and narrower: pinned left, the region keeps its place,
         // which is past the right edge.
         let narrow = frame(12, 32, |_, _| true);
@@ -1595,7 +1614,14 @@ mod tests {
             width: 60,
             height: 40,
         };
-        Recording::new(1, region, (RED, 0), (size, Follows::Drawn), started).across_window(8)
+        Recording::new(
+            Ticket::numbered(1),
+            region,
+            (RED, 0),
+            (size, Follows::Drawn),
+            started,
+        )
+        .across_window(8)
     }
 
     const STROKE: (u32, u32, u32, u32) = (2, 2, 3, 8);
@@ -1915,8 +1941,14 @@ mod tests {
             width: 60,
             height: 40,
         };
-        let mut recording =
-            Recording::new(1, region, (RED, 0), (drawn, follows), start).across_window(8);
+        let mut recording = Recording::new(
+            Ticket::numbered(1),
+            region,
+            (RED, 0),
+            (drawn, follows),
+            start,
+        )
+        .across_window(8);
         recording.look_for([16]);
         assert_eq!(
             looked_over(&mut recording, &blocks(&[STROKE]), start),
@@ -1985,7 +2017,14 @@ mod tests {
             height: 40,
         };
         let follows = Follows::Scaled(PinDef::TopLeft);
-        Recording::new(1, region, (RED, 0), (drawn, follows), started).across_window(8)
+        Recording::new(
+            Ticket::numbered(1),
+            region,
+            (RED, 0),
+            (drawn, follows),
+            started,
+        )
+        .across_window(8)
     }
 
     #[test]
@@ -2045,8 +2084,14 @@ mod tests {
             width: 60,
             height: 40,
         };
-        let mut recording =
-            Recording::new(1, region, (RED, 0), (drawn, follows), start).across_window(16);
+        let mut recording = Recording::new(
+            Ticket::numbered(1),
+            region,
+            (RED, 0),
+            (drawn, follows),
+            start,
+        )
+        .across_window(16);
         let half = frame(30, 20, |_, _| false);
         assert!(recording.look(&half, start).is_none());
         let job = recording.look(&half, after(start, 250)).expect("due");
@@ -2105,7 +2150,7 @@ mod tests {
     fn the_ui_sees_what_it_records() {
         let region = Region::new(2, 1, 5, 3).expect("not empty");
         let view = Recording::new(
-            1,
+            Ticket::numbered(1),
             region,
             (RED, 7),
             (size(), Follows::Drawn),

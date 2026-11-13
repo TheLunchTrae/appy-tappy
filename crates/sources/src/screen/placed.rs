@@ -6,10 +6,11 @@
 //! asks [`FrameMeaning`] what a frame means, so a frame of another size means the
 //! same to all of them.
 
+use std::borrow::Cow;
 use std::io;
 
 use super::saved::{AtSize, Unread};
-use super::{Frame, Image, Layout, OutsideWindow, Size};
+use super::{Frame, Image, Layout, OutsideWindow, Region, Size};
 
 /// What a frame means to a capture that reads at one window size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,10 +124,21 @@ impl Placed {
     }
 
     /// The pixels of the value at `position` in `image`, a readable frame's
-    /// image, or `None` for a value that does not read at the size.
+    /// image, or `None` for a value that does not read at the size. A value
+    /// whose place is the whole image, such as the only value that reads,
+    /// borrows it; any other is copied out of it.
     #[must_use]
-    pub fn cropped(&self, position: usize, image: &Image) -> Option<Image> {
-        image.crop(self.layout.as_ref()?.packed(position)?)
+    pub fn cropped<'image>(
+        &self,
+        position: usize,
+        image: &'image Image,
+    ) -> Option<Cow<'image, Image>> {
+        let region = self.layout.as_ref()?.packed(position)?;
+        if Region::whole(image.size()) == Some(region) {
+            Some(Cow::Borrowed(image))
+        } else {
+            image.crop(region).map(Cow::Owned)
+        }
     }
 }
 
@@ -136,9 +148,9 @@ mod tests {
 
     use appytappy_config::app_file::{PinDef, SizeChangesDef};
 
+    use super::super::Rgb;
     use super::super::check::{Check, ColorMatch};
     use super::super::saved::{SavedCheck, SavedValue};
-    use super::super::{Region, Rgb};
     use super::*;
 
     const WINDOW: Size = Size {
@@ -267,6 +279,18 @@ mod tests {
         assert_eq!(pixels(0), Some([1; 4]));
         assert_eq!(pixels(1), None);
         assert_eq!(pixels(2), Some([3; 4]));
+        assert!(
+            matches!(placed.cropped(0, &packed), Some(Cow::Owned(_))),
+            "a value that shares the image is copied out of it"
+        );
+
+        // The only value that reads has the whole image, which is not copied.
+        let alone = Placed::new(WINDOW, [Err(Unread::NotDrawn), Ok(at(8))]);
+        let whole = Image::new(region(0).size(), [5_u8; 16].to_vec()).unwrap();
+        assert!(matches!(
+            alone.cropped(1, &whole),
+            Some(Cow::Borrowed(image)) if image == &whole
+        ));
 
         let unread = Placed::new(SMALL, [Err(Unread::Outside), Err(Unread::NotDrawn)]);
         assert_eq!(unread.layout(), None, "nothing to capture");

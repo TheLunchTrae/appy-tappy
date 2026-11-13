@@ -6,8 +6,9 @@
 
 use std::collections::BTreeMap;
 
-use appytappy_config::anti_cheat::{ProcessId, known_anti_cheat};
+use appytappy_config::anti_cheat::known_anti_cheat;
 use appytappy_config::app_file::WindowDef;
+use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowFacts;
 use appytappy_sources::screen::Size;
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
@@ -76,7 +77,7 @@ pub(crate) fn list(
         .filter_map(|window| {
             let Size { width, height } = window.bounds.size()?;
             let executable = executables.get(&window.process.raw())?;
-            (width > 0 && height > 0).then(|| WindowChoice {
+            Some(WindowChoice {
                 handle: window.handle,
                 process: window.process,
                 title: window.title,
