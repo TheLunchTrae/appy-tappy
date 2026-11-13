@@ -450,7 +450,7 @@ mod tests {
 
     use crate::overlay::OverlayWindow;
 
-    use super::test_support::{Harness, STATE, spec, with_saved_bar};
+    use super::test_support::{Harness, STATE, add_other_bar, spec, with_saved_bar};
     use super::*;
 
     /// The folder of `Example App`, holding the state `Icon visible` with
@@ -633,6 +633,43 @@ mod tests {
         assert_eq!(harness.reloads(), 0);
         assert!(harness.closed.try_recv().is_err());
         assert!(harness.synced.try_recv().is_err());
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_change_to_the_values_restarts_only_that_applications_values_page_readings() {
+        let (mut harness, root) = with_saved_bar("changed-live");
+        add_other_bar(&mut harness);
+        for app in ["example", "example-2"] {
+            harness
+                .ask(|owner| owner.live_values(app))
+                .expect("the Values page reads");
+            harness.handlers.try_recv().expect("its capture started");
+        }
+        let other = harness.owner.live.ticket("example-2");
+        assert!(other.is_some(), "reads");
+        harness.closed.try_iter().for_each(drop);
+
+        harness
+            .ask(|owner| {
+                owner.update_app("example", Changed::Values, |_owner, found| {
+                    "Renamed".clone_into(&mut found.file.name);
+                    Ok(Edit::Save((), Vec::new()))
+                })
+            })
+            .expect("saves");
+        assert_eq!(harness.closed.try_recv(), Ok(7), "one capture closes");
+        assert!(harness.closed.try_recv().is_err(), "only one");
+        assert_eq!(
+            harness.owner.live.ticket("example"),
+            None,
+            "the changed application's readings start again on the next poll"
+        );
+        assert_eq!(
+            harness.owner.live.ticket("example-2"),
+            other,
+            "the other application's readings go on"
+        );
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

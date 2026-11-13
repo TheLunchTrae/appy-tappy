@@ -569,3 +569,17 @@ pub(super) const WINDOW: Size = Size {
     width: 4,
     height: 2,
 };
+
+/// Saves `Other App`, on the same window as `Example App`, as the
+/// application `example-2`, with the bar `Progress bar` of its own.
+pub(super) fn add_other_bar(harness: &mut Harness) {
+    let mut other = example_app(SizeChangesDef::Often);
+    "Other App".clone_into(&mut other.name);
+    assert_eq!(
+        harness.ask(|owner| owner.save_app(None, other)),
+        Ok("example-2".to_owned())
+    );
+    harness
+        .ask(|owner| owner.save(&spec("example-2", "Progress bar", BAR)))
+        .expect("saves");
+}
