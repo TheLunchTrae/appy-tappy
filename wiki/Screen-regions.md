@@ -40,10 +40,9 @@ byte for each pixel of its region, for which of them are ink.
   than guessing that the `,` is a decimal point. A read finds the ink (pixels
   near the text color) once, as `digits::Ink`, splits it into characters at
   blank columns, and scales each one to a fixed grid by the height of the
-  text line. The text
-  line is the band of rows with the most ink, so a stray speck elsewhere in
-  the region does not throw it off. Each character takes the closest learned
-  shape, if the two are the same but for their edges, as
+  text line. The text line is the band of rows with the most ink, so a stray
+  speck elsewhere in the region does not throw it off. Each character takes
+  the closest learned shape, if the two are the same but for their edges, as
   [Matching](#matching) describes. A character it has not learned fails the
   read rather than being guessed, unless the number has already ended, as in
   the "HP" of "37% HP", and a read that fails
