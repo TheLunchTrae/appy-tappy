@@ -128,8 +128,7 @@ run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 # Cargo tasks, so a copied target/ never holds a build half written.
 #
 # MUTANTS_SHARD=k/n tests only the kth of n shards of the selected mutants,
-# counting from 0; CI runs the shards on separate runners. Unset, the lane
-# tests every selected mutant.
+# counting from 0; unset, the lane tests every one.
 #
 # cargo-mutants builds in its own copy of the tree and leaves target/ out of
 # it. MUTANTS_COPY_TARGET=true copies target/ too, so the baseline reuses the
@@ -192,21 +191,21 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# When the diff or this shard selects no mutants, cargo-mutants writes a
+# report with no outcomes, which verification rejects, so the lane lists the
+# mutants first. Listing builds nothing.
+selected="$(cargo mutants --list --workspace --all-features --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file")"
+if [ -z "$selected" ]; then
+  echo "The diff selects no mutants${MUTANTS_SHARD:+ in shard $MUTANTS_SHARD}; nothing to test."
+  exit 0
+fi
+
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
   run_mutants_task_child cargo test --no-run --workspace --all-features --locked
 fi
-shard_args=""
-if [ -n "${MUTANTS_SHARD:-}" ]; then
-  shard_args="--shard=$MUTANTS_SHARD"
-fi
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
-# shard_args is unquoted so that it expands to nothing when the lane is whole.
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked $shard_args --in-diff "$diff_file"
-if [ ! -d mutants.out ]; then
-  echo "The diff selects no mutants; nothing to verify."
-  exit 0
-fi
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file"
 run_mutants_task_child sh scripts/verify-mutants.sh diff mutants.out
 """
 
