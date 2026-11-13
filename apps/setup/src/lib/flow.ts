@@ -404,7 +404,7 @@ export function heldInAll(flow: Flow | null, reported: Held): Held {
 /** What leaving each kind of flow before it is saved loses. */
 const LOST: Readonly<Record<Flow['kind'], string>> = {
   value: 'The screenshots, the region and any recording are lost.',
-  reference: 'The screenshots, the labels and any recording are lost.',
+  reference: 'The screenshots, the boxes and any recording are lost.',
   automation: 'The changes to this automation are lost.',
   application: 'The changes to this application are lost.',
 };

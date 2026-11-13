@@ -20,6 +20,14 @@ export interface Editing {
 export type Step = 'where' | 'how' | 'check';
 
 /**
+ * The screenshot shown on entering `step`, or null for the live view. Where to read lists only the screenshot the
+ * value's region is drawn on, `drawnOn`, so that one shows there; any other step keeps `selected`, the one shown.
+ */
+export function shownOnStep(step: Step, drawnOn: number | null, selected: number | null): number | null {
+  return step === 'where' && drawnOn !== null ? drawnOn : selected;
+}
+
+/**
  * What the capture screen has set up, apart from its screenshots' pixels, which the draft keeps beside it. The
  * value's side and reading area, its check, and a reference's boxes and expected characters are all
  * here; what belongs to a recording that runs or waits for review is not.
