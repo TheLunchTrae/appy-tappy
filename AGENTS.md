@@ -231,10 +231,9 @@ dependency changes and commit it.
 `rust:mutants` mutates the whole workspace. `rust:mutants:diff` mutates only
 changed code; its base defaults to `origin/main`, then local `main`, and can be
 set with `MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
-`rust:standards:check` runs the lane that `MUTANTS_LANE` names, `full` by
-default; [mutation testing](wiki/Rust-standards.md#mutation-testing)
-says which lane CI runs. Before handoff, run `mise run rust:standards:check`;
-report skipped checks and their reasons.
+`rust:standards:check` runs the diff lane; see
+[mutation testing](wiki/Rust-standards.md#mutation-testing). Before handoff,
+run `mise run rust:standards:check`; report skipped checks and their reasons.
 
 ### Ownership and state
 

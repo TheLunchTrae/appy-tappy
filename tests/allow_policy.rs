@@ -2976,28 +2976,23 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     let Some(diff) = task_definition(&tasks, "rust:mutants:diff") else {
         panic!("the diff Rust mutation task should exist");
     };
-    let Some(gate) = task_definition(&tasks, "rust:mutants:gate") else {
-        panic!("the Rust mutation gate task should exist");
-    };
     let Some(check) = task_definition(&tasks, "rust:standards:check") else {
         panic!("the Rust standards gate task should exist");
     };
 
     assert!(
-        check.contains("\"rust:mutants:gate\""),
-        "the Rust standards gate must run a mutation lane"
+        check.contains("\"rust:mutants:diff\""),
+        "the Rust standards gate must run the diff mutation lane"
     );
-    for contract in [
-        "case \"${MUTANTS_LANE:-full}\" in",
-        "full) exec mise run rust:mutants ;;",
-        "diff) exec mise run rust:mutants:diff ;;",
-        "exit 2",
-    ] {
-        assert!(
-            gate.contains(contract),
-            "the mutation gate must default to the full lane and reject unknown lanes; missing {contract}"
-        );
-    }
+    assert!(
+        !check.contains("\"rust:mutants\""),
+        "the Rust standards gate must not run the full mutation lane"
+    );
+    // A copied target/ must not catch another Cargo task's build half written.
+    assert!(
+        diff.contains("wait_for = [\"rust:policy\", \"rust:package\"]"),
+        "the diff mutation lane must start after the gate's other Cargo tasks"
+    );
 
     assert!(
         full.contains("--test-workspace=true"),
