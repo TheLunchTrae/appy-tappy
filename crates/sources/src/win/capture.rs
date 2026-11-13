@@ -697,7 +697,7 @@ mod tests {
     use std::sync::mpsc;
 
     use super::*;
-    use crate::screen::{Image, Layout, Region};
+    use crate::screen::{Image, Layout, NextFrame, Region};
     use crate::system::{Bounds, System};
     use crate::win::window_handle;
 
@@ -729,7 +729,7 @@ mod tests {
                 Box::new(move |frame| {
                     let frame = frame.unwrap();
                     frames.send((frame.image.size(), frame.latency())).unwrap();
-                    Duration::from_millis(10)
+                    NextFrame::After(Duration::from_millis(10))
                 }),
             )
             .unwrap();
@@ -759,7 +759,7 @@ mod tests {
                     let frame = frame.unwrap();
                     // The test stops listening after the first frame.
                     let _sent = frames.send((frame.window_size, frame.image.clone()));
-                    Duration::from_secs(60)
+                    NextFrame::After(Duration::from_secs(60))
                 }),
             )
             .unwrap();
@@ -841,7 +841,12 @@ mod tests {
     #[test]
     fn refuses_a_window_that_does_not_exist() {
         let system = WindowsSystem::new();
-        let started = system.start(0, Crop::Whole, Duration::ZERO, Box::new(|_| Duration::ZERO));
+        let started = system.start(
+            0,
+            Crop::Whole,
+            Duration::ZERO,
+            Box::new(|_| NextFrame::After(Duration::ZERO)),
+        );
         assert!(started.is_err());
     }
 }
