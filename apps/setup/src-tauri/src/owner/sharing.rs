@@ -91,7 +91,7 @@ impl<H: Host> Owner<H> {
             .map_err(|error| {
                 format!("AppyTappy cannot import {from}: it could not be saved ({error}).")
             })?;
-        self.tell(Changed::Values);
+        self.tell(&id, Changed::Values);
         Ok(id)
     }
 }
@@ -158,7 +158,7 @@ mod tests {
     use appytappy_config::app_file::OverlayModeDef;
 
     use crate::check_spec::ColorSpec;
-    use crate::owner::messages::ReferenceSaveSpec;
+    use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
         BAR, FakeHost, Harness, STATE, capturing, characters_in, frame_image, spec,
     };

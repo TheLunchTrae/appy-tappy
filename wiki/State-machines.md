@@ -2697,6 +2697,14 @@ state pictures are drawn again, once for each settled size. When none does,
 the capture goes on and each value shows why it is not read there, such as
 that its region is too small, as `NotRead`.
 
+A save that works for one application closes that application's entry in
+both sets (`Overlays::reopen`, from `Owner::tell`), so its next poll opens
+it from the saved file again. The other applications' entries and captures
+go on as they were. An overlay window that closes drops its entry and the
+size of its card (`Overlays::window_closed`), and closing the app or
+leaving the Values page closes every entry of the set
+(`Overlays::close_all`).
+
 `overlay::window::sync` opens a window for each overlay that is on and closes
 each that is not. The owner thread runs it through its host: when the main
 window mounts, and from `Owner::write_app` after each overlay change and after

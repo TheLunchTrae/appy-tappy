@@ -5,17 +5,78 @@
 //! unusable removes them only with the user's word for it.
 
 use appytappy_config::app_file::{CheckDef, FixDef, PinDef, ScreenDef, SizeDef, ValueDef};
+use serde::{Deserialize, Serialize};
 
 use crate::automations;
-use crate::check_spec::{self, Pictures};
+use crate::check_spec::{self, CheckSpec, Pictures};
 use crate::stores::SavedApp;
 
 use super::fixes::free_picture_number;
 use super::host::Host;
-use super::messages::{EditDrawing, EditPreview, EditSpec, SavedValue};
 use super::references::and_list;
-use super::values::{named_apart, read_back};
+use super::values::{SavedValue, named_apart, read_back};
 use super::{Changed, Edit, Owner};
+
+/// A saved value changed in place, as the UI describes it. The value keeps
+/// its ID and the window size it was drawn at.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EditSpec {
+    /// The saved application.
+    pub(crate) app: String,
+    /// The value's ID.
+    pub(crate) value: String,
+    /// The value's name, the one it has or a new one.
+    pub(crate) value_name: String,
+    /// The side of the window the region stays at as the window changes
+    /// size.
+    pub(crate) pin: PinDef,
+    /// Whether the region is a reading area, larger than what it reads.
+    /// Only a check that reads anywhere in its region may have one.
+    pub(crate) reading_area: bool,
+    /// Where the value is read and how.
+    pub(crate) drawing: EditDrawing,
+}
+
+/// Where an edited value is read and how.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum EditDrawing {
+    /// Its region stays where it is saved, so no screenshot is needed and
+    /// the window may have any size.
+    Kept {
+        /// The check as the file spells it. A state check names the
+        /// pictures the value has, in their order, each under the name the
+        /// state has now.
+        check: CheckDef,
+    },
+    /// Its region is drawn again, on a screenshot of the window size the
+    /// value was drawn at.
+    Drawn {
+        /// The check, with the session's screenshots it names. A state
+        /// check takes every state's picture again.
+        check: CheckSpec,
+        /// The screenshot the region was drawn on.
+        screenshot: usize,
+    },
+}
+
+/// What saving an edit would do, which the editor shows before the save.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EditPreview {
+    /// Why the edited value is not read at the window's size now, or `None`
+    /// when the live reading reads it there.
+    pub(crate) unread: Option<String>,
+    /// The window sizes of the fixes the edit removes, since they no longer
+    /// suit how the value reads. The save needs the user's word for it.
+    pub(crate) dropped_fixes: Vec<SizeDef>,
+    /// Why the save is refused: the automations the edit would break.
+    pub(crate) refused: Option<String>,
+}
 
 /// A saved value as an edit leaves it, before anything is saved.
 #[derive(Debug)]

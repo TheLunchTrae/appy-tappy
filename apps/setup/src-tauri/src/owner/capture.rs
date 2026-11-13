@@ -20,13 +20,25 @@ use crate::screenshots::Screenshots;
 use crate::selection::{self, SelectionSpec, SelectionView};
 use crate::ticket::{Running, Ticket, Tickets};
 use crate::window_list::{self, WindowChoice, WindowFit, WindowList, WindowScore};
+use crate::words::sentence;
 
 use super::found::Found;
 use super::host::Host;
 use super::live::LiveCheck;
-use super::messages::{CaptureFailure, Event, Message, Reading};
+use super::messages::{Event, Message};
 use super::watch::Watching;
 use super::{Owner, PREVIEW_INTERVAL};
+use crate::reading::Reading;
+
+/// Why the picked window's capture failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CaptureFailure {
+    /// Why, for the user.
+    pub(crate) error: String,
+    /// Whether the window closed, which ends the capture for good. Any other
+    /// failure lasts only until the next good frame.
+    pub(crate) ended: bool,
+}
 
 /// What the owner's one capture slot holds. The capture screen's preview and
 /// the automation editor's watch share it, so starting one ends the other
@@ -274,7 +286,7 @@ impl<H: Host> Owner<H> {
         if let Some(recording) = &mut picked.recording {
             let next = recording.after_failure();
             let recording = recording.life_mut();
-            let error = check_spec::sentence(&failure.error);
+            let error = sentence(&failure.error);
             if failure.ended {
                 recording.end(
                     Instant::now(),
@@ -313,7 +325,7 @@ impl<H: Host> Owner<H> {
                 } else {
                     "Take it once the window shows again."
                 };
-                format!("{} {next}", check_spec::sentence(&failure.error))
+                format!("{} {next}", sentence(&failure.error))
             })?
             .clone();
         let picked = self

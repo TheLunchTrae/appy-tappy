@@ -34,28 +34,6 @@ impl<H: Host> Owner<H> {
         Ok(())
     }
 
-    /// Whether the runtime starts when the user signs in to Windows. It
-    /// runs here, like every command, so two changes reach the registry in
-    /// the order the user made them.
-    #[expect(
-        clippy::unused_self,
-        reason = "a command runs on the owner, which keeps the registry's reads and writes in order"
-    )]
-    #[mutants::skip] // Reads the registry, checked by hand on Windows.
-    pub(crate) fn starts_with_windows(&self) -> Result<bool, String> {
-        settings::starts_with_windows()
-    }
-
-    /// Makes the runtime start when the user signs in to Windows, or not.
-    #[expect(
-        clippy::unused_self,
-        reason = "a command runs on the owner, which keeps the registry's reads and writes in order"
-    )]
-    #[mutants::skip] // Writes the registry, checked by hand on Windows.
-    pub(crate) fn set_starts_with_windows(&self, on: bool) -> Result<(), String> {
-        settings::set_starts_with_windows(on)
-    }
-
     /// The folder the runtime writes its trace files to.
     pub(crate) fn trace_folder(&self) -> Result<String, String> {
         self.traces().map(|traces| traces.display().to_string())

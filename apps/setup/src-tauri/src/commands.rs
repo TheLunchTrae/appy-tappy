@@ -39,15 +39,16 @@ use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
-    FixSpec, FoundClick, FoundView, ImportSpec, Live, Message, Owner, Reading, RecordSpec,
+    FixSpec, FoundClick, FoundView, ImportSpec, Live, Message, Owner, RecordSpec,
     ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, SharedView,
     TrialSpec,
 };
+use crate::reading::Reading;
 use crate::recording::RecordingView;
 use crate::recording::character::CharacterView;
 use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
-use crate::settings::SettingsView;
+use crate::settings::{self, SettingsView};
 use crate::window_list::{WindowFit, WindowList, WindowScore};
 
 /// The UI's way to the owner thread.
@@ -719,7 +720,7 @@ pub(crate) async fn live_values(
 #[tauri::command]
 pub(crate) async fn stop_live_values(app: AppHandle) -> Result<(), String> {
     ask(&app, "stop_live_values", |owner| {
-        owner.stop_live_values(None);
+        owner.stop_live_values();
     })
     .await
 }
@@ -951,11 +952,13 @@ pub(crate) async fn open_trace_folder(app: AppHandle) -> Result<(), String> {
     try_ask(&app, "open_trace_folder", |owner| owner.open_trace_folder()).await
 }
 
-/// Whether the runtime starts when the user signs in to Windows.
+/// Whether the runtime starts when the user signs in to Windows. It reads
+/// no state of the owner's, and runs on its thread like every command, so
+/// a read and a change reach the registry in the order the user made them.
 #[tauri::command]
 pub(crate) async fn starts_with_windows(app: AppHandle) -> Result<bool, String> {
-    try_ask(&app, "starts_with_windows", |owner| {
-        owner.starts_with_windows()
+    try_ask(&app, "starts_with_windows", |_owner| {
+        settings::starts_with_windows()
     })
     .await
 }
@@ -963,8 +966,8 @@ pub(crate) async fn starts_with_windows(app: AppHandle) -> Result<bool, String> 
 /// Makes the runtime start when the user signs in to Windows, or not.
 #[tauri::command]
 pub(crate) async fn set_starts_with_windows(app: AppHandle, on: bool) -> Result<(), String> {
-    try_ask(&app, "set_starts_with_windows", move |owner| {
-        owner.set_starts_with_windows(on)
+    try_ask(&app, "set_starts_with_windows", move |_owner| {
+        settings::set_starts_with_windows(on)
     })
     .await
 }

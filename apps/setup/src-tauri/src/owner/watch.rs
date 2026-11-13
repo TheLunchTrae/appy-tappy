@@ -19,16 +19,58 @@ use appytappy_config::signal::SignalName;
 use appytappy_sources::screen::saved::{self, AtSize, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{
-    CaptureSession, Crop, Frame, FrameMeaning, Layout, OutsideWindow, Size,
+    CaptureSession, Crop, Frame, FrameMeaning, Image, Layout, OutsideWindow, Size,
 };
 
+use serde::Serialize;
+
 use crate::debug::workings::{self, ReadingDetails};
+use crate::reading::{Reading, at_size};
 use crate::ticket::{Running, Ticket};
 
 use super::capture::{self, Capture};
 use super::host::Host;
-use super::messages::{Event, Live, Seen, at_size};
+use super::messages::Event;
 use super::{Owner, WATCH_INTERVAL};
+
+/// What a watched value reads on the newest frame, for the automation
+/// editor.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum Live {
+    /// No frame has arrived from the window yet.
+    Waiting,
+    /// The value's reading.
+    Read {
+        /// What it reads.
+        reading: Reading,
+        /// Whether the condition the editor asked about holds for it, or
+        /// `None` when it asked about none.
+        holds: Option<bool>,
+    },
+    /// The window shows but the value cannot be read on it, and why.
+    Problem {
+        /// What is wrong, for the user.
+        message: String,
+    },
+    /// The capture stopped, such as when the window closed, and why. The
+    /// editor watches the value again.
+    Lost {
+        /// What happened, for the user.
+        message: String,
+    },
+}
+
+/// What a frame of the watched value's window showed.
+#[derive(Debug)]
+pub(crate) struct Seen {
+    /// The window's size.
+    pub(crate) window_size: Size,
+    /// The pixels of the region the capture copies, or `None` when the
+    /// region lies outside a window of this size.
+    pub(crate) image: Option<Image>,
+}
 
 /// The automation editor's watch of a saved value.
 #[derive(Debug)]
@@ -392,7 +434,6 @@ mod tests {
     use appytappy_sources::screen::settle::SETTLE;
 
     use crate::debug::workings::WorkingsView;
-    use crate::owner::messages::Reading;
     use crate::owner::test_support::{
         BAR, FakeHost, Harness, STATE, WINDOW, add_example_app, capturing, example_build,
         frame_image, harness_with, scratch_store, spec, with_saved_bar,
@@ -446,6 +487,47 @@ mod tests {
             )
         );
         (watch, started.handler)
+    }
+
+    #[test]
+    fn live_readings_reach_the_ui_tagged_by_kind() {
+        let read = Live::Read {
+            reading: Reading::Flag(true),
+            holds: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&read).expect("serializes"),
+            serde_json::json!({"kind": "read", "reading": {"kind": "flag", "value": true}, "holds": null})
+        );
+        assert_eq!(
+            serde_json::to_value(Reading::Number(87.0)).expect("serializes"),
+            serde_json::json!({"kind": "number", "value": 87.0})
+        );
+        assert_eq!(
+            serde_json::to_value(Reading::from(appytappy_config::signal::Value::State(
+                appytappy_config::signal::StateName::none(),
+            )))
+            .expect("serializes"),
+            serde_json::json!({"kind": "state", "value": "none"})
+        );
+        assert_eq!(
+            serde_json::to_value(Live::Waiting).expect("serializes"),
+            serde_json::json!({"kind": "waiting"})
+        );
+        assert_eq!(
+            serde_json::to_value(Live::Problem {
+                message: "x".to_owned()
+            })
+            .expect("serializes"),
+            serde_json::json!({"kind": "problem", "message": "x"})
+        );
+        assert_eq!(
+            serde_json::to_value(Live::Lost {
+                message: "y".to_owned()
+            })
+            .expect("serializes"),
+            serde_json::json!({"kind": "lost", "message": "y"})
+        );
     }
 
     #[test]

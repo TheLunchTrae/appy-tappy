@@ -28,7 +28,7 @@ mod error;
 pub(crate) use characters::{
     CharactersSpec, Label, MAX_EXPECTED_CHARACTERS, SavedReference, Session, sample_problem_of,
 };
-pub(crate) use error::{Cut, SpecError, sentence};
+pub(crate) use error::{Cut, SpecError};
 
 /// A rectangle of the window, in pixels from its top-left corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]

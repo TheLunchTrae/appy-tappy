@@ -13,9 +13,10 @@ use appytappy_sources::screen::place::Target;
 use appytappy_sources::screen::{Image, Region};
 use serde::{Deserialize, Serialize};
 
-use crate::check_spec::{RegionSpec, sentence};
+use crate::check_spec::RegionSpec;
 use crate::pixels;
 use crate::selection::{self, SelectionSpec};
+use crate::words::sentence;
 
 use super::Owner;
 use super::host::{ClickNow, ClickedWindow, Host};

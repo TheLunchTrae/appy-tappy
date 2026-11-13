@@ -21,8 +21,9 @@ use crate::stores::{self, Stores};
 use crate::ticket::Ticket;
 
 use super::host::{ClickNow, ClickedWindow, Host};
-use super::messages::{Event, Message, RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
+use super::messages::{Event, Message};
 use super::{Owner, PREVIEW_INTERVAL};
+use super::{RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
 
 /// A host with one window whose captures the test drives by hand: each
 /// started capture's handler goes to the test over a channel, and so
@@ -568,3 +569,17 @@ pub(super) const WINDOW: Size = Size {
     width: 4,
     height: 2,
 };
+
+/// Saves `Other App`, on the same window as `Example App`, as the
+/// application `example-2`, with the bar `Progress bar` of its own.
+pub(super) fn add_other_bar(harness: &mut Harness) {
+    let mut other = example_app(SizeChangesDef::Often);
+    "Other App".clone_into(&mut other.name);
+    assert_eq!(
+        harness.ask(|owner| owner.save_app(None, other)),
+        Ok("example-2".to_owned())
+    );
+    harness
+        .ask(|owner| owner.save(&spec("example-2", "Progress bar", BAR)))
+        .expect("saves");
+}
