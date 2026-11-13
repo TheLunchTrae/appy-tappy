@@ -787,7 +787,7 @@ mod tests {
             ("icon_visible.png".to_owned(), vec![1]),
             ("../x.png".to_owned(), Vec::new()),
         ];
-        // The first picture is written before the second is refused.
+        // Every name is checked before any picture is written.
         let failed = store.create(&good, &pictures).expect_err("refused");
         assert!(failed.to_string().contains("not a valid picture name"));
         assert_eq!(names_in(&root), [""; 0], "nothing of it stays");

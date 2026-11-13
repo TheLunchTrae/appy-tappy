@@ -1,5 +1,7 @@
 //! A reading's ink as the text reader takes it.
 
+use std::ops::Range;
+
 use appytappy_sources::screen::digits::Ink;
 
 /// One line of text for the text reader: gray pixels, one byte each, row by
@@ -18,12 +20,10 @@ impl Line {
     /// `ink` as the text reader takes it: black ink on white, cut to the
     /// line of text with a margin of white around it, as text on a page
     /// has. Black on white reads better than the application's own colors,
-    /// which can be any pair. The line is the rows the number reader takes,
-    /// [`Ink::line`], so a stray pixel above or below the text does not
-    /// stretch it. `None` without ink.
+    /// which can be any pair. The line is [`rows`]. `None` without ink.
     pub(crate) fn of(ink: &Ink) -> Option<Self> {
         let size = ink.size();
-        let rows = ink.line(0..size.width, 0..size.height)?;
+        let rows = rows(ink)?;
         let inked = |x: &u32| rows.clone().any(|y| ink.at(*x, y));
         let left = (0..size.width).find(inked)?;
         let right = (0..size.width).rfind(inked)?.saturating_add(1);
@@ -52,6 +52,32 @@ impl Line {
             pixels,
         })
     }
+}
+
+/// The rows of the line of text in `ink`: the rows the number reader takes,
+/// [`Ink::line`], with the inked rows above and below them that no more than
+/// a quarter of their height in blank rows, and at least one, sets apart.
+/// Those hold the dots of an i or a j and the accents, which the number
+/// reader has no use for and the text reader needs to tell the letters
+/// apart. A dot sits about a tenth to a fifth of the letters' height above
+/// them, and the next line of text, or a stray pixel, usually further.
+/// `None` without ink.
+fn rows(ink: &Ink) -> Option<Range<u32>> {
+    let size = ink.size();
+    let letters = ink.line(0..size.width, 0..size.height)?;
+    let gap = (letters.end.saturating_sub(letters.start) / 4).max(1);
+    let inked = |&y: &u32| (0..size.width).any(|x| ink.at(x, y));
+    let mut start = letters.start;
+    while let Some(above) = (start.saturating_sub(gap.saturating_add(1))..start).rfind(inked) {
+        start = above;
+    }
+    let mut end = letters.end;
+    while let Some(below) =
+        (end..end.saturating_add(gap).saturating_add(1).min(size.height)).find(inked)
+    {
+        end = below.saturating_add(1);
+    }
+    Some(start..end)
 }
 
 #[cfg(test)]
@@ -103,6 +129,26 @@ mod tests {
             .collect();
         assert_eq!(black, [14, 15, 21], "the stray pixel is no part of it");
         assert!(line.pixels.iter().all(|&pixel| pixel == 0 || pixel == 255));
+    }
+
+    #[test]
+    fn the_line_keeps_a_dot_and_a_mark_one_blank_row_from_the_letters() {
+        // A stem on rows 2 to 4, an i's dot on row 0 and a mark under it on
+        // row 6, each one blank row apart, as in a lowercase line with no
+        // ascenders.
+        let line = line(|x, y| x == 1 && y != 1 && y != 5).expect("it shows ink");
+        assert_eq!(
+            (line.width, line.height),
+            (7, 13),
+            "seven rows and a margin of three"
+        );
+        let black: Vec<usize> = line
+            .pixels
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &pixel)| (pixel == 0).then_some(index))
+            .collect();
+        assert_eq!(black, [24, 38, 45, 52, 66], "the dot and the mark show");
     }
 
     #[test]
