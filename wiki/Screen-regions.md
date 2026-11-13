@@ -142,8 +142,9 @@ that flickers between two stages is two.
 [Troubleshooting](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
 says what the user does about each.
 
-On the fixture screenshots, each check takes 2 to 10 microseconds per read on
-one CPU core, and a state check about that much for each of its states;
+On the fixture screenshots, a check takes from under a microsecond for an
+image to about 13 microseconds for a number per read on one CPU core, and a
+state check about an image's cost for each of its states;
 `mise run rust:bench` prints the current numbers.
 
 Windows has its own OCR engine, and `ocrs` is a pure-Rust neural OCR crate.
