@@ -135,19 +135,21 @@ cargo-mutants runs for each mutant, which is quick when `target/` is already
 current. The standards gate starts the lane only after the other Cargo tasks
 finish, so the copy never catches a build half written. Both lanes also run
 every workspace package's tests against each mutant (`--test-workspace=true`),
-because a mutant in one crate can be caught by another crate's tests. A
-mutant's run can take several times the baseline's, since `cargo test` stops
-only at the first failing test binary, so `.cargo/mutants.toml` sets a
-minimum test timeout of 120 seconds. Whether
+because a mutant in one crate can be caught by another crate's tests. The
+baseline times only the mutated packages' tests, so a test timeout derived
+from it is too short for a mutant's whole-workspace run; `.cargo/mutants.toml`
+sets a floor under it. Whether
 testing only the mutated package catches the same mutants is still to be
 measured.
 
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. Every
-report needs a baseline that built and passed in the same build directory. A
-full report in which every mutant is unviable fails; a diff report may hold
-only unviable mutants, as a shard of a small change can, since its baseline
-already shows the build works. A surviving mutant is a review finding.
+report needs exactly one successful baseline. A full report in which every
+mutant is unviable fails. A diff report may hold only unviable mutants, as a
+shard of a small change can, but only when each mutant's log shows a compiler
+error in the mutated file: a broken build directory, or a build killed for
+memory or disk, also leaves every mutant unviable. A surviving mutant is a
+review finding.
 
 Both lanes hold `target/standards-mutants.lock` through the run and its
 verification, so a second run fails instead of replacing the report. If a
@@ -159,6 +161,6 @@ process-group signals, so mutation runs on Linux only.
 
 `CODEOWNERS` assigns every path to the owner, because source files can carry
 mutation classifications and lint expectations. The settings that make that a
-gate live on GitHub: require the `quality`, `windows` and `mutants` checks
-and Code Owner review, dismiss stale approvals on new commits, and disallow
-bypassing protection.
+gate live on GitHub: require the `quality` and `windows` checks, the
+`mutants 0/4` to `mutants 3/4` checks, and Code Owner review, dismiss stale
+approvals on new commits, and disallow bypassing protection.
