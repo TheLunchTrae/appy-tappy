@@ -231,7 +231,7 @@ pub(crate) async fn set_check(app: AppHandle, trial: TrialSpec) -> Result<(), St
 #[tauri::command]
 pub(crate) async fn set_characters(app: AppHandle, trial: ReferenceTrial) -> Result<(), String> {
     try_ask(&app, "set_characters", move |owner| {
-        owner.set_characters(&trial)
+        owner.try_characters(&trial)
     })
     .await
 }

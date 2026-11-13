@@ -25,15 +25,22 @@ const NOTHING_READ: LiveRead = { reading: null, problem: null };
 
 /**
  * What the capture screen tries on the live window, or what it still needs. Trying a saved value's edit answers
- * what saving it would do; trying a check that is being set up answers null.
+ * what saving it would do; trying a check that is being set up answers null. Its `key` names what is tried by its
+ * content, so two trials of the same spec are one trial however often the draft they are built from changes.
  */
-export type Trial = Built<() => Promise<EditPreview | null>>;
+export type Trial =
+  | { readonly ok: true; readonly key: string; readonly attempt: () => Promise<EditPreview | null> }
+  | { readonly ok: false; readonly next: string };
+
+/** How a trial is tried: the characters of a reference, a check being set up, or a saved value's edit. */
+type TrialKind = 'characters' | 'check' | 'edit';
 
 /**
- * The trial of `built` on the live window, or what `built` still needs. `attempt` tries it: `set`, which sets a
- * check and answers nothing, or a try that answers what saving would do.
+ * The trial of `built` on the live window as a `kind` of trial, or what `built` still needs. `attempt` tries it:
+ * `set`, which sets a check and answers nothing, or a try that answers what saving would do.
  */
 export function trialOf<Spec>(
+  kind: TrialKind,
   built: Built<Spec>,
   attempt: { readonly set: (spec: Spec) => Promise<void> } | ((spec: Spec) => Promise<EditPreview>),
 ): Trial {
@@ -41,12 +48,14 @@ export function trialOf<Spec>(
     return built;
   }
   const { spec } = built;
+  const key = `${kind}:${JSON.stringify(spec)}`;
   if (typeof attempt === 'function') {
-    return { ok: true, spec: async () => attempt(spec) };
+    return { ok: true, key, attempt: async () => attempt(spec) };
   }
   return {
     ok: true,
-    spec: async () => {
+    key,
+    attempt: async () => {
       await attempt.set(spec);
       return null;
     },
@@ -54,9 +63,11 @@ export function trialOf<Spec>(
 }
 
 /**
- * Tries `trial` on the live window once it has not changed for a moment, and reads the window with it while it is
- * set. It is tried again when `again` changes, which says that the same trial may answer otherwise now, as an edit
- * does once the window has another size.
+ * Tries `trial` on the live window once what it tries has not changed for a moment, and reads the window with it
+ * while it is set. A trial with the same key as the one before is the same trial: an edit of the draft that leaves
+ * the spec as it was, such as an empty box added or moved, tries nothing again. It is tried again when `again`
+ * changes, which says that the same trial may answer otherwise now, as an edit does once the window has another
+ * size.
  */
 export function useLiveCheck(trial: Trial, again: string | null): LiveCheck {
   const [state, setState] = useState<CheckState>({ kind: 'idle' });
@@ -66,7 +77,13 @@ export function useLiveCheck(trial: Trial, again: string | null): LiveCheck {
   // `afterRead`. A trial tried again takes a new number too.
   const tried = useRef(0);
   const inForce = useRef<InForce>(null);
+  // The effect below runs when the trial's key changes, not for each new trial with the same key, so it reads the
+  // trial through a ref.
+  const newest = useRef(trial);
+  newest.current = trial;
+  const key = trial.ok ? trial.key : null;
   useEffect(() => {
+    const trial = newest.current;
     tried.current += 1;
     inForce.current = null;
     const number = tried.current;
@@ -79,7 +96,7 @@ export function useLiveCheck(trial: Trial, again: string | null): LiveCheck {
     setState({ kind: 'pending' });
     setRead((shown) => ({ ...shown, problem: null }));
     return ask(
-      trial.spec,
+      trial.attempt,
       (answer) => {
         inForce.current = number;
         setPreview(answer);
@@ -91,7 +108,7 @@ export function useLiveCheck(trial: Trial, again: string | null): LiveCheck {
       },
       CHECK_DELAY_MS,
     );
-  }, [trial, again]);
+  }, [key, again]);
 
   const readNow = useCallback(async (): Promise<void> => {
     const asked = inForce.current;

@@ -294,10 +294,11 @@ impl<H: Host> Owner<H> {
     /// it, or `None` when it can; an error when `spec`'s own labels cannot
     /// be learned.
     pub(crate) fn found_problems(
-        &self,
+        &mut self,
         spec: &CharactersSpec,
         found: &[Label],
     ) -> Result<Vec<Option<String>>, String> {
+        self.keep_reference(spec.reference.as_ref());
         self.with_session(|session| spec.label_problems(session, found))
             .map_err(|error| error.to_string())
     }

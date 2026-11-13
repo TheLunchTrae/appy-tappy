@@ -7,7 +7,7 @@ use appytappy_config::app_file::{OriginDef, new_reference_id, reference_id};
 use crate::check_spec::{ReferenceRef, SavedReference, Session};
 
 use super::host::Host;
-use super::messages::{ReferenceSaveSpec, SavedReferenceId};
+use super::messages::{ReferenceSaveSpec, ReferenceTrial, SavedReferenceId};
 use super::{Changed, Edit, Owner};
 
 impl<H: Host> Owner<H> {
@@ -23,8 +23,19 @@ impl<H: Host> Owner<H> {
     }
 
     /// The saved reference `reference` with those of its samples' pictures
-    /// that can be read. Learning it says which one is missing.
+    /// that can be read: the one the owner keeps, or else as its
+    /// application's folder has it. Learning it says which picture is
+    /// missing.
     fn saved_reference(&self, reference: &ReferenceRef) -> Result<SavedReference, String> {
+        match &self.kept_reference {
+            Some((kept, saved)) if kept == reference => Ok(saved.clone()),
+            _ => self.read_reference(reference),
+        }
+    }
+
+    /// Reads the saved reference `reference` from its application's file
+    /// and its samples' pictures from the folder.
+    fn read_reference(&self, reference: &ReferenceRef) -> Result<SavedReference, String> {
         let app = self.stores()?.app(&reference.app)?;
         let saved = app
             .file
@@ -40,6 +51,35 @@ impl<H: Host> Owner<H> {
             reference: saved,
             pictures,
         })
+    }
+
+    /// Keeps the saved reference `reference` as read now, so the asks about
+    /// the characters that add to it, a few for each edit in its editor,
+    /// read its application's file and its pictures once. It stays until
+    /// an application is written, which [`Owner::write_app`] says, or
+    /// another reference is kept. One that cannot be read whole, with every
+    /// sample's picture, is not kept, so each ask reads it again and says
+    /// what is wrong once that changed. `None`, a new reference, keeps what
+    /// is kept.
+    pub(super) fn keep_reference(&mut self, reference: Option<&ReferenceRef>) {
+        let Some(reference) = reference else {
+            return;
+        };
+        if matches!(&self.kept_reference, Some((kept, _)) if kept == reference) {
+            return;
+        }
+        self.kept_reference = self
+            .read_reference(reference)
+            .ok()
+            .filter(|saved| saved.pictures.len() == saved.reference.samples.len())
+            .map(|saved| (reference.clone(), saved));
+    }
+
+    /// Tries `trial` on the live frame as [`Owner::set_characters`] does,
+    /// with the saved reference it adds to kept for the asks that follow.
+    pub(crate) fn try_characters(&mut self, trial: &ReferenceTrial) -> Result<(), String> {
+        self.keep_reference(trial.characters.reference.as_ref());
+        self.set_characters(trial)
     }
 
     /// Saves the reference `spec` teaches to its application, and says
@@ -157,11 +197,12 @@ pub(super) fn and_list(names: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
+    use appytappy_config::app_file::{AntiCheatDef, CheckDef, FixDef, SizeDef};
 
     use crate::owner::messages::SavedValue;
     use crate::owner::test_support::{
-        FakeHost, add_example_app, frame_image, harness_with, scratch_store, spec, trial,
+        FakeHost, Harness, add_example_app, frame_image, harness_with, scratch_store, spec,
+        teaching, trial,
     };
 
     use super::*;
@@ -444,6 +485,67 @@ mod tests {
             Err("A reference needs at most 128 characters. Remove some.".to_owned()),
         );
         assert_eq!(save(saved, ""), Ok((None, 3)), "none chosen");
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// What the three asks of one edit in the reference's editor answer
+    /// for characters that add to the saved reference `digits`.
+    fn edit(harness: &mut Harness) -> [Result<(), String>; 3] {
+        let adding = reference("example", "Digits", Some(("example", "digits"))).characters;
+        let trial = teaching(adding.clone());
+        [
+            harness.ask(|owner| owner.try_characters(&trial)),
+            harness
+                .ask(|owner| owner.review_problems(&adding))
+                .map(drop),
+            harness
+                .ask(|owner| owner.found_problems(&adding, &[]))
+                .map(drop),
+        ]
+    }
+
+    #[test]
+    fn a_saved_reference_is_read_once_until_an_application_is_written() {
+        let (stores, root) = scratch_store("references-kept");
+        let picture = stores.apps.folder("example").join("ref-digits-1.png");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let save = |harness: &mut Harness, editing| {
+            harness
+                .ask(|owner| owner.save_reference(&reference("example", "Digits", editing)))
+                .map(drop)
+        };
+        save(&mut harness, None).expect("saves");
+        let png = std::fs::read(&picture).expect("the saved picture");
+        // Each ask says the picture is missing, in its own words.
+        let missing = |answers: [Result<(), String>; 3]| {
+            answers.iter().all(|answer| {
+                answer
+                    .as_ref()
+                    .is_err_and(|error| error.contains("is missing its picture ref-digits-1.png"))
+            })
+        };
+
+        // A reference that cannot be read whole is not kept: each ask reads
+        // it again, so it is learned once its picture is back.
+        std::fs::remove_file(&picture).expect("remove the picture");
+        assert!(missing(edit(&mut harness)));
+        std::fs::write(&picture, &png).expect("put the picture back");
+        assert_eq!(edit(&mut harness), [Ok(()), Ok(()), Ok(())]);
+
+        // Kept, it is not read again: the asks answer without its picture.
+        std::fs::remove_file(&picture).expect("remove the picture");
+        assert_eq!(edit(&mut harness), [Ok(()), Ok(()), Ok(())]);
+
+        // Writing an application forgets it, so the next ask reads what
+        // the folder has now.
+        harness
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .expect("writes the application");
+        assert!(missing(edit(&mut harness)));
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

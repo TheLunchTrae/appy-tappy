@@ -301,9 +301,10 @@ impl<H: Host> Owner<H> {
     /// it reads it right; an error when the labeled screenshots cannot be
     /// learned.
     pub(crate) fn review_problems(
-        &self,
+        &mut self,
         spec: &CharactersSpec,
     ) -> Result<Vec<Option<String>>, String> {
+        self.keep_reference(spec.reference.as_ref());
         self.with_session(|session| spec.recorded_problems(session))
             .map_err(|error| error.to_string())
     }
