@@ -2716,7 +2716,8 @@ written the application's file, and removing an application tells them even
 when the removal fails partway. Each save of an application's file that
 starts writing, whether it works or fails, ends with `AppStore::save`
 removing the pictures in the application's folder that the file on disk does
-not name, of those AppyTappy named. So a save that fails after it wrote some
+not name, of those AppyTappy named. When a failed save leaves no file the
+store can read, it removes nothing. So a save that fails after it wrote some
 pictures takes them back, and pictures that a save left when the program
 ended in the middle of it go with the application's next save. A save that
 the store refuses before it writes anything, such as one with a bad picture
