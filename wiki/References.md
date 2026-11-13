@@ -422,9 +422,16 @@ It has limits, and review is where you deal with them:
   [chose what the reference needs](#choose-what-it-needs), a reading whose
   text shows none of those characters starts with **Keep** cleared and says
   so; set its **Keep** if you want it after all. A reading that mixes both,
-  such as `Lv 5`, starts kept, since its `5` may be the only one.
-- **It looks twice a second.** Looking over a whole window takes longer than
-  one place, so text that shows for less than half a second can be missed.
+  such as `Lv 5`, starts kept, since its `5` may be the only one. So does
+  one that may be a number misread, such as `SOS` for `505`, when every
+  character of it is a letter often read in place of a digit.
+- **It takes the text nearest the place first.** Each time it looks, it
+  takes up to 32 pieces of text, starting with the ones nearest the place
+  the reference reads. A recording is full after 256 different shapes; if a
+  window with much other text fills it, record **This place** instead.
+- **It looks twice a second at most.** Looking over a whole window takes
+  longer than one place, and on a large window one look can take longer
+  than half a second, so text that shows only briefly can be missed.
   **This place** looks about 30 times a second.
 - **It finds one size.** Text much larger or smaller than the example's is
   not collected. What the reference learns still reads at other

@@ -14,7 +14,7 @@ use tokio::sync::oneshot;
 
 use crate::check_spec::{CharactersSpec, CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{FrameRead, Purpose};
-use crate::recording::{Scope, Text};
+use crate::recording::{Scope, Text, look};
 use crate::window_list::{WindowFit, WindowList};
 
 use super::{Desktop, Host, Owner};
@@ -417,6 +417,17 @@ pub(crate) enum Message<H: Host = Desktop> {
         index: usize,
         /// What it read.
         text: Text,
+    },
+    /// The frame that arrived at `at` was looked over for recording
+    /// `recording`.
+    Looked {
+        /// Which recording it belongs to; a look for an earlier one is
+        /// dropped.
+        recording: u64,
+        /// When the frame it looked over arrived.
+        at: Instant,
+        /// Each run of text it found, or `None` when the look failed.
+        seen: Option<Vec<look::Seen>>,
     },
     /// The text reader read find `index` of search `search`.
     FoundText {

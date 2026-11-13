@@ -11,7 +11,9 @@ use appytappy_sources::system::Rgb;
 use crate::check_spec::{self, CharactersSpec, RegionSpec};
 use crate::owner::messages::RecordSpec;
 use crate::pixels;
-use crate::recording::{Recorder, Recording, RecordingView, Scope, Text, find, ocr};
+use crate::recording::{
+    NewReading, Recorder, Recording, RecordingView, Scope, Text, find, look, ocr,
+};
 
 use super::Owner;
 use super::host::Host;
@@ -30,7 +32,38 @@ impl<H: Host> Owner<H> {
             },
             None => return,
         };
-        for new in recording.offer(frame, received) {
+        // A recording of the whole window keeps nothing from the frame
+        // here: it sends the frame to be looked over when a look is due.
+        if let Some(job) = recording.look(frame, received)
+            && self.looks.send(job).is_err()
+        {
+            recording.stop_looking(Instant::now());
+        }
+        let new = recording.offer(frame, received);
+        self.read_new(new);
+    }
+
+    /// Takes the answer to a look for recording `recording`, of the frame
+    /// that arrived at `at`: sends each new reading it `seen` to the text
+    /// reader. An answer for a recording that was discarded or replaced is
+    /// dropped.
+    pub(super) fn looked(&mut self, recording: u64, at: Instant, seen: Option<Vec<look::Seen>>) {
+        let Some(current) = self
+            .readings_mut()
+            .filter(|current| current.id == recording)
+        else {
+            return;
+        };
+        let new = current.looked(at, seen, Instant::now());
+        self.read_new(new);
+    }
+
+    /// Sends each of the recording's `new` readings to the text reader.
+    fn read_new(&mut self, new: impl IntoIterator<Item = NewReading>) {
+        let Some(Recorder::Readings(recording)) = &mut self.recording else {
+            return;
+        };
+        for new in new {
             let job = ocr::Job {
                 source: ocr::Source::Recording(recording.id),
                 index: new.index,
@@ -106,7 +139,7 @@ impl<H: Host> Owner<H> {
             Some(Recorder::Readings(recording))
                 if more && recording.records(region, settings, window_size, spec.scope) =>
             {
-                recording.life.resume(now);
+                recording.resume(now);
             },
             Some(Recorder::Readings(recording)) if more => {
                 return Err(format!(
@@ -165,7 +198,7 @@ impl<H: Host> Owner<H> {
     /// recorded.
     pub(crate) fn stop_recording(&mut self) {
         if let Some(recording) = &mut self.recording {
-            recording.life_mut().stop(Instant::now());
+            recording.stop(Instant::now());
         }
     }
 
@@ -489,6 +522,28 @@ mod tests {
             .ask(start_window_recording(0, false))
             .expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(3)));
+        // More frames arrive while the look is out; the owner holds none.
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        assert_eq!(harness.jobs.try_iter().count(), 0, "nothing is read yet");
+        let looks: Vec<look::Job> = harness.looks.try_iter().collect();
+        assert_eq!(looks.len(), 1, "one frame goes to be looked over");
+        let job = &looks[0];
+        // A look for a recording that was discarded or replaced is dropped.
+        let stale = Message::Looked {
+            recording: job.recording.wrapping_sub(1),
+            at: job.at,
+            seen: Some(look::look(job)),
+        };
+        assert!(harness.owner.handle(stale).is_continue());
+        assert_eq!(harness.recording().expect("a recording").spots, []);
+        assert_eq!(harness.jobs.try_iter().count(), 0);
+        let answer = Message::Looked {
+            recording: job.recording,
+            at: job.at,
+            seen: Some(look::look(job)),
+        };
+        assert!(harness.owner.handle(answer).is_continue());
         assert_eq!(harness.jobs.try_iter().count(), 1, "read as text");
         let view = harness.recording().expect("a recording");
         assert_eq!(view.settings.scope, Scope::Window);
