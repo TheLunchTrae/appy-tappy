@@ -23,6 +23,7 @@ import {
   unrelated,
   untaughtNote,
   withCrop,
+  CROP_TRIES,
   cropAskFailed,
   cropsToAsk,
   NO_CROP_ASKS,
@@ -497,14 +498,26 @@ test("a late picture of a replaced recording leaves the newest recording's pictu
   expect(withCrop(first, 3, 3, 0, picture(5))).toEqual({ id: 3, pictures: new Map([[0, picture(5)]]) });
 });
 
-test('a reading whose picture ask failed is asked for again, and each other reading once', () => {
+test('a reading whose picture ask failed is asked for again, up to its tries, and each other reading once', () => {
   const first = cropsToAsk(NO_CROP_ASKS, 2, 3);
   expect(first.indexes).toEqual([0, 1, 2]);
   expect(cropsToAsk(first.asks, 2, 4).indexes).toEqual([3]);
-  // The ask for reading 1 failed; a failure reported for another recording changes nothing.
-  expect(cropAskFailed(first.asks, 1, 1)).toBe(first.asks);
-  const failed = cropAskFailed(first.asks, 2, 1);
-  expect(cropsToAsk(failed, 2, 3).indexes).toEqual([1]);
-  // Another recording's readings are all asked for.
-  expect(cropsToAsk(failed, 3, 2).indexes).toEqual([0, 1]);
+  // A failure reported for another recording is stale and changes nothing.
+  expect(cropAskFailed(first.asks, 1, 1)).toEqual({ asks: first.asks, retry: false });
+  // Reading 1's ask fails each time: it is asked for again until it was asked for CROP_TRIES times.
+  let asks = first.asks;
+  for (let tries = 1; tries < CROP_TRIES; tries += 1) {
+    const failed = cropAskFailed(asks, 2, 1);
+    expect(failed.retry).toBe(true);
+    const again = cropsToAsk(failed.asks, 2, 3);
+    expect(again.indexes).toEqual([1]);
+    asks = again.asks;
+  }
+  const last = cropAskFailed(asks, 2, 1);
+  expect(last.retry).toBe(false);
+  expect(cropsToAsk(last.asks, 2, 3).indexes).toEqual([]);
+  // Another recording's readings are all asked for, with tries of their own.
+  const other = cropsToAsk(last.asks, 3, 2);
+  expect(other.indexes).toEqual([0, 1]);
+  expect(cropAskFailed(other.asks, 3, 1).retry).toBe(true);
 });
