@@ -199,7 +199,7 @@ fn index(ink: &Ink, x: u32, y: u32) -> Option<usize> {
 /// The height of the line of text in `region`, which is the reader's line
 /// of a region ([`Ink::line`]); `None` without ink.
 fn line_height(ink: &Ink, region: Region) -> Option<u32> {
-    let rows = ink.line(&(region.x()..region.right()), region.y()..region.bottom())?;
+    let rows = ink.line(region.x()..region.right(), region.y()..region.bottom())?;
     Some(rows.end.saturating_sub(rows.start))
 }
 

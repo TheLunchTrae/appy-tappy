@@ -21,6 +21,7 @@
 //! See `wiki/Architecture.md` for this crate's boundaries.
 
 pub mod automation;
+// Only the Windows adapter calls it, and tests run it on every platform.
 #[cfg(any(windows, test))]
 mod build;
 pub mod schedule;

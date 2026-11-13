@@ -341,16 +341,18 @@ all.
 The value takes its number from the characters it reads alone. A character
 it does not read, and its reference knows, is text to it: it ends the number
 or comes before it, and is never part of it. So **Digits** reads `87%` as 87
-and `Lv.5` as 5. It also reads `87.5%` as 87 and `1,234` as 1, since the `.`
-and the `,` end the number: add the `.` to read 87.5, and the `,` to read 1234.
+and `Lv.5` as 5.
 
-A digit is the exception. The value reads nothing while its region shows a
-digit it does not read before the number, inside it, or right after it, and
-says that it does not read that digit, since the number beside it would be
-another number without it. A shape the reference has not learned still fails
-the read there, whatever the value reads: text needs no teaching only after
-a character the reference knows has ended the number, such as the `HP` in
-`37% HP`.
+The value reads nothing while a character it leaves out is a part of the
+number its region shows, and says that it leaves out a character its number
+holds, since the number would be another number without it. So **Digits**
+reads none of `-5`, `.5`, `87.5%`, and `1,234`: add the `-`, the `.`, or the
+`,`. With **Whole number only** on, the number ends at its `.` anyway, so
+**Digits** reads `87.5%` as 87. A digit the value leaves out fails the read
+the same way. A shape the reference has not learned still fails the read
+before the number ends, whatever the value reads: text needs no teaching
+only after a character the reference knows has ended the number, such as the
+`HP` in `37% HP`.
 
 A [fix](#fix-a-value-at-one-size) that reads with its own reference reads the
 same characters of that reference.
