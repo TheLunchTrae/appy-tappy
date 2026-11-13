@@ -8,7 +8,7 @@
 //! and [`Input`] only list things and act on one of them; every choice is
 //! made here, where it is tested with fakes on every platform. The Windows
 //! adapter in `win` implements both; other platforms get [`Unsupported`]
-//! input. `wiki/Actions.md` explains the v1 set.
+//! input and [`NoControls`]. `wiki/Actions.md` explains the v1 set.
 //!
 //! See `wiki/Architecture.md` for this crate's boundaries.
 
@@ -24,7 +24,7 @@ pub mod win;
 
 pub use backoff::Backoff;
 pub use click::{MouseButton, MouseEvent, MouseMessage, PlacedClick, Press, click, pack};
-pub use controls::{Controls, MediaSession, Volume};
+pub use controls::{Controls, Executables, MediaSession, NoControls, Volume};
 pub use error::ActionError;
 pub use input::{Input, Unsupported};
 pub use journal::{Actions, MEDIA_RETRY, Watched};
@@ -37,3 +37,11 @@ pub type HostInput = win::WindowsInput;
 /// The [`Input`] of the platform this build targets.
 #[cfg(not(windows))]
 pub type HostInput = Unsupported;
+
+/// The [`Controls`] of the platform this build targets.
+#[cfg(windows)]
+pub type HostControls = win::WindowsControls;
+
+/// The [`Controls`] of the platform this build targets.
+#[cfg(not(windows))]
+pub type HostControls = NoControls;

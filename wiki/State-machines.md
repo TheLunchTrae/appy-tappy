@@ -362,7 +362,7 @@ The thread can also panic in any state, which ends it.
   When the process owns none of the windows that fit best, such as while
   another process's window fits better, it waits, and detection follows the
   other process or keeps this one for its grace. Before the capture starts,
-  `framed_at` asks `System::content_size` for the size the window's frames
+  `framed_at` asks `System::content_bounds` for the size the window's frames
   will have, the size of its
   [content](Screen-regions.md#window-content), and places the values there
   when some value reads there, so a window that is not at the first value's
@@ -410,7 +410,7 @@ The thread can also panic in any state, which ends it.
   the 2 second check ended the capture, it then sends `Unseen`, so no
   reading from the old capture can follow it.
 - **Backoff.** After `Lost`, `Failing`, or `Panicked`, the thread waits
-  before it looks again: `FIND_AGAIN` at first, doubling up to
+  before it looks again: `RESTART_WAIT_MIN` at first, doubling up to
   `RESTART_WAIT_MAX` while each new capture ends before it reads a frame. It
   logs the reason once until the reason changes. A restarted capture that
   reads a frame sends `Recovered`, which resets both. A frame whose reading
@@ -432,7 +432,8 @@ The thread can also panic in any state, which ends it.
 
 ### Frame handler
 
-`FrameReader::handle` runs once per frame and acts on what the frame means,
+`FrameReader::handle`, in `apps/runtime/src/workers/reader/frames.rs`, runs once
+per frame and acts on what the frame means,
 which `Placed::meaning` decides for every reader of saved values, as
 [Window sizes](Screen-regions.md#window-sizes) describes: the window at the
 capture's size, at another size, or at the capture's size with a region
@@ -470,7 +471,7 @@ stateDiagram-v2
   the frame pool cannot follow the window to a new size, with a
   `NotConnected` error. A panic in the capture's frame loop outside `handle`
   ends it the same way: `run_capture` (`crates/sources/src/screen/capture.rs`)
-  runs the Windows capture's frame loop, catches the panic, and hands the
+  runs the capture's [frame loop](#capture-frame-loop), catches the panic, and hands the
   handler a `NotConnected` error with the panic's message, so the reader
   logs it, sends `Unseen`, and captures again after the backoff. Unwound,
   the panic would end the capture's thread, and the reader would hear of it
@@ -519,6 +520,60 @@ stateDiagram-v2
 - Each value's problems leave the window size out and are carried into the
   capture started for a new size, so the log says why once for each reason,
   not once for each size or each restart.
+
+### Capture frame loop
+
+`run_frames` in `crates/sources/src/screen/frames.rs` runs on each capture's
+own thread, for the runtime's readers and the setup app's captures alike. The
+Windows capture (`crates/sources/src/win/capture.rs`) is its `FrameSource`: it
+waits for the thread's next event and makes each system call the loop asks
+for. The loop's state is the frame it holds, when the handler's last wait
+ends (`next_read`), when it last checked the window and the device
+(`checked`), the size the system makes frames at (`frames`), and the interval
+it last asked the system for (`asked`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Empty
+    Empty --> Holding: a frame arrives during the wait
+    Holding --> Holding: a newer frame arrives, the older is given back
+    Empty --> Empty: a frame arrives after the wait and is read
+    Holding --> Empty: the wait ends, the frame is read
+    Empty --> Ended: the check finds the window closed or the device lost
+    Holding --> Ended: the check finds the window closed or the device lost
+    Empty --> Ended: a read cannot follow the window's size, or the device is lost
+    Empty --> [*]: Stop
+    Holding --> [*]: Stop, the frame is given back
+    Ended --> [*]
+```
+
+- **Empty.** The loop holds no frame and waits for the next event or the next
+  check, whichever comes first.
+- **Holding.** The loop holds the newest frame until the handler's wait ends,
+  and gives every older one back to the system unread. It waits until the read
+  or the next check, whichever comes first.
+- **Reading.** The loop reads a held frame once the wait has ended. A frame of
+  another size than the system's frames is dropped: the loop has the system
+  make its frames at that size and reads the next frame at once. Otherwise it
+  finds the [window's content](Screen-regions.md#window-content) in the
+  frame, has the crop's regions copied, hands the copy to the handler, and
+  takes the handler's wait. A wait of 64 ms or more also sets how often the
+  system is asked for frames, as [Capture](Screen-regions.md#capture)
+  describes. A handler that returns `NO_MORE_FRAMES` is handed no more,
+  as a one-frame grab's does.
+- **A frame that fails.** A region that lies outside the window's content, or
+  a copy the system fails, reaches the handler as that frame's error, and the
+  loop goes on with the wait the handler returns. The
+  [frame handler](#frame-handler) counts such frames.
+- **Ended.** Every `HEALTH_CHECK`, 2 seconds, whatever arrives meanwhile, the
+  loop asks whether the window is gone and whether the graphics device is
+  lost. Either ends the capture, and so does a read that fails while the
+  device is lost and a system that cannot make frames at the window's new
+  size. The handler receives one `NotConnected` error that says why, and the
+  loop returns. The capture's owner recovers: the runtime's
+  [reader thread](#reader-thread) captures again after its backoff.
+- **Stop.** Closing or dropping the session wakes the loop, which gives back
+  the frame it holds and returns.
 
 ### Read schedule
 
@@ -572,7 +627,12 @@ stateDiagram-v2
 
 Before a digit, a character that does not fit starts the number over. After a
 digit, it ends the number, and the rest of the region is ignored, so `12/50`
-reads as 12 once `/` is learned. A `,` is skipped when it separates groups of
+reads as 12 once `/` is learned. A character the value leaves out is "any
+other character" whatever it is, a `-`, a `.`, or a `,` included
+(`NumberText::push_text`), and a letter left out still counts as a letter
+before a point. A read runs a second `NumberText` that takes each left-out
+character as itself, and fails with `ReadError::LeftOut` when the two end
+with different numbers. A `,` is skipped when it separates groups of
 three digits before the point, so `1,234` reads as 1234. When the digits after
 a `,` are not a group of three, as in `12,5`, the number ends at the `,` and
 reads as 12. A `.` before any digit reads as `0.`, so `.5` reads as 0.5 (or 0 for

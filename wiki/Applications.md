@@ -75,7 +75,7 @@ can be up to 16 MB, and its pictures together can hold as many pixels as one
 picture of 7680 by 4320, the whole screen of an 8K display: four whole
 windows at 4K fill it. **Export** refuses an application whose pictures would
 make a larger file, and says what to change: draw smaller regions or fewer
-states or fixes, or teach a reference that many values read with smaller pictures.
+states or fixes.
 
 ## How AppyTappy finds the window
 

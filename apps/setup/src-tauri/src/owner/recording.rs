@@ -6,8 +6,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use appytappy_sources::screen::digits::DigitReader;
-use appytappy_sources::screen::{Image, Region, Size};
-use appytappy_sources::system::Rgb;
+use appytappy_sources::screen::{Image, Region, Rgb, Size};
 
 use crate::check_spec::{self, CharactersSpec, RegionSpec};
 use crate::owner::messages::{ExampleSpec, RecordSpec};
@@ -226,13 +225,7 @@ impl<H: Host> Owner<H> {
     ) -> Vec<u32> {
         let mut drawn: BTreeMap<usize, Vec<Region>> = BTreeMap::new();
         for example in examples {
-            let RegionSpec {
-                x,
-                y,
-                width,
-                height,
-            } = example.region;
-            if let Some(region) = Region::new(x, y, width, height) {
+            if let Ok(region) = Region::try_from(example.region) {
                 drawn.entry(example.screenshot).or_default().push(region);
             }
         }

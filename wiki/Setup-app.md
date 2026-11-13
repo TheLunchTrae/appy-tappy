@@ -149,7 +149,8 @@ This page covers what the user guide leaves out.
   and drops only its own work.
 - **Selection.** Each state of a state check has its own selection, which travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
-  selection, with one color match for all of them (`selection.rs`). The owner
+  selection, with one color match for all of them (`selection.rs`, with the
+  snap and the grow themselves in `selection/select.rs`). The owner
   replays a state's steps on the screenshot the state is taken from, both to
   answer the UI's `select` command and to build and save the check, so moving
   the slider remakes every selection from the same steps. A new step fits the
@@ -187,7 +188,7 @@ This page covers what the user guide leaves out.
   the rule, and answers the pixels the rule takes (`match_preview.rs`). Each
   rule asks the function its reader asks, so the tint and the reading agree
   at the tolerance's edge: `DigitReader::is_ink` for a reference's
-  characters, `BarFill::classify` for a bar, and `ColorMatch::near` for a
+  characters, `BarFill::classify` for a bar, and `Rgb::near` for a
   color check, which the check itself asks about the region's average color.
   A color check's answer carries that average, its distance from the color,
   and what the check reads on the rectangle. The answer holds each kind of
@@ -581,12 +582,11 @@ review without keeping, and review's edits stay for the next one.
 
 [Find more like it](References.md#find-more-like-it) searches the screenshot
 the selected box is on for more text like the box shows
-(`recording/find.rs`). It
-marks each pixel as ink with the reference's color and tolerance, as
-`DigitReader` does, and takes the band of inked rows with the most ink in the
-region, as the reader segments it. It joins touching ink, corners included,
-into blobs, leaving out blobs over twice that band's height, such as a panel in
-the same color. The sample's height is its tallest blob centered in the region,
+(`recording/find.rs`). It reads the screenshot's ink with `DigitReader::ink`,
+the ink a read works from, and takes the band of inked rows with the most ink
+in the region with `Ink::line`, the rule a read finds its line by, so the two
+cannot differ. It joins touching ink, corners included, into blobs, leaving
+out blobs over twice that band's height, such as a panel in the same color. The sample's height is its tallest blob centered in the region,
 and a run's is its tallest blob, so a comma or a mark below the characters
 measures neither. Blobs whose rows meet and that start no further than the
 sample's height past each other join into a run of text; runs are looked up by
@@ -1022,11 +1022,10 @@ saved file is held to and takes nothing else from it:
   of a window hold. A picture without a PNG header, or larger than AppyTappy
   reads, is refused with the value or reference that names it, in the words
   a saved file's would be.
-- Reading the values decodes no more than `MAX_DECODED_PIXELS`, four pictures
-  of `LARGEST_PICTURE`, in all. `saved::build` decodes a reference's pictures
-  again for each value and fix that reads with it, so a file that holds few
-  pixels can still ask for many. A reference's text is small, so many values
-  can read with it.
+- Reading the values decodes each picture once, so the pixels the pictures
+  hold are the pixels it decodes. Each picture has one place that names it,
+  and one `saved::Readers` builds each reference's reader once, however many
+  values and fixes read with it.
 - Each picture takes the name the setup app gives it: `sample_name` for a
   reference's samples in order, and `state_image_name` for a value's states,
   with each fix's pictures in the set of its place among the fixes. The file's
@@ -1034,9 +1033,9 @@ saved file is held to and takes nothing else from it:
   picture for two values, or name a value's picture as another value's next
   one, which a later save would overwrite; after the renaming each picture
   has one owner, and `AppStore::prune` knows every name.
-- `saved::build` reads each value and `saved::reader` each reference from the
-  pictures, as the runtime does and as saving a value does, so a file with a
-  value the runtime could not read is refused.
+- `saved::build` reads each value from the pictures, and `saved::Readers`
+  each reference, as the runtime does and as saving a value does, so a file
+  with a value the runtime could not read is refused.
 
 `Shared::of` holds an application to the same rules, and `pack` reads back
 what it packed with `unpack` and refuses what that refuses, such as an

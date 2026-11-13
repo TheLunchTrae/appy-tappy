@@ -180,8 +180,7 @@ impl<H: Host> Owner<H> {
         let outside = || {
             "The picture reaches past the edge of the window. Draw it inside the window.".to_owned()
         };
-        let region =
-            Region::new(region.x, region.y, region.width, region.height).ok_or_else(outside)?;
+        let region = Region::try_from(region).map_err(|_empty| outside())?;
         let picture = image.crop(region).ok_or_else(outside)?;
         let mask = selection
             .map(|selection| {

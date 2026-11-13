@@ -125,8 +125,8 @@ impl<H: Host> Owner<H> {
             .screenshots
             .get(screenshot)
             .ok_or_else(|| "Take a screenshot first.".to_owned())?;
-        let region = Region::new(region.x, region.y, region.width, region.height)
-            .ok_or_else(|| "Draw the box around some characters first.".to_owned())?;
+        let region = Region::try_from(region)
+            .map_err(|_empty| "Draw the box around some characters first.".to_owned())?;
         if !region.fits(image.size()) {
             return Err(
                 "The box reaches past the edge of the window. Draw it inside the window."
@@ -136,7 +136,7 @@ impl<H: Host> Owner<H> {
         let reader = DigitReader::new(ink.into(), tolerance);
         let added: Vec<Region> = added
             .iter()
-            .filter_map(|spec| Region::new(spec.x, spec.y, spec.width, spec.height))
+            .filter_map(|&spec| Region::try_from(spec).ok())
             .collect();
         let search = find::like(image, region, &added, &reader).ok_or_else(|| {
             "The box shows no characters in that color. Pick the characters' color first."
@@ -284,7 +284,7 @@ impl<H: Host> Owner<H> {
         let reader = DigitReader::new(ink.into(), tolerance);
         self.screenshots
             .get(screenshot)
-            .zip(Region::new(region.x, region.y, region.width, region.height))
+            .zip(Region::try_from(region).ok())
             .and_then(|(image, region)| image.crop(region))
             .map(|crop| character::of(&crop, &reader))
             .unwrap_or_default()
