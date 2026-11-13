@@ -10,7 +10,7 @@ use appytappy_config::app_file::{AntiCheatDef, AppFile, OriginDef};
 use serde::{Deserialize, Serialize};
 
 use crate::applications;
-use crate::sharing::{ShareError, Shared};
+use crate::sharing::{self, ShareError, Shared};
 
 use super::host::Host;
 use super::{Changed, Owner};
@@ -51,9 +51,7 @@ impl<H: Host> Owner<H> {
     /// The saved application `app` as the bytes of a file to share.
     pub(crate) fn export_app(&self, app: &str) -> Result<Vec<u8>, String> {
         let saved = self.stores()?.app(app)?;
-        Shared::of(&saved)
-            .and_then(|shared| shared.pack())
-            .map_err(|error| cannot_export(&saved.file.name, &error))
+        sharing::pack(&saved).map_err(|error| cannot_export(&saved.file.name, &error))
     }
 
     /// What the shared file `bytes`, named `from`, holds, for the user to
