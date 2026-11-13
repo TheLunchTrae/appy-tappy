@@ -35,7 +35,8 @@ use appytappy_sources::screen::{Image, Region, Size};
 use appytappy_sources::system::Rgb;
 use serde::Serialize;
 
-use self::ink::{Ink, Line};
+use self::ink::Ink;
+pub(crate) use self::ink::Line;
 pub(crate) use self::lifecycle::Lifecycle;
 use self::looks::LookRecording;
 use self::sightings::{Full, MAX_SHAPES, ShapeView, Sightings};

@@ -1,30 +1,20 @@
 import { useEffect, useRef } from 'react';
 
-import type { FoundView } from '../lib/bindings.ts';
-import { type FoundEntry, type FoundRow, keptState } from '../lib/found.ts';
-import { FIND_LIKE_HINT, FOUND_HINT } from '../lib/hints.ts';
+import { type FoundRow, keptState, rereadable } from '../lib/found.ts';
+import { FIND_LIKE_HINT, FOUND_HINT, REREAD_HINT } from '../lib/hints.ts';
 import type { Picture } from '../lib/pixels.ts';
+import { background } from '../lib/repeat.ts';
+import type { Finder } from '../lib/useFound.ts';
 import type { Size } from '../lib/region.ts';
 import { PictureCanvas } from './canvas.tsx';
 import { Hint } from './Hint.tsx';
 
 interface PanelProps {
-  readonly view: FoundView | null;
-  readonly rows: readonly FoundRow[];
-  readonly flags: ReadonlyMap<number, string>;
-  readonly crops: ReadonlyMap<number, Picture>;
+  readonly finder: Finder;
   /** Why the search cannot start, or null when it can. */
   readonly findBlocked: string | null;
-  /** Why Add waits, or null. */
-  readonly addBlocked: string | null;
-  readonly error: string | null;
-  readonly searching: boolean;
+  /** Starts the search, from the selected box. */
   readonly onFind: () => void;
-  readonly onEntry: (index: number, entry: FoundEntry) => void;
-  /** Ticks every listed find, or with false leaves every one out. */
-  readonly onKeepAll: (keep: boolean) => void;
-  readonly onAdd: () => void;
-  readonly onDismiss: () => void;
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -74,11 +64,11 @@ function KeepAll({
 }
 
 /** The inspector's part for finding more text like the selected box, and adding what the user ticks as boxes. */
-export function FoundPanel(props: PanelProps) {
-  const { view, findBlocked, addBlocked, error, searching, flags, crops } = props;
+export function FoundPanel({ finder, findBlocked, onFind }: PanelProps) {
+  const { view, blocked: addBlocked, error, searching, flags, crops } = finder;
   // Finds that show characters the reference does not need are left out of the list.
-  const rows = props.rows.filter((row) => row.fits);
-  const unlisted = props.rows.length - rows.length;
+  const rows = finder.rows.filter((row) => row.fits);
+  const unlisted = finder.rows.length - rows.length;
   const title = useRef<HTMLHeadingElement>(null);
   const find = useRef<HTMLButtonElement>(null);
   // The pressed button leaves with the panel it was on, so focus follows to what replaced it: the results'
@@ -111,7 +101,7 @@ export function FoundPanel(props: PanelProps) {
             aria-describedby={findBlocked === null ? 'hint-find-like' : 'hint-find-like find-blocked'}
             onClick={() => {
               if (!searching) {
-                props.onFind();
+                onFind();
               }
             }}
           >
@@ -161,7 +151,40 @@ export function FoundPanel(props: PanelProps) {
             Text in the same color and size on this screenshot, read as text. Tick the ones to add; each becomes a box
             the reference learns from.
           </p>
-          <KeepAll rows={rows} onKeepAll={props.onKeepAll} />
+          <div className="row">
+            <KeepAll rows={rows} onKeepAll={finder.keepAll} />
+            {/* Each button leaves once pressed, so focus moves to the heading rather than being lost. */}
+            {flags.size === 0 ? null : (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => {
+                  finder.leaveOutFlagged();
+                  title.current?.focus();
+                }}
+              >
+                Deselect flagged
+              </button>
+            )}
+            {rereadable(rows, flags).length === 0 ? null : (
+              <span className="with-hint">
+                <button
+                  type="button"
+                  className="btn small"
+                  aria-describedby="hint-reread"
+                  onClick={() => {
+                    background(finder.reread());
+                    title.current?.focus();
+                  }}
+                >
+                  Reread
+                </button>
+                <Hint topic="Reread" id="hint-reread">
+                  {REREAD_HINT}
+                </Hint>
+              </span>
+            )}
+          </div>
           <ul aria-label="Found text">
             {rows.map((row) => {
               const number = row.index + 1;
@@ -174,7 +197,7 @@ export function FoundPanel(props: PanelProps) {
                     aria-label={`Add find ${number}`}
                     checked={row.keep}
                     onChange={(event) => {
-                      props.onEntry(row.index, { keep: event.target.checked, text: row.text, typed: row.typed });
+                      finder.edit(row.index, { keep: event.target.checked, text: row.text, typed: row.typed });
                     }}
                   />
                   <span className={flag === undefined ? 'n' : 'n flagged'} aria-hidden="true">
@@ -189,7 +212,7 @@ export function FoundPanel(props: PanelProps) {
                     aria-describedby={flag === undefined ? undefined : flagId}
                     value={row.text}
                     onChange={(event) => {
-                      props.onEntry(row.index, {
+                      finder.edit(row.index, {
                         keep: row.keep || event.target.value.trim() !== '',
                         text: event.target.value,
                         typed: true,
@@ -216,12 +239,12 @@ export function FoundPanel(props: PanelProps) {
             className="btn primary"
             disabled={addBlocked !== null}
             aria-describedby={addBlocked === null ? undefined : 'found-blocked'}
-            onClick={props.onAdd}
+            onClick={finder.add}
           >
             {kept === 1 ? 'Add 1 to the reference' : `Add ${kept} to the reference`}
           </button>
         )}
-        <button type="button" className="btn" onClick={props.onDismiss}>
+        <button type="button" className="btn" onClick={finder.dismiss}>
           {rows.length === 0 ? 'Close' : 'Not these'}
         </button>
       </div>

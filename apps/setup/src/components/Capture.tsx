@@ -1390,14 +1390,8 @@ export function Capture({
             findPanel={
               chosen === null && finder.view === null ? null : (
                 <FoundPanel
-                  view={finder.view}
-                  rows={finder.rows}
-                  flags={finder.flags}
-                  crops={finder.crops}
+                  finder={finder}
                   findBlocked={findBlocked}
-                  addBlocked={finder.blocked}
-                  error={finder.error}
-                  searching={finder.searching}
                   onFind={() => {
                     if (chosen !== null) {
                       setPicking(null);
@@ -1405,10 +1399,6 @@ export function Capture({
                       background(finder.search(chosen));
                     }
                   }}
-                  onEntry={finder.edit}
-                  onKeepAll={finder.keepAll}
-                  onAdd={finder.add}
-                  onDismiss={finder.dismiss}
                 />
               )
             }
