@@ -501,6 +501,7 @@ select {
 }
 
 .window-list button:disabled {
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -2772,6 +2773,10 @@ tr.draft-row > td:not(.end):not(.row-actions) {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.check-row:has(input:disabled) label {
+  color: var(--muted);
 }
 
 .dialog-actions {
