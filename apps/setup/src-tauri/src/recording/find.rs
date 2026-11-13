@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::{Image, Region};
 
-use super::ink::{Ink, Line};
+use super::ink::{self, Line};
 
 /// The most finds one search returns; the rest are counted.
 pub(crate) const MAX_FOUND: usize = 12;
@@ -417,7 +417,7 @@ fn same_size(height: u32, sample: u32) -> bool {
 /// The ink of `image`, a find's pixels, for the text reader, as `reader`
 /// tells ink from background; `None` when it shows none.
 pub(crate) fn ink_line(image: &Image, reader: &DigitReader) -> Option<Line> {
-    Ink::of(image, reader).line()
+    ink::line(image, reader)
 }
 
 /// The height of the characters among `blobs` that `region` shows: that of

@@ -19,6 +19,7 @@ mod match_preview;
 mod overlay;
 mod owner;
 mod pixels;
+mod reading;
 mod recording;
 mod screenshots;
 mod selection;
@@ -28,6 +29,7 @@ mod stores;
 mod ticket;
 mod updates;
 mod window_list;
+mod words;
 mod zip_pack;
 
 use std::env;

@@ -698,8 +698,10 @@ operating system's OCR. Only its recognition model loads: the region holds one
 line, so there is no text to find first. It runs on a thread of its own, because
 a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
-as black text on white with a margin, whatever the application's colors
-(`recording/ink.rs`). Text for a recording or a search the user discarded or
+as black text on white with a margin, whatever the application's colors,
+cut to the rows the number reader takes as the line of text
+(`DigitReader::line_rows`), so a stray pixel above or below the text does
+not stretch the line (`recording/ink.rs`). Text for a recording or a search the user discarded or
 replaced is dropped by its number, and a queued job of a recording or search
 that a newer one of the same kind replaced is skipped without reading it. Only the setup app uses it; the runtime reads
 numbers with the shapes the user's labels and kept readings taught it ([Screen

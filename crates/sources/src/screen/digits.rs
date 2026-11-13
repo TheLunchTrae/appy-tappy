@@ -401,6 +401,13 @@ impl DigitReader {
         Ok((line, count))
     }
 
+    /// The rows of `image` a read takes as its line of text: the run of
+    /// adjacent inked rows that holds the most ink. `None` without ink.
+    #[must_use]
+    pub fn line_rows(&self, image: &Image) -> Option<Range<u32>> {
+        self.line(image).map(|line| line.top..line.bottom)
+    }
+
     /// The run of adjacent inked rows that holds the most ink, so a stray
     /// pixel elsewhere in the region does not stretch the line.
     fn line(&self, image: &Image) -> Option<Line> {
@@ -1376,6 +1383,13 @@ mod tests {
             reader.read(&draw(&above), false),
             Ok(Number::new(12.0).unwrap())
         );
+        let rows = u32::try_from(TWELVE.len()).unwrap();
+        assert_eq!(reader.line_rows(&draw(&noisy)), Some(0..rows));
+        assert_eq!(
+            reader.line_rows(&draw(&above)),
+            Some(2..rows.checked_add(2).unwrap())
+        );
+        assert_eq!(reader.line_rows(&draw(&["....."])), None);
     }
 
     /// `rows` with `left` and `right` blank columns beside them and `above`

@@ -95,6 +95,19 @@ impl<H: Host> Owner<H> {
             .delete(id)
             .map_err(|error| error.to_string())
     }
+
+    /// Deletes the drafts that `gone` takes, after what they belong to was
+    /// removed. The removal worked either way: a draft that stays says on
+    /// its page that it can only be deleted.
+    pub(super) fn delete_drafts(&self, gone: impl Fn(&DraftDef) -> bool) {
+        if let Ok(stores) = self.stores() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the item is removed; a draft that stays can be deleted on its page"
+            )]
+            let _ = stores.drafts.delete_where(gone);
+        }
+    }
 }
 
 #[cfg(test)]

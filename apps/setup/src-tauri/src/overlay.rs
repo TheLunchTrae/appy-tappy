@@ -21,6 +21,7 @@ pub(crate) mod window;
 
 use std::collections::BTreeMap;
 use std::io;
+use std::mem;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
@@ -34,7 +35,8 @@ use appytappy_sources::screen::{
 use appytappy_sources::system::WindowPlace;
 use serde::Serialize;
 
-use crate::owner::{Event, Host, Message, Reading, at_size};
+use crate::owner::{Event, Host, Message};
+use crate::reading::{Reading, at_size};
 use crate::stores::SavedApp;
 use crate::ticket::{Running, Ticket, Tickets};
 
@@ -377,14 +379,18 @@ impl<S: CaptureSession> Overlays<S> {
         }
     }
 
-    /// The panel places that settled, by application ID, which the caller
-    /// saves. With `all`, every place not yet saved, such as on closing.
-    pub(crate) fn settled(&mut self, all: bool) -> Vec<(String, PanelDef)> {
+    /// The panel places `places` names, by application ID, which the
+    /// caller saves.
+    pub(crate) fn placed_panels(&mut self, places: Places) -> Vec<(String, PanelDef)> {
         self.open
             .iter_mut()
             .filter_map(|(app, overlay)| {
                 let (panel, polls) = overlay.placed?;
-                (all || polls >= SETTLE_POLLS).then(|| {
+                let taken = match places {
+                    Places::Settled => polls >= SETTLE_POLLS,
+                    Places::All => true,
+                };
+                taken.then(|| {
                     overlay.placed = None;
                     (app.clone(), panel)
                 })
@@ -392,32 +398,55 @@ impl<S: CaptureSession> Overlays<S> {
             .collect()
     }
 
-    /// Closes `app`'s overlay, whose window closed, or every overlay with
-    /// `None`, so the next poll opens it from its file again.
+    /// Closes `app`'s overlay, whose file changed, so the next poll opens
+    /// it from its file again.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error its capture's thread ended with.
+    pub(crate) fn reopen(&mut self, app: &str) -> io::Result<()> {
+        self.failed.remove(app);
+        self.open
+            .remove(app)
+            .and_then(|overlay| overlay.capture)
+            .map_or(Ok(()), Running::close)
+    }
+
+    /// Closes `app`'s overlay, whose window closed, and forgets the size of
+    /// its card.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error its capture's thread ended with.
+    pub(crate) fn window_closed(&mut self, app: &str) -> io::Result<()> {
+        self.cards.remove(app);
+        self.reopen(app)
+    }
+
+    /// Closes every overlay, as when the app closes or the Values page is
+    /// left.
     ///
     /// # Errors
     ///
     /// Returns the first error a capture's thread ended with.
-    pub(crate) fn close(&mut self, app: Option<&str>) -> io::Result<()> {
-        let closing: Vec<String> = if let Some(app) = app {
-            vec![app.to_owned()]
-        } else {
-            self.failed.clear();
-            self.open.keys().cloned().collect()
-        };
-        closing
-            .iter()
-            .filter_map(|closed| {
-                self.failed.remove(closed);
-                if app.is_some() {
-                    self.cards.remove(closed);
-                }
-                self.open.remove(closed)
-            })
+    pub(crate) fn close_all(&mut self) -> io::Result<()> {
+        self.failed.clear();
+        mem::take(&mut self.open)
+            .into_values()
             .filter_map(|overlay| overlay.capture)
             .map(Running::close)
             .fold(Ok(()), Result::and)
     }
+}
+
+/// Which of the panel places not yet saved [`Overlays::placed_panels`]
+/// hands over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Places {
+    /// Those the user left alone long enough to have settled.
+    Settled,
+    /// Every one, as before the overlays close or read their files again.
+    All,
 }
 
 /// The overlay `file` describes, without a capture yet, for `purpose`. A

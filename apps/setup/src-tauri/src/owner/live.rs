@@ -21,13 +21,54 @@ use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::saved::{AtSize, SavedCheck, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Size};
+use serde::Deserialize;
 
-use crate::check_spec::{self, SpecError};
+use crate::check_spec::{self, CharactersSpec, CheckSpec, SpecError};
+use crate::reading::at_size;
 
 use super::Owner;
 use super::host::Host;
-use super::messages::{ReferenceTrial, TrialSpec, at_size};
 use super::values::read_back;
+
+/// A value's check to try on the live window before it is saved, as the UI
+/// describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TrialSpec {
+    /// The saved application the value is for, whose references it reads
+    /// with and whose window's size changes say where it reads.
+    pub(crate) app: String,
+    /// The check, with the session's screenshots it names.
+    pub(crate) check: CheckSpec,
+    /// The screenshot the region was drawn on, whose size the value would
+    /// keep.
+    pub(crate) screenshot: usize,
+    /// The side of the window the region stays at as the window changes
+    /// size, or `None` before one is picked, for the side it is nearest.
+    pub(crate) pin: Option<PinDef>,
+}
+
+/// A reference being taught to try on the live window before it is saved,
+/// as the UI describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReferenceTrial {
+    /// The saved application the reference is for, whose window's size
+    /// changes say where its region reads.
+    pub(crate) app: String,
+    /// The characters it is taught.
+    pub(crate) characters: CharactersSpec,
+    /// The characters the number it is made for reads of it, or `None`
+    /// for every character it is taught, as [`CheckDef::Number`] has them.
+    pub(crate) reads: Option<String>,
+    /// Whether that number ignores digits after the decimal point.
+    pub(crate) whole: bool,
+    /// The side of the window that number's region stays at, or `None`
+    /// for the side the region is nearest.
+    pub(crate) pin: Option<PinDef>,
+}
 
 /// The ID a value is tried under before it is saved under its own. It
 /// names only pictures that are never written.
@@ -249,11 +290,12 @@ mod tests {
 
     use crate::check_spec::{CharactersSpec, CheckSpec};
     use crate::debug::workings::WorkingsView;
-    use crate::owner::messages::{Reading, ReferenceSaveSpec};
+    use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
         BAR, Harness, add_example_app, capturing, characters, harness_with, scratch_store,
         teaching, trial,
     };
+    use crate::reading::Reading;
     use crate::stores::SavedApp;
 
     use super::*;

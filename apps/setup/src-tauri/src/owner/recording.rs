@@ -8,17 +8,60 @@ use std::time::Instant;
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::{Image, Region, Size};
 use appytappy_sources::system::Rgb;
+use serde::Deserialize;
 
-use crate::check_spec::{self, CharactersSpec, RegionSpec};
-use crate::owner::messages::{ExampleSpec, RecordSpec};
+use crate::check_spec::{self, CharactersSpec, ColorSpec, RegionSpec};
 use crate::pixels;
 use crate::recording::follow::Follows;
 use crate::recording::{
     NewReading, Recorder, Recording, RecordingView, Scope, Text, find, look, ocr,
 };
+use crate::words::sentence;
+use appytappy_config::app_file::PinDef;
 
 use super::Owner;
 use super::host::Host;
+
+/// What a recording of readings records, as the UI describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RecordSpec {
+    /// The saved application whose window is recorded, whose answer on how
+    /// often its window changes size says whether the recording follows
+    /// the window to another size.
+    pub(crate) app: String,
+    /// The region of the window to record.
+    pub(crate) region: RegionSpec,
+    /// The screenshot the region was drawn on, whose window size the
+    /// recording keeps.
+    pub(crate) screenshot: usize,
+    /// The side of the window the region stays at as the window changes
+    /// size, or `None` for the side the region is nearest.
+    pub(crate) pin: Option<PinDef>,
+    /// The characters' color.
+    pub(crate) ink: ColorSpec,
+    /// How far from `ink` a pixel of a character may be.
+    pub(crate) tolerance: u8,
+    /// Where to look for characters: in the region alone, or wherever the
+    /// window shows text like the region's.
+    pub(crate) scope: Scope,
+    /// The reference's boxes: more examples of its text, which a recording
+    /// of the whole window looks for the sizes of too.
+    pub(crate) examples: Vec<ExampleSpec>,
+}
+
+/// One more example of the text a recording of the whole window looks for:
+/// a box the user drew around some of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExampleSpec {
+    /// The box.
+    pub(crate) region: RegionSpec,
+    /// The screenshot it is drawn on.
+    pub(crate) screenshot: usize,
+}
 
 impl<H: Host> Owner<H> {
     /// Records `frame`, which arrived at `received`: sends a new reading it
@@ -111,7 +154,7 @@ impl<H: Host> Owner<H> {
         if let Some(failure) = picked.failure.as_ref().filter(|failure| failure.ended) {
             return Err(format!(
                 "{} Change window to pick it again.",
-                check_spec::sentence(&failure.error)
+                sentence(&failure.error)
             ));
         }
         if self.capture.screenshots().get(screenshot).is_none() {
@@ -325,7 +368,7 @@ mod tests {
     use appytappy_sources::screen::settle::SETTLE;
 
     use crate::check_spec::ColorSpec;
-    use crate::owner::messages::{Event, ExampleSpec, Message};
+    use crate::owner::messages::{Event, Message};
     use crate::owner::test_support::{
         FakeHost, Harness, capturing, characters_in, example_app, frame_image, harness, recognized,
         teaching, with_example_app,

@@ -21,8 +21,9 @@ use crate::stores::{self, Stores};
 use crate::ticket::Ticket;
 
 use super::host::{ClickNow, ClickedWindow, Host};
-use super::messages::{Event, Message, RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
+use super::messages::{Event, Message};
 use super::{Owner, PREVIEW_INTERVAL};
+use super::{RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
 
 /// A host with one window whose captures the test drives by hand: each
 /// started capture's handler goes to the test over a channel, and so

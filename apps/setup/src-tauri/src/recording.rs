@@ -64,7 +64,6 @@ use crate::ticket::Ticket;
 use self::character::CharacterView;
 use self::find::{Sizes, TextSize};
 use self::follow::{Follows, Unplaced};
-use self::ink::Ink;
 pub(crate) use self::ink::Line;
 pub(crate) use self::lifecycle::Lifecycle;
 use self::looks::LookRecording;
@@ -605,7 +604,7 @@ impl Recording {
             }
             return None;
         }
-        let line = Ink::of(&crop, &self.reader).line()?;
+        let line = ink::line(&crop, &self.reader)?;
         let index = self.readings.len();
         self.readings.push(Kept {
             characters: character::of(&crop, &self.reader),

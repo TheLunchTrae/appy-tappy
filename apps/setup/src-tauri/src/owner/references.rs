@@ -5,11 +5,43 @@
 use appytappy_config::app_file::OriginDef;
 use appytappy_config::names::{new_reference_id, reference_id};
 
-use crate::check_spec::{ReferenceRef, SavedReference, Session};
+use serde::{Deserialize, Serialize};
+
+use crate::check_spec::{CharactersSpec, ReferenceRef, SavedReference, Session};
 
 use super::host::Host;
-use super::messages::{ReferenceSaveSpec, SavedReferenceId};
 use super::{Changed, Edit, Owner};
+
+/// A reference to save, as the UI describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReferenceSaveSpec {
+    /// The saved application to add the reference to.
+    pub(crate) app: String,
+    /// The reference's name, such as `Percent font`.
+    pub(crate) reference_name: String,
+    /// The characters it is taught, which name the reference when it is
+    /// saved already.
+    pub(crate) characters: CharactersSpec,
+    /// The characters the user says it needs to know, or empty when the
+    /// user chose none. The save lists each once, in order, refuses more
+    /// than a reference saves, and replaces what the saved reference
+    /// expected.
+    pub(crate) expects: String,
+}
+
+/// Where a reference was saved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SavedReference"))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SavedReferenceId {
+    /// The application's ID.
+    pub(crate) app: String,
+    /// The reference's ID.
+    pub(crate) reference: String,
+}
 
 impl<H: Host> Owner<H> {
     /// Hands `work` the session's screenshots, recording and saved
@@ -157,7 +189,7 @@ pub(super) fn and_list(names: &[&str]) -> String {
 mod tests {
     use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
 
-    use crate::owner::messages::SavedValue;
+    use crate::owner::SavedValue;
     use crate::owner::test_support::{
         FakeHost, add_example_app, frame_image, harness_with, scratch_store, spec, trial,
     };

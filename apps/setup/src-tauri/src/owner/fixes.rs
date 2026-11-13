@@ -5,13 +5,30 @@
 use appytappy_config::app_file::{CheckDef, FixDef, ScreenDef, SizeDef, ValueDef};
 use appytappy_sources::screen::scale::scaled;
 use appytappy_sources::screen::{Region, Size};
+use serde::Deserialize;
 
 use crate::check_spec::{self, CheckSpec, RegionSpec};
 
 use super::host::Host;
-use super::messages::{FixSpec, SavedValue};
-use super::values::read_back;
+use super::values::{SavedValue, read_back};
 use super::{Changed, Edit, Owner};
+
+/// A saved value drawn again at another window size, as the UI describes
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FixSpec {
+    /// The saved application.
+    pub(crate) app: String,
+    /// The value's ID.
+    pub(crate) value: String,
+    /// The check at this size: of the value's kind, with each of its
+    /// states in order, or for a number, the reference to read with.
+    pub(crate) check: CheckSpec,
+    /// The screenshot the region was drawn on, whose size the fix is for.
+    pub(crate) screenshot: usize,
+}
 
 impl<H: Host> Owner<H> {
     /// Where the value `value` of the application `app` starts on a window

@@ -193,12 +193,6 @@ fn one(screenshot: usize) -> Vec<Label> {
 }
 
 #[test]
-fn a_problem_reads_as_a_sentence_of_its_own() {
-    assert_eq!(sentence("a character was given"), "A character was given.");
-    assert_eq!(sentence(""), "");
-}
-
-#[test]
 fn each_state_is_cut_from_its_screenshot_at_the_region() {
     // Screenshot 2 is screenshot 1 with its halves swapped, so the left
     // region is red on one and gray on the other.

@@ -15,6 +15,7 @@
 //! each command calls live in modules below it, and `test_support` holds the
 //! stand-ins the tests share.
 
+mod apps;
 mod automations;
 mod capture;
 mod clicks;
@@ -53,22 +54,26 @@ use crate::check_spec::Pictures;
 use crate::debug::log::SetupLog;
 use crate::debug::trace_file::TraceTail;
 use crate::debug::trace_view::TraceView;
-use crate::overlay::{Overlays, Purpose};
+use crate::overlay::{Overlays, Places, Purpose};
 use crate::recording::{look, ocr};
 use crate::stores::{SavedApp, Stores};
 use crate::ticket::{Ticket, Tickets};
 use crate::updates::Downloaded;
 
+pub(crate) use self::apps::{AppSummary, AppWindows};
 use self::capture::Capture;
 pub(crate) use self::clicks::{ClickPictureView, ClickSent, ClickSpec, FoundClick};
+pub(crate) use self::edits::{EditPreview, EditSpec};
+pub(crate) use self::fixes::FixSpec;
 pub(crate) use self::found::FoundView;
 pub(crate) use self::host::{Desktop, Host};
-pub(crate) use self::messages::{
-    AppSummary, AppWindows, EditPreview, EditSpec, Event, FixSpec, Live, Message, Reading,
-    RecordSpec, ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue,
-    TrialSpec, at_size,
-};
+pub(crate) use self::live::{ReferenceTrial, TrialSpec};
+pub(crate) use self::messages::{Event, Message, Run};
+pub(crate) use self::recording::RecordSpec;
+pub(crate) use self::references::{ReferenceSaveSpec, SavedReferenceId};
 pub(crate) use self::sharing::{ImportSpec, SharedView};
+pub(crate) use self::values::{SaveSpec, SavedValue};
+pub(crate) use self::watch::Live;
 use self::watch::Watching;
 
 /// The shortest time between two frames the preview takes: about 30 a
@@ -160,7 +165,6 @@ impl<H: Host> Owner<H> {
                     self.apply(event);
                 }
             },
-            Message::PanelPlaced { app, panel } => self.overlays.placed(&app, panel),
             Message::Shutdown => return ControlFlow::Break(()),
         }
         ControlFlow::Continue(())
@@ -235,17 +239,17 @@ impl<H: Host> Owner<H> {
     /// Returns the error the capture's thread ended with. An overlay's
     /// capture that ended with an error already showed it.
     pub(crate) fn shut_down(&mut self) -> io::Result<()> {
-        self.save_panels(true);
+        self.save_panels(Places::All);
         #[expect(
             clippy::let_underscore_must_use,
             reason = "an overlay's capture error already showed in its window, which is closing"
         )]
-        let _ = self.overlays.close(None);
+        let _ = self.overlays.close_all();
         #[expect(
             clippy::let_underscore_must_use,
             reason = "the Values page showed its capture's error already, and it is closing"
         )]
-        let _ = self.live.close(None);
+        let _ = self.live.close_all();
         self.end_capture()
     }
 
@@ -298,7 +302,7 @@ impl<H: Host> Owner<H> {
         }
         .map_err(|error| error.to_string());
         if written.is_ok() || matches!(write, Write::Remove) {
-            self.tell(changed);
+            self.tell(app, changed);
         }
         written?;
         let windows = changed
@@ -312,32 +316,33 @@ impl<H: Host> Owner<H> {
     /// with `save`, and has the runtime read the saved files again once it
     /// worked.
     pub(crate) fn update_runtime<T>(
-        &mut self,
+        &self,
         save: impl FnOnce(&Stores) -> Result<T, String>,
     ) -> Result<T, String> {
         let saved = self.stores().and_then(save)?;
-        self.tell(Changed::Runtime);
+        self.host.reload_runtime();
         Ok(saved)
     }
 
-    /// Does what follows from a change to the saved files: each overlay
-    /// reads again what `changed` names, and the runtime reads the saved
-    /// files again when it reads what changed.
-    fn tell(&mut self, changed: Changed) {
+    /// Does what follows from a change to the saved files of the
+    /// application `app`: its overlay reads them again when it reads what
+    /// `changed` names, and so does the runtime. The other applications'
+    /// overlays go on as they were.
+    pub(super) fn tell(&mut self, app: &str, changed: Changed) {
         if changed.overlays() {
-            // Each overlay reads its values again from their saved files,
+            // The overlay reads its values again from their saved files,
             // after keeping where the user just put its panel.
-            self.save_panels(true);
+            self.save_panels(Places::All);
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a capture that ended with an error stopped already, and the next poll starts another"
             )]
-            let _ = self.overlays.close(None);
+            let _ = self.overlays.reopen(app);
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a capture that ended with an error stopped already, and the next poll starts another"
             )]
-            let _ = self.live.close(None);
+            let _ = self.live.reopen(app);
         }
         if changed.runtime() {
             self.host.reload_runtime();
@@ -625,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn a_removal_that_fails_still_tells_who_reads_the_files() {
+    fn a_removal_that_fails_still_tells_the_runtime_and_leaves_other_overlays() {
         let (mut harness, root) = with_saved_bar("changed-removal");
         harness
             .ask(|owner| owner.set_overlay("example", true, OverlayModeDef::Overlay))
@@ -635,15 +640,19 @@ mod tests {
             .expect("shows");
         harness.forget_reloads();
         harness.synced.try_iter().for_each(drop);
-        // Part of the folder may be gone, so the runtime and the overlays
-        // read again whether or not the removal finished.
+        // Part of the folder may be gone, so the runtime reads again
+        // whether or not the removal finished. So would that application's
+        // overlay; another application's goes on as it was.
         assert!(
             harness
                 .ask(|owner| owner.write_app("Not An Id", Changed::Applications, Write::Remove))
                 .is_err()
         );
         assert_eq!(harness.reloads(), 1, "the runtime reads again");
-        assert!(harness.closed.try_recv().is_ok(), "the overlay reads again");
+        assert!(
+            harness.closed.try_recv().is_err(),
+            "the overlay of an application that did not change goes on"
+        );
         assert!(
             harness.synced.try_recv().is_err(),
             "the windows stay until a removal is done"

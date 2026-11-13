@@ -3,7 +3,7 @@
 
 use appytappy_config::app_file::{OverlayDef, OverlayModeDef, PanelDef};
 
-use crate::overlay::{self, Card, OverlayView, OverlayWindow, Place};
+use crate::overlay::{self, Card, OverlayView, OverlayWindow, Place, Places};
 
 use super::host::Host;
 use super::{Changed, Edit, Owner, known};
@@ -59,7 +59,7 @@ impl<H: Host> Owner<H> {
     /// the user put its panels once they settled.
     pub(crate) fn overlay_state(&mut self, app: &str) -> Result<OverlayView, String> {
         let view = self.overlay_view(app);
-        self.save_panels(false);
+        self.save_panels(Places::Settled);
         view
     }
 
@@ -67,6 +67,12 @@ impl<H: Host> Owner<H> {
     /// while its window is not showing.
     pub(crate) fn overlay_place(&self, app: &str) -> Option<Place> {
         self.overlays.place(&self.host, app)
+    }
+
+    /// Notes where the user put the panel of the application `app`'s
+    /// overlay, which a poll saves once it settles.
+    pub(crate) fn panel_placed(&mut self, app: &str, panel: PanelDef) {
+        self.overlays.placed(app, panel);
     }
 
     /// Keeps the size the page measured for the card of the application
@@ -80,12 +86,12 @@ impl<H: Host> Owner<H> {
     /// since stays open.
     pub(crate) fn close_overlay(&mut self, app: &str, mode: OverlayModeDef) {
         if self.overlays.mode(app) == Some(mode) {
-            self.save_panels(true);
+            self.save_panels(Places::All);
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "the overlay's window closed, so nothing shows the capture's error"
             )]
-            let _ = self.overlays.close(Some(app));
+            let _ = self.overlays.window_closed(app);
         }
     }
 
@@ -100,14 +106,13 @@ impl<H: Host> Owner<H> {
             })
     }
 
-    /// Stops reading the values of the application `app` for the Values
-    /// page, or of every application with `None`.
-    pub(crate) fn stop_live_values(&mut self, app: Option<&str>) {
+    /// Stops reading every application's values for the Values page.
+    pub(crate) fn stop_live_values(&mut self) {
         #[expect(
             clippy::let_underscore_must_use,
             reason = "the Values page no longer shows the readings, so nothing shows the error"
         )]
-        let _ = self.live.close(app);
+        let _ = self.live.close_all();
     }
 
     pub(super) fn overlay_view(&mut self, app: &str) -> Result<OverlayView, String> {
@@ -118,11 +123,11 @@ impl<H: Host> Owner<H> {
             })
     }
 
-    /// Saves where the user put each panel, once it settled or, with `all`,
-    /// right away. A place that cannot be saved is lost, and the panel opens
-    /// where it last was saved.
-    pub(super) fn save_panels(&mut self, all: bool) {
-        for (app, panel) in self.overlays.settled(all) {
+    /// Saves where the user put each panel that `places` names. A place
+    /// that cannot be saved is lost, and the panel opens where it last was
+    /// saved.
+    pub(super) fn save_panels(&mut self, places: Places) {
+        for (app, panel) in self.overlays.placed_panels(places) {
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a panel's place is a convenience; the panel still shows"
@@ -156,7 +161,8 @@ mod tests {
     use crate::overlay::{
         Card, FrameRead, OVERLAY_INTERVAL, Place, RETRY_POLLS, SETTLE_POLLS, ValueRead, ValueView,
     };
-    use crate::owner::messages::{Event, Message, Reading};
+    use crate::owner::messages::{Event, Message, Run};
+    use crate::reading::Reading;
     use appytappy_config::app_file::AntiCheatDef;
 
     use crate::owner::test_support::{
@@ -597,7 +603,7 @@ mod tests {
             harness.ask(overlay_state),
             Err("The overlay for Example App is off.".to_owned())
         );
-        harness.ask(|owner| owner.stop_live_values(None));
+        harness.ask(Owner::stop_live_values);
         assert_eq!(harness.closed.try_recv(), Ok(7), "the page stopped reading");
         std::fs::remove_dir_all(root).expect("clean up");
     }
@@ -667,9 +673,10 @@ mod tests {
             width: 260,
             height: 200,
         };
-        let placed = |x| Message::PanelPlaced {
-            app: "example".to_owned(),
-            panel: panel(x),
+        let placed = |x| {
+            Message::Run(Run::unanswered(move |owner| {
+                owner.panel_placed("example", panel(x));
+            }))
         };
         let saved = |harness: &mut Harness| {
             harness

@@ -19,10 +19,11 @@ use serde::Deserialize;
 
 use crate::recording::Recording;
 use crate::screenshots::Shots;
+use crate::words::sentence;
 
 use super::{
-    ColorSpec, Cut, Pictures, ReferenceRef, RegionSpec, SpecError, cut, drawn, same_size, sentence,
-    size_of, to_region,
+    ColorSpec, Cut, Pictures, ReferenceRef, RegionSpec, SpecError, cut, drawn, same_size, size_of,
+    to_region,
 };
 
 /// The most characters a reference is saved as expecting: room for the

@@ -431,19 +431,20 @@ pub(crate) fn on_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
             let (Ok(position), Ok(size)) = (window.outer_position(), window.inner_size()) else {
                 return;
             };
+            let app = app.to_owned();
+            let panel = PanelDef {
+                x: position.x,
+                y: position.y,
+                width: size.width,
+                height: size.height,
+            };
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a failed send means the owner stopped; the panel opens where it was saved"
             )]
-            let _ = bridge.0.send(Message::PanelPlaced {
-                app: app.to_owned(),
-                panel: PanelDef {
-                    x: position.x,
-                    y: position.y,
-                    width: size.width,
-                    height: size.height,
-                },
-            });
+            let _ = bridge.0.send(Message::Run(Run::unanswered(move |owner| {
+                owner.panel_placed(&app, panel);
+            })));
         },
         _ => {},
     }

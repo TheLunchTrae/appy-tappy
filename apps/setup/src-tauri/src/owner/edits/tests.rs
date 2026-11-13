@@ -10,11 +10,12 @@ use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::{FrameHandler, Image, Size};
 
 use crate::applications::AppSpec;
-use crate::owner::messages::{FixSpec, Reading, ReferenceSaveSpec};
 use crate::owner::test_support::{
     BAR, Harness, NO_STORE, add_example_app, frame_image, harness, harness_with, scratch_store,
     spec, with_saved_bar,
 };
+use crate::owner::{FixSpec, ReferenceSaveSpec};
+use crate::reading::Reading;
 
 use super::*;
 
