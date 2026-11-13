@@ -48,7 +48,9 @@ back to the automation with the value picked.
    **Next: how to read it**.
 4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
    box under it then shows what AppyTappy reads on the live window, a few
-   times a second. If the check cannot work, such as a bar whose filled and
+   times a second, where and how an automation reads the value once it is
+   saved. While the window has a size the value isn't read at, the box says
+   so, as [Window size](#window-size) describes. If the check cannot work, such as a bar whose filled and
    empty colors are the same, it says why there, and so it does when it
    can't read the live window, such as a number with a character its
    reference hasn't learned.

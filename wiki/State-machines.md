@@ -1218,9 +1218,13 @@ stateDiagram-v2
 
 The capture screen tries a trial on the live window (`useLiveCheck` in
 `apps/setup/src/lib/useLiveCheck.ts`): the check being set up, with
-`set_check`, or a saved value's edit, with `try_edit`, as
-[Value edit](#value-edit) describes. Either way the owner reads the window
-with what it took, so the two share this machine and its one guard. Its
+`set_check`, a reference being taught, with `set_characters`, or a saved
+value's edit, with `try_edit`, as [Value edit](#value-edit) describes. Each
+way the owner reads the window with what it took, a value in its saved
+form (`LiveCheck` in `owner/live.rs`), so they share this machine and its
+one guard. The owner places that value at the window size of each frame, as
+the runtime does, so a read at a size the value is not read at answers why
+and the next frame of a size it is read at answers a reading. Its
 state is `state`, a `CheckState`; `read`, the reading or the problem shown;
 `preview`, what saving an edit would do; `tried`, the number of the newest
 trial; and `inForce`, the number of the trial the owner reads with, or none.

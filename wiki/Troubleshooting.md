@@ -103,6 +103,10 @@ The reasons a number has no reading:
 - **The characters hold no number.** The message shows what it read, such as
   `%`. The region shows no digit now, or the region cuts the digits off.
 
+The box in setup reads the live window the way the automation does, at the
+size the window has then. So try the value in setup with the window at the
+size you play at: the box gives the same reason.
+
 If the reason isn't one of these, or the number reads on the live window in
 setup at the same window size and not in the overlay, that is a fault in
 AppyTappy. Report it with the log line, the application's folder in
