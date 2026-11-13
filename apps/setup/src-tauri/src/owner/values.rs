@@ -6,8 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, new_value_id,
-    value_id,
+    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, ValueDef, new_value_id, value_id,
 };
 use appytappy_sources::screen::saved::{self, SavedError};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
@@ -138,10 +137,7 @@ impl<H: Host> Owner<H> {
             let saved = check_spec::to_saved(&spec.check, &owner.screenshots, &spec.app, &id)
                 .map_err(|error| error.to_string())?;
             let screen = ScreenDef {
-                window_size: SizeDef {
-                    width: size.width,
-                    height: size.height,
-                },
+                window_size: size.into(),
                 region: saved.region,
                 check: saved.check,
                 pin: Some(spec.pin),
@@ -374,7 +370,7 @@ pub(super) fn read_back(
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::WindowDef;
+    use appytappy_config::app_file::{SizeDef, WindowDef};
     use appytappy_config::automation_file::{ActionDef, AutomationDef, MediaCommandDef};
     use appytappy_sources::screen::{Image, Size};
 

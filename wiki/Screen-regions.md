@@ -4,13 +4,16 @@ A screen region source reads a signal from part of an application's window, such
 as a progress bar, a number counter, or whether an icon is showing. The setup
 app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
-`screen/image.rs` holds images and regions, `screen/layout.rs` where a
+`screen/image.rs` holds images, regions, sizes, and colors, with their
+conversions from and to the saved types, `screen/layout.rs` where a
 capture packs the regions it copies, `screen/placed.rs` values placed at
 one window size and what a frame means to their capture,
 `screen/capture.rs` the capture trait
 and where a window's content lies in its frame,
 `screen/check.rs` and `screen/digits.rs` the checks, `screen/detect.rs` the
-proposal of a bar's colors, `screen/mask.rs` and
+proposal of a bar's colors, `screen/masked.rs` the comparison of a region
+with a saved picture, which a state check and a click's picture search
+share, `screen/mask.rs` and
 `screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
 the saved checks, `screen/scale.rs` and `screen/resample.rs` how a value
 reads at another window size, and `schedule.rs` the read interval.
@@ -319,7 +322,8 @@ with and without it (`saved::build`).
   then fills the holes: unselected pixels that cannot reach the edge of the
   box through other unselected pixels.
 
-Colors are alike when each channel is within the tolerance, as for the color
+Colors are alike when each channel is within the tolerance. `Rgb::near` is
+the one place that says so, for a selection, a number's ink, and the color
 check. Selections combine with union and difference, and `mask_in` gives the
 mask of any region, as after the user adjusts the box by hand.
 

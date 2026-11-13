@@ -155,8 +155,8 @@ mod tests {
     use appytappy_config::click::{Area, ClickPicture, Corner};
 
     use super::*;
-    use crate::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Region};
-    use crate::system::{ProcessEntry, Rgb, WindowEntry, WindowPlace};
+    use crate::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Region, Rgb};
+    use crate::system::{ProcessEntry, WindowEntry, WindowPlace};
 
     /// The window rules of `Target.exe`, which take any of its windows.
     fn any_window() -> WindowDef {

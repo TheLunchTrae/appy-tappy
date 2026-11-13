@@ -187,7 +187,7 @@ This page covers what the user guide leaves out.
   the rule, and answers the pixels the rule takes (`match_preview.rs`). Each
   rule asks the function its reader asks, so the tint and the reading agree
   at the tolerance's edge: `DigitReader::is_ink` for a reference's
-  characters, `BarFill::classify` for a bar, and `ColorMatch::near` for a
+  characters, `BarFill::classify` for a bar, and `Rgb::near` for a
   color check, which the check itself asks about the region's average color.
   A color check's answer carries that average, its distance from the color,
   and what the check reads on the rectangle. The answer holds each kind of

@@ -33,8 +33,7 @@ use std::ops::Range;
 use appytappy_config::app_file::is_label_character;
 use appytappy_config::signal::Number;
 
-use super::Image;
-use crate::system::Rgb;
+use super::{Image, Rgb};
 
 #[cfg(test)]
 pub(crate) mod drawn;
@@ -43,8 +42,9 @@ pub(crate) mod drawn;
 const GRID_ROWS: u32 = 16;
 
 /// Grid columns: twice the rows, so a character up to twice as wide as the
-/// line is tall, such as `%`, fits.
-const GRID_COLUMNS: u32 = 32;
+/// line is tall, such as `%`, fits. A [`Shape`] holds a row's cells in the
+/// bits of one `u32`, so there are as many columns as it has bits.
+const GRID_COLUMNS: u32 = u32::BITS;
 
 /// The most characters one read or one screenshot may hold.
 const MAX_CHARACTERS: usize = 24;
@@ -56,7 +56,7 @@ pub const MAX_GLYPHS: usize = 256;
 const MAX_NUMBER_LEN: usize = 24;
 
 /// A character's shape: one `u32` of cells per grid row.
-pub type Shape = [u32; 16];
+pub type Shape = [u32; GRID_ROWS as usize];
 
 /// The shapes of an image's characters, from [`DigitReader::shapes`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,10 +295,8 @@ impl DigitReader {
     /// [`Image::pixels`] holds it, is ink: each of its red, green, and blue
     /// within the tolerance of the text color.
     #[must_use]
-    pub fn is_ink(&self, [blue, green, red, _]: [u8; 4]) -> bool {
-        blue.abs_diff(self.ink.blue) <= self.tolerance
-            && green.abs_diff(self.ink.green) <= self.tolerance
-            && red.abs_diff(self.ink.red) <= self.tolerance
+    pub fn is_ink(&self, pixel: [u8; 4]) -> bool {
+        Rgb::of_pixel(pixel).near(self.ink, self.tolerance)
     }
 
     /// The shapes of the characters in `image`, left to right, as a read

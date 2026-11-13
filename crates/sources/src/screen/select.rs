@@ -8,12 +8,12 @@
 //! background around them.
 //!
 //! Colors are compared per channel: two colors are alike when each of their
-//! red, green, and blue differ by at most a tolerance, as a color check does.
+//! red, green, and blue differ by at most a tolerance, as [`Rgb::near`] says.
 
 use std::collections::HashMap;
 
 use super::mask::{Mask, pixels};
-use super::{Image, Region, Size};
+use super::{Image, Region, Rgb, Size};
 
 /// The most background colors [`snap`] collects from a box's edge. A plain
 /// background, even a gradient, has far fewer; more means the edge is not
@@ -109,21 +109,21 @@ pub fn snap(image: &Image, rough: Region, tolerance: u8) -> Option<Selection> {
     if !rough.fits(image.size()) {
         return None;
     }
-    let mut background: Vec<[u8; 3]> = Vec::new();
-    for color in edge(rough).filter_map(|(x, y)| color(image, x, y)) {
+    let mut background: Vec<Rgb> = Vec::new();
+    for color in edge(rough).filter_map(|(x, y)| image.pixel(x, y)) {
         if background.len() < MAX_BACKGROUND_COLORS && !background.contains(&color) {
             background.push(color);
         }
     }
     // A screenshot repeats its colors, so each is compared with the
     // background once.
-    let mut known: HashMap<[u8; 3], bool> = HashMap::new();
+    let mut known: HashMap<Rgb, bool> = HashMap::new();
     let kept: Vec<bool> = points(rough)
         .map(|(x, y)| {
-            color(image, x, y).is_some_and(|color| {
-                *known.entry(color).or_insert_with(|| {
-                    !background.iter().any(|edge| alike(*edge, color, tolerance))
-                })
+            image.pixel(x, y).is_some_and(|color| {
+                *known
+                    .entry(color)
+                    .or_insert_with(|| !background.iter().any(|edge| edge.near(color, tolerance)))
             })
         })
         .collect();
@@ -144,7 +144,7 @@ pub fn snap(image: &Image, rough: Region, tolerance: u8) -> Option<Selection> {
 #[must_use]
 pub fn grow(image: &Image, x: u32, y: u32, tolerance: u8) -> Option<Selection> {
     let size = image.size();
-    let seed = color(image, x, y)?;
+    let seed = image.pixel(x, y)?;
     let mut filled = vec![false; pixels(size)?];
     let start = index(x, y, size)?;
     *filled.get_mut(start)? = true;
@@ -154,7 +154,9 @@ pub fn grow(image: &Image, x: u32, y: u32, tolerance: u8) -> Option<Selection> {
             let Some(at) = index(x, y, size) else {
                 continue;
             };
-            let near = color(image, x, y).is_some_and(|color| alike(seed, color, tolerance));
+            let near = image
+                .pixel(x, y)
+                .is_some_and(|color| seed.near(color, tolerance));
             if near && let Some(slot) = filled.get_mut(at).filter(|slot| !**slot) {
                 *slot = true;
                 pending.push((x, y));
@@ -263,18 +265,6 @@ fn index(x: u32, y: u32, size: Size) -> Option<usize> {
         .ok()?
         .checked_mul(usize::try_from(size.width).ok()?)?
         .checked_add(usize::try_from(x).ok()?)
-}
-
-/// The red, green, and blue of the pixel at (`x`, `y`).
-fn color(image: &Image, x: u32, y: u32) -> Option<[u8; 3]> {
-    image
-        .pixel(x, y)
-        .map(|pixel| [pixel.red, pixel.green, pixel.blue])
-}
-
-/// Whether each channel of `a` is within `tolerance` of `b`'s.
-fn alike(a: [u8; 3], b: [u8; 3], tolerance: u8) -> bool {
-    a.iter().zip(b).all(|(&a, b)| a.abs_diff(b) <= tolerance)
 }
 
 #[cfg(test)]

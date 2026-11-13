@@ -15,7 +15,7 @@
 
 use std::time::Instant;
 
-use appytappy_config::app_file::{PinDef, RegionDef, ScreenDef, SizeDef};
+use appytappy_config::app_file::{PinDef, ScreenDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::saved::{AtSize, SavedCheck, SavedValue, Unread};
@@ -152,10 +152,7 @@ impl<H: Host> Owner<H> {
         let saved = check_spec::to_saved(&trial.check, &self.screenshots, &trial.app, TRIED)
             .map_err(|error| error.to_string())?;
         let screen = ScreenDef {
-            window_size: SizeDef {
-                width: size.width,
-                height: size.height,
-            },
+            window_size: size.into(),
             region: saved.region,
             check: saved.check,
             pin: trial.pin,
@@ -186,25 +183,12 @@ impl<H: Host> Owner<H> {
             }
             .to_string()
         })?;
-        let size = taught.window_size;
-        let region = taught.region.size();
-        let pin = trial.pin.unwrap_or_else(|| {
-            PinDef::guess(
-                RegionDef {
-                    x: taught.region.x(),
-                    y: taught.region.y(),
-                    width: region.width,
-                    height: region.height,
-                },
-                SizeDef {
-                    width: size.width,
-                    height: size.height,
-                },
-            )
-        });
+        let pin = trial
+            .pin
+            .unwrap_or_else(|| PinDef::guess(taught.region.into(), taught.window_size.into()));
         self.go_live(SavedValue {
             drawn: SavedCheck {
-                window_size: size,
+                window_size: taught.window_size,
                 region: taught.region,
                 check: Check::Number {
                     reader,
@@ -663,10 +647,9 @@ mod tests {
 
     #[test]
     fn settling_where_a_fix_reads_forgets_the_size_it_was_not_read_at() {
-        use appytappy_sources::screen::Region;
         use appytappy_sources::screen::check::ColorMatch;
         use appytappy_sources::screen::saved::SavedFix;
-        use appytappy_sources::system::Rgb;
+        use appytappy_sources::screen::{Region, Rgb};
 
         let size = |width| Size { width, height: 4 };
         let (drawn, fixed, unread) = (size(8), size(10), size(12));

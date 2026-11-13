@@ -8,6 +8,7 @@
 
 use std::ops::Range;
 
+use appytappy_config::app_file::RegionDef;
 use appytappy_sources::screen::select::{Selection, grow, snap};
 use appytappy_sources::screen::{Image, Region};
 use serde::{Deserialize, Serialize};
@@ -65,7 +66,8 @@ pub(crate) fn select(image: &Image, spec: &SelectionSpec) -> Option<Selection> {
     spec.steps.iter().fold(None, |current, step| {
         let (picked, combine) = match *step {
             SelectStep::Snap { region, combine } => (
-                Region::new(region.x, region.y, region.width, region.height)
+                Region::try_from(region)
+                    .ok()
                     .and_then(|rough| snap(image, rough, spec.tolerance)),
                 combine,
             ),
@@ -87,7 +89,7 @@ pub(crate) fn select(image: &Image, spec: &SelectionSpec) -> Option<Selection> {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct SelectionView {
     /// The box around the selected pixels.
-    region: RegionSpec,
+    region: RegionDef,
     /// The runs of selected pixels in the box, each as the index of its
     /// first pixel and of the pixel after its last, row by row from the top.
     spans: Vec<[usize; 2]>,
@@ -95,15 +97,8 @@ pub(crate) struct SelectionView {
 
 impl From<&Selection> for SelectionView {
     fn from(selection: &Selection) -> Self {
-        let region = selection.region();
-        let size = region.size();
         Self {
-            region: RegionSpec {
-                x: region.x(),
-                y: region.y(),
-                width: size.width,
-                height: size.height,
-            },
+            region: selection.region().into(),
             spans: selection
                 .mask()
                 .spans()
@@ -150,6 +145,15 @@ mod tests {
         }
     }
 
+    fn saved(x: u32, y: u32, width: u32, height: u32) -> RegionDef {
+        RegionDef {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
     fn view(steps: Vec<SelectStep>) -> Option<SelectionView> {
         select(
             &picture(),
@@ -169,7 +173,7 @@ mod tests {
     #[test]
     fn a_snap_or_a_click_selects_the_thing() {
         let square = Some(SelectionView {
-            region: region(1, 1, 2, 2),
+            region: saved(1, 1, 2, 2),
             spans: vec![[0, 4]],
         });
         assert_eq!(
@@ -191,7 +195,7 @@ mod tests {
                 click(4, 3, Combine::Replace)
             ]),
             Some(SelectionView {
-                region: region(4, 3, 1, 1),
+                region: saved(4, 3, 1, 1),
                 spans: vec![[0, 1]],
             })
         );
@@ -201,7 +205,7 @@ mod tests {
                 click(4, 3, Combine::Add)
             ]),
             Some(SelectionView {
-                region: region(1, 1, 4, 3),
+                region: saved(1, 1, 4, 3),
                 spans: vec![[0, 2], [4, 6], [11, 12]],
             })
         );
@@ -212,7 +216,7 @@ mod tests {
                 click(2, 1, Combine::Remove),
             ]),
             Some(SelectionView {
-                region: region(4, 3, 1, 1),
+                region: saved(4, 3, 1, 1),
                 spans: vec![[0, 1]],
             })
         );
@@ -260,7 +264,7 @@ mod tests {
                 click(4, 3, Combine::Add)
             ]),
             Some(SelectionView {
-                region: region(4, 3, 1, 1),
+                region: saved(4, 3, 1, 1),
                 spans: vec![[0, 1]],
             }),
             "adding to nothing is the pick"

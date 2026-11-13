@@ -80,7 +80,7 @@ pub(crate) fn outline(
         layout
             .copies()
             .iter()
-            .map(|copy| region_def(copy.from))
+            .map(|copy| copy.from.into())
             .collect()
     });
     let values = file
@@ -91,22 +91,11 @@ pub(crate) fn outline(
             id: value.id.clone(),
             name: value.name.clone(),
             watched,
-            region: region.as_ref().ok().copied().map(region_def),
+            region: region.as_ref().ok().copied().map(RegionDef::from),
             problem: region.err(),
         })
         .collect();
     CaptureOutline { copies, values }
-}
-
-/// `region` as the page reads it.
-const fn region_def(region: Region) -> RegionDef {
-    let size = region.size();
-    RegionDef {
-        x: region.x(),
-        y: region.y(),
-        width: size.width,
-        height: size.height,
-    }
 }
 
 #[cfg(test)]

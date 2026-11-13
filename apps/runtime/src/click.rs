@@ -108,9 +108,9 @@ pub(crate) mod tests {
     };
     use appytappy_config::click::{Area, ClickButton, ClickDelivery, Corner, Spot};
     use appytappy_sources::screen::{
-        CaptureSession, Crop, Frame, FrameHandler, Image, Region, Size,
+        CaptureSession, Crop, Frame, FrameHandler, Image, Region, Rgb, Size,
     };
-    use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
+    use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
     use std::io;
     use std::time::{Duration, Instant};
 
