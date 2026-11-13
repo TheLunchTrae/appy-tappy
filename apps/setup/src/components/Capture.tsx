@@ -261,7 +261,6 @@ export function Capture({
       setToReview(null);
     }
   }, [toReview, shots, setSelected]);
-  // The recording that runs now, of readings or of looks: the owner records one thing at a time.
   const setup: CaptureSetup = {
     valueName,
     step,
