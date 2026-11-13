@@ -2,9 +2,11 @@
 
 import { useMemo } from 'react';
 
-import { LIMITS, type Reading } from '../lib/bindings.ts';
+import { LIMITS } from '../lib/bindings.ts';
 import { type Draft, type DraftState, stateOn, withoutState, withState, withStateAt } from '../lib/check.ts';
+import type { LiveReads } from '../lib/liveCheck.ts';
 import { type Picture, cropPicture } from '../lib/pixels.ts';
+import { useLiveRead } from '../lib/useLiveCheck.ts';
 import type { Rect } from '../lib/region.ts';
 import type { Masking } from '../lib/selection.ts';
 import { PictureCanvas } from './canvas.tsx';
@@ -17,7 +19,8 @@ interface Props {
   readonly selected: number | null;
   /** What each state's selection leaves of the region, by the screenshot it is taken from. */
   readonly masks: ReadonlyMap<number, Masking>;
-  readonly reading: Reading | null;
+  /** What the live window reads, which says the state that shows there now. */
+  readonly reads: LiveReads;
   /** The screenshot's number as the strip shows it. */
   readonly position: (index: number) => number;
   readonly onDraft: (update: (draft: Draft) => Draft) => void;
@@ -121,7 +124,8 @@ function StateCard(props: CardProps) {
   );
 }
 
-export function StatesField({ draft, full, selected, masks, reading, position, onDraft, onShow, fix }: Props) {
+export function StatesField({ draft, full, selected, masks, reads, position, onDraft, onShow, fix }: Props) {
+  const { reading } = useLiveRead(reads);
   const blocked = addBlocked(draft, selected);
   const selecting = draft.states.some((state) => state.steps.length > 0);
   return (

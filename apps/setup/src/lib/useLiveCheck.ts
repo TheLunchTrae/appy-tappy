@@ -1,11 +1,19 @@
 // The check the capture screen sets up on the live frame, and what it reads.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { EditPreview } from './bindings.ts';
 import { errorText, readValue } from './api.ts';
 import type { Built, CheckState } from './check.ts';
-import { afterRead, type InForce, type LiveRead, type ReadAnswer } from './liveCheck.ts';
+import {
+  afterRead,
+  type InForce,
+  type LiveRead,
+  type LiveReads,
+  liveReads,
+  NOTHING_READ,
+  type ReadAnswer,
+} from './liveCheck.ts';
 import { useRepeat } from './repeat.ts';
 import { ask } from './request.ts';
 
@@ -14,14 +22,19 @@ const CHECK_DELAY_MS = 250;
 /** How long the live reading waits between reads. */
 const READING_PAUSE_MS = 120;
 
-/** What the trial being set up reads on the live window. */
-export interface LiveCheck extends LiveRead {
+/** The trial being set up on the live window. */
+export interface LiveCheck {
   readonly state: CheckState;
   /** What saving the edit that is set would do; null for any other check and until one is set. */
   readonly preview: EditPreview | null;
+  /** What the trial reads on the live window, for {@link useLiveRead}. */
+  readonly reads: LiveReads;
 }
 
-const NOTHING_READ: LiveRead = { reading: null, problem: null };
+/** What `reads` shows now: the component that calls it renders again with each new reading, and no other does. */
+export function useLiveRead(reads: LiveReads): LiveRead {
+  return useSyncExternalStore(reads.subscribe, reads.shown);
+}
 
 /**
  * What the capture screen tries on the live window, or what it still needs. Trying a saved value's edit answers
@@ -71,7 +84,8 @@ export function trialOf<Spec>(
  */
 export function useLiveCheck(trial: Trial, again: string | null): LiveCheck {
   const [state, setState] = useState<CheckState>({ kind: 'idle' });
-  const [read, setRead] = useState<LiveRead>(NOTHING_READ);
+  // The window is read several times a second, so what it reads is no state of the screen that calls this.
+  const [reads] = useState(liveReads);
   const [preview, setPreview] = useState<EditPreview | null>(null);
   // The number of the newest trial, a check or a saved value's edit, and of the one the Rust side reads with: see
   // `afterRead`. A trial tried again takes a new number too.
@@ -89,12 +103,12 @@ export function useLiveCheck(trial: Trial, again: string | null): LiveCheck {
     const number = tried.current;
     if (!trial.ok) {
       setState({ kind: 'idle' });
-      setRead(NOTHING_READ);
+      reads.change(() => NOTHING_READ);
       setPreview(null);
       return undefined;
     }
     setState({ kind: 'pending' });
-    setRead((shown) => ({ ...shown, problem: null }));
+    reads.change((shown) => (shown.problem === null ? shown : { ...shown, problem: null }));
     return ask(
       trial.attempt,
       (answer) => {
@@ -108,7 +122,7 @@ export function useLiveCheck(trial: Trial, again: string | null): LiveCheck {
       },
       CHECK_DELAY_MS,
     );
-  }, [key, again]);
+  }, [key, again, reads]);
 
   const readNow = useCallback(async (): Promise<void> => {
     const asked = inForce.current;
@@ -119,8 +133,8 @@ export function useLiveCheck(trial: Trial, again: string | null): LiveCheck {
       answer = { ok: false, problem: errorText(error) };
     }
     const now = inForce.current;
-    setRead((shown) => afterRead(shown, asked, now, answer));
-  }, []);
+    reads.change((shown) => afterRead(shown, asked, now, answer));
+  }, [reads]);
   useRepeat(readNow, READING_PAUSE_MS, state.kind === 'set');
-  return { state, ...read, preview };
+  return { state, preview, reads };
 }

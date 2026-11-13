@@ -1460,7 +1460,11 @@ Settling at a size where the value reads places it there and forgets
 `unread`. Each new trial places its value at the newest frame's size at
 once, so an edit that the page tries again on a size change reads there
 without waiting for the size to settle.
-Its state is `state`, a `CheckState`; `read`, the reading or the problem shown;
+Its state is `state`, a `CheckState`; `reads`, the reading or the problem
+shown, which is kept outside the capture screen's own state (`liveReads` in
+`apps/setup/src/lib/liveCheck.ts`) so that a new reading renders only the
+parts that show it, and a read that answers what shows already renders
+nothing;
 `preview`, what saving an edit would do; `tried`, the number of the newest
 trial; and `inForce`, the number of the trial the owner reads with, or none.
 Below, a check stands for any of the three.
