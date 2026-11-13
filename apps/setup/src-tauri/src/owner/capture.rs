@@ -894,7 +894,7 @@ mod tests {
         harness
             .ask(|owner| owner.set_check(&trial(STATE)))
             .expect("a valid check");
-        // The page asks for a reading's pixels by its recording's ID, which
+        // The page asks for a reading's pixels by its recording's number, which
         // it still holds after the stop.
         let recording = harness
             .ask(Owner::recording_state)

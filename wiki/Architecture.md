@@ -811,7 +811,8 @@ is removed; a window that cannot open or close is reported and does not stop
 the others, and a removal or overlay change that worked is not undone by such
 a report. With no monitors listed, a panel opens where it was left. The
 picture-in-picture panel reports where it was moved, and the owner saves that
-once the panel stops moving.
+once the panel stops moving, or at once when that application's overlay reads
+its file again or its window closes. Other panels still wait to stop moving.
 
 ## Unsafe code
 

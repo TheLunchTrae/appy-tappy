@@ -381,13 +381,14 @@ impl<S: CaptureSession> Overlays<S> {
 
     /// The panel places `places` names, by application ID, which the
     /// caller saves.
-    pub(crate) fn placed_panels(&mut self, places: Places) -> Vec<(String, PanelDef)> {
+    pub(crate) fn placed_panels(&mut self, places: Places<'_>) -> Vec<(String, PanelDef)> {
         self.open
             .iter_mut()
             .filter_map(|(app, overlay)| {
                 let (panel, polls) = overlay.placed?;
                 let taken = match places {
                     Places::Settled => polls >= SETTLE_POLLS,
+                    Places::Of(only) => app == only,
                     Places::All => true,
                 };
                 taken.then(|| {
@@ -442,10 +443,13 @@ impl<S: CaptureSession> Overlays<S> {
 /// Which of the panel places not yet saved [`Overlays::placed_panels`]
 /// hands over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Places {
+pub(crate) enum Places<'app> {
     /// Those the user left alone long enough to have settled.
     Settled,
-    /// Every one, as before the overlays close or read their files again.
+    /// The one of the application with this ID, as before its overlay
+    /// closes or reads its file again.
+    Of(&'app str),
+    /// Every one, as before the overlays close.
     All,
 }
 
