@@ -243,8 +243,7 @@ pub(crate) fn measure(
 
 #[cfg(test)]
 mod tests {
-    use appytappy_sources::screen::Size;
-    use appytappy_sources::system::Rgb;
+    use appytappy_sources::screen::{Rgb, Size};
     use serde_json::json;
 
     use super::*;

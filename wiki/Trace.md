@@ -92,7 +92,8 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
   which categories to record, and builds a `Record` only for those. A record
   holds no text of its own, only the session, the value's or rule's position
   in the plan, and fixed words, so building one allocates nothing.
-- **Writer thread.** The writer, in `trace/writer.rs`, owns the files. Each
+- **Writer thread.** The writer, in `trace/writer.rs`, owns the files, and
+  `trace/rows.rs` words each record's row. Each
   handle sends its records into one bounded buffer of `BUFFER` records, which
   is allocated when the trace starts. A send never waits: when the buffer is
   full, the record is dropped and counted, and the next record from the same

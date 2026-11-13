@@ -1769,6 +1769,12 @@ div.match-answer {
   gap: 6px;
 }
 
+/* The hint for the keys sits at the page's right edge, so it opens toward the left. */
+.sheet-head .end > .hint-wrap > .tip {
+  left: auto;
+  right: 0;
+}
+
 .sheet {
   flex: 1;
   min-height: 0;

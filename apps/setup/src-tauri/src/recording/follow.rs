@@ -13,7 +13,7 @@
 //! drawn at. It also says why a recording is not placed at a size
 //! ([`Unplaced`]), which the recording tells the user.
 
-use appytappy_config::app_file::{PinDef, RegionDef, SizeChangesDef, SizeDef};
+use appytappy_config::app_file::{PinDef, SizeChangesDef};
 use appytappy_sources::screen::{Region, Size, scale};
 
 /// How a recording follows its window to another size.
@@ -39,20 +39,9 @@ impl Follows {
     ) -> Self {
         match size_changes {
             SizeChangesDef::Rarely => Self::Drawn,
-            SizeChangesDef::Often => Self::Scaled(pin.unwrap_or_else(|| {
-                PinDef::guess(
-                    RegionDef {
-                        x: region.x(),
-                        y: region.y(),
-                        width: region.size().width,
-                        height: region.size().height,
-                    },
-                    SizeDef {
-                        width: drawn.width,
-                        height: drawn.height,
-                    },
-                )
-            })),
+            SizeChangesDef::Often => {
+                Self::Scaled(pin.unwrap_or_else(|| PinDef::guess(region.into(), drawn.into())))
+            },
         }
     }
 

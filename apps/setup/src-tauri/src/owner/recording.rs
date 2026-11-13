@@ -6,8 +6,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use appytappy_sources::screen::digits::DigitReader;
-use appytappy_sources::screen::{Image, Region, Size};
-use appytappy_sources::system::Rgb;
+use appytappy_sources::screen::{Image, Region, Rgb, Size};
 
 use crate::check_spec::{self, CharactersSpec, RegionSpec};
 use crate::owner::messages::{ExampleSpec, RecordSpec};
@@ -221,13 +220,7 @@ impl<H: Host> Owner<H> {
     ) -> Vec<u32> {
         let mut drawn: BTreeMap<usize, Vec<Region>> = BTreeMap::new();
         for example in examples {
-            let RegionSpec {
-                x,
-                y,
-                width,
-                height,
-            } = example.region;
-            if let Some(region) = Region::new(x, y, width, height) {
+            if let Ok(region) = Region::try_from(example.region) {
                 drawn.entry(example.screenshot).or_default().push(region);
             }
         }
@@ -296,10 +289,18 @@ impl<H: Host> Owner<H> {
             .map(|recording| recording.view(Instant::now()))
     }
 
-    /// Recorded reading `index`'s pixels, at most `max_width` wide.
-    pub(crate) fn recorded_pixels(&self, index: usize, max_width: u32) -> Option<Vec<u8>> {
+    /// Reading `index`'s pixels of recording `recording`, at most
+    /// `max_width` wide; `None` when that recording was replaced or
+    /// forgotten.
+    pub(crate) fn recorded_pixels(
+        &self,
+        recording: u64,
+        index: usize,
+        max_width: u32,
+    ) -> Option<Vec<u8>> {
         self.readings()
-            .and_then(|recording| recording.readings().get(index))
+            .filter(|kept| kept.id.number() == recording)
+            .and_then(|kept| kept.readings().get(index))
             .map(|kept| pixels::rgba(&kept.image, max_width))
     }
 
@@ -307,9 +308,10 @@ impl<H: Host> Owner<H> {
     /// it reads it right; an error when the labeled screenshots cannot be
     /// learned.
     pub(crate) fn review_problems(
-        &self,
+        &mut self,
         spec: &CharactersSpec,
     ) -> Result<Vec<Option<String>>, String> {
+        self.keep_reference(spec.reference.as_ref());
         self.with_session(|session| spec.recorded_problems(session))
             .map_err(|error| error.to_string())
     }
@@ -433,7 +435,9 @@ mod tests {
             harness.readings(),
             [(2, Text::Read("1".to_owned())), (1, Text::Pending)]
         );
-        let pixels_of = |index| move |owner: &mut Owner<FakeHost>| owner.recorded_pixels(index, 4);
+        let recording = harness.recording().expect("a recording").id;
+        let pixels_of =
+            |index| move |owner: &mut Owner<FakeHost>| owner.recorded_pixels(recording, index, 4);
         assert_eq!(
             harness.ask(pixels_of(1)),
             Some(pixels::rgba(&red_columns(3), 4))
@@ -450,6 +454,33 @@ mod tests {
             "a stopped recording keeps no more"
         );
         assert_eq!(harness.jobs.try_iter().count(), 0);
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_reading_s_pixels_are_answered_only_for_its_own_recording() {
+        let (mut harness, root) = with_example_app("rec-pixels-of-its-own");
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        assert_eq!(harness.ask(start_recording(255, false)), Ok(()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        let old = harness.recording().expect("a recording").id;
+        let pixels = |harness: &mut Harness, recording| {
+            harness.ask(move |owner| owner.recorded_pixels(recording, 0, 64))
+        };
+        let first = pixels(&mut harness, old).expect("the reading's pixels");
+
+        // Discarded and recorded again at once: the page's late ask for the
+        // old recording's first reading gets none of the new one's pixels.
+        harness.ask(Owner::discard_recording);
+        assert_eq!(harness.ask(start_recording(255, false)), Ok(()));
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        let new = harness.recording().expect("a recording").id;
+        assert_ne!(new, old);
+        assert_eq!(pixels(&mut harness, old), None, "the old ID is dropped");
+        let second = pixels(&mut harness, new).expect("the new reading's pixels");
+        assert_ne!(second, first);
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

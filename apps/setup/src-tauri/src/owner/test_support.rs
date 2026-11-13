@@ -386,13 +386,19 @@ impl Harness {
 
     /// Picks window 7 and returns the capture's handler.
     pub(super) fn pick(&mut self) -> FrameHandler {
-        self.ask(|owner| owner.pick(7)).expect("capture starts");
+        self.pick_numbered().1
+    }
+
+    /// Picks window 7 and returns the capture's number, as the page gets
+    /// it, with the capture's handler.
+    pub(super) fn pick_numbered(&mut self) -> (u64, FrameHandler) {
+        let capture = self.ask(|owner| owner.pick(7)).expect("capture starts");
         let started = self.handlers.try_recv().expect("capture started");
         assert_eq!(
             (started.window, started.crop, started.interval),
             (7, Crop::Whole, PREVIEW_INTERVAL)
         );
-        started.handler
+        (capture, started.handler)
     }
 
     /// Runs `handler` on `frame`, a whole window's frame, and applies

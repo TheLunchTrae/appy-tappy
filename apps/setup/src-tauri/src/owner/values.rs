@@ -5,7 +5,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef,
+    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, ValueDef,
 };
 use appytappy_config::names::{new_value_id, value_id};
 use appytappy_config::process::ProcessId;
@@ -139,10 +139,7 @@ impl<H: Host> Owner<H> {
                 check_spec::to_saved(&spec.check, owner.capture.screenshots(), &spec.app, &id)
                     .map_err(|error| error.to_string())?;
             let screen = ScreenDef {
-                window_size: SizeDef {
-                    width: size.width,
-                    height: size.height,
-                },
+                window_size: size.into(),
                 region: saved.region,
                 check: saved.check,
                 pin: Some(spec.pin),
@@ -348,12 +345,17 @@ pub(super) fn read_back(
     pictures: &Pictures,
 ) -> Result<saved::SavedValue, String> {
     let file = &app.file;
-    saved::build(screen, &file.references, file.size_changes, |picture| {
-        pictures
-            .iter()
-            .find(|(name, _)| name == picture)
-            .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
-    })
+    saved::build(
+        screen,
+        &mut saved::Readers::new(&file.references),
+        file.size_changes,
+        |picture| {
+            pictures
+                .iter()
+                .find(|(name, _)| name == picture)
+                .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
+        },
+    )
     .map_err(|error| match error {
         SavedError::NoReference { .. } => format!("{} no longer has that reference.", file.name),
         SavedError::NoCharacters { id, characters } => {
@@ -375,7 +377,7 @@ pub(super) fn read_back(
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::WindowDef;
+    use appytappy_config::app_file::{SizeDef, WindowDef};
     use appytappy_config::automation_file::{ActionDef, AutomationDef, MediaCommandDef};
     use appytappy_sources::screen::{Image, Size};
 

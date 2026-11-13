@@ -15,8 +15,8 @@ use std::fmt;
 use std::io;
 
 use appytappy_config::app_file::{
-    CheckDef, CheckDefError, ColorDef, FixDef, MAX_FIXES, PinDef, ReferenceDef, RegionDef,
-    ScreenDef, SizeChangesDef, SizeDef, StateDef,
+    CheckDef, CheckDefError, FixDef, MAX_FIXES, PinDef, ReferenceDef, RegionDef, ScreenDef,
+    SizeChangesDef, SizeDef, StateDef,
 };
 use appytappy_config::signal::{InvalidStateName, StateName};
 
@@ -24,8 +24,7 @@ use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
 use super::digits::{DigitReader, LearnError};
 use super::mask::Mask;
 use super::scale::scaled;
-use super::{Image, ImageError, Region, Size};
-use crate::system::Rgb;
+use super::{EmptyRegion, Image, ImageError, Region, Size};
 
 /// A saved value's first drawing: the window size it was drawn at, its
 /// region, and its check.
@@ -219,18 +218,59 @@ impl SavedValue {
     }
 }
 
-impl From<ColorDef> for Rgb {
-    fn from(color: ColorDef) -> Self {
+/// The readers of one application's references, each built the first time
+/// a value reads with it and kept for the values after it, so loading an
+/// application decodes each reference's pictures once.
+///
+/// It is for one load of the application: it never looks at a reference's
+/// pictures again, so every value built with it must take its pictures from
+/// the same files. A reference that cannot be read is not kept, and is read
+/// again for the next value that names it.
+#[derive(Debug)]
+pub struct Readers<'app> {
+    references: &'app [ReferenceDef],
+    /// The reader of each reference built so far, in the references' order.
+    built: Vec<Option<DigitReader>>,
+}
+
+impl<'app> Readers<'app> {
+    /// The readers of `references`, an application's, none of them built
+    /// yet.
+    #[must_use]
+    pub fn new(references: &'app [ReferenceDef]) -> Self {
         Self {
-            red: color.red,
-            green: color.green,
-            blue: color.blue,
+            references,
+            built: vec![None; references.len()],
+        }
+    }
+
+    /// The reader of the reference `id`, with every character the reference
+    /// learns from its pictures, which `picture` returns the bytes of.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SavedError::NoReference`] when the application has no such
+    /// reference, and what [`reader`] returns when it cannot be built.
+    pub fn reader(
+        &mut self,
+        id: &str,
+        picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
+    ) -> Result<&DigitReader, SavedError> {
+        let (reference, built) = self
+            .references
+            .iter()
+            .zip(&mut self.built)
+            .find(|(known, _)| known.id == id)
+            .ok_or_else(|| SavedError::NoReference { id: id.to_owned() })?;
+        match built {
+            Some(reader) => Ok(reader),
+            None => Ok(built.insert(reader(reference, picture)?)),
         }
     }
 }
 
-/// Rebuilds the value `screen` describes, with the application's
-/// `references`, read as its window's `size_changes` say.
+/// Rebuilds the value `screen` describes, with its application's `readers`,
+/// read as its window's `size_changes` say.
 ///
 /// `picture` returns the bytes of a PNG file the check, a fix or a
 /// reference names, such as `status-1.png`.
@@ -252,7 +292,7 @@ impl From<ColorDef> for Rgb {
 /// reference do not suit its check.
 pub fn build(
     screen: &ScreenDef,
-    references: &[ReferenceDef],
+    readers: &mut Readers<'_>,
     size_changes: SizeChangesDef,
     mut picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Result<SavedValue, SavedError> {
@@ -265,7 +305,7 @@ pub fn build(
             whole,
             characters,
         } => number_check(
-            references,
+            readers,
             reference,
             *whole,
             characters.as_deref(),
@@ -295,10 +335,7 @@ pub fn build(
         .iter()
         .map(|fix| {
             let in_fix = |source: SavedError| SavedError::Fix {
-                window_size: Size {
-                    width: fix.window_size.width,
-                    height: fix.window_size.height,
-                },
+                window_size: fix.window_size.into(),
                 source: Box::new(source),
             };
             if !sizes.insert((fix.window_size.width, fix.window_size.height)) {
@@ -309,7 +346,7 @@ pub fn build(
                     return Err(in_fix(SavedError::SamePicture(image.clone())));
                 }
             }
-            build_fix(fix, &screen.check, references, &mut picture).map_err(in_fix)
+            build_fix(fix, &screen.check, readers, &mut picture).map_err(in_fix)
         })
         .collect::<Result<_, _>>()?;
     Ok(SavedValue {
@@ -326,12 +363,8 @@ pub fn build(
 
 /// The region `region` of a window of `size`, once it is not empty and fits.
 fn place(region: RegionDef, size: SizeDef) -> Result<(Region, Size), SavedError> {
-    let window_size = Size {
-        width: size.width,
-        height: size.height,
-    };
-    let region = Region::new(region.x, region.y, region.width, region.height)
-        .ok_or(SavedError::EmptyRegion)?;
+    let window_size = Size::from(size);
+    let region = Region::try_from(region).map_err(|EmptyRegion| SavedError::EmptyRegion)?;
     if region.fits(window_size) {
         Ok((region, window_size))
     } else {
@@ -339,21 +372,19 @@ fn place(region: RegionDef, size: SizeDef) -> Result<(Region, Size), SavedError>
     }
 }
 
-/// A number check that reads with the reference `id` among `references`:
-/// with only its glyphs for `characters`, or with all of them for `None`.
-/// The glyphs are chosen here, once, so a read matches against no others.
+/// A number check that reads with the reference `id` among `readers`: with
+/// only its glyphs for `characters`, or with all of them for `None`. The
+/// glyphs are chosen here, once, so a read matches against no others.
 fn number_check(
-    references: &[ReferenceDef],
+    readers: &mut Readers<'_>,
     id: &str,
     whole: bool,
     characters: Option<&str>,
     picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Result<Check, SavedError> {
-    let reference = references
-        .iter()
-        .find(|known| known.id == id)
-        .ok_or_else(|| SavedError::NoReference { id: id.to_owned() })?;
-    let reader = reader(reference, picture)?
+    let reader = readers
+        .reader(id, picture)?
+        .clone()
         .reading(characters)
         .ok_or_else(|| SavedError::NoCharacters {
             id: id.to_owned(),
@@ -366,7 +397,7 @@ fn number_check(
 fn build_fix(
     fix: &FixDef,
     check: &CheckDef,
-    references: &[ReferenceDef],
+    readers: &mut Readers<'_>,
     picture: &mut impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Result<SavedFix, SavedError> {
     let (region, window_size) = place(fix.region, fix.window_size)?;
@@ -384,7 +415,7 @@ fn build_fix(
             },
             Some(reference),
         ) => Some(number_check(
-            references,
+            readers,
             reference,
             *whole,
             characters.as_deref(),
@@ -694,7 +725,7 @@ impl Error for SavedError {
 mod tests {
     use std::collections::BTreeMap;
 
-    use appytappy_config::app_file::{RegionDef, SampleDef, SizeDef, StateDef};
+    use appytappy_config::app_file::{ColorDef, SampleDef, StateDef};
     use appytappy_config::names::sample_name;
     use appytappy_config::signal::{Number, Value};
 
@@ -782,7 +813,7 @@ mod tests {
                 color: RED,
                 tolerance: 10,
             }),
-            &[],
+            &mut Readers::new(&[]),
             OFTEN,
             from(&BTreeMap::new()),
         )
@@ -837,7 +868,7 @@ mod tests {
         );
         let built = build(
             &state_check(&[("Shown", "icon.png")]),
-            &[],
+            &mut Readers::new(&[]),
             OFTEN,
             from(&files),
         )
@@ -860,7 +891,7 @@ mod tests {
                 filled: RED,
                 empty: GRAY,
             }),
-            &[],
+            &mut Readers::new(&[]),
             OFTEN,
             from(&BTreeMap::new()),
         )
@@ -874,7 +905,7 @@ mod tests {
                 filled: RED,
                 empty: RED,
             }),
-            &[],
+            &mut Readers::new(&[]),
             OFTEN,
             from(&BTreeMap::new()),
         );
@@ -894,7 +925,7 @@ mod tests {
         let files = pictures(&[("red.png", &solid(4, RED)), ("gray.png", &solid(4, GRAY))]);
         let built = build(
             &state_check(&[("Red", "red.png"), ("Gray", "gray.png")]),
-            &[],
+            &mut Readers::new(&[]),
             OFTEN,
             from(&files),
         )
@@ -907,7 +938,7 @@ mod tests {
         );
         let error = build(
             &state_check(&[("none", "red.png")]),
-            &[],
+            &mut Readers::new(&[]),
             OFTEN,
             from(&files),
         )
@@ -960,7 +991,7 @@ mod tests {
         };
         let plain = build(
             &screen(number.clone()),
-            &[counter("11")],
+            &mut Readers::new(&[counter("11")]),
             OFTEN,
             from(&files),
         )
@@ -970,8 +1001,13 @@ mod tests {
         for expected in ["0123456789,.%", "11 ", "", &"x".repeat(5000)] {
             let mut expecting = counter("11");
             expecting.expects = Some(expected.to_owned());
-            let guided =
-                build(&screen(number.clone()), &[expecting], OFTEN, from(&files)).expect("builds");
+            let guided = build(
+                &screen(number.clone()),
+                &mut Readers::new(&[expecting]),
+                OFTEN,
+                from(&files),
+            )
+            .expect("builds");
             assert_eq!(guided.drawn.check, plain.drawn.check, "{expected:?}");
         }
     }
@@ -1047,7 +1083,8 @@ mod tests {
             fixes: Vec::new(),
             reading_area: false,
         };
-        let built = build(&value, &[reference], OFTEN, from(&files)).expect("builds");
+        let built =
+            build(&value, &mut Readers::new(&[reference]), OFTEN, from(&files)).expect("builds");
         // The runtime's read: the value placed at the window's size, and
         // its check on that region of the frame.
         for (size, text, shown) in [
@@ -1096,14 +1133,20 @@ mod tests {
         for check in [number, bar] {
             let plain = build(
                 &screen(check.clone()),
-                &[counter("11")],
+                &mut Readers::new(&[counter("11")]),
                 OFTEN,
                 from(&files),
             )
             .expect("builds");
             let mut area = screen(check);
             area.reading_area = true;
-            let guided = build(&area, &[counter("11")], OFTEN, from(&files)).expect("builds");
+            let guided = build(
+                &area,
+                &mut Readers::new(&[counter("11")]),
+                OFTEN,
+                from(&files),
+            )
+            .expect("builds");
             // The same region, check, pin and sizes, whatever the flag says.
             assert_eq!(guided, plain);
         }
@@ -1120,7 +1163,7 @@ mod tests {
         };
         let built = build(
             &screen(number.clone()),
-            &[counter("11")],
+            &mut Readers::new(&[counter("11")]),
             OFTEN,
             from(&files),
         )
@@ -1137,8 +1180,13 @@ mod tests {
         // transparent.
         let mut clear = BTreeMap::new();
         clear.insert(sample_name("counter", 1), transparent(&elevens(3)));
-        let from_clear =
-            build(&screen(number), &[counter("11")], OFTEN, from(&clear)).expect("builds");
+        let from_clear = build(
+            &screen(number),
+            &mut Readers::new(&[counter("11")]),
+            OFTEN,
+            from(&clear),
+        )
+        .expect("builds");
         assert_eq!(
             from_clear.drawn.check.read(&elevens(1)),
             Ok(Value::Number(Number::new(11.0).expect("finite")))
@@ -1149,7 +1197,7 @@ mod tests {
                 whole: false,
                 characters: None,
             }),
-            &[counter("111")],
+            &mut Readers::new(&[counter("111")]),
             OFTEN,
             from(&files),
         )
@@ -1166,7 +1214,7 @@ mod tests {
                 whole: false,
                 characters: None,
             }),
-            &[counter("11")],
+            &mut Readers::new(&[counter("11")]),
             OFTEN,
             from(&files),
         )
@@ -1224,19 +1272,29 @@ mod tests {
             })
         };
         let read = |characters: Option<&str>| {
-            build(&number(characters), &[counter("O0")], OFTEN, from(&files))
-                .expect("builds")
-                .drawn
-                .check
-                .read(&rings(&[10]))
+            build(
+                &number(characters),
+                &mut Readers::new(&[counter("O0")]),
+                OFTEN,
+                from(&files),
+            )
+            .expect("builds")
+            .drawn
+            .check
+            .read(&rings(&[10]))
         };
         let zero = Ok(Value::Number(Number::new(0.0).expect("finite")));
         assert!(read(None).is_err());
         assert!(read(Some("O")).is_err());
         // Characters the reference has yet to learn are passed over.
         assert_eq!(read(Some("0123456789")), zero);
-        let error = build(&number(Some("%")), &[counter("O0")], OFTEN, from(&files))
-            .expect_err("it knows none of them");
+        let error = build(
+            &number(Some("%")),
+            &mut Readers::new(&[counter("O0")]),
+            OFTEN,
+            from(&files),
+        )
+        .expect_err("it knows none of them");
         assert_eq!(
             error.to_string(),
             "its reference counter knows none of the characters it reads, \"%\""
@@ -1252,12 +1310,73 @@ mod tests {
         let mut letters = counter("O");
         letters.id = "letters".to_owned();
         letters.samples[0].image = "ref-letters-1.png".to_owned();
-        let error = build(&fixed, &[counter("O0"), letters], OFTEN, from(&files))
-            .expect_err("the fix's reference knows no digit");
+        let error = build(
+            &fixed,
+            &mut Readers::new(&[counter("O0"), letters]),
+            OFTEN,
+            from(&files),
+        )
+        .expect_err("the fix's reference knows no digit");
         assert_eq!(
             error.to_string(),
             "at 1000x500, its reference letters knows none of the characters it reads, \"0\""
         );
+    }
+
+    #[test]
+    fn an_application_s_values_build_each_reference_s_reader_once() {
+        let files = pictures(&[(&sample_name("counter", 1), &rings(&[10, 11]))]);
+        let number = |characters: &str| {
+            screen(CheckDef::Number {
+                reference: "counter".to_owned(),
+                whole: false,
+                characters: Some(characters.to_owned()),
+            })
+        };
+        let mut asked = Vec::new();
+        let references = [counter("O0")];
+        let mut readers = Readers::new(&references);
+        let mut built = Vec::new();
+        for characters in ["0", "O", "O0"] {
+            let picture = |name: &str| {
+                asked.push(name.to_owned());
+                from(&files)(name)
+            };
+            built.push(build(&number(characters), &mut readers, OFTEN, picture).expect("builds"));
+        }
+        // Three values and the reference itself read its one picture once.
+        assert!(readers.reader("counter", from(&files)).is_ok());
+        assert_eq!(asked, [sample_name("counter", 1)]);
+        // Each value still reads with its own characters of the reader.
+        let alone = |characters: &str| {
+            build(
+                &number(characters),
+                &mut Readers::new(&references),
+                OFTEN,
+                from(&files),
+            )
+            .expect("builds")
+        };
+        assert_eq!(built, ["0", "O", "O0"].map(alone));
+        assert_ne!(built[0], built[1]);
+    }
+
+    #[test]
+    fn a_reference_that_cannot_be_read_is_read_again_for_the_next_value() {
+        let references = [counter("O0")];
+        let mut readers = Readers::new(&references);
+        let gone = readers
+            .reader("counter", from(&BTreeMap::new()))
+            .expect_err("no picture");
+        assert!(matches!(gone, SavedError::Missing { .. }), "{gone:?}");
+        let files = pictures(&[(&sample_name("counter", 1), &rings(&[10, 11]))]);
+        assert!(readers.reader("counter", from(&files)).is_ok());
+        // Once built, it is kept, whatever the pictures say now.
+        assert!(readers.reader("counter", from(&BTreeMap::new())).is_ok());
+        let unknown = readers
+            .reader("other", from(&files))
+            .expect_err("no such reference");
+        assert!(matches!(unknown, SavedError::NoReference { id } if id == "other"));
     }
 
     #[test]
@@ -1273,7 +1392,13 @@ mod tests {
             .expect("a header");
         files.insert("huge.png".to_owned(), huge);
         let problems = ["gone.png", "broken.png", "huge.png", "small.png"].map(|name| {
-            let error = build(&reference(name), &[], OFTEN, from(&files)).expect_err("refused");
+            let error = build(
+                &reference(name),
+                &mut Readers::new(&[]),
+                OFTEN,
+                from(&files),
+            )
+            .expect_err("refused");
             (error.to_string(), error.source().is_some())
         });
         assert_eq!(
@@ -1296,19 +1421,20 @@ mod tests {
         );
         let mut empty = reference("small.png");
         empty.region.width = 0;
-        let error = build(&empty, &[], OFTEN, from(&files)).expect_err("empty");
+        let error = build(&empty, &mut Readers::new(&[]), OFTEN, from(&files)).expect_err("empty");
         assert_eq!(error.to_string(), "its region is empty");
         assert!(error.source().is_none());
         let mut outside = reference("small.png");
         outside.region.x = 797;
-        let error = build(&outside, &[], OFTEN, from(&files)).expect_err("outside");
+        let error =
+            build(&outside, &mut Readers::new(&[]), OFTEN, from(&files)).expect_err("outside");
         assert_eq!(
             error.to_string(),
             "its region lies outside the 800x600 window it was drawn on"
         );
         assert!(error.source().is_none());
         outside.region.x = 796;
-        let edge = build(&outside, &[], OFTEN, from(&files));
+        let edge = build(&outside, &mut Readers::new(&[]), OFTEN, from(&files));
         assert!(
             matches!(edge, Err(SavedError::PictureSize { .. })),
             "touching the edge fits, so only the picture is wrong: {edge:?}"
@@ -1319,7 +1445,13 @@ mod tests {
     fn a_state_check_needs_its_file_s_rules_and_each_picture_once() {
         let files = pictures(&[("a.png", &solid(4, RED)), ("b.png", &solid(4, GRAY))]);
         let refused = |states: &[(&str, &str)]| {
-            build(&state_check(states), &[], OFTEN, from(&files)).expect_err("refused")
+            build(
+                &state_check(states),
+                &mut Readers::new(&[]),
+                OFTEN,
+                from(&files),
+            )
+            .expect_err("refused")
         };
         let same = refused(&[("Paused", "a.png"), ("paused", "b.png")]);
         assert!(
@@ -1343,7 +1475,7 @@ mod tests {
         assert!(
             build(
                 &state_check(&[("Paused", "a.png"), ("Live", "b.png")]),
-                &[],
+                &mut Readers::new(&[]),
                 OFTEN,
                 from(&files)
             )
@@ -1400,7 +1532,7 @@ mod tests {
     #[test]
     fn a_value_reads_its_drawing_at_its_size_and_scales_elsewhere() {
         let (screen, files) = red_or_gray();
-        let value = build(&screen, &[], OFTEN, from(&files)).expect("builds");
+        let value = build(&screen, &mut Readers::new(&[]), OFTEN, from(&files)).expect("builds");
         // Its center is in the top-left third of the window.
         assert_eq!(value.pin, PinDef::TopLeft);
         let drawn = value.at(size(800, 600)).expect("reads");
@@ -1443,12 +1575,18 @@ mod tests {
     #[test]
     fn a_value_that_cannot_scale_says_why() {
         let (screen, files) = red_or_gray();
-        let rarely = build(&screen, &[], SizeChangesDef::Rarely, from(&files)).expect("builds");
+        let rarely = build(
+            &screen,
+            &mut Readers::new(&[]),
+            SizeChangesDef::Rarely,
+            from(&files),
+        )
+        .expect("builds");
         assert_eq!(rarely.at(size(1600, 1200)), Err(Unread::NotDrawn));
         assert_eq!(rarely.region_at(size(1600, 1200)), Err(Unread::NotDrawn));
         assert!(rarely.at(size(1000, 500)).is_ok(), "a fix still reads");
         assert!(rarely.at(size(800, 600)).is_ok());
-        let often = build(&screen, &[], OFTEN, from(&files)).expect("builds");
+        let often = build(&screen, &mut Readers::new(&[]), OFTEN, from(&files)).expect("builds");
         // Too narrow for the region pinned left at 10 to 14.
         assert_eq!(often.at(size(12, 600)), Err(Unread::Outside));
         assert_eq!(often.region_at(size(12, 600)), Err(Unread::Outside));
@@ -1467,7 +1605,7 @@ mod tests {
             "dot.png".to_owned(),
             icon.encode_png_masked(&mask).expect("encodes"),
         );
-        let dot = build(&sparse, &[], OFTEN, from(&dotted)).expect("builds");
+        let dot = build(&sparse, &mut Readers::new(&[]), OFTEN, from(&dotted)).expect("builds");
         assert_eq!(dot.at(size(400, 300)), Err(Unread::TooSmall));
         assert_eq!(
             dot.region_at(size(400, 300)),
@@ -1508,7 +1646,8 @@ mod tests {
             fix_at(400, 300, (0, 0, 4, 2), &[]),
         ];
         let references = [counter("11"), big];
-        let value = build(&screen, &references, OFTEN, from(&files)).expect("builds");
+        let value =
+            build(&screen, &mut Readers::new(&references), OFTEN, from(&files)).expect("builds");
         let own = value.at(size(1000, 500)).expect("reads");
         assert!(matches!(
             value.check(&own),
@@ -1522,7 +1661,8 @@ mod tests {
             Ok(Value::Number(Number::new(11.0).expect("finite")))
         );
         screen.fixes[0].reference = Some("gone".to_owned());
-        let error = build(&screen, &references, OFTEN, from(&files)).expect_err("missing");
+        let error = build(&screen, &mut Readers::new(&references), OFTEN, from(&files))
+            .expect_err("missing");
         assert_eq!(
             error.to_string(),
             "at 1000x500, its reference gone is not saved"
@@ -1549,13 +1689,24 @@ mod tests {
                 .collect()
         };
         screen.fixes = fixes(MAX_FIXES);
-        let built = build(&screen, &[], OFTEN, from(&BTreeMap::new())).expect("builds");
+        let built = build(
+            &screen,
+            &mut Readers::new(&[]),
+            OFTEN,
+            from(&BTreeMap::new()),
+        )
+        .expect("builds");
         assert_eq!(built.fixes.len(), MAX_FIXES);
         screen.fixes = fixes(MAX_FIXES + 1);
         assert_eq!(
-            build(&screen, &[], OFTEN, from(&BTreeMap::new()))
-                .expect_err("one too many")
-                .to_string(),
+            build(
+                &screen,
+                &mut Readers::new(&[]),
+                OFTEN,
+                from(&BTreeMap::new())
+            )
+            .expect_err("one too many")
+            .to_string(),
             format!("it has more than {MAX_FIXES} fixes")
         );
     }
@@ -1566,7 +1717,7 @@ mod tests {
         let refused = |change: &dyn Fn(&mut ScreenDef)| {
             let mut screen = states.clone();
             change(&mut screen);
-            build(&screen, &[], OFTEN, from(&files))
+            build(&screen, &mut Readers::new(&[]), OFTEN, from(&files))
                 .expect_err("refused")
                 .to_string()
         };
@@ -1624,14 +1775,15 @@ mod tests {
         });
         let mut pictured = color.clone();
         pictured.fixes = vec![fix_at(1000, 500, (0, 0, 2, 2), &["x.png"])];
-        let error = build(&pictured, &[], OFTEN, from(&files)).expect_err("refused");
+        let error =
+            build(&pictured, &mut Readers::new(&[]), OFTEN, from(&files)).expect_err("refused");
         assert_eq!(
             error.to_string(),
             "at 1000x500, it has 1 state pictures for the check's 0 states"
         );
         let mut plain = color;
         plain.fixes = vec![fix_at(1000, 500, (0, 0, 2, 2), &[])];
-        let value = build(&plain, &[], OFTEN, from(&files)).expect("builds");
+        let value = build(&plain, &mut Readers::new(&[]), OFTEN, from(&files)).expect("builds");
         assert_eq!(
             value.fixes[0].check, None,
             "a color fix reads with the value's own check"

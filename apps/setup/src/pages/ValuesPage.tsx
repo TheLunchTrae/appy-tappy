@@ -12,7 +12,6 @@ import {
 import { deleteValue, errorText, markChecked, removeFix } from '../lib/api.ts';
 import { readingText, usedBy } from '../lib/automation.ts';
 import { buildState, checkedText } from '../lib/build.ts';
-import { checkSummary } from '../lib/describe.ts';
 import { Hint } from '../components/Hint.tsx';
 import { MARK_CHECKED_HINT } from '../lib/hints.ts';
 import { hex } from '../lib/pixels.ts';
@@ -32,7 +31,7 @@ import { type LiveApp, useLiveValues } from '../lib/useLiveValues.ts';
 import type { Changing } from '../lib/flow.ts';
 import { type Resumed, draftsOf } from '../lib/drafts.ts';
 import { captureProblem } from '../lib/captureDraft.ts';
-import { KIND_NAMES } from '../lib/check.ts';
+import { CHECKS, checkSummary } from '../lib/check.ts';
 import { CaptureDraftRow } from '../components/Drafts.tsx';
 
 /** What a page's draft rows need: every draft, the saved applications, and what Finish and Delete do. */
@@ -67,7 +66,7 @@ function ValueDraftRows({
       problem={captureProblem(resumed.def, rows.apps)}
       cells={(setup) => (
         <>
-          <td className="note">{setup === null ? '' : KIND_NAMES[setup.draft.kind]}</td>
+          <td className="note">{setup === null ? '' : CHECKS[setup.draft.kind].label}</td>
           <td className="note">{setup?.draft.region === null || setup === null ? 'No region yet' : 'Region drawn'}</td>
           {nowColumn ? <td className="note">Doesn&apos;t read</td> : null}
           <td className="note">Can&apos;t be used until finished</td>

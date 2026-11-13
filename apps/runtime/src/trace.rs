@@ -10,6 +10,7 @@
 //! and counted, and the next record that gets through carries the count, so
 //! the file says how many were lost. See `wiki/Trace.md`.
 
+mod rows;
 pub(crate) mod switch;
 pub(crate) mod writer;
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import type { WindowChoice, WindowDef, WindowFit, WindowScore } from '../lib/bindings.ts';
 import { errorText, matchWindows, windowScores } from '../lib/api.ts';
+import { ask } from '../lib/request.ts';
 import { type MatchRules, fitLabel, scoreText } from '../lib/matching.ts';
 import { useSettings } from '../lib/settings.ts';
 
@@ -25,24 +26,16 @@ export function useWindowFits(window: WindowDef | null, again: unknown): WindowF
     if (window === null) {
       return undefined;
     }
-    let current = true;
-    const timer = setTimeout(() => {
-      matchWindows(window)
-        .then((fits) => {
-          if (current) {
-            setFound({ fits, error: null });
-          }
-        })
-        .catch((error: unknown) => {
-          if (current) {
-            setFound({ fits: null, error: errorText(error) });
-          }
-        });
-    }, MATCH_DELAY_MS);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
+    return ask(
+      async () => matchWindows(window),
+      (fits) => {
+        setFound({ fits, error: null });
+      },
+      (error) => {
+        setFound({ fits: null, error: errorText(error) });
+      },
+      MATCH_DELAY_MS,
+    );
   }, [window, again]);
   return found;
 }
@@ -59,23 +52,14 @@ export function useWindowScores(window: WindowDef | null, again: unknown): reado
     if (!showDebug || window === null) {
       return undefined;
     }
-    let current = true;
-    const timer = setTimeout(() => {
-      windowScores(window).then(
-        (found) => {
-          if (current) {
-            setScores(found);
-          }
-        },
-        () => {
-          // The fits already say when the windows cannot be read.
-        },
-      );
-    }, MATCH_DELAY_MS);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
+    return ask(
+      async () => windowScores(window),
+      setScores,
+      () => {
+        // The fits already say when the windows cannot be read.
+      },
+      MATCH_DELAY_MS,
+    );
   }, [showDebug, window, again]);
   return scores;
 }

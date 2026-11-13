@@ -147,9 +147,12 @@ impl<H: Host> Owner<H> {
             .iter()
             .find(|saved| saved.id == value)
             .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
-        let check = saved::build(&saved.screen, &file.references, file.size_changes, |name| {
-            found.picture(name)
-        })
+        let check = saved::build(
+            &saved.screen,
+            &mut saved::Readers::new(&file.references),
+            file.size_changes,
+            |name| found.picture(name),
+        )
         .map_err(|error| format!("{} cannot be read: {error}.", saved.name))?;
         let (processes, windows) = self.desktop()?;
         let window = self
