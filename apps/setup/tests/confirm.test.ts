@@ -12,10 +12,11 @@ import {
   settle,
   steps,
   turn,
+  unchecked,
   unfitted,
 } from '../src/lib/confirm.ts';
 import { disagreements, entries } from '../src/lib/review.ts';
-import { checkPlaces, escapeCloses } from '../src/lib/useCharacterCheck.ts';
+import { checkPlaces, escapeCloses, learnedPlaces } from '../src/lib/useCharacterCheck.ts';
 
 /** A place that shows `shapes`, one name each, two pixels wide each, with `text` as the reader or the user has it. */
 function place(source: Place['source'], index: number, shapes: string, text: string, keep = true): Place {
@@ -23,11 +24,13 @@ function place(source: Place['source'], index: number, shapes: string, text: str
   return {
     source,
     index,
+    number: index + 1,
     characters,
     width: characters.length * 2,
     text,
     typed: false,
     keep,
+    ticks: source !== 'box',
     reading: false,
     asks: true,
   };
@@ -208,7 +211,7 @@ describe('a reading review leaves out', () => {
     const readings = [read('18', [0, 1], 'se'), read('1', [0], 's')];
     const start = entries(readings, new Map(), new Map(), new Map(), []);
     expect(start.map((entry) => entry.keep)).toEqual([true, false]);
-    const places = checkPlaces([], [], readings, start);
+    const places = checkPlaces([], [], [], readings, start);
     const next = turn(openGuide(places, []), { kind: 'retype', shape: 's', character: '7' }, places, []);
     const edits = new Map(next.changes.map((change) => [change.index, { keep: change.keep, text: change.text }]));
     const after = entries(readings, edits, new Map(), new Map(), []);
@@ -256,6 +259,79 @@ describe('a shape that is no character', () => {
     );
     expect(places.map((each) => each.keep)).toEqual([false]);
     expect(guide.left).toEqual(new Set(['reading-1']));
+  });
+});
+
+describe('a box', () => {
+  // The user typed the box, and the text reader misread the same 7 in a find and in a reading.
+  const drawn = place('box', 4, 'se', '78');
+  const places = [drawn, place('find', 0, 's', '1', false), reading];
+
+  test('joins the steps, and one answer fixes it with the finds and the readings', () => {
+    const guide = openGuide(places, []);
+    expect(outline(places, guide)).toEqual(['1:s', '8:e']);
+    expect(turn(guide, { kind: 'retype', shape: 's', character: 'T' }, places, []).changes).toEqual([
+      { source: 'box', index: 4, text: 'T8', keep: true },
+      { source: 'find', index: 0, text: 'T', keep: true },
+      { source: 'reading', index: 1, text: 'T8', keep: true },
+    ]);
+  });
+
+  test('gets its text from the answers when it has none', () => {
+    const empty = [place('box', 4, 'se', ''), place('find', 0, 'se', '78', false)];
+    const { places: after } = play(empty, [], { kind: 'confirm' }, { kind: 'confirm' });
+    expect(after[0]).toMatchObject({ text: '78', keep: true });
+  });
+
+  test('has no tick, so a shape that is no character leaves it as it is, and taking that back gives it nothing', () => {
+    const aside = play(places, [], { kind: 'setAside', shape: 's' });
+    expect(texts(aside.places)).toEqual([
+      ['78', true],
+      ['1', false],
+      ['18', false],
+    ]);
+    expect(aside.guide.left).toEqual(new Set(['reading-1']));
+    expect(turn(aside.guide, { kind: 'restore', shape: 's' }, aside.places, []).changes).toEqual([
+      { source: 'reading', index: 1, text: '18', keep: true },
+    ]);
+    // One that joins afterward is not remembered as left out either.
+    const late = [...aside.places, { ...place('box', 5, 's', '7'), typed: true }];
+    expect(join(aside.guide, late)).toMatchObject({ guide: { left: aside.guide.left }, changes: [] });
+  });
+});
+
+describe('the characters nobody has checked', () => {
+  const guess = place('box', 0, 'sep', '18%');
+  const typed = { ...place('box', 1, 'sx', '74'), typed: true };
+
+  test("are the ones of the text reader's guesses, each once, and never the ones the user typed", () => {
+    expect(unchecked([guess, typed, place('reading', 0, 'se', '18')], new Map())).toEqual(['1', '8', '%']);
+    expect(unchecked([typed], new Map())).toEqual([]);
+  });
+
+  test('leave out a character the user typed for the same shape elsewhere, unless an answer says otherwise', () => {
+    const typedToo = { ...place('box', 1, 'ep', '8%'), typed: true };
+    expect(unchecked([guess, typedToo], new Map())).toEqual(['1']);
+    // Typed text that gives the shape another character does not check the guess.
+    expect(unchecked([guess, { ...place('box', 1, 's', '7'), typed: true }], new Map())).toEqual(['1', '8', '%']);
+    expect(unchecked([guess, typedToo], new Map([['e', '3']]))).toEqual(['1', '8']);
+    // Typed text that does not fit its shapes says nothing about them.
+    expect(unchecked([guess, { ...place('box', 1, 'ep', '8'), typed: true }], new Map())).toEqual(['1', '8', '%']);
+  });
+
+  test('leave out a character whose shape an answer says is that character, or is none', () => {
+    const answers = new Map<string, string | null>([
+      ['s', '1'],
+      ['e', '3'],
+      ['p', null],
+    ]);
+    // The answer for the second shape is another character than the guess has, so the guess is still not checked.
+    expect(unchecked([guess], answers)).toEqual(['8']);
+  });
+
+  test('are every character of a guess that does not fit its shapes, and none of one still being read', () => {
+    expect(unchecked([place('reading', 0, 'se', '187')], new Map([['s', '1']]))).toEqual(['1', '8', '7']);
+    expect(unchecked([{ ...guess, reading: true }], new Map())).toEqual([]);
   });
 });
 
@@ -479,8 +555,16 @@ describe('the places a check goes over', () => {
       { keep: true, text: '7' },
       { keep: true, text: '' },
     ];
-    const places = checkPlaces(finds, rows, [recorded('read'), recorded('read'), recorded('pending')], entries);
+    const box = { screenshot: 0, region };
+    const drawn = [
+      { box: { ...box, id: 7, text: '7' }, characters },
+      { box: { ...box, id: 2, text: '1', guess: '1' }, characters: null },
+    ];
+    const readings = [recorded('read'), recorded('read'), recorded('pending')];
+    const places = checkPlaces(drawn, finds, rows, readings, entries);
     expect(places.map((each) => [each.source, each.index, each.text, each.keep, each.asks, each.reading])).toEqual([
+      ['box', 7, '7', true, true, false],
+      ['box', 2, '1', true, true, true],
       ['find', 0, '7', false, true, false],
       ['find', 2, '', false, true, true],
       ['reading', 0, '1', false, false, false],
@@ -488,9 +572,42 @@ describe('the places a check goes over', () => {
       ['reading', 2, '', true, true, true],
     ]);
     // The second reading's text is not the reader's 1, so it is the user's.
-    expect(places.map((each) => each.typed)).toEqual([false, false, false, true, false]);
+    expect(places.map((each) => each.typed)).toEqual([true, false, false, false, false, true, false]);
+    // A box has no tick, is numbered as its list shows it, and its text is the user's unless it is still a guess.
+    expect(places.map((each) => [each.number, each.ticks])).toEqual([
+      [1, false],
+      [2, false],
+      [1, true],
+      [3, true],
+      [1, true],
+      [2, true],
+      [3, true],
+    ]);
+    expect(checkPlaces([{ box: { ...box, id: 2, text: '7', guess: '1' }, characters }], [], [], [], [])[0]?.typed).toBe(
+      true,
+    );
+
+    // A reference saved now learns from the boxes with text and the readings the draft keeps, with their kept text.
+    const blank = { box: { ...box, id: 3, text: ' ' }, characters };
+    const learned = learnedPlaces(
+      checkPlaces([...drawn, blank], finds, rows, readings, entries),
+      readings,
+      new Map([
+        [0, '1'],
+        [1, '7'],
+        [9, '4'],
+      ]),
+    );
+    expect(learned.map((each) => [each.source, each.index, each.text, each.keep, each.typed])).toEqual([
+      ['box', 7, '7', true, true],
+      ['box', 2, '1', true, false],
+      ['reading', 0, '1', true, false],
+      ['reading', 1, '7', true, true],
+    ]);
     expect(places[0]).toMatchObject({ characters, width: 9 });
-    expect(places[3]).toMatchObject({ characters, width: 5 });
+    expect(places[1]).toMatchObject({ characters: [], width: 9 });
+    expect(places[2]).toMatchObject({ characters, width: 9 });
+    expect(places[5]).toMatchObject({ characters, width: 5 });
   });
 });
 

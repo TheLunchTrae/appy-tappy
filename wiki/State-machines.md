@@ -1758,7 +1758,9 @@ stateDiagram-v2
 
 A reference being taught learns from `Draft.boxes`
 (`apps/setup/src/lib/boxes.ts`): each box has an ID no other box of the draft
-has, the screenshot it is on, its region, and its text. `boxStep` there is the
+has, the screenshot it is on, its region, and its text. A box added from a
+find whose text nobody typed also carries that text as its `guess`: while
+its text is still the guess, nobody has checked it. `boxStep` there is the
 pure `(state, event)` transition over the boxes and the ID of the selected
 box, and `useBoxes` in `apps/setup/src/lib/useBoxes.ts` holds that ID and
 sends each event to the draft's boxes.
@@ -2194,7 +2196,8 @@ stateDiagram-v2
 The check of a reference's characters one at a time
 (`apps/setup/src/lib/confirm.ts`, held by `useCharacterCheck.ts`) is closed, or
 a `Guide`: the answers given so far, by shape, the places it left out, the
-places that have joined it, and a cursor. `turn` is its pure
+places that have joined it, and a cursor. Beside it the hook holds `past`,
+the answers of the checks closed since the reference's editor opened. `turn` is its pure
 `(state, event)` transition for what the user does, and `join` is the one
 for places that show under an open check. Each answers with the next guide
 and the edits of the places' texts and ticks.
@@ -2223,11 +2226,18 @@ stateDiagram-v2
     Done --> Closed: Done, or Escape
 ```
 
-- The places are every [found text](#found-text) the list holds, ticked or
-  not, and every [recording](#recording) reading (`checkPlaces`). The check
-  asks about the finds and the readings that review keeps. A reading that
+- The places are every [box](#reference-boxes) of the reference, every
+  [found text](#found-text) the list holds, ticked or not, and every
+  [recording](#recording) reading (`checkPlaces`). The check asks about the
+  boxes, the finds, and the readings that review keeps. A reading that
   review leaves out joins no step and never changes its keep; it only gets
-  the answers, so its text does not disagree with the kept ones. Each place
+  the answers, so its text does not disagree with the kept ones. A box has
+  no tick (`ticks`): it gets the answers in its text, gets its whole text
+  from them when it has none, and is never left out, so the tile of a
+  shape that is no character names the boxes that still teach it. A box's
+  characters come from `box_characters`, asked once for each place and
+  characters' color (`useBoxCharacters.ts`); until they arrive the box
+  waits like text still being read, and joins when they do. Each place
   carries where its characters are in its picture and a name for each one's
   shape (`recording/character.rs`), which is the same for the same shape in
   a find and in a reading.
@@ -2283,11 +2293,25 @@ stateDiagram-v2
   the button is let go. Each step has its own buttons
   (`CharacterCheck.tsx`), so that click lands on no button and answers for
   nothing.
-- Closing forgets the answers. The texts and ticks they wrote stay with the
-  finds and with review.
+- Closing forgets the answers, so the next check asks from the start. The
+  texts and ticks they wrote stay with the boxes, the finds, and review. An
+  edit of a reading the draft keeps already is made on the draft too, so
+  that saving learns what the check wrote: its kept text changes, and a
+  reading left out is kept no longer.
+- Closing moves the answers into `past`, which only says what the user has
+  checked. The characters nobody has checked (`unchecked`) are the ones a
+  reference saved now would learn from a text reader's guess, a box that
+  still has its `guess` or a kept reading with the reader's text, for a
+  shape that neither an answer, open or past, nor a text the user typed
+  gives that character. While there are any, the editor offers
+  **Check characters** above **Save reference** (`CheckOffer.tsx`). The
+  offer is no state: saving never waits for it. Leaving the reference's
+  editor forgets `past`.
 
-The check has no failure state of its own: it makes no request, and every
-turn is an edit the list of finds or review takes. What goes wrong is that
+The check has no failure state of its own, and every turn is an edit the
+list of boxes, the list of finds, or review takes. Its one request asks
+which characters a box shows; a box whose request fails shows none, so it
+is text to type on the `Unfitted` stop instead of a place that waits. What goes wrong is that
 the places change under an open check, and each case recovers on the next
 render (`settle`) or the next answer:
 

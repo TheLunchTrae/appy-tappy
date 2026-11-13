@@ -48,7 +48,9 @@ select **Capture this window**, as the first step of
    [record readings](#record-readings) to collect them as they show.
 5. **Save.** Select **Save reference**. A reference with characters still
    missing saves too: the editor says so next to the button, and you can
-   teach them later. To finish it later instead, select **Save as draft**
+   teach them later. When AppyTappy read some of its characters and nobody
+   has checked them, **Not checked yet** above the button
+   [offers to check them](#check-before-you-save) first. To finish it later instead, select **Save as draft**
    ([Drafts](Drafts.md)). A draft doesn't keep a recording.
 
 The box at the bottom of the panel shows what the reference reads on the
@@ -199,9 +201,10 @@ it lists the rest, leaving out what you added.
 
 AppyTappy tends to misread a character the same way wherever it shows, such
 as every `7` as a `1`. **Check characters** lets you fix that once instead of
-in each text. It shows above the list of finds and in a recording's review,
-and goes through the characters of the listed finds and the kept readings
-together.
+in each text. It shows above the list of finds, in a recording's review, and
+under **Not checked yet** above **Save reference**. It goes through the
+characters of the boxes, the listed finds, and the kept readings together,
+so one answer also fixes a box you drew by hand.
 
 1. **Answer for each character.** Each step shows one character, drawn
    large, and every place that shows it, with the character outlined. When
@@ -223,13 +226,20 @@ together.
    characters. A place like that gets its text by itself when your answers
    cover all its characters.
 4. **Finish.** **Done**, **Back to the screenshot**, **Back to review**, or
-   Escape closes the check. The texts it fixed stay in the list of finds and
-   in review, where you add or keep them as before.
+   Escape closes the check. The texts it fixed stay in the list of boxes,
+   in the list of finds, and in review, where you add or keep them as
+   before. A reading the reference keeps already has its fixed text right
+   away, and one that shows what is not a character is kept no longer.
 
 **Skip** goes on without answering, and **Back** returns to the step before.
 A find whose characters you all answered for is ticked, and you can clear
 the tick afterward. A reading that review leaves out is not asked about and
 stays left out, and its text gets your answers too.
+
+A box has no tick. It gets your answers in its text, and a box with no text
+gets its text once your answers cover every character it shows. A box that
+shows something you answered **Not a character** for still teaches it, and
+the tile names the box: delete it, or draw it around the characters alone.
 
 You can still change any text by hand. An answer changes only the character
 it is about, in the places that show it, and never a text you typed since.
@@ -242,6 +252,18 @@ the answers you gave already, **Not a character** included, and any other
 character it shows joins the steps: go **Back** to them, or select
 **Check characters** again. The same holds for a find or a reading that
 first shows while the check is open.
+
+### Check before you save
+
+**Not checked yet** shows above **Save reference** while the reference
+learns a character that AppyTappy read and nobody has checked: it is in a
+find you added, or a reading you kept, with the text AppyTappy gave it. A
+character counts as checked once you answer for it in **Check characters**,
+or type it yourself, in that text or in another one that shows the same
+shape.
+
+**Check characters** there opens the check. You can also select
+**Save reference** as it is: the offer never holds the save up.
 
 ## What a reference can't learn
 

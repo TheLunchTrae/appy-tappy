@@ -14,7 +14,7 @@ import {
   unfitted,
 } from '../lib/confirm.ts';
 import type { Picture } from '../lib/pixels.ts';
-import { labelCharacters } from '../lib/reference.ts';
+import { andList, labelCharacters } from '../lib/reference.ts';
 import type { ReviewEntry } from '../lib/review.ts';
 import { PictureCanvas } from './canvas.tsx';
 
@@ -36,9 +36,11 @@ function plural(count: number, one: string, many: string): string {
   return count === 1 ? `1 ${one}` : `${count} ${many}`;
 }
 
-/** What a place is called: its find's number, as the list and the screenshot show it, or its reading's. */
+const SOURCE_NAMES = { box: 'Box', find: 'Find', reading: 'Reading' } as const;
+
+/** What a place is called: its box's, find's, or reading's number, as its list shows it. */
 function placeName(place: Place): string {
-  return place.source === 'find' ? `Find ${place.index + 1}` : `Reading ${place.index + 1}`;
+  return `${SOURCE_NAMES[place.source]} ${place.number}`;
 }
 
 /** The columns of `picture` that hold the character from `left` to `right` of a place `width` wide, drawn large. */
@@ -184,6 +186,13 @@ function ShapeTile({
   const name = step.shapes.length === 1 ? 'this shape' : `shape ${number}`;
   const noteId = `shape-${use.shape}-note`;
   const state = use.aside ? 'Left out: not a character. ' : use.answered ? 'Checked. ' : '';
+  // A box has no tick to clear, so it still teaches a shape that is no character until the user changes the box.
+  const boxes = use.aside
+    ? use.spots.flatMap((spot) => {
+        const place = places[spot.place];
+        return place === undefined || place.ticks ? [] : [placeName(place)];
+      })
+    : [];
   return (
     <li className={use.aside ? 'tile shape off' : use.answered ? 'tile shape kept' : 'tile shape'}>
       <Cutout
@@ -197,6 +206,9 @@ function ShapeTile({
         {state}
         Shows in {plural(use.spots.length, 'place', 'places')}.
         {use.also.length === 0 || use.aside ? '' : ` The text of some has it as ${use.also.join(', ')}.`}
+        {boxes.length === 0
+          ? ''
+          : ` ${andList([...new Set(boxes)])} still ${boxes.length === 1 ? 'teaches' : 'teach'} it: delete the box, or draw it around the characters alone.`}
       </span>
       <span className="marks">
         {use.spots.slice(0, SHOWN_PLACES).map((spot) => {
@@ -337,7 +349,7 @@ function UnfittedStep({ guide, places, picture, onTurn, onEdit }: Props) {
           <p>
             The text of each has another number of characters than the picture shows, so its characters could not be
             checked one at a time. Type what it shows, or leave it out. What you type counts as your answer for its
-            characters.
+            characters. A box with no text teaches nothing.
           </p>
         </div>
         <div className="end">
@@ -371,17 +383,21 @@ function UnfittedStep({ guide, places, picture, onTurn, onEdit }: Props) {
           const noteId = `unfitted-${placeKey(place)}`;
           return (
             <li key={noteId} className={place.keep ? 'tile kept' : 'tile off'}>
-              <label className="top">
-                <input
-                  type="checkbox"
-                  aria-label={`Keep ${name}`}
-                  checked={place.keep}
-                  onChange={(event) => {
-                    onEdit(place, { keep: event.target.checked, text: place.text });
-                  }}
-                />
-                {name}
-              </label>
+              {place.ticks ? (
+                <label className="top">
+                  <input
+                    type="checkbox"
+                    aria-label={`Keep ${name}`}
+                    checked={place.keep}
+                    onChange={(event) => {
+                      onEdit(place, { keep: event.target.checked, text: place.text });
+                    }}
+                  />
+                  {name}
+                </label>
+              ) : (
+                <span className="top">{name}</span>
+              )}
               <Whole picture={picture(place)} label={name} />
               <input
                 className="input"
@@ -454,10 +470,10 @@ export function CharacterCheckSheet(props: Props) {
             </h2>
             <p>
               {all.length === 0 && left === 0 && unread === 0
-                ? 'No find or kept reading has text to check. Find more like a box, or record the reference, first.'
+                ? 'No box, find, or kept reading shows characters to check. Draw a box around some characters, find more like it, or record the reference, first.'
                 : [
                     skipped.length === 0
-                      ? 'Each place has the text you confirmed, and a find you checked in full is ticked, ready to add.'
+                      ? 'Each box, find, and reading has the text you confirmed, and a find you checked in full is ticked, ready to add.'
                       : `${skipped.join(', ')} ${skipped.length === 1 ? 'is' : 'are'} not checked yet. The places that show ${skipped.length === 1 ? 'it' : 'them'} keep the text they have.`,
                     left === 0
                       ? null

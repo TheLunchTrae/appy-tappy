@@ -10,6 +10,11 @@ export interface Box {
   readonly screenshot: number;
   readonly region: Rect;
   readonly text: string;
+  /**
+   * The text the text reader gave it, for a box added from a find whose text nobody typed. While that is still its
+   * text, nobody has checked it.
+   */
+  readonly guess?: string;
 }
 
 /** A box before it has an ID: a region of a screenshot, and its text. */

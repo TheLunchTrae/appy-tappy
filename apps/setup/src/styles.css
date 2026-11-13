@@ -2191,6 +2191,31 @@ div.match-answer {
   align-items: center;
 }
 
+/*
+ * The offer to check characters before a reference is saved. Its dashed edge is the one the characters nobody has
+ * checked wear, so it reads as a matter left open and not as a fault.
+ */
+.check-offer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px dashed var(--muted);
+  border-radius: 8px;
+  background: var(--base);
+}
+
+.check-offer #check-offer-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.check-offer .glyphs {
+  align-items: center;
+}
+
 /* Numbered outlines over the found text on the screenshot. */
 .found-marks {
   position: absolute;

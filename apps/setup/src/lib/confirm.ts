@@ -1,13 +1,13 @@
 // Checking a reference's characters one at a time, across every place that shows them.
 //
-// A reference learns a character from each place whose text names it: a find from Find more like it, or a recorded
-// reading. The text reader's guesses fill those texts in, and it tends to misread one shape the same way wherever
-// the shape shows. So the check goes by shape instead of by place. Each step is one character with every shape the
+// A reference learns a character from each place whose text names it: a box, a find from Find more like it, or a
+// recorded reading. The text reader's guesses fill the texts of finds and readings in, and it tends to misread one
+// shape the same way wherever the shape shows. So the check goes by shape instead of by place. Each step is one character with every shape the
 // texts give it, and one answer for a shape rewrites the text of every place that shows the shape.
 //
 // The places' texts stay the one record of what each place shows. The check holds only the answers given so far, by
 // shape, and where it is. Every change it makes is an edit of a place's text or its tick, the same edit the user
-// makes by hand in the list of finds or in review. It makes them in the turn that gives the answer, and once more
+// makes by hand in the list of boxes, the list of finds, or review. It makes them in the turn that gives the answer, and once more
 // for each place that joins afterward: one that first shows, or whose text the reader sends, while the check is
 // open gets the answers that stand for its shapes. Text the user typed is theirs. Where it disagrees with an answer
 // it is left as it is, and the shape counts as not answered again, so its step asks once more.
@@ -22,9 +22,11 @@ import { labelCharacters } from './reference.ts';
 
 /** One place a reference would learn characters from. */
 export interface Place {
-  /** Whether it is a find or a recorded reading, and its index there. */
-  readonly source: 'find' | 'reading';
+  /** Whether it is a box, a find, or a recorded reading, and what names it there: a box's ID, or else its index. */
+  readonly source: 'box' | 'find' | 'reading';
   readonly index: number;
+  /** Its number as its list shows it, from 1. */
+  readonly number: number;
   /** Where each of its characters is in its picture, with the name of its shape. */
   readonly characters: readonly ShownCharacter[];
   /** How wide its picture is, in the pixels the characters are placed in. */
@@ -32,8 +34,13 @@ export interface Place {
   readonly text: string;
   /** Whether its text is the user's, typed by hand or written by an answer, and not the text reader's guess. */
   readonly typed: boolean;
-  /** Whether it is ticked or kept, so the reference learns from it. */
+  /** Whether it is ticked or kept, so the reference learns from it. A box always is. */
   readonly keep: boolean;
+  /**
+   * Whether it has a tick the check may change. A box has none: the reference learns from it while it has text,
+   * and only the user deletes it.
+   */
+  readonly ticks: boolean;
   /** Whether the text reader is still reading it, so it has no text to ask about yet. */
   readonly reading: boolean;
   /**
@@ -44,7 +51,7 @@ export interface Place {
 }
 
 /** What the user answered for each shape so far: its character, or null for a shape that is no character. */
-type Answers = ReadonlyMap<string, string | null>;
+export type Answers = ReadonlyMap<string, string | null>;
 
 /** One character of one place: the place's position among the places, and the character's position in it. */
 interface Spot {
@@ -145,6 +152,11 @@ function asked(place: Place, left: ReadonlySet<string>): boolean {
   return place.asks || left.has(placeKey(place));
 }
 
+/** Whether the check may change `place`'s tick: it has one, and the steps go over the place. */
+function ticked(place: Place, left: ReadonlySet<string>): boolean {
+  return place.ticks && asked(place, left);
+}
+
 /**
  * The steps for `places` with what is `given` so far: each character with its shapes, the characters among `needs`
  * first, in that order, then the rest as they first show. A shape goes with its answer, or else with the character
@@ -233,6 +245,7 @@ function rewritten(text: string, characters: readonly (string | null | undefined
  * text from the answers once every one of its shapes has one. A place the check asks about is left out when one of
  * its shapes is no character, and kept once every one has an answer, since the user has then checked all of it. A
  * tick the user changes by hand afterward stays, and the tick of a place the check does not ask about never changes.
+ * A box has no tick, so it only gets its text.
  */
 function changes(places: readonly Place[], given: Given, touched: ReadonlySet<string>): readonly Change[] {
   return places.flatMap((place): Change[] => {
@@ -252,7 +265,7 @@ function changes(places: readonly Place[], given: Given, touched: ReadonlySet<st
       text = whole;
     }
     let { keep } = place;
-    if (asked(place, given.left)) {
+    if (ticked(place, given.left)) {
       keep = aside ? false : whole !== null || keep;
     }
     return text === place.text && keep === place.keep ? [] : [{ source: place.source, index: place.index, text, keep }];
@@ -330,7 +343,7 @@ export function join(
   }
   const left = new Set(guide.left);
   for (const place of fresh) {
-    if (place.keep && asked(place, left) && setAside(place, guide.answers)) {
+    if (place.keep && ticked(place, left) && setAside(place, guide.answers)) {
       left.add(placeKey(place));
     }
   }
@@ -432,7 +445,7 @@ export function turn(
   } else if (event.kind === 'setAside') {
     answer(event.shape, null);
     for (const place of places) {
-      if (place.keep && asked(place, left) && place.characters.some((shown) => shown.shape === event.shape)) {
+      if (place.keep && ticked(place, left) && place.characters.some((shown) => shown.shape === event.shape)) {
         left.add(placeKey(place));
       }
     }
@@ -480,4 +493,48 @@ export function progress(
   const { cursor } = guide;
   const at = cursor.at === 'character' ? all.findIndex((step) => step.character === cursor.character) : -1;
   return at === -1 ? null : { step: at + 1, of: all.length };
+}
+
+/**
+ * The characters of `places` that nobody has checked, each once, as they first show: the ones in text that is the
+ * text reader's guess, for a shape nobody has said is that character. The user says so with an answer in `answers`,
+ * or by typing a text that gives the shape that character in one of `places`; an answer comes before typed text.
+ * An answer that a shape is no character counts as checked. A guess with another number of characters than its
+ * place has shapes names none of its shapes, so every character of it counts.
+ */
+export function unchecked(places: readonly Place[], answers: Answers): readonly string[] {
+  const said = new Map<string, string | null>();
+  for (const place of places) {
+    const characters = place.typed ? named(place) : null;
+    place.characters.forEach((shown, at) => {
+      const character = characters?.[at];
+      if (character !== undefined && !said.has(shown.shape)) {
+        said.set(shown.shape, character);
+      }
+    });
+  }
+  for (const [shape, answer] of answers) {
+    said.set(shape, answer);
+  }
+  const found = new Set<string>();
+  for (const place of places) {
+    if (place.typed || place.reading) {
+      continue;
+    }
+    const characters = named(place);
+    if (characters === null) {
+      for (const character of labelCharacters(place.text)) {
+        found.add(character);
+      }
+      continue;
+    }
+    place.characters.forEach((shown, at) => {
+      const character = characters[at];
+      const answer = said.get(shown.shape);
+      if (character !== undefined && answer !== null && answer !== character) {
+        found.add(character);
+      }
+    });
+  }
+  return [...found];
 }
