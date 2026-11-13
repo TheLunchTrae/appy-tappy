@@ -2,9 +2,13 @@ import type { AppFile } from '../lib/bindings.ts';
 import { referenceCoverage } from '../lib/expected.ts';
 import { readers, referenceCharacters } from '../lib/reference.ts';
 import { REFERENCE_HINT } from '../lib/hints.ts';
+import { draftHolds } from '../lib/teaching.ts';
 import { CharacterChips, MissingNote } from './CharacterChips.tsx';
 import { CharactersRead } from './CharactersRead.tsx';
 import { Hint } from './Hint.tsx';
+
+/** The id of the note that says the picked reference has a draft of changes, which Record readings points at. */
+const DRAFT_HOLDS_ID = 'reference-draft-holds';
 
 interface Props {
   readonly appName: string;
@@ -18,7 +22,7 @@ interface Props {
   readonly characters: readonly string[] | null;
   readonly onSelect: (reference: string) => void;
   readonly onEdit: (reference: string) => void;
-  /** The references that have a draft of changes, which are changed by finishing it instead. */
+  /** The references that have a draft of changes, which are changed by finishing it instead: no Edit, no recording. */
   readonly drafted: ReadonlySet<string>;
   readonly onNew: () => void;
   /** Opens the picked reference, or a new one, to record the region's readings. */
@@ -35,6 +39,7 @@ export function ReferencePicker(props: Props) {
   const { appName, file, selected, hasRegion, whole } = props;
   const references = file?.references ?? [];
   const chosen = references.find((reference) => reference.id === selected) ?? null;
+  const held = chosen === null ? null : draftHolds(chosen, props.drafted);
   return (
     <>
       <div className="field">
@@ -73,10 +78,10 @@ export function ReferencePicker(props: Props) {
           </div>
         )}
         <div className="choices">
-          {chosen === null ? null : props.drafted.has(chosen.id) ? (
-            // Editing it here would change it apart from its draft, which finishing later would undo.
-            <span className="note">
-              {chosen.name} has a draft of changes. Finish it on the References page to change it.
+          {chosen === null ? null : held !== null ? (
+            // Changing it here would change it apart from its draft, which finishing later would undo.
+            <span id={DRAFT_HOLDS_ID} className="note">
+              {held}
             </span>
           ) : (
             <button
@@ -101,8 +106,9 @@ export function ReferencePicker(props: Props) {
           <button
             type="button"
             className="btn small"
-            disabled={!hasRegion}
-            title={hasRegion ? undefined : 'Draw the region first'}
+            disabled={!hasRegion || held !== null}
+            title={hasRegion ? (held ?? undefined) : 'Draw the region first'}
+            aria-describedby={held === null ? undefined : DRAFT_HOLDS_ID}
             onClick={props.onRecord}
           >
             Record readings

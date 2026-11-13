@@ -236,9 +236,33 @@ so one answer also fixes a box you drew by hand.
    **It is a character** keeps it again.
 
 **Skip** goes on without answering, and **Back** returns to the step before.
+
+You can answer from the keyboard. The **?** beside the buttons lists the
+keys:
+
+| Key         | What it does                                                              |
+| ----------- | ------------------------------------------------------------------------- |
+| Enter       | Presses the highlighted button: the **Yes** answer, **Next**, or **Done** |
+| A character | Goes in **It is** under the first shape not checked yet                   |
+| Alt+S       | **Skip**                                                                  |
+| Alt+B       | **Back**                                                                  |
+
+A character you type goes in **It is** under the step's first shape once
+all its shapes are checked. Enter in **It is** makes the character your
+answer. Alt+S or Alt+B does that too when you have typed a character and
+not pressed Enter yet, and stays at the step: press it again to move.
+Typing the character the step already asks about does nothing.
+
+Enter and typing answer a step only while the check has focus: select
+anywhere in the check to give it focus. A text field that has focus keeps
+Enter and the characters you type, and a button that has focus keeps Enter,
+as anywhere in Windows.
+
 A find whose characters you all answered for is ticked, and you can clear
 the tick afterward. A reading that review leaves out is not asked about and
-stays left out, and its text gets your answers too.
+stays left out, and its text gets your answers too. A reading you kept and
+then left out in review without keeping again still teaches the reference,
+so the check asks about it until you keep the readings again.
 
 A box has no tick. It gets your answers in its text, and a box with no text
 gets its text once your answers cover every character it shows. A box that
@@ -392,7 +416,10 @@ stray shape and draw a box around it instead.
    **Keep 12 readings**. The kept readings teach the reference like boxes
    do. **Review recording** opens them again with your choices, and
    **Record more** goes on with the same recording. **Back** leaves review
-   without keeping, and your changes stay for next time. To record more, keep
+   without keeping, and your changes stay for next time. **Save reference**
+   is off while review is open, since the reference has only the readings
+   you kept: keep them to save them with the reference, or go **Back** to
+   save without review's changes. To record more, keep
    the place it reads, the characters' color, and the tolerance as they
    were, on a screenshot of the same window size: if you changed them,
    **Use its settings** puts them back. In a reference you teach by itself,

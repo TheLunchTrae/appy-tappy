@@ -2,10 +2,12 @@
 //! [`Controls`] lists, the calls that act on them, and the [`Input`] that
 //! key presses and clicks go through.
 
+use std::convert::Infallible;
 use std::io;
 use std::path::Path;
 
 use appytappy_config::action::{MediaCommand, OpenTarget, VolumeLevel};
+use appytappy_config::process::ProcessId;
 
 use crate::Input;
 
@@ -109,4 +111,96 @@ pub trait Controls {
     ///
     /// Returns the operating system's error.
     fn play_sound(&mut self, file: &Path) -> io::Result<bool>;
+}
+
+/// Lists the running processes' executable names with their process IDs.
+/// It must not open any process: the controls rely on that so that no
+/// action opens a watched app's process.
+pub type Executables = Box<dyn Fn() -> io::Result<Vec<(ProcessId, String)>>>;
+
+/// The controls of a platform AppyTappy does not support: none can be made,
+/// so no action runs there.
+#[derive(Debug)]
+pub struct NoControls(Infallible);
+
+impl NoControls {
+    /// Fails, as there are no controls to connect to.
+    ///
+    /// # Errors
+    ///
+    /// Always returns an [`io::ErrorKind::Unsupported`] error.
+    pub fn new(_executables: Executables) -> io::Result<Self> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "actions run only on Windows",
+        ))
+    }
+}
+
+// `NoControls` holds `Infallible`, so no value exists and none of these
+// bodies ever runs. No test can call them, so mutating them cannot be
+// caught.
+impl Controls for NoControls {
+    type Media = ();
+    type Volume = ();
+    type Input = crate::Unsupported;
+
+    #[mutants::skip]
+    fn input(&mut self) -> &mut crate::Unsupported {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn current_media(&mut self) -> io::Result<Option<MediaSession<()>>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn media_sessions(&mut self) -> io::Result<Vec<MediaSession<()>>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn media_command(&mut self, (): &(), _command: MediaCommand) -> io::Result<bool> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn system_volume(&mut self) -> io::Result<Option<Volume<()>>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn app_volumes(&mut self) -> io::Result<Vec<(String, Volume<()>)>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn set_volume(&mut self, (): &(), _level: VolumeLevel) -> io::Result<bool> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn open(&mut self, _target: &OpenTarget) -> io::Result<()> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn play_sound(&mut self, _file: &Path) -> io::Result<bool> {
+        match self.0 {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_controls_can_be_made_where_actions_cannot_run() {
+        let made = NoControls::new(Box::new(|| Ok(Vec::new())));
+        assert_eq!(
+            made.expect_err("unsupported").kind(),
+            io::ErrorKind::Unsupported
+        );
+    }
 }

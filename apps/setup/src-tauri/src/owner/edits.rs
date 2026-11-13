@@ -120,13 +120,7 @@ impl<H: Host> Owner<H> {
     /// tried at, or `None` before a frame arrived.
     pub(crate) fn window_size(&self) -> Option<SizeDef> {
         let (frame, _arrived) = self.capture.picked()?.latest.as_ref()?;
-        Some({
-            let size = frame.size();
-            SizeDef {
-                width: size.width,
-                height: size.height,
-            }
-        })
+        Some(frame.size().into())
     }
 
     /// Tries `spec` as [`Owner::try_edit`] describes.

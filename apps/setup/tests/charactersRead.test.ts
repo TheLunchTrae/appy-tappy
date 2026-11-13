@@ -8,7 +8,7 @@ import {
   withCharacter,
   withReadChoice,
 } from '../src/lib/charactersRead.ts';
-import { checkSummary } from '../src/lib/describe.ts';
+import { checkSummary } from '../src/lib/check.ts';
 
 const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 /** A reference that knows some digits, two symbols, and two letters. */

@@ -3,7 +3,7 @@
 use std::env::{self, VarError};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -59,6 +59,7 @@ impl Counts {
 struct Outcome {
     scenario: Value,
     summary: String,
+    log_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -144,11 +145,65 @@ fn verify_report(mode: ReportMode, report_directory: &Path) -> Result<(u64, u64)
         return Err("full mutation testing must execute at least one mutant".to_owned());
     }
     if report.total_mutants > 0 && executed == 0 {
-        return Err(
-            "a nonempty mutation report must contain at least one executed mutant".to_owned(),
-        );
+        verify_all_rejected_by_compiler(report_directory, &report.outcomes)?;
     }
     Ok((executed, report.total_mutants))
+}
+
+/// A diff can select only mutants that do not compile, as one shard of a
+/// small change can. A scratch build directory that broke, or a build killed
+/// for memory or disk, also leaves every mutant unviable, and the baseline
+/// cannot rule that out: it builds only the mutated packages, in one of the
+/// build directories. So each mutant's log must show the compiler rejecting
+/// the mutated file itself.
+fn verify_all_rejected_by_compiler(
+    report_directory: &Path,
+    outcomes: &[Outcome],
+) -> Result<(), String> {
+    for outcome in outcomes {
+        let Some(file) = outcome
+            .scenario
+            .get("Mutant")
+            .map(|mutant| mutant.get("file").and_then(Value::as_str))
+        else {
+            continue;
+        };
+        let file = file.ok_or_else(|| "an unviable mutant names no file".to_owned())?;
+        let log_path = outcome
+            .log_path
+            .as_deref()
+            .map(Path::new)
+            .filter(|path| {
+                path.components()
+                    .all(|part| matches!(part, Component::Normal(_)))
+            })
+            .ok_or_else(|| format!("the unviable mutant in {file} has no log inside the report"))?;
+        let log_path = report_directory.join(log_path);
+        let log = fs::read_to_string(&log_path)
+            .map_err(|error| format!("cannot read {}: {error}", log_path.display()))?;
+        if !compiler_rejected(&log, file) {
+            return Err(format!(
+                "a nonempty mutation report must contain at least one executed mutant: \
+                 {} shows no compiler error in {file}, so the build directory may be broken",
+                log_path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `log` holds a compiler error that points at `file`.
+fn compiler_rejected(log: &str, file: &str) -> bool {
+    let location = format!("--> {file}:");
+    let mut in_error = false;
+    log.lines().any(|line| {
+        if line.starts_with("error") {
+            in_error = true;
+        } else if !line.starts_with(' ') && !line.is_empty() {
+            in_error = false;
+        }
+        in_error && line.trim_start().starts_with(&location)
+    })
 }
 
 fn observed_outcome_counts(outcomes: &[Outcome]) -> Result<Counts, String> {
@@ -288,7 +343,7 @@ fn rejects_malformed_trailing_and_duplicate_json() {
 
 #[test]
 #[ignore = "run by rust:policy"]
-fn rejects_inconsistent_and_all_unviable_reports() {
+fn rejects_inconsistent_reports_and_all_unviable_full_ones() {
     let inconsistent = TestReport::new(
         "inconsistent",
         Counts {
@@ -310,6 +365,78 @@ fn rejects_inconsistent_and_all_unviable_reports() {
     .expect("create unviable report");
     assert!(verify_report(ReportMode::Full, unviable.path()).is_err());
     assert!(verify_report(ReportMode::Diff, unviable.path()).is_err());
+}
+
+#[test]
+#[ignore = "run by rust:policy"]
+fn passes_a_diff_whose_mutants_the_compiler_rejects() {
+    let rejected = TestReport::unviable_with_log(
+        "rejected",
+        "error[E0015]: cannot call non-const associated function in constant functions\n   \
+         --> src/lib.rs:167:9\n    |\nerror: could not compile `lib` due to 1 previous error\n",
+    )
+    .expect("create rejected report");
+    assert_eq!(verify_report(ReportMode::Diff, rejected.path()), Ok((0, 1)));
+    assert!(verify_report(ReportMode::Full, rejected.path()).is_err());
+
+    for (label, log) in [
+        (
+            "no-space",
+            "error: could not compile `lib`\nNo space left on device (os error 28)\n",
+        ),
+        (
+            "killed",
+            "error: could not compile `lib` (signal: 9, SIGKILL: kill)\n",
+        ),
+        (
+            "warning-only",
+            "warning: unused variable\n  --> src/lib.rs:3:9\nerror: could not compile `lib`\n",
+        ),
+        (
+            "other-file",
+            "error[E0308]: mismatched types\n  --> src/other.rs:3:9\n",
+        ),
+        (
+            "killed-then-warning",
+            "error: could not compile `b` (signal: 9, SIGKILL: kill)\nwarning: unused variable\n --> src/lib.rs:3:9\n",
+        ),
+        (
+            "warning-naming-error",
+            "warning: this error handling looks odd\n --> src/lib.rs:3:9\n",
+        ),
+    ] {
+        let broken = TestReport::unviable_with_log(label, log).expect("create broken-build report");
+        assert!(
+            verify_report(ReportMode::Diff, broken.path()).is_err(),
+            "{label} must fail"
+        );
+    }
+
+    let compiler_log =
+        "error[E0015]: cannot call non-const associated function\n --> src/lib.rs:167:9\n";
+    let outside = env::temp_dir().join(format!(
+        "standards-mutation-report-{}-outside.log",
+        std::process::id()
+    ));
+    let outside = outside.to_str().expect("temporary paths are UTF-8 here");
+    for (label, log_path, written_at, log) in [
+        (
+            "parent-log",
+            "log/../mutant.log",
+            "log/../mutant.log",
+            Some(compiler_log),
+        ),
+        ("absolute-log", outside, outside, Some(compiler_log)),
+        ("missing-log", "log/mutant.log", "log/mutant.log", None),
+    ] {
+        let report = TestReport::unviable_logged_at(label, log_path, written_at, log)
+            .expect("create report with an unusable log path");
+        assert!(
+            verify_report(ReportMode::Diff, report.path()).is_err(),
+            "{label} must fail"
+        );
+    }
+    fs::remove_file(outside).expect("remove the outside log");
 }
 
 #[test]
@@ -343,6 +470,54 @@ impl TestReport {
         fs::write(report.root.join("outcomes.json"), &document)
             .map_err(|error| format!("cannot write synthetic mutation report: {error}"))?;
         write_outcome_lists(&report.root, counts)?;
+        Ok(report)
+    }
+
+    /// A diff report with one unviable mutant in `src/lib.rs` whose build
+    /// wrote `log`.
+    fn unviable_with_log(label: &str, log: &str) -> Result<Self, String> {
+        Self::unviable_logged_at(label, "log/mutant.log", "log/mutant.log", Some(log))
+    }
+
+    /// A diff report with one unviable mutant in `src/lib.rs` whose outcome
+    /// names `log_path`, with `log`, if any, written at `written_at` under
+    /// the report or at that absolute path.
+    fn unviable_logged_at(
+        label: &str,
+        log_path: &str,
+        written_at: &str,
+        log: Option<&str>,
+    ) -> Result<Self, String> {
+        let report = Self::new(
+            label,
+            Counts {
+                unviable: 1,
+                ..Counts::default()
+            },
+        )?;
+        let document = report.document()?.replacen(
+            "\"name\": \"mutant-Unviable-0\"",
+            "\"name\": \"mutant-Unviable-0\", \"file\": \"src/lib.rs\"",
+            1,
+        );
+        let log_path = serde_json::to_string(log_path)
+            .map_err(|error| format!("cannot encode synthetic log path: {error}"))?;
+        let document = document.replacen(
+            "\"summary\": \"Unviable\"",
+            &format!("\"summary\": \"Unviable\", \"log_path\": {log_path}"),
+            1,
+        );
+        fs::write(report.root.join("outcomes.json"), document)
+            .map_err(|error| format!("cannot write synthetic mutation report: {error}"))?;
+        if let Some(log) = log {
+            let written_at = report.root.join(written_at);
+            if let Some(parent) = written_at.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("cannot create synthetic log directory: {error}"))?;
+            }
+            fs::write(&written_at, log)
+                .map_err(|error| format!("cannot write synthetic mutant log: {error}"))?;
+        }
         Ok(report)
     }
 

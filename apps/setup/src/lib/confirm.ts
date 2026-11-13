@@ -35,7 +35,10 @@ export interface Place {
   readonly text: string;
   /** Whether its text is the user's, typed by hand or written by an answer, and not the text reader's guess. */
   readonly typed: boolean;
-  /** Whether it is ticked or kept, so the reference learns from it. A box always is. */
+  /**
+   * Whether the reference learns from it. A box always does, and a find does while it is ticked. A reading does
+   * while review keeps it, or while the draft keeps it and a save would learn it though review's tick is clear.
+   */
   readonly keep: boolean;
   /**
    * Whether it has a tick the check may change. A box has none: the reference learns from it while it has text,
@@ -45,8 +48,9 @@ export interface Place {
   /** Whether the text reader is still reading it, so it has no text to ask about yet. */
   readonly reading: boolean;
   /**
-   * Whether the check asks about it. A reading that review leaves out is not asked about, and its tick is never
-   * changed: it only gets the answers, so that its text does not disagree with the texts of the kept ones.
+   * Whether the check asks about it. A reading that nothing would learn, since review leaves it out and the draft
+   * does not keep it, is not asked about, and its keep is never changed: it only gets the answers, so that its text
+   * does not disagree with the texts of the kept ones.
    */
   readonly asks: boolean;
 }

@@ -221,9 +221,19 @@ impl<H: Host> Owner<H> {
         let _ = self.end_capture();
     }
 
+    /// Stops capture `capture`, the number [`Owner::pick`] answered, unless
+    /// another capture took its place: a screen that goes stops its own
+    /// capture, and its stop can arrive after the next screen started one.
+    pub(crate) fn stop_capture(&mut self, capture: u64) {
+        let picked = self.capture.picked();
+        if picked.is_some_and(|picked| picked.capture.ticket.number() == capture) {
+            self.stop();
+        }
+    }
+
     /// Captures `window`, dropping the previous window's screenshots and
-    /// check, and answers once the capture started.
-    pub(crate) fn pick(&mut self, window: u64) -> Result<(), String> {
+    /// check, and answers the capture's number once it started.
+    pub(crate) fn pick(&mut self, window: u64) -> Result<u64, String> {
         self.stop();
         let capture = start(
             &self.host,
@@ -233,6 +243,7 @@ impl<H: Host> Owner<H> {
             PREVIEW_INTERVAL,
             preview_event,
         )?;
+        let number = capture.ticket.number();
         self.capture = Capture::Picked(Box::new(Picked {
             capture,
             latest: None,
@@ -242,7 +253,7 @@ impl<H: Host> Owner<H> {
             recording: None,
             found: None,
         }));
-        Ok(())
+        Ok(number)
     }
 
     /// Keeps `image`, a frame of the picked window that arrived at
@@ -539,6 +550,22 @@ mod tests {
         harness.deliver(&mut handler, Ok(&frame_image()));
         let bytes = harness.ask(preview).expect("running").expect("a frame");
         assert_eq!(bytes, pixels::rgba(&frame_image(), 100));
+    }
+
+    #[test]
+    fn a_stop_of_an_older_capture_leaves_the_newer_one() {
+        let mut harness = harness(false);
+        let (older, _replaced) = harness.pick_numbered();
+        let (newest, mut handler) = harness.pick_numbered();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
+        harness.ask(move |owner| owner.stop_capture(older));
+        assert!(
+            harness.ask(preview).expect("running").is_some(),
+            "the newer capture keeps its frame"
+        );
+        harness.ask(move |owner| owner.stop_capture(newest));
+        assert_eq!(harness.ask(preview), Ok(None));
     }
 
     #[test]
@@ -867,6 +894,12 @@ mod tests {
         harness
             .ask(|owner| owner.set_check(&trial(STATE)))
             .expect("a valid check");
+        // The page asks for a reading's pixels by its recording's ID, which
+        // it still holds after the stop.
+        let recording = harness
+            .ask(Owner::recording_state)
+            .expect("a recording runs")
+            .id;
         // What the page can ask for of the picked window: the newest frame,
         // a screenshot, a recorded reading, the recording, and what the
         // check, which holds a state's picture, reads.
@@ -874,15 +907,16 @@ mod tests {
             [
                 owner.preview(4).expect("no failure").is_some(),
                 owner.screenshot_pixels(0, 4).is_some(),
-                owner.recorded_pixels(0, 4).is_some(),
+                owner.recorded_pixels(recording, 0, 4).is_some(),
                 owner.recording_state().is_some(),
                 owner.reading().expect("reads").is_some(),
             ]
         };
         assert_eq!(harness.ask(held), [true; 5]);
 
-        // The page's `stop_capture`, as it reaches the owner when a flow
-        // closes or the user selects Change window.
+        // The stop that `stop_capture` runs for the capture that still
+        // runs, sent as a command reaches the owner when a flow closes or
+        // the user selects Change window.
         let (reply, mut answer) = oneshot::channel();
         let stop = Message::Run(Run::new(reply, Owner::stop));
         assert!(harness.owner.handle(stop).is_continue());

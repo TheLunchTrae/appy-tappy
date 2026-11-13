@@ -1,14 +1,16 @@
 // Recording a value's region for its looks on the capture screen: its state, and its commands.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 import type { LookRecordingView } from './bindings.ts';
-import { discardRecording, errorText, lookRecordingState, startLookRecording, stopRecording } from './api.ts';
+import { discardRecording, lookRecordingState, startLookRecording, stopRecording } from './api.ts';
 import type { Rect } from './region.ts';
-import { background, useRepeat } from './repeat.ts';
+import { useRecorder } from './useRecorder.ts';
 
-/** How long the recording's state waits between reads, while it records. */
-const RECORDING_PAUSE_MS = 250;
+/** Whether the recording's state still changes: it records. */
+function stillRecords(view: LookRecordingView): boolean {
+  return view.recording;
+}
 
 /** What a recording of looks records: a region drawn on a screenshot, and how far a look may be from another. */
 interface Recordable {
@@ -33,34 +35,8 @@ export function useLookRecording(adopt: (index: number) => void): {
   /** Forgets the recording, if there is one. The screenshots it kept stay. */
   readonly discard: () => Promise<void>;
 } {
-  const [view, setView] = useState<LookRecordingView | null>(null);
-  // Each error clears only when what set it next succeeds: a start, stop or
-  // discard, or reading the recording's state.
-  const [commandError, setCommandError] = useState<string | null>(null);
-  const [pollError, setPollError] = useState<string | null>(null);
-  // Bumped by each start, stop, or discard, so a poll sent before one is ignored.
-  const turn = useRef(0);
-
-  useEffect(
-    () => () => {
-      background(stopRecording());
-    },
-    [],
-  );
-
-  const poll = useCallback(async (): Promise<void> => {
-    const sent = turn.current;
-    try {
-      const state = await lookRecordingState();
-      if (sent === turn.current) {
-        setView(state);
-        setPollError(null);
-      }
-    } catch (error: unknown) {
-      setPollError(errorText(error));
-    }
-  }, []);
-  useRepeat(poll, RECORDING_PAUSE_MS, view?.recording === true);
+  const recorder = useRecorder(lookRecordingState, stillRecords);
+  const { view, command, show, forget } = recorder;
 
   // Hands each kept screenshot over once. The session never gives an index twice.
   const adopted = useRef<Set<number>>(new Set());
@@ -75,45 +51,31 @@ export function useLookRecording(adopt: (index: number) => void): {
   }, [kept, adopt]);
 
   const start = async (settings: Recordable, onStarted: () => void): Promise<void> => {
-    turn.current += 1;
-    try {
+    await command(async () => {
       await startLookRecording(settings.region, settings.tolerance, settings.drawnOn);
-      setCommandError(null);
       onStarted();
-      setView(await lookRecordingState());
-    } catch (error: unknown) {
-      setCommandError(errorText(error));
-    }
+      show(await lookRecordingState());
+    });
   };
 
   const stop = async (): Promise<LookRecordingView | null> => {
-    turn.current += 1;
-    try {
+    let stopped: LookRecordingView | null = null;
+    const worked = await command(async () => {
       await stopRecording();
-      const stopped = await lookRecordingState();
-      setView(stopped);
-      setCommandError(null);
-      return stopped;
-    } catch (error: unknown) {
-      setCommandError(errorText(error));
-      return null;
-    }
+      stopped = await lookRecordingState();
+      show(stopped);
+    });
+    return worked ? stopped : null;
   };
 
   const discard = async (): Promise<void> => {
-    if (view === null) {
-      return;
-    }
-    turn.current += 1;
-    try {
-      await discardRecording();
-      setView(null);
-      setCommandError(null);
-      setPollError(null);
-    } catch (error: unknown) {
-      setCommandError(errorText(error));
+    if (view !== null) {
+      await command(async () => {
+        await discardRecording();
+        forget();
+      });
     }
   };
 
-  return { view, error: commandError ?? pollError, start, stop, discard };
+  return { view, error: recorder.commandError ?? recorder.pollError, start, stop, discard };
 }

@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Twelve guards drop such stale messages:
+it was about has gone. Thirteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -45,10 +45,16 @@ it was about has gone. Twelve guards drop such stale messages:
   application's overlay capture for an overlay's reading. So what a stopped
   or replaced capture still sends is dropped, and so is text for a recording
   or a search that was discarded or replaced. A ticket's number names its
-  work to the UI: the owner answers nothing for a picture asked of another
-  search than the one it holds and rereads nothing for one
-  (`apps/setup/src-tauri/src/owner/found.rs`), and an ask about another
-  watch than the one it holds is refused. Within one recording, the look's
+  work to the UI: a stop that carries the number of another capture than
+  the picked window's is dropped (`Owner::stop_capture`), the owner answers
+  nothing for a picture asked of another search than the one it holds and
+  rereads nothing for one (`apps/setup/src-tauri/src/owner/found.rs`), and
+  an ask about another watch than the one it holds is refused. A reading's
+  picture is asked for with its recording's number: the owner answers
+  nothing for a recording that was discarded or replaced (`recorded_pixels`
+  in `apps/setup/src-tauri/src/owner/recording.rs`), and the page drops a
+  picture that arrives for another recording than the newest it asked for
+  (`withCrop` in `apps/setup/src/lib/review.ts`). Within one recording, the look's
   gate drops the answer to a look from before **Record more** or from before
   a frame showed the window at another size than the recording is placed at
   (`Gate::Abandoned`). The [character check](#character-check) remembers
@@ -95,6 +101,16 @@ it was about has gone. Twelve guards drop such stale messages:
   automations, and drafts as it starts. An answer older than the newest one taken is
   dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
   started before a save and answers late never puts older lists back.
+- **Newest asks.** Every other answer the setup app's screens wait for goes
+  through `apps/setup/src/lib/request.ts`. `ask` is what an effect returns:
+  it sends a request, after a delay where a run of changes should ask once,
+  and drops the answer once what it asked about changed or its component
+  went. `useNewest` is for asks an event starts: each `begin` makes the
+  asks before it stale, and a poll that `join`s the newest ask is dropped
+  once any command begins another, as a recording's or a search's state
+  read before a start, stop, discard, or reread is. `drop` makes them stale
+  without asking: the click target drops a selection still asked for when
+  the user draws a box by hand or shows another screenshot.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -348,7 +364,7 @@ The thread can also panic in any state, which ends it.
   When the process owns none of the windows that fit best, such as while
   another process's window fits better, it waits, and detection follows the
   other process or keeps this one for its grace. Before the capture starts,
-  `framed_at` asks `System::content_size` for the size the window's frames
+  `framed_at` asks `System::content_bounds` for the size the window's frames
   will have, the size of its
   [content](Screen-regions.md#window-content), and places the values there
   when some value reads there, so a window that is not at the first value's
@@ -396,7 +412,7 @@ The thread can also panic in any state, which ends it.
   the 2 second check ended the capture, it then sends `Unseen`, so no
   reading from the old capture can follow it.
 - **Backoff.** After `Lost`, `Failing`, or `Panicked`, the thread waits
-  before it looks again: `FIND_AGAIN` at first, doubling up to
+  before it looks again: `RESTART_WAIT_MIN` at first, doubling up to
   `RESTART_WAIT_MAX` while each new capture ends before it reads a frame. It
   logs the reason once until the reason changes. A restarted capture that
   reads a frame sends `Recovered`, which resets both. A frame whose reading
@@ -418,7 +434,8 @@ The thread can also panic in any state, which ends it.
 
 ### Frame handler
 
-`FrameReader::handle` runs once per frame and acts on what the frame means,
+`FrameReader::handle`, in `apps/runtime/src/workers/reader/frames.rs`, runs once
+per frame and acts on what the frame means,
 which `Placed::meaning` decides for every reader of saved values, as
 [Window sizes](Screen-regions.md#window-sizes) describes: the window at the
 capture's size, at another size, or at the capture's size with a region
@@ -456,7 +473,7 @@ stateDiagram-v2
   the frame pool cannot follow the window to a new size, with a
   `NotConnected` error. A panic in the capture's frame loop outside `handle`
   ends it the same way: `run_capture` (`crates/sources/src/screen/capture.rs`)
-  runs the Windows capture's frame loop, catches the panic, and hands the
+  runs the capture's [frame loop](#capture-frame-loop), catches the panic, and hands the
   handler a `NotConnected` error with the panic's message, so the reader
   logs it, sends `Unseen`, and captures again after the backoff. Unwound,
   the panic would end the capture's thread, and the reader would hear of it
@@ -505,6 +522,61 @@ stateDiagram-v2
 - Each value's problems leave the window size out and are carried into the
   capture started for a new size, so the log says why once for each reason,
   not once for each size or each restart.
+
+### Capture frame loop
+
+`run_frames` in `crates/sources/src/screen/frames.rs` runs on each capture's
+own thread, for the runtime's readers and the setup app's captures alike. The
+Windows capture (`crates/sources/src/win/capture.rs`) is its `FrameSource`: it
+waits for the thread's next event and makes each system call the loop asks
+for. The loop's state is the frame it holds, when the handler's last wait
+ends (`next_read`), when it last checked the window and the device
+(`checked`), the size the system makes frames at (`frames`), and the interval
+it last asked the system for (`asked`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Empty
+    Empty --> Holding: a frame arrives during the wait
+    Holding --> Holding: a newer frame arrives, the older is given back
+    Empty --> Empty: a frame arrives after the wait and is read
+    Holding --> Empty: the wait ends, the frame is read
+    Empty --> Ended: the check finds the window closed or the device lost
+    Holding --> Ended: the check finds the window closed or the device lost
+    Empty --> Ended: a read cannot follow the window's size, or the device is lost
+    Holding --> Ended: a read cannot follow the window's size, or the device is lost
+    Empty --> [*]: Stop
+    Holding --> [*]: Stop, the frame is given back
+    Ended --> [*]
+```
+
+- **Empty.** The loop holds no frame and waits for the next event or the next
+  check, whichever comes first.
+- **Holding.** The loop holds the newest frame until the handler's wait ends,
+  and gives every older one back to the system unread. It waits until the read
+  or the next check, whichever comes first.
+- **Reading.** The loop reads a held frame once the wait has ended. A frame of
+  another size than the system's frames is dropped: the loop has the system
+  make its frames at that size and reads the next frame at once. Otherwise it
+  finds the [window's content](Screen-regions.md#window-content) in the
+  frame, has the crop's regions copied, hands the copy to the handler, and
+  takes the handler's wait. A wait of 64 ms or more also sets how often the
+  system is asked for frames, as [Capture](Screen-regions.md#capture)
+  describes. A handler that returns `NO_MORE_FRAMES`, as a one-frame grab's
+  does, is handed no frame for a day, longer than such a capture runs.
+- **A frame that fails.** A region that lies outside the window's content, or
+  a copy the system fails, reaches the handler as that frame's error, and the
+  loop goes on with the wait the handler returns. The
+  [frame handler](#frame-handler) counts such frames.
+- **Ended.** Every `HEALTH_CHECK`, 2 seconds, whatever arrives meanwhile, the
+  loop asks whether the window is gone and whether the graphics device is
+  lost. Either ends the capture, and so does a read that fails while the
+  device is lost and a system that cannot make frames at the window's new
+  size. The handler receives one `NotConnected` error that says why, and the
+  loop gives back any frame it holds and returns. The capture's owner recovers: the runtime's
+  [reader thread](#reader-thread) captures again after its backoff.
+- **Stop.** Closing or dropping the session wakes the loop, which gives back
+  the frame it holds and returns.
 
 ### Read schedule
 
@@ -558,7 +630,12 @@ stateDiagram-v2
 
 Before a digit, a character that does not fit starts the number over. After a
 digit, it ends the number, and the rest of the region is ignored, so `12/50`
-reads as 12 once `/` is learned. A `,` is skipped when it separates groups of
+reads as 12 once `/` is learned. A character the value leaves out is "any
+other character" whatever it is, a `-`, a `.`, or a `,` included
+(`NumberText::push_text`), and a letter left out still counts as a letter
+before a point. A read runs a second `NumberText` that takes each left-out
+character as itself, and fails with `ReadError::LeftOut` when the two end
+with different numbers. A `,` is skipped when it separates groups of
 three digits before the point, so `1,234` reads as 1234. When the digits after
 a `,` are not a group of three, as in `12,5`, the number ends at the `,` and
 reads as 12. A `.` before any digit reads as `0.`, so `.5` reads as 0.5 (or 0 for
@@ -1332,9 +1409,25 @@ stateDiagram-v2
   after its window is picked (`restore_draft_screenshots`), each under the
   index it had, and changes no other field. With no window picked, it is
   refused.
-  The page stops it when a value or reference flow closes, on **Change
-  window**, and when a click's target screen closes or looks for its window
-  again.
+  A screen that previews a window says that it holds the capture
+  (`useCapture` in `apps/setup/src/lib/capture.ts`): a value or reference
+  flow, and a click's target screen. The capture stops when that screen
+  goes, on **Change window**, and when a click's target screen looks for
+  its window again. The screen stops the capture it started, by the number
+  its pick answered (`ownCapture`), and the owner drops the stop when
+  another capture took that one's place (`Owner::stop_capture`): a stop
+  sent as a screen goes can arrive after the next screen's pick or the
+  automation editor's watch started. While one holds it, the pages' lists are read only
+  after a save.
+- The automation editor's watch (`liveWatchStep` in
+  `apps/setup/src/lib/liveWatch.ts`) holds the owner's watch number, the
+  time before which it starts no new watch, and why its last reading was
+  refused, if nothing was read since. A watch that reads **Lost**, or that
+  cannot start, shows why and starts again a second later. The owner
+  refuses to read a watch that another capture replaced: the editor then
+  watches again at once and says nothing. When the watch that follows is
+  refused too, with no reading between, the refusal is a failure: the
+  editor shows it and tries again each second.
 - **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
   error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
@@ -1388,7 +1481,11 @@ Settling at a size where the value reads places it there and forgets
 `unread`. Each new trial places its value at the newest frame's size at
 once, so an edit that the page tries again on a size change reads there
 without waiting for the size to settle.
-Its state is `state`, a `CheckState`; `read`, the reading or the problem shown;
+Its state is `state`, a `CheckState`; `reads`, the reading or the problem
+shown, which is kept outside the capture screen's own state (`liveReads` in
+`apps/setup/src/lib/liveCheck.ts`) so that a new reading renders only the
+parts that show it, and a read that answers what shows already renders
+nothing;
 `preview`, what saving an edit would do; `tried`, the number of the newest
 trial; and `inForce`, the number of the trial the owner reads with, or none.
 Below, a check stands for any of the three.
@@ -1411,8 +1508,11 @@ stateDiagram-v2
 - **Idle.** The draft lacks something, and the box says what. Nothing is
   shown as read.
 - **Setting** (`pending`). The check waits 250 ms for the draft to hold
-  still, then goes to the owner. Each change of the check, and each time the
-  same edit is tried again, as when the window's size changes,
+  still, then goes to the owner. A check is the same check while what it
+  sends is the same (`key` of `trialOf` in `useLiveCheck.ts`), so a change
+  of the draft that sends nothing new, such as an empty box added or moved
+  in the reference editor, changes no check. Each change of the check, and
+  each time the same edit is tried again, as when the window's size changes,
   takes the next number, starts the wait again, and leaves no number in
   force, and the owner's answer for a check the draft has left is ignored.
   The box says it is trying the check. The last reading is kept, to show
@@ -1525,7 +1625,9 @@ by itself.
 
 A recording of readings keeps a reading for each shape a region shows, for
 the user to review. Its `Sightings` hold `full`, which says why it takes no
-more once a frame did not fit.
+more once a frame did not fit. A reading's picture is answered only for its
+own recording's ID, one of the
+[stale-message guards](#how-to-read-this-page).
 
 ```mermaid
 stateDiagram-v2
@@ -2378,8 +2480,13 @@ stateDiagram-v2
 - The places are every [box](#reference-boxes) of the reference, every
   [found text](#found-text) the list holds, ticked or not, and every
   [recording](#recording) reading (`checkPlaces`). The check asks about the
-  boxes, the finds, and the readings that review keeps. A reading that
-  review leaves out joins no step and never changes its keep; it only gets
+  boxes, the finds, the readings that review keeps, and the readings a
+  save would learn next (`savedReadings`): while review is open, the ones
+  its **Keep** would put on the draft, and otherwise the ones the draft
+  keeps, which review may have left out since without **Keep**. Such a
+  reading counts as kept though review's tick for it is clear, so the
+  check leaves it out of the draft like any kept place. Any other reading
+  that review leaves out joins no step and never changes its keep; it gets
   the answers, so its text does not disagree with the kept ones. A box has
   no tick (`ticks`): it gets the answers in its text, gets its whole text
   from them when it has none, and is never left out, so the tile of a
@@ -2421,11 +2528,11 @@ stateDiagram-v2
   which `useCharacterCheck.ts` runs after each render). Its text takes the
   answered characters, it is left out and remembered in `left` for a shape
   that is no character, and it is ticked or kept once all its shapes have
-  answers. A reading that review leaves out gets the text and keeps its
-  keep. A place whose text the user typed keeps that text and is only left
-  out. A place joins once, so a text or a tick the user changes afterward
-  stays. One that is gone, or being read again, leaves `seen` and joins
-  anew.
+  answers. A reading that nothing would learn, since review leaves it out
+  and the draft does not keep it, gets the text and keeps its keep. A place
+  whose text the user typed keeps that text and is only left out. A place
+  joins once, so a text or a tick the user changes afterward stays. One
+  that is gone, or being read again, leaves `seen` and joins anew.
 - **Text that fits no step.** A place whose text has another number of
   characters than its picture has shapes joins no step. Once every one of
   its shapes has an answer, the answers are its text. One still left is the
@@ -2450,18 +2557,23 @@ stateDiagram-v2
   too, so that saving learns what the check wrote (`editedReading`). Its
   kept text gets only the characters the edit changed, and the draft keeps
   it or not as before unless the edit changes its keep, so what review
-  changed without **Keep**, a text or a cleared tick, stays review's. A
-  draft text of another length than review's does not line up with the
-  edit and stays as it is. A reading left out goes from the
-  draft, and `leftOut` remembers the text the draft kept it with;
-  **It is a character**, or its tick on the `Unfitted` stop, puts it back
-  with that text. A reading the draft never kept stays off it. Closing
+  changed without **Keep**, a text or a cleared tick, stays review's:
+  review's tick follows the edit only when the edit changes the keep
+  (`reviewTick`), so an answer that rewrites the text of a reading the
+  draft keeps does not tick it in review again. A draft text of another
+  length than review's does not line up with the edit and stays as it is.
+  A reading left out goes from the draft, whether or not review has it
+  ticked, and `leftOut` remembers the text the draft kept it with and
+  review's tick; **It is a character**, or its tick on the `Unfitted` stop,
+  puts it back with that text and that tick. A reading the draft never
+  kept stays off it. Closing
   forgets `leftOut` with the answers, and a reading of another recording
   than the one `leftOut` names is not in it.
 - Closing moves the answers into `past`, which only says what the user has
   confirmed. The characters nobody has confirmed (`unconfirmed`) are the
-  ones a reference saved now would learn from a text reader's guess, a box
-  that is still `guessed` or a kept reading with the reader's text, for a
+  ones a reference saved next would learn from a text reader's guess, a box
+  that is still `guessed` or one of the same `savedReadings` with the
+  reader's text, for a
   shape that neither an answer, open or past, nor a text the user typed
   gives that character. A guessed box that shows no characters counts for
   none, since no answer could confirm it. While there are any, the editor
@@ -2635,6 +2747,20 @@ gone saves nothing and tells no one, but still removes the pictures an
 earlier delete left behind. An edit that leaves a value as it was saved
 writes nothing and tells no one. Moving a panel writes the application's
 file without telling anyone.
+
+The owner keeps one saved reference in memory, `kept_reference`: the one the
+reference editor's characters add to, with its samples' pictures, as
+`Owner::keep_reference` read it when the editor first asked about those
+characters (`apps/setup/src-tauri/src/owner/references.rs`). It has two
+states. **Empty** reads the application's file and the pictures for each
+ask. **Kept** answers every ask about that reference from memory, a few for
+each edit in the editor. A reference is kept only when every sample's
+picture could be read, so one that is missing a picture is read again on
+each ask and learned once the picture is back. `Owner::write_app` empties it
+before any saved application is written or removed, whether that works or
+fails, and keeping another reference replaces it. An import writes a new
+application, which no kept reference is part of. A file changed outside the setup app
+while a reference is kept is not seen until then.
 
 A click's picture is written to the `clicks` folder when its target is set
 up, before its automation is saved. Each save of the automations removes the
