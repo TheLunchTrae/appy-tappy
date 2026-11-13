@@ -10,7 +10,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use appytappy_config::settings_file::ReadInterval;
 
@@ -62,122 +62,12 @@ impl ReadSchedule {
     }
 }
 
-/// The longest wait a [`ReadClock`] keeps; a longer one, such as
-/// [`Duration::MAX`] to pause, is cut to this so the deadline stays
-/// representable.
-pub const LONGEST_WAIT: Duration = Duration::from_hours(24);
-
-/// When a capture may read next: the deadline the last read's wait set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReadClock {
-    next: Instant,
-}
-
-impl ReadClock {
-    /// A clock whose first read is due at once.
-    #[must_use]
-    pub const fn new(now: Instant) -> Self {
-        Self { next: now }
-    }
-
-    /// Whether a read is due at `now`.
-    #[must_use]
-    pub fn due(self, now: Instant) -> bool {
-        now >= self.next
-    }
-
-    /// How long from `now` until a read is due; zero once it is.
-    #[must_use]
-    pub fn remaining(self, now: Instant) -> Duration {
-        self.next.saturating_duration_since(now)
-    }
-
-    /// Records a read that finished at `now` and asked to wait `wait`.
-    pub fn after_read(&mut self, now: Instant, wait: Duration) {
-        self.next = now.checked_add(wait.min(LONGEST_WAIT)).unwrap_or(now);
-    }
-}
-
-/// The shortest wait a capture asks the system to match. Below it, the
-/// capture keeps its throttle, so a value that changes on every other read
-/// does not change the capture's setting on every read.
-const SHORTEST_PACED_WAIT: Duration = Duration::from_millis(64);
-
-/// The least time between frames a capture asks the system for.
-///
-/// After a read that asked to wait `wait`, it is the wait itself, cut to
-/// [`LONGEST_WAIT`] and never below `throttle`, or just `throttle` for a wait
-/// too short for a capture to ask the system to match.
-#[must_use]
-pub fn frame_interval(wait: Duration, throttle: Duration) -> Duration {
-    if wait < SHORTEST_PACED_WAIT {
-        return throttle;
-    }
-    wait.min(LONGEST_WAIT).max(throttle)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn millis(value: u64) -> Duration {
         Duration::from_millis(value)
-    }
-
-    #[test]
-    fn a_read_clock_waits_until_the_deadline() {
-        let start = Instant::now();
-        let mut clock = ReadClock::new(start);
-        assert!(clock.due(start));
-        assert_eq!(clock.remaining(start), Duration::ZERO);
-        clock.after_read(start, millis(10));
-        assert!(!clock.due(start));
-        assert_eq!(clock.remaining(start), millis(10));
-        let later = start.checked_add(millis(10)).unwrap();
-        assert!(clock.due(later));
-        assert_eq!(clock.remaining(later), Duration::ZERO);
-    }
-
-    #[test]
-    fn a_read_clock_cuts_very_long_waits() {
-        let start = Instant::now();
-        let mut clock = ReadClock::new(start);
-        clock.after_read(start, Duration::MAX);
-        assert_eq!(clock.remaining(start), LONGEST_WAIT);
-        assert!(!clock.due(start.checked_add(millis(1)).unwrap()));
-    }
-
-    #[test]
-    fn a_capture_asks_for_frames_as_often_as_it_reads_them() {
-        let throttle = millis(16);
-        assert_eq!(frame_interval(millis(500), throttle), millis(500));
-        assert_eq!(
-            frame_interval(SHORTEST_PACED_WAIT, throttle),
-            SHORTEST_PACED_WAIT
-        );
-        assert_eq!(frame_interval(Duration::MAX, throttle), LONGEST_WAIT);
-    }
-
-    #[test]
-    fn a_short_wait_keeps_the_throttle() {
-        let throttle = millis(16);
-        assert_eq!(frame_interval(Duration::ZERO, throttle), throttle);
-        assert_eq!(frame_interval(millis(32), throttle), throttle);
-        assert_eq!(
-            frame_interval(
-                SHORTEST_PACED_WAIT.checked_sub(millis(1)).unwrap(),
-                throttle
-            ),
-            throttle
-        );
-        assert_eq!(frame_interval(millis(32), Duration::ZERO), Duration::ZERO);
-    }
-
-    #[test]
-    fn a_capture_never_asks_for_frames_faster_than_its_throttle() {
-        assert_eq!(frame_interval(millis(100), millis(200)), millis(200));
-        let slow = LONGEST_WAIT.checked_mul(2).unwrap();
-        assert_eq!(frame_interval(Duration::MAX, slow), slow);
     }
 
     #[test]
