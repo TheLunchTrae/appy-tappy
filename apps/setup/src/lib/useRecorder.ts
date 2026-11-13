@@ -20,6 +20,11 @@ export interface Recorder<View> {
   readonly clearCommandError: () => void;
   /** Shows `view` as the recording's state, as a command does with what it read after it. */
   readonly show: (view: View | null) => void;
+  /**
+   * Reads the recording's state now, as a start does after it answered. A failure is a failed read, as a poll's is,
+   * and never the command's.
+   */
+  readonly readState: () => Promise<void>;
   /** Shows no recording and no failed read, once a discard forgot it. */
   readonly forget: () => void;
   /**
@@ -37,30 +42,39 @@ export interface Recorder<View> {
 }
 
 /**
- * What the page knows of its recording: the view the newest read answered, and whether a start answered with no
- * read since, which leaves a recording the owner runs with no view yet.
+ * What the page knows of its recording: the view the newest read answered, whether a start answered with no read
+ * since, which leaves a recording the owner runs with no view yet, and why the newest read failed, until one
+ * answers.
  */
 interface Known<View> {
   readonly view: View | null;
   readonly unread: boolean;
+  readonly readError: string | null;
 }
 
 /** What changes what the page knows of its recording. */
 type Learned<View> =
   | { readonly kind: 'started' }
   | { readonly kind: 'read'; readonly view: View | null }
+  | { readonly kind: 'readFailed'; readonly error: string }
   | { readonly kind: 'forgot' };
 
 /** Nothing known of a recording. */
-const NOTHING_KNOWN: Known<never> = { view: null, unread: false };
+const NOTHING_KNOWN: Known<never> = { view: null, unread: false, readError: null };
 
-/** What the page knows of its recording after `learned`. */
+/**
+ * What the page knows of its recording after `learned`. A read that fails keeps the view and the wait for a read: a
+ * start that answered worked, and the read after it is a read like any poll, whose failure the next read that
+ * answers clears.
+ */
 export function learn<View>(known: Known<View>, learned: Learned<View>): Known<View> {
   switch (learned.kind) {
     case 'started':
       return { ...known, unread: true };
     case 'read':
-      return { view: learned.view, unread: false };
+      return { view: learned.view, unread: false, readError: null };
+    case 'readFailed':
+      return { ...known, readError: learned.error };
     case 'forgot':
       return NOTHING_KNOWN;
   }
@@ -86,7 +100,6 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
   // Each error clears only when what set it next succeeds: a start, stop or discard, or reading the recording's
   // state.
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [pollError, setPollError] = useState<string | null>(null);
   // Each start, stop, and discard makes the polls sent before it stale.
   const turn = useNewest();
   const [own] = useState(() =>
@@ -108,12 +121,18 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
       const state = await read();
       if (current()) {
         tell({ kind: 'read', view: state });
-        setPollError(null);
       }
     } catch (error: unknown) {
-      setPollError(errorText(error));
+      tell({ kind: 'readFailed', error: errorText(error) });
     }
   }, [turn, read]);
+  const readState = useCallback(async (): Promise<void> => {
+    try {
+      tell({ kind: 'read', view: await read() });
+    } catch (error: unknown) {
+      tell({ kind: 'readFailed', error: errorText(error) });
+    }
+  }, [read]);
   useRepeat(poll, RECORDING_PAUSE_MS, keepsReading(known, live));
 
   const command = useCallback(
@@ -138,7 +157,6 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
   }, []);
   const forget = useCallback(() => {
     tell({ kind: 'forgot' });
-    setPollError(null);
   }, []);
   const started = useCallback(
     (recording: number) => {
@@ -156,9 +174,10 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
   return {
     view,
     commandError,
-    pollError,
+    pollError: known.readError,
     clearCommandError,
     show,
+    readState,
     forget,
     command,
     started,
