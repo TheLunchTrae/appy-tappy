@@ -519,6 +519,9 @@ mod tests {
                 .map(drop)
         };
         save(&mut harness, None).expect("saves");
+        harness
+            .ask(|owner| owner.save_reference(&reference("example", "Small", None)))
+            .expect("saves a second reference");
         let png = std::fs::read(&picture).expect("the saved picture");
         // Each ask says the picture is missing, in its own words.
         let missing = |answers: [Result<(), String>; 3]| {
@@ -539,6 +542,17 @@ mod tests {
         // Kept, it is not read again: the asks answer without its picture.
         std::fs::remove_file(&picture).expect("remove the picture");
         assert_eq!(edit(&mut harness), [Ok(()), Ok(()), Ok(())]);
+
+        // Only the kept reference is answered from memory: another one is
+        // read from the folder, where its picture is gone too.
+        std::fs::remove_file(picture.with_file_name("ref-small-1.png")).expect("remove it");
+        assert!(
+            harness
+                .ask(|owner| {
+                    owner.save_reference(&reference("example", "Small", Some(("example", "small"))))
+                })
+                .is_err_and(|error| error.contains("is missing its picture ref-small-1.png"))
+        );
 
         // Writing an application forgets it, so the next ask reads what
         // the folder has now.
