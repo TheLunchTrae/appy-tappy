@@ -20,6 +20,8 @@ import {
   toReference,
   withFixRegion,
   withKind,
+  charactersOnceTaught,
+  readsOf,
   withReference,
   withoutState,
   withState,
@@ -402,6 +404,39 @@ test("a new screenshot carries the value's region when it fits, and clears it wh
   // A saved value's region waits, on no screenshot, for one of the size it was drawn at.
   const saved = { ...EMPTY_DRAFT, region };
   expect(onPicture(saved, 1, false)).toBe(saved);
+});
+
+test('charactersOnceTaught keeps the choice that was picked, for the reference as it is taught', () => {
+  const percent = {
+    id: 'percent',
+    name: 'Percent',
+    ink: red,
+    tolerance: 40,
+    samples: [{ image: 'p.png', text: '10%' }],
+  };
+  const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  const number = { ...EMPTY_DRAFT, reference: 'percent', characters: [...digits, '%'] };
+  const taught = (reference: string | null) => ({
+    region,
+    screenshot: 0,
+    reference: reference === null ? null : { app: 'example', id: reference },
+    ink: red,
+    tolerance: 40,
+    labels: [{ screenshot: 0, text: '3/' }],
+    recorded: [{ reading: 0, text: '7' }],
+  });
+  // Digits and symbols takes up a symbol taught to the reference the number reads with.
+  expect(charactersOnceTaught(number, [percent], taught('percent'))).toEqual([...digits, '%', '/']);
+  // A new reference knows only what it is taught.
+  expect(charactersOnceTaught(number, [percent], taught(null))).toEqual([...digits, '/']);
+  // A chosen set keeps the characters the taught reference knows, and every character stays every character.
+  expect(charactersOnceTaught({ ...number, characters: ['1', '7', 'L'] }, [percent], taught('percent'))).toEqual([
+    '1',
+    '7',
+  ]);
+  expect(charactersOnceTaught({ ...number, characters: null }, [percent], taught(null))).toBeNull();
+  expect(readsOf(charactersOnceTaught({ ...number, characters: ['1'] }, [percent], taught(null)))).toBeNull();
+  expect(readsOf(['1', '%'])).toBe('1%');
 });
 
 test('withReference keeps the choice of characters that was picked, for the new reference', () => {

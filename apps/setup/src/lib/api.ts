@@ -38,8 +38,10 @@ import type {
   OverlayView,
   Reading,
   ReadingDetails,
+  RecordSpec,
   RecordingView,
   ReferenceSaveSpec,
+  ReferenceTrial,
   RegionSpec,
   RowFilter,
   SaveSpec,
@@ -143,11 +145,11 @@ export async function setCheck(trial: TrialSpec): Promise<void> {
 }
 
 /**
- * Reads the live window with the reference `spec` teaches, in the region its characters were drawn in. With
- * `reads`, the characters of the value the reference is made for, it reads only those, as that value does.
+ * Reads the live window with the reference `trial` teaches, in the region its characters were drawn in,
+ * as the number it is made for reads there once both are saved.
  */
-export async function setCharacters(spec: CharactersSpec, reads: string | null): Promise<void> {
-  await invoke('set_characters', { spec, reads });
+export async function setCharacters(trial: ReferenceTrial): Promise<void> {
+  await invoke('set_characters', { trial });
 }
 
 /** What the check reads on the newest frame, or null without a check or a frame. */
@@ -161,11 +163,11 @@ export async function explainReading(): Promise<ReadingDetails | null> {
 }
 
 /**
- * Records the region of the picked window that `spec`'s characters were drawn in, in their color. With
+ * Records the region of the picked window that `spec` names, in the characters' color. With
  * `more`, goes on with the stopped recording, which needs the same region, ink and window size;
  * otherwise starts a new one.
  */
-export async function startRecording(spec: CharactersSpec, more: boolean): Promise<void> {
+export async function startRecording(spec: RecordSpec, more: boolean): Promise<void> {
   await invoke('start_recording', { spec, more });
 }
 

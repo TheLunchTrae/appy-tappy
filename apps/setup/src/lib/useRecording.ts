@@ -116,10 +116,7 @@ export function useRecording(): {
     turn.current += 1;
     try {
       const { region, ink, tolerance, drawnOn } = settings;
-      await startRecording(
-        { region, screenshot: drawnOn, reference: null, ink, tolerance, labels: [], recorded: [] },
-        more,
-      );
+      await startRecording({ region, screenshot: drawnOn, ink, tolerance }, more);
       if (!more) {
         // A new recording replaced the old one, whose readings' pixels go with it.
         setCrops(NO_CROPS);

@@ -1295,6 +1295,28 @@ workings: WorkingsView | null,
 problem: string | null, }>;
 
 /**
+ * What a recording of readings records, as the UI describes it.
+ */
+export type RecordSpec = DeepReadonly<{
+/**
+ * The region of the window to record.
+ */
+region: RegionSpec,
+/**
+ * The screenshot the region was drawn on, whose window size the
+ * recording keeps.
+ */
+screenshot: number,
+/**
+ * The characters' color.
+ */
+ink: ColorSpec,
+/**
+ * How far from `ink` a pixel of a character may be.
+ */
+tolerance: number, }>;
+
+/**
  * What one recorded reading shows, as the user confirmed it in review, so
  * a reference learns its characters like a labeled screenshot's.
  */
@@ -1489,6 +1511,35 @@ characters: CharactersSpec,
  * expected.
  */
 expects: string, }>;
+
+/**
+ * A reference being taught to try on the live window before it is saved,
+ * as the UI describes it.
+ */
+export type ReferenceTrial = DeepReadonly<{
+/**
+ * The saved application the reference is for, whose window's size
+ * changes say where its region reads.
+ */
+app: string,
+/**
+ * The characters it is taught.
+ */
+characters: CharactersSpec,
+/**
+ * The characters the number it is made for reads of it, or `None`
+ * for every character it is taught, as [`CheckDef::Number`] has them.
+ */
+reads: string | null,
+/**
+ * Whether that number ignores digits after the decimal point.
+ */
+whole: boolean,
+/**
+ * The side of the window that number's region stays at, or `None`
+ * for the side the region is nearest.
+ */
+pin: PinDef | null, }>;
 
 /**
  * A rectangle in pixels from the window's top-left corner.

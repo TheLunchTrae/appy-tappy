@@ -668,7 +668,7 @@ mod tests {
         let red: ColorSpec =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         harness
-            .ask(|owner| owner.start_recording(&characters_in(left, red), false))
+            .ask(|owner| owner.start_recording(characters_in(left, red), false))
             .expect("records");
         harness.deliver(&mut handler, Ok(&frame_image()));
         harness

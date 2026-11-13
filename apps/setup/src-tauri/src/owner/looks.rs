@@ -98,7 +98,7 @@ mod tests {
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         let ink: ColorSpec =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
-        move |owner: &mut Owner<FakeHost>| owner.start_recording(&characters_in(region, ink), more)
+        move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region, ink), more)
     }
 
     impl Harness {

@@ -98,7 +98,7 @@ fn with_everything_saved(name: &str) -> (Harness, FrameHandler, Stores, PathBuf,
     assert_eq!(harness.ask(Owner::screenshot), Ok(0));
 
     harness
-        .ask(|owner| owner.start_recording(&characters_in(left(), red()), false))
+        .ask(|owner| owner.start_recording(characters_in(left(), red()), false))
         .expect("records");
     harness.deliver(&mut handler, Ok(&narrow_image()));
     harness.ask(Owner::stop_recording);

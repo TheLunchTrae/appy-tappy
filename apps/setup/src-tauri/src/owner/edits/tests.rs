@@ -1024,7 +1024,22 @@ fn trying_an_edit_reads_the_live_frame_as_the_runtime_would_and_saves_nothing() 
             refused: None,
         })
     );
-    assert_eq!(read(&mut harness), Ok(None), "the check before it is gone");
+    assert_eq!(
+        read(&mut harness),
+        Err(
+            "Not read at 8 × 4, the window's size now: it is read only at the window sizes it \
+             was drawn at."
+                .to_owned()
+        ),
+        "each read says why"
+    );
+    // The edit stays the live check, so a frame of a size it is read at
+    // reads with no new try.
+    harness.deliver(&mut handler, Ok(&frame_image()));
+    assert!(
+        matches!(read(&mut harness), Ok(Some(Reading::State(_)))),
+        "read at the size it was drawn at"
+    );
     // Only the application's own save, above, changed its file.
     let pictures = |mut files: BTreeMap<String, Vec<u8>>| {
         files.remove("app.json");

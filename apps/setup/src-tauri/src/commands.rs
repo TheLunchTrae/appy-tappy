@@ -36,8 +36,8 @@ use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
-    FixSpec, FoundClick, FoundView, Live, Message, Owner, Reading, ReferenceSaveSpec, Run,
-    SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
+    FixSpec, FoundClick, FoundView, Live, Message, Owner, Reading, RecordSpec, ReferenceSaveSpec,
+    ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
 };
 use crate::recording::RecordingView;
 use crate::recording::looks::LookRecordingView;
@@ -222,16 +222,11 @@ pub(crate) async fn set_check(app: AppHandle, trial: TrialSpec) -> Result<(), St
     try_ask(&app, "set_check", move |owner| owner.set_check(&trial)).await
 }
 
-/// Makes the reference `spec` teaches the check the live reading uses,
-/// reading only the characters `reads` when it has any.
+/// Makes the reference `trial` teaches the check the live reading uses.
 #[tauri::command]
-pub(crate) async fn set_characters(
-    app: AppHandle,
-    spec: CharactersSpec,
-    reads: Option<String>,
-) -> Result<(), String> {
+pub(crate) async fn set_characters(app: AppHandle, trial: ReferenceTrial) -> Result<(), String> {
     try_ask(&app, "set_characters", move |owner| {
-        owner.set_characters(&spec, reads.as_deref())
+        owner.set_characters(&trial)
     })
     .await
 }
@@ -685,17 +680,17 @@ pub(crate) async fn overlay_card(
     .await
 }
 
-/// Records the region of the picked window that `spec`'s characters were
-/// drawn in, keeping each reading it shows in their color. With `more`,
+/// Records the region of the picked window that `spec` names, keeping each
+/// reading it shows in the characters' color. With `more`,
 /// goes on with the stopped recording; otherwise starts a new one.
 #[tauri::command]
 pub(crate) async fn start_recording(
     app: AppHandle,
-    spec: CharactersSpec,
+    spec: RecordSpec,
     more: bool,
 ) -> Result<(), String> {
     try_ask(&app, "start_recording", move |owner| {
-        owner.start_recording(&spec, more)
+        owner.start_recording(spec, more)
     })
     .await
 }

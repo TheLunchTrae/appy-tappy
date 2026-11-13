@@ -117,9 +117,12 @@ This page covers what the user guide leaves out.
   taught (`CharactersSpec`, `set_characters`) is never read by the text
   reader: its labels become the reference's saved form, pictures included,
   and `saved::reader` learns it as the runtime learns the saved file. It
-  reads as a number in its region, which scales with the window, and with
-  only the characters of the number it is made for, when that number
-  chooses some.
+  reads as a number in its region, placed as a value of its application
+  is. A reference opened from a number is tried as that number will read
+  with it once both are saved (`ReferenceTrial`): whole when the number
+  is, at its side of the window, and with the characters its choice comes
+  to for the reference as taught (`charactersOnceTaught` in
+  `lib/check.ts`), which the save then gives the number.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A

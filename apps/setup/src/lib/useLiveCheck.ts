@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { CharactersSpec, EditPreview, TrialSpec } from './bindings.ts';
-import { errorText, readValue, setCharacters, setCheck } from './api.ts';
+import type { EditPreview } from './bindings.ts';
+import { errorText, readValue } from './api.ts';
 import type { Built, CheckState } from './check.ts';
 import { afterRead, type InForce, type LiveRead, type ReadAnswer } from './liveCheck.ts';
 import { useRepeat } from './repeat.ts';
@@ -28,28 +28,28 @@ const NOTHING_READ: LiveRead = { reading: null, problem: null };
  */
 export type Trial = Built<() => Promise<EditPreview | null>>;
 
-/** The trial of `built` that `attempt` makes on the live window, or what `built` still needs. */
-export function trialOf<Spec>(built: Built<Spec>, attempt: (spec: Spec) => Promise<EditPreview | null>): Trial {
+/**
+ * The trial of `built` on the live window, or what `built` still needs. `attempt` tries it: `set`, which sets a
+ * check and answers nothing, or a try that answers what saving would do.
+ */
+export function trialOf<Spec>(
+  built: Built<Spec>,
+  attempt: { readonly set: (spec: Spec) => Promise<void> } | ((spec: Spec) => Promise<EditPreview>),
+): Trial {
   if (!built.ok) {
     return built;
   }
   const { spec } = built;
-  return { ok: true, spec: async () => attempt(spec) };
-}
-
-/**
- * Sets the reference `spec` teaches as the check the live window is read with. It reads only the characters
- * `reads`, those of the value the reference is made for, or every character it is taught for null.
- */
-export async function tryCharacters(spec: CharactersSpec, reads: string | null): Promise<null> {
-  await setCharacters(spec, reads);
-  return null;
-}
-
-/** Sets the value `trial` would save as the check the live window is read with. */
-export async function tryCheck(trial: TrialSpec): Promise<null> {
-  await setCheck(trial);
-  return null;
+  if (typeof attempt === 'function') {
+    return { ok: true, spec: async () => attempt(spec) };
+  }
+  return {
+    ok: true,
+    spec: async () => {
+      await attempt.set(spec);
+      return null;
+    },
+  };
 }
 
 /**

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ReferenceDef, ReferenceRef, TrialSpec, ValueDef } from '../lib/bindings.ts';
+import type { ReferenceDef, ReferenceRef, ReferenceTrial, TrialSpec, ValueDef } from '../lib/bindings.ts';
 import {
   editValue,
   errorText,
@@ -10,6 +10,8 @@ import {
   saveFix,
   saveReference,
   saveValue,
+  setCharacters,
+  setCheck,
   tryEdit,
 } from '../lib/api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
@@ -26,6 +28,8 @@ import {
   findBlocked as findBlockedBy,
   onPicture,
   readingOf,
+  readsOf,
+  charactersOnceTaught,
   recordBlocked,
   regionScreenshot,
   settingsDiffer,
@@ -91,7 +95,7 @@ import { useAppFile } from '../lib/useAppFile.ts';
 import { useBarSetup } from '../lib/useBarSetup.ts';
 import { useBoxes } from '../lib/useBoxes.ts';
 import { useFound } from '../lib/useFound.ts';
-import { type Trial, trialOf, tryCharacters, tryCheck, useLiveCheck } from '../lib/useLiveCheck.ts';
+import { type Trial, trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
 import { useMatchPreview, useSelectedPreview } from '../lib/useMatchPreview.ts';
 import { useRecording } from '../lib/useRecording.ts';
@@ -539,11 +543,22 @@ export function Capture({
   });
   const { drawnOn } = draft;
   const fixPin = fixing?.screen.pin;
-  // A reference made for a number is tried with the characters that number reads, once it has any.
-  const reads = draft.characters === null || draft.characters.length === 0 ? null : draft.characters.join('');
+  // A reference is tried as the number it is made for reads with it once both are saved: with that number's
+  // characters, which a fix keeps and a value's follow the reference, whole when it is, and at its side. A reference
+  // made on its own reads every character it knows.
+  const references = file?.references;
+  const taughtTrial = useMemo((): Built<ReferenceTrial> | null => {
+    if (characters === null || !characters.ok) {
+      return characters;
+    }
+    const { spec } = characters;
+    const reads = readsOf(fixing === null ? charactersOnceTaught(draft, references ?? [], spec) : draft.characters);
+    const whole = mode.kind !== 'reference' && draft.whole;
+    return { ok: true, spec: { app: appId, characters: spec, reads, whole, pin: fixPin ?? pin } };
+  }, [characters, fixing, draft, references, mode.kind, appId, fixPin, pin]);
   const trial = useMemo((): Trial => {
-    if (characters !== null) {
-      return trialOf(characters, async (spec) => tryCharacters(spec, reads));
+    if (taughtTrial !== null) {
+      return trialOf(taughtTrial, { set: setCharacters });
     }
     if (edit.built !== null) {
       return trialOf(edit.built, tryEdit);
@@ -556,8 +571,8 @@ export function Capture({
     }
     // A value is tried as it would be saved, which a fix does at its value's side.
     const spec: TrialSpec = { app: appId, check: valueCheck.spec, screenshot: drawnOn, pin: fixPin ?? pin };
-    return trialOf({ ok: true, spec }, tryCheck);
-  }, [characters, reads, edit.built, valueCheck, drawnOn, appId, fixPin, pin]);
+    return trialOf({ ok: true, spec }, { set: setCheck });
+  }, [taughtTrial, edit.built, valueCheck, drawnOn, appId, fixPin, pin]);
   const check = useLiveCheck(trial, edit.again);
   const dropFixes = agreedFixes(check.preview, edit.lost);
   // The size of the screenshot the region would show over, when an edited value was drawn at another: its region
@@ -798,14 +813,16 @@ export function Capture({
         onSaved({ app: saved.app, value: null });
         return;
       }
-      const references = (await appFile.reload())?.references ?? [];
+      await appFile.reload();
       closeEditor();
-      // A value's choice of characters follows its reference, as when one is picked. A fix reads its value's.
-      setDraft((current) =>
-        fixing === null
-          ? withReference({ ...current, kind: 'number' }, saved.reference, references)
-          : { ...current, kind: 'number', reference: saved.reference },
-      );
+      // A value's choice of characters follows its reference, as the live check tried it. A fix reads its value's.
+      const { spec } = characters;
+      setDraft((current) => ({
+        ...current,
+        kind: 'number',
+        reference: saved.reference,
+        characters: fixing === null ? charactersOnceTaught(current, references ?? [], spec) : current.characters,
+      }));
     } catch (error: unknown) {
       setSaveError(errorText(error));
     } finally {
