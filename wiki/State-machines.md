@@ -104,7 +104,9 @@ it was about has gone. Sixteen guards drop such stale messages:
   went. `useNewest` is for asks an event starts: each `begin` makes the
   asks before it stale, and a poll that `join`s the newest ask is dropped
   once any command begins another, as a recording's or a search's state
-  read before a start, stop, discard, or reread is.
+  read before a start, stop, discard, or reread is. `drop` makes them stale
+  without asking: the click target drops a selection still asked for when
+  the user draws a box by hand or shows another screenshot.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
