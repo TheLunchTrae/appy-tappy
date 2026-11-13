@@ -17,7 +17,7 @@ use appytappy_sources::screen::{Image, Region};
 
 use crate::owner::Message;
 
-use super::find;
+use super::find::{self, Sizes};
 
 /// One frame to look over.
 #[derive(Debug)]
@@ -29,8 +29,8 @@ pub(crate) struct Job {
     pub(crate) frame: Image,
     /// When the frame arrived.
     pub(crate) at: Instant,
-    /// How tall the characters it looks for are, in pixels.
-    pub(crate) sample: u32,
+    /// How tall the characters it looks for are, at each size.
+    pub(crate) sizes: Sizes,
     /// The recording's region, which the text it takes first is nearest to.
     pub(crate) near: Region,
     /// What tells the characters' ink from background.
@@ -42,6 +42,9 @@ pub(crate) struct Job {
 pub(crate) struct Seen {
     /// Where it is on the frame.
     pub(crate) spot: Region,
+    /// How tall the characters are that the look took it for, in pixels:
+    /// the one of the job's sizes it has.
+    pub(crate) size: u32,
     /// Its pixels and the shape of each of its characters. `None` for a run
     /// of more characters than a reading holds, which is a sentence in the
     /// characters' color and not a value.
@@ -51,11 +54,12 @@ pub(crate) struct Seen {
 /// Each run of text `job`'s frame shows like the region's, nearest the
 /// region first.
 pub(crate) fn look(job: &Job) -> Vec<Seen> {
-    find::lines(&job.frame, job.sample, job.near, &job.reader)
+    find::lines(&job.frame, &job.sizes, job.near, &job.reader)
         .into_iter()
-        .map(|spot| Seen {
-            spot,
-            reading: job.frame.crop(spot).and_then(|crop| {
+        .map(|find::Spot { region, size }| Seen {
+            spot: region,
+            size,
+            reading: job.frame.crop(region).and_then(|crop| {
                 let shapes = job.reader.shapes(&crop).ok()?.characters().to_vec();
                 Some((crop, shapes))
             }),
@@ -109,7 +113,7 @@ mod tests {
             recording,
             frame: Image::new(size, [40, 40, 40, 0].repeat(4)).expect("matching length"),
             at: Instant::now(),
-            sample: 2,
+            sizes: Sizes::of(2),
             near: Region::new(0, 0, 2, 2).expect("not empty"),
             reader: DigitReader::new(RED, 0),
         };
@@ -159,7 +163,7 @@ mod tests {
             recording: 7,
             frame,
             at,
-            sample: 4,
+            sizes: Sizes::of(4),
             near: Region::new(0, 0, 3, 6).expect("not empty"),
             reader: DigitReader::new(RED, 0),
         })
@@ -179,6 +183,7 @@ mod tests {
             panic!("one run of text");
         };
         let (crop, shapes) = seen.reading.as_ref().expect("few characters");
+        assert_eq!(seen.size, 4);
         assert_eq!(crop.size(), seen.spot.size());
         assert_eq!(shapes.len(), 1);
         assert!(messages.try_recv().is_err(), "and it ends with the owner");

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { RecordingSettings, RecordingView } from './bindings.ts';
+import type { ExampleSpec, RecordingSettings, RecordingView } from './bindings.ts';
 import { discardRecording, errorText, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
 import type { Picture } from './pixels.ts';
 import { background, useRepeat } from './repeat.ts';
@@ -14,9 +14,12 @@ const CROP_WIDTH = 480;
 
 /**
  * What a recording records: a region drawn on a screenshot, read with the characters' color and tolerance, in that
- * place alone or wherever the window shows text like it.
+ * place alone or wherever the window shows text like it or like one of the `examples`, the reference's boxes.
  */
-type Recordable = Omit<RecordingSettings, 'windowSize'> & { readonly drawnOn: number };
+type Recordable = Omit<RecordingSettings, 'windowSize'> & {
+  readonly drawnOn: number;
+  readonly examples: readonly ExampleSpec[];
+};
 
 /** Each recorded reading's pixels, by its index, for the recording `id`. */
 interface Crops {
@@ -118,8 +121,8 @@ export function useRecording(): {
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
     turn.current += 1;
     try {
-      const { region, ink, tolerance, drawnOn, scope } = settings;
-      await startRecording({ region, screenshot: drawnOn, ink, tolerance, scope }, more);
+      const { region, ink, tolerance, drawnOn, scope, examples } = settings;
+      await startRecording({ region, screenshot: drawnOn, ink, tolerance, scope, examples }, more);
       if (!more) {
         // A new recording replaced the old one, whose readings' pixels go with it.
         setCrops(NO_CROPS);

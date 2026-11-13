@@ -1519,6 +1519,18 @@ stateDiagram-v2
   another window size sets the problem, clears the places the last look
   found, and is not sent, whenever it arrives. Stopping forgets those
   places, and so does **Record more**, after a stop that a failure made.
+- A recording of the whole window holds the sizes of text it looks for
+  (`Sizes` in `recording/find.rs`): the height of the text its region shows
+  on its screenshot, and the height of the text in each of the reference's
+  boxes that differs from the ones held
+  ([Recording](Setup-app.md#recording)). The set is never empty and only
+  grows: a new recording measures them, and **Record more** measures the
+  boxes again and adds the sizes of the ones drawn since
+  (`Recording::look_for`). No event removes a size; **Discard** and a new
+  recording start the set again. Each look carries the sizes the recording
+  held when its frame went out. A kept reading holds the size its text was
+  taken for, and a shape that shows at two sizes is one shape, kept and
+  counted once.
 - Each frame is cropped to the region. A crop of another window size, or one
   the reader cannot read, sets the recording's `problem` and is skipped while
   it goes on recording. A crop with no ink is skipped and clears the problem,
@@ -1537,7 +1549,8 @@ stateDiagram-v2
   it: **Stop** and review what it found, or **Discard** it to start a new
   one.
 - **Record more** needs the same region, ink, tolerance, window size, and
-  choice of where to look, and clears the problem. The page sends the
+  choice of where to look, and clears the problem. The boxes may differ,
+  since they only add sizes to look for. The page sends the
   stopped recording's own choice of where to look, so only the others can
   differ. When any of them differs (`settingsDiffer`), **Use its
   settings** shows and puts the ink and the tolerance back
@@ -2090,8 +2103,13 @@ stateDiagram-v2
   try again.", opens the gate, and forgets the places the last look found.
   **Record more** sends a frame again, and stops the same way if the thread
   is gone.
-- A look takes the 32 runs nearest the recording's region (`MAX_LINES`), so
-  the text around the value is counted before other text in the window.
+- A look takes the 32 runs nearest the recording's region (`MAX_LINES`), of
+  all the sizes together, so the text around the value is counted before
+  other text in the window.
+- A job carries the sizes of text to look for, as the recording held them
+  when the frame went out, and the answer says which of them each run has.
+  **Record more** can add a size while a look is out; that look is then
+  **Abandoned**, and the next frame goes out with the sizes as they are.
 
 ### Text reader
 

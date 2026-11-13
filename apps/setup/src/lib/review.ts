@@ -34,6 +34,32 @@ export function seen(times: number): string {
   return times === 1 ? 'seen once' : `seen ${times} times`;
 }
 
+/** `sizes` as a list of heights, such as "8 px", "8 px and 16 px", or "8 px, 16 px and 24 px". */
+function heights(sizes: readonly number[]): string {
+  const each = sizes.map((size) => `${size} px`);
+  const last = each.at(-1) ?? '';
+  return each.length < 2 ? last : `${each.slice(0, -1).join(', ')} and ${last}`;
+}
+
+/**
+ * The text a recording of the whole window looks for, by its `sizes`, such as "text 8 px tall" or "text of 2 sizes:
+ * 8 px and 16 px tall"; null for a recording of one place, which looks for no size.
+ */
+export function sizesNote(sizes: readonly number[]): string | null {
+  if (sizes.length === 0) {
+    return null;
+  }
+  return sizes.length === 1 ? `text ${heights(sizes)} tall` : `text of ${sizes.length} sizes: ${heights(sizes)} tall`;
+}
+
+/**
+ * Which of the recording's `sizes` of text `reading` is, such as "text 16 px tall"; null when the recording looked
+ * for one size or none, so there is nothing to tell apart.
+ */
+export function readingSize(reading: RecordedReading, sizes: readonly number[]): string | null {
+  return sizes.length < 2 || reading.size === null ? null : `text ${reading.size} px tall`;
+}
+
 /**
  * How often a shape showed, such as "seen 214 times in 37 readings". These are counts of what the recording saw. They
  * say nothing of whether the shape's character is right, which only its text decides.

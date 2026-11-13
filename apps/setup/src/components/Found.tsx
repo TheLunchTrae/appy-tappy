@@ -132,7 +132,9 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
     unlisted === 0
       ? null
       : `Skipped ${plural(unlisted, 'find that shows', 'finds that show')} characters the reference does not need. A find you ticked before its text was read is skipped the same way.`,
-    view.otherSizes === 0 ? null : `Skipped ${plural(view.otherSizes, 'run', 'runs')} of other sizes.`,
+    view.otherSizes === 0
+      ? null
+      : `Skipped ${plural(view.otherSizes, 'run', 'runs')} of other sizes. To find those, select a box around text of that size first.`,
     view.more === 0 ? null : `${plural(view.more, 'more was', 'more were')} left out; add these, then find again.`,
   ].filter((part) => part !== null);
   return (

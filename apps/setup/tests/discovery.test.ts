@@ -7,6 +7,7 @@ import { discovery } from '../src/lib/discovery.ts';
 const reading = (...shapes: number[]): RecordedReading => ({
   firstMs: 0,
   seen: 1,
+  size: null,
   text: { kind: 'pending' },
   shapes,
   width: 0,

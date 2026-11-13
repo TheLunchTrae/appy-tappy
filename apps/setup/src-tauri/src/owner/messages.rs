@@ -135,7 +135,7 @@ pub(crate) struct ReferenceTrial {
 }
 
 /// What a recording of readings records, as the UI describes it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RecordSpec {
@@ -151,6 +151,21 @@ pub(crate) struct RecordSpec {
     /// Where to look for characters: in the region alone, or wherever the
     /// window shows text like the region's.
     pub(crate) scope: Scope,
+    /// The reference's boxes: more examples of its text, which a recording
+    /// of the whole window looks for the sizes of too.
+    pub(crate) examples: Vec<ExampleSpec>,
+}
+
+/// One more example of the text a recording of the whole window looks for:
+/// a box the user drew around some of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExampleSpec {
+    /// The box.
+    pub(crate) region: RegionSpec,
+    /// The screenshot it is drawn on.
+    pub(crate) screenshot: usize,
 }
 
 /// Where and why a value is not read on a window of `size`, as the end of

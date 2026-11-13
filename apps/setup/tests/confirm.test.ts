@@ -189,6 +189,7 @@ describe('a reading review leaves out', () => {
     const read = (text: string, shapes: number[], names: string) => ({
       firstMs: 0,
       seen: 1,
+      size: null,
       text: { kind: 'read' as const, text },
       shapes,
       ...cut(names),
@@ -373,6 +374,7 @@ describe('the places a check goes over', () => {
     const recorded = (kind: 'pending' | 'read') => ({
       firstMs: 0,
       seen: 1,
+      size: null,
       text: kind === 'pending' ? { kind } : { kind, text: '1' },
       shapes: [1],
       width: 5,

@@ -191,7 +191,9 @@ added. A reference with no list of what it needs lists every find.
 
 Draw the box tightly around the text first, since the finds' characters must
 be about as tall as the text in it; a comma or a mark below them does not
-count. Text of another size is skipped, and the list says how much. One search
+count. Text of another size is skipped, and the list says how much. To find
+that text, select a box around some text of that size, or draw one, and then
+select **Find more like it**. One search
 lists at most 12 finds; add those, then select **Find more like it** again, and
 it lists the rest, leaving out what you added.
 
@@ -428,6 +430,26 @@ the place itself. While it records, the window shows an
 outline around each piece it found the last time it looked, and **Recording
 the whole window** says in how many places that was.
 
+An application can show the same characters at more than one size, such as a
+small counter and a large total. Each [box](#boxes) is one more example of a
+size:
+
+1. Before you start, draw a box around some text of the other size, on a
+   screenshot of the same window size. The box needs no text typed in it to
+   be an example, and a box you typed text in is one too.
+2. Select **Start recording**. **Recording the whole window** says which
+   sizes it looks for, such as
+   **Looking for text of 2 sizes: 14 px and 28 px tall**. Two examples of
+   nearly the same height count as one size.
+3. In review, each reading says which size it is, such as
+   **text 28 px tall**, when the recording looked for more than one.
+
+To add a size to a recording you stopped, draw a box around some text of
+that size and select **Record more**. A recording keeps the sizes it has: to
+drop one, **Discard** the recording and start a new one. A character that
+looks the same at two sizes is kept once, so a second size adds readings only
+for the shapes it draws differently.
+
 It has limits, and review is where you deal with them:
 
 - **It can pick up other text.** A menu's label or a name in the same color
@@ -446,9 +468,9 @@ It has limits, and review is where you deal with them:
   longer than one place, and on a large window one look can take longer
   than half a second, so text that shows only briefly can be missed.
   **This place** looks about 30 times a second.
-- **It finds one size.** Text much larger or smaller than the example's is
-  not collected. What the reference learns still reads at other
-  sizes.
+- **It finds the sizes it has an example of.** Text much larger or smaller
+  than every example's is not collected. What the reference learns still
+  reads at other sizes.
 - **It reads text by itself on a line.** Text that touches other things in
   the same color, or a line of more than 24 characters, is skipped.
 

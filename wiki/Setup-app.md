@@ -423,8 +423,22 @@ character is one shape.
   like its region's, as [Finding more like it](#finding-more-like-it) finds
   them (`find::lines`): in the characters' color and within 15% of the
   height the region's characters had on its screenshot, which starting the
-  recording measures once (`find::sample_height`) and refuses when the
-  region shows no ink there. Each run is cropped with its margin and goes
+  recording measures once (`find::sample_heights`) and refuses when the
+  region shows no ink there. Each of the reference's boxes is one more
+  example of a size (`RecordSpec::examples`): its text is measured the same
+  way, and the recording looks for each height that is further than 15%
+  from the ones it holds (`find::Sizes`). A box that shows no ink, or that
+  is on a screenshot of another window size, is no example and is left out
+  without a word, since it is a box for teaching first. **Record more**
+  measures the boxes again and adds the sizes drawn since; it drops none,
+  so the counts stay those of one recording. Each size is looked for by
+  itself, among the ink no taller than twice the size and in runs no
+  further apart than the size, as one search finds one. A run that two
+  sizes take is a line once, at the smaller size. A kept reading holds the
+  size its run was taken for (`size`), which review shows when the
+  recording looked for more than one. A shape is a character scaled to the
+  grid, so one that shows at two sizes is counted and kept once, and the
+  shapes stay one set across sizes. Each run is cropped with its margin and goes
   through the same counting and keeping as a place's crop, so the bounds
   above hold, and a kept reading is the run's own crop. A run the reader
   cannot split, such as one of more than 24 characters, is skipped. The

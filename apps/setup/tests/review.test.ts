@@ -61,6 +61,7 @@ const shapesOf = (text: string): number[] => Array.from(text.trim(), (character)
 const read = (text: string, shapes: readonly number[] = shapesOf(text), firstMs = 0): RecordedReading => ({
   firstMs,
   seen: 1,
+  size: null,
   text: { kind: 'read', text },
   shapes,
   ...cut,
@@ -69,15 +70,17 @@ const read = (text: string, shapes: readonly number[] = shapesOf(text), firstMs 
 const unread = (shapes: readonly number[]): RecordedReading => ({
   firstMs: 0,
   seen: 1,
+  size: null,
   text: { kind: 'pending' },
   shapes,
   ...cut,
 });
 const keeps = (all: readonly { readonly keep: boolean }[]): boolean[] => all.map((entry) => entry.keep);
-const pending: RecordedReading = { firstMs: 0, seen: 1, text: { kind: 'pending' }, shapes: [1], ...cut };
+const pending: RecordedReading = { firstMs: 0, seen: 1, size: null, text: { kind: 'pending' }, shapes: [1], ...cut };
 const failed: RecordedReading = {
   firstMs: 0,
   seen: 1,
+  size: null,
   text: { kind: 'failed', text: 'No model.' },
   shapes: [2],
   ...cut,
@@ -93,6 +96,22 @@ describe('clock and seen', () => {
     expect(sighted({ frames: 1, readings: 1 })).toBe('seen once');
     expect(sighted({ frames: 5, readings: 1 })).toBe('seen 5 times in 1 reading');
     expect(sighted({ frames: 214, readings: 37 })).toBe('seen 214 times in 37 readings');
+  });
+});
+
+describe('text sizes', () => {
+  test('a recording says which sizes of text it looks for, and one place says nothing', () => {
+    expect(review.sizesNote([])).toBeNull();
+    expect(review.sizesNote([8])).toBe('text 8 px tall');
+    expect(review.sizesNote([8, 16])).toBe('text of 2 sizes: 8 px and 16 px tall');
+    expect(review.sizesNote([8, 16, 24])).toBe('text of 3 sizes: 8 px, 16 px and 24 px tall');
+  });
+
+  test('a reading says its size only when the recording looked for more than one', () => {
+    const large = { ...read('5'), size: 16 };
+    expect(review.readingSize(large, [8, 16])).toBe('text 16 px tall');
+    expect(review.readingSize(large, [16])).toBeNull();
+    expect(review.readingSize(read('5'), [8, 16])).toBeNull();
   });
 });
 

@@ -2,6 +2,7 @@
 //! readings, starting it and sending each new reading it shows to the text
 //! reader. Recording looks is in `looks.rs`.
 
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use appytappy_sources::screen::digits::DigitReader;
@@ -9,7 +10,7 @@ use appytappy_sources::screen::{Image, Region, Size};
 use appytappy_sources::system::Rgb;
 
 use crate::check_spec::{self, CharactersSpec, RegionSpec};
-use crate::owner::messages::RecordSpec;
+use crate::owner::messages::{ExampleSpec, RecordSpec};
 use crate::pixels;
 use crate::recording::{
     NewReading, Recorder, Recording, RecordingView, Scope, Text, find, look, ocr,
@@ -130,16 +131,26 @@ impl<H: Host> Owner<H> {
     /// the window shows text like the region's. With `more`, goes on with
     /// the stopped recording, which must be of the same region, ink, window
     /// size, and scope; otherwise starts a new one in place of any
-    /// recording.
+    /// recording. A recording of the whole window looks for text of the
+    /// size of each of `spec`'s examples too, and going on with one adds
+    /// the sizes of the examples drawn since.
     pub(crate) fn start_recording(&mut self, spec: RecordSpec, more: bool) -> Result<(), String> {
         let (region, window_size) = self.recordable(spec.region, spec.screenshot)?;
         let settings: (Rgb, u8) = (spec.ink.into(), spec.tolerance);
         let now = Instant::now();
+        // The whole window is searched for text as tall as each example's
+        // on its screenshot.
+        let reader = DigitReader::new(settings.0, settings.1);
+        let examples = match spec.scope {
+            Scope::Place => Vec::new(),
+            Scope::Window => self.example_heights(&spec.examples, window_size, &reader),
+        };
         match &mut self.recording {
             Some(Recorder::Readings(recording))
                 if more && recording.records(region, settings, window_size, spec.scope) =>
             {
                 recording.resume(now);
+                recording.look_for(examples);
             },
             Some(Recorder::Readings(recording)) if more => {
                 return Err(format!(
@@ -158,40 +169,79 @@ impl<H: Host> Owner<H> {
                 );
             },
             _ => {
-                // The whole window is searched for text as tall as the
-                // region's on its screenshot, so that is measured first.
+                // The region's own text is the first example, so it is
+                // measured before anything is replaced.
                 let sample = match spec.scope {
                     Scope::Place => None,
-                    Scope::Window => Some(self.sample_height(region, spec.screenshot, settings)?),
+                    Scope::Window => Some(self.sample_height(region, spec.screenshot, &reader)?),
                 };
                 let id = self.next_recording_id();
-                let recording = Recording::new(id, region, settings, window_size, now);
-                self.recording = Some(Recorder::Readings(match sample {
-                    Some(sample) => recording.across_window(sample),
-                    None => recording,
-                }));
+                let mut recording = Recording::new(id, region, settings, window_size, now);
+                if let Some(sample) = sample {
+                    recording = recording.across_window(sample);
+                    recording.look_for(examples);
+                }
+                self.recording = Some(Recorder::Readings(recording));
             },
         }
         Ok(())
     }
 
     /// How tall the characters are that `region` of screenshot `screenshot`
-    /// shows in the characters' color, or what to do when it shows none.
+    /// shows in the ink `reader` tells from background, or what to do when
+    /// it shows none.
     fn sample_height(
         &self,
         region: Region,
         screenshot: usize,
-        (ink, tolerance): (Rgb, u8),
+        reader: &DigitReader,
     ) -> Result<u32, String> {
         self.screenshots
             .get(screenshot)
-            .and_then(|image| find::sample_height(image, region, &DigitReader::new(ink, tolerance)))
+            .and_then(|image| find::sample_heights(image, &[region], reader).pop()?)
             .ok_or_else(|| {
                 "That place shows no characters in that color, so there is nothing to look for in \
                  the rest of the window. Draw it around some characters and pick their color \
                  first."
                     .to_owned()
             })
+    }
+
+    /// How tall the characters are that each of `examples` shows in the ink
+    /// `reader` tells from background. An example that shows none, or that
+    /// is on a screenshot of another size than `window_size`, whose pixels
+    /// measure another window, is no example of a size and is left out.
+    /// Each screenshot's ink is read once for all the examples on it.
+    fn example_heights(
+        &self,
+        examples: &[ExampleSpec],
+        window_size: Size,
+        reader: &DigitReader,
+    ) -> Vec<u32> {
+        let mut drawn: BTreeMap<usize, Vec<Region>> = BTreeMap::new();
+        for example in examples {
+            let RegionSpec {
+                x,
+                y,
+                width,
+                height,
+            } = example.region;
+            if let Some(region) = Region::new(x, y, width, height) {
+                drawn.entry(example.screenshot).or_default().push(region);
+            }
+        }
+        drawn
+            .into_iter()
+            .filter_map(|(screenshot, regions)| {
+                let image = self
+                    .screenshots
+                    .get(screenshot)
+                    .filter(|image| image.size() == window_size)?;
+                Some(find::sample_heights(image, &regions, reader))
+            })
+            .flatten()
+            .flatten()
+            .collect()
     }
 
     /// Stops the recording, of readings or of looks, which keeps what it
@@ -242,7 +292,7 @@ mod tests {
     use appytappy_sources::screen::Size;
 
     use crate::check_spec::ColorSpec;
-    use crate::owner::messages::Message;
+    use crate::owner::messages::{ExampleSpec, Message};
     use crate::owner::test_support::{
         FakeHost, Harness, capturing, characters_in, frame_image, harness, teaching,
     };
@@ -558,6 +608,87 @@ mod tests {
         harness
             .ask(start_window_recording(0, true))
             .expect("goes on over the whole window");
+    }
+
+    /// A `width` by 30 frame with a red stroke 4 tall at its top left,
+    /// one 8 tall in its middle, and one 16 tall at its right.
+    fn three_sizes(width: u32) -> Image {
+        let strokes: [(u32, u32, u32); 3] = [(1, 1, 4), (10, 10, 8), (20, 10, 16)];
+        let pixels = (0..30_u32)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                let red = strokes.iter().any(|&(left, top, height)| {
+                    (left..left.saturating_add(2)).contains(&x)
+                        && (top..top.saturating_add(height)).contains(&y)
+                });
+                if red { [0, 0, 255, 0] } else { [40, 40, 40, 0] }
+            })
+            .collect();
+        Image::new(Size { width, height: 30 }, pixels).expect("matching length")
+    }
+
+    /// Records the whole window for text like the 4 tall stroke of
+    /// [`three_sizes`] on screenshot 0, and like each of `examples`, as a
+    /// screenshot and a box's left and top; each box is 4 by 18.
+    fn start_recording_sizes(
+        scope: Scope,
+        examples: &[(usize, u32, u32)],
+        more: bool,
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
+        let region = |x: u32, y: u32, height: u32| -> RegionSpec {
+            serde_json::from_str(&format!(
+                r#"{{"x":{x},"y":{y},"width":4,"height":{height}}}"#
+            ))
+            .expect("valid JSON")
+        };
+        let ink: ColorSpec =
+            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+        let spec = RecordSpec {
+            scope,
+            examples: examples
+                .iter()
+                .map(|&(screenshot, x, y)| ExampleSpec {
+                    region: region(x, y, 18),
+                    screenshot,
+                })
+                .collect(),
+            ..characters_in(region(0, 0, 6), ink)
+        };
+        move |owner: &mut Owner<FakeHost>| owner.start_recording(spec, more)
+    }
+
+    #[test]
+    fn a_whole_window_is_recorded_for_text_as_tall_as_each_box_on_a_screenshot_of_its_size() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&three_sizes(30)));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // A screenshot of a wider window, whose pixels measure another size.
+        harness.deliver(&mut handler, Ok(&three_sizes(40)));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(1));
+        harness.deliver(&mut handler, Ok(&three_sizes(30)));
+        // The boxes: the stroke 8 tall, a place with no ink, a box past the
+        // screenshot's edge, a screenshot that was never taken, and the
+        // stroke 16 tall on the screenshot of the other size.
+        let boxes = [(0, 9, 9), (0, 25, 9), (0, 28, 9), (5, 9, 9), (1, 19, 9)];
+        harness
+            .ask(start_recording_sizes(Scope::Place, &boxes, false))
+            .expect("records");
+        let place = harness.recording().expect("a recording");
+        assert_eq!(place.sizes, [0_u32; 0], "one place looks for no size");
+        harness
+            .ask(start_recording_sizes(Scope::Window, &boxes, false))
+            .expect("records");
+        assert_eq!(harness.recording().expect("a recording").sizes, [4, 8]);
+        harness.deliver(&mut handler, Ok(&three_sizes(30)));
+        let job = harness.looks.try_iter().next().expect("a look goes out");
+        assert_eq!(job.sizes.heights(), [4, 8]);
+        harness.ask(Owner::stop_recording);
+        // Going on adds the size of a box drawn since, and keeps the others.
+        harness
+            .ask(start_recording_sizes(Scope::Window, &[(0, 19, 9)], true))
+            .expect("goes on");
+        assert_eq!(harness.recording().expect("a recording").sizes, [4, 8, 16]);
     }
 
     #[test]

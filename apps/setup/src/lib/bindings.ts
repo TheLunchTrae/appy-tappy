@@ -839,6 +839,20 @@ readingArea: boolean,
 drawing: EditDrawing, }>;
 
 /**
+ * One more example of the text a recording of the whole window looks for:
+ * a box the user drew around some of it.
+ */
+export type ExampleSpec = DeepReadonly<{
+/**
+ * The box.
+ */
+region: RegionSpec,
+/**
+ * The screenshot it is drawn on.
+ */
+screenshot: number, }>;
+
+/**
  * [`WindowMatch::fallback`] as the file spells it.
  */
 export type FallbackDef = DeepReadonly<"none" | "executable">;
@@ -1374,7 +1388,12 @@ tolerance: number,
  * Where to look for characters: in the region alone, or wherever the
  * window shows text like the region's.
  */
-scope: RecordingScope, }>;
+scope: RecordingScope,
+/**
+ * The reference's boxes: more examples of its text, which a recording
+ * of the whole window looks for the sizes of too.
+ */
+examples: Array<ExampleSpec>, }>;
 
 /**
  * What one recorded reading shows, as the user confirmed it in review, so
@@ -1402,6 +1421,12 @@ firstMs: number,
  * How many frames showed exactly this reading.
  */
 seen: number,
+/**
+ * How tall the characters are that a recording of the whole window
+ * took it for when it first showed, in pixels: the one of the
+ * recording's sizes it has. `None` for a reading of the region itself.
+ */
+size: number | null,
 /**
  * What the text reader made of it.
  */
@@ -1501,6 +1526,13 @@ problem: string | null,
  * What it records, which going on with it needs again.
  */
 settings: RecordingSettings,
+/**
+ * How tall the characters are that a recording of the whole window
+ * looks for, in pixels, smallest first: one size for each example of
+ * text that differs from the others. Empty for a recording of the
+ * region alone.
+ */
+sizes: Array<number>,
 /**
  * Where a recording of the whole window found text like its region's
  * the last time it looked, while it records; empty otherwise.

@@ -20,7 +20,11 @@
 //!
 //! A recording of the whole window collects the same way from every place
 //! the window shows text like the region's: in the characters' color and as
-//! tall as the characters the region showed when it started ([`find`]).
+//! tall as the characters the region showed when it started, or as those of
+//! another example the user drew ([`find`]), so text at each size the
+//! application draws the characters in is collected. A shape is a character
+//! scaled onto one grid, whatever its size, so a shape that shows at two
+//! sizes is still kept and counted once.
 //! Each such run of text is cropped and counted as the region's own crop
 //! is. Looking over a whole frame costs far more than cropping one region,
 //! so a thread of its own does it ([`look`]), one frame at a time: the
@@ -47,6 +51,7 @@ use appytappy_sources::system::Rgb;
 use serde::{Deserialize, Serialize};
 
 use self::character::CharacterView;
+use self::find::Sizes;
 use self::ink::Ink;
 pub(crate) use self::ink::Line;
 pub(crate) use self::lifecycle::Lifecycle;
@@ -82,6 +87,10 @@ pub(crate) struct Kept {
     pub(crate) first: Duration,
     /// How many frames showed exactly this reading.
     pub(crate) seen: u32,
+    /// How tall the characters are that a look over the whole window took
+    /// it for when it first showed, in pixels: the one of the recording's
+    /// sizes it has. `None` for a reading of the region itself.
+    size: Option<u32>,
     /// What the text reader made of it.
     pub(crate) text: Text,
 }
@@ -182,9 +191,10 @@ enum Looking {
 /// Looking over the whole window for text like a region's.
 #[derive(Debug)]
 struct Scan {
-    /// How tall the characters were that the region showed when the
-    /// recording started, in pixels: the size of text it looks for.
-    sample: u32,
+    /// The sizes of text it looks for: how tall the characters were that
+    /// the region showed when the recording started, and those of each
+    /// other example.
+    sizes: Sizes,
     /// Whether a look is out, and when the last went out.
     gate: Gate,
     /// Where the last look found text, while it records.
@@ -263,11 +273,23 @@ impl Recording {
     /// started, rather than in the region alone.
     pub(crate) fn across_window(mut self, sample: u32) -> Self {
         self.looking = Looking::Window(Scan {
-            sample,
+            sizes: Sizes::of(sample),
             gate: Gate::Idle(None),
             spots: Vec::new(),
         });
         self
+    }
+
+    /// Has a recording of the whole window look for text with characters
+    /// of each of `heights` too, in pixels: those of the other examples.
+    /// The looks from the next one on take it, and what it kept stays. A
+    /// recording of the region alone looks for no size.
+    pub(crate) fn look_for(&mut self, heights: impl IntoIterator<Item = u32>) {
+        if let Looking::Window(scan) = &mut self.looking {
+            for height in heights {
+                scan.sizes.add(height);
+            }
+        }
     }
 
     /// Where it looks for characters.
@@ -313,7 +335,7 @@ impl Recording {
             },
         };
         self.life.set_problem(None);
-        self.keep(crop, shapes.characters(), at)
+        self.keep(crop, shapes.characters(), None, at)
     }
 
     /// The look to send for `frame`, a whole window's frame that arrived at
@@ -353,7 +375,7 @@ impl Recording {
             recording: self.id,
             frame: frame.clone(),
             at,
-            sample: scan.sample,
+            sizes: scan.sizes.clone(),
             near: self.region,
             reader: self.reader.clone(),
         })
@@ -392,7 +414,7 @@ impl Recording {
         seen.into_iter()
             .filter_map(|seen| {
                 let (crop, shapes) = seen.reading?;
-                self.keep(crop, &shapes, at)
+                self.keep(crop, &shapes, Some(seen.size), at)
             })
             .collect()
     }
@@ -439,8 +461,15 @@ impl Recording {
     }
 
     /// Counts `crop`, which showed `shapes` at `at`, and keeps it when it
-    /// is worth keeping; answers it then, for the text reader.
-    fn keep(&mut self, crop: Image, shapes: &[Shape], at: Instant) -> Option<NewReading> {
+    /// is worth keeping; answers it then, for the text reader. `size` is
+    /// the size of text a look over the whole window took it for.
+    fn keep(
+        &mut self,
+        crop: Image,
+        shapes: &[Shape],
+        size: Option<u32>,
+        at: Instant,
+    ) -> Option<NewReading> {
         let shapes = self.sightings.count(shapes)?;
         let kept = self.readings.iter().map(|kept| kept.shapes.as_slice());
         if !self.sightings.worth_keeping(&shapes, kept) {
@@ -457,6 +486,7 @@ impl Recording {
             shapes,
             first: self.life.elapsed(at),
             seen: 1,
+            size,
             text: Text::Pending,
         });
         Some(NewReading { index, line })
@@ -521,6 +551,10 @@ impl Recording {
                 },
                 scope: self.scope(),
             },
+            sizes: match &self.looking {
+                Looking::Window(scan) => scan.sizes.heights().to_vec(),
+                Looking::Place => Vec::new(),
+            },
             spots: match &self.looking {
                 Looking::Window(scan) => scan
                     .spots
@@ -535,6 +569,7 @@ impl Recording {
                 .map(|kept| ReadingView {
                     first_ms: millis(kept.first),
                     seen: kept.seen,
+                    size: kept.size,
                     text: kept.text.clone(),
                     shapes: kept.shapes.clone(),
                     width: kept.image.size().width,
@@ -596,6 +631,11 @@ pub(crate) struct RecordingView {
     pub(crate) problem: Option<String>,
     /// What it records, which going on with it needs again.
     pub(crate) settings: Settings,
+    /// How tall the characters are that a recording of the whole window
+    /// looks for, in pixels, smallest first: one size for each example of
+    /// text that differs from the others. Empty for a recording of the
+    /// region alone.
+    pub(crate) sizes: Vec<u32>,
     /// Where a recording of the whole window found text like its region's
     /// the last time it looked, while it records; empty otherwise.
     pub(crate) spots: Vec<RegionView>,
@@ -674,6 +714,10 @@ pub(crate) struct ReadingView {
     pub(crate) first_ms: u64,
     /// How many frames showed exactly this reading.
     pub(crate) seen: u32,
+    /// How tall the characters are that a recording of the whole window
+    /// took it for when it first showed, in pixels: the one of the
+    /// recording's sizes it has. `None` for a reading of the region itself.
+    pub(crate) size: Option<u32>,
     /// What the text reader made of it.
     pub(crate) text: Text,
     /// Each of its characters' shapes, left to right, as an index into the
@@ -1281,6 +1325,52 @@ mod tests {
                 height: 12
             }
         );
+    }
+
+    #[test]
+    fn a_whole_window_keeps_text_of_each_example_s_size_and_a_shape_once_across_them() {
+        let start = Instant::now();
+        let mut recording = window_recording(start);
+        // The region's stroke, the same stroke twice as large, and a block
+        // twice as large as the region's text.
+        let shown = blocks(&[STROKE, (20, 20, 6, 16), (44, 20, 12, 16)]);
+        assert_eq!(looked_over(&mut recording, &shown, start), Some(1));
+        assert_eq!(recording.view(start).sizes, [8]);
+        assert_eq!(recording.view(start).spots.len(), 1, "one size is found");
+        recording.look_for([16, 17, 8]);
+        let later = start + SCAN_EVERY;
+        assert_eq!(
+            looked_over(&mut recording, &shown, later),
+            Some(1),
+            "the large stroke shows the shape the small one does"
+        );
+        let view = recording.view(later);
+        assert_eq!(view.sizes, [8, 16], "17 is the size 16 is");
+        assert_eq!(view.spots.len(), 3);
+        let readings: Vec<(Option<u32>, u32, &[usize])> = view
+            .readings
+            .iter()
+            .map(|reading| (reading.size, reading.seen, reading.shapes.as_slice()))
+            .collect();
+        assert_eq!(
+            readings,
+            [(Some(8), 3, &[0][..]), (Some(16), 1, &[1])],
+            "the stroke is seen twice at its size and once at the other"
+        );
+    }
+
+    #[test]
+    fn a_recording_of_the_region_alone_looks_for_no_size() {
+        let start = Instant::now();
+        let mut recording = recording_of(16, 32, start);
+        recording.look_for([4]);
+        recording
+            .offer(&frame(16, 32, zero), start)
+            .expect("a new reading");
+        let view = recording.view(start);
+        assert_eq!(view.sizes, [0_u32; 0]);
+        assert_eq!(view.readings[0].size, None);
+        assert_eq!(recording.scope(), Scope::Place);
     }
 
     #[test]

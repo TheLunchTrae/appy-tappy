@@ -705,7 +705,9 @@ export function Capture({
     // A reference taught by itself reads at its first box, which the recording is of.
     const readAt = draft.region === null ? (draft.boxes[0]?.id ?? null) : null;
     const scope = more ? (recording?.settings.scope ?? recordScope) : recordScope;
-    await recorder.start({ region, ink, tolerance, drawnOn, scope }, more, () => {
+    // Each box is one more example of the text a recording of the whole window looks for.
+    const examples = draft.boxes.map((box) => ({ region: box.region, screenshot: box.screenshot }));
+    await recorder.start({ region, ink, tolerance, drawnOn, scope, examples }, more, () => {
       review.show(false);
       setSelected(null);
       setPicking(null);

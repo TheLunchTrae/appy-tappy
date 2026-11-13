@@ -65,9 +65,9 @@ parts fit.
   different character shape a number region shows, for the user to review
   and label; kept readings teach a reference like labeled screenshots. It
   looks in the region alone, or over the whole window for text like the
-  region's. A recording of looks keeps a screenshot each time a value's region shows a
-  look that no screenshot shows yet. A capture records one of the two at a
-  time.
+  region's, at the size of each example the user drew. A recording of looks
+  keeps a screenshot each time a value's region shows a look that no
+  screenshot shows yet. A capture records one of the two at a time.
 - **Reference.** The characters of one font in one application, learned from
   labeled pictures of its text. A number check reads with one, at any size.
 - **Rule.** A condition on signals, the actions to run when it starts to hold,
