@@ -34,7 +34,7 @@ use crate::debug::trace_file::TraceFile;
 use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows};
 use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
-use crate::drafts::{DraftDef, DraftSummary};
+use crate::drafts::{DraftDef, DraftShot, DraftSummary};
 use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
@@ -1077,12 +1077,12 @@ pub(crate) async fn save_draft(
 }
 
 /// Makes the screenshots of the draft `id` this session's, and answers the
-/// index each has.
+/// index each has and whether a recording of looks kept it.
 #[tauri::command]
 pub(crate) async fn restore_draft_screenshots(
     app: AppHandle,
     id: String,
-) -> Result<Vec<usize>, String> {
+) -> Result<Vec<DraftShot>, String> {
     try_ask(&app, "restore_draft_screenshots", move |owner| {
         owner.restore_draft_screenshots(&id)
     })

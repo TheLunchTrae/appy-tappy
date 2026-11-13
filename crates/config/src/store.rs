@@ -641,10 +641,10 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             values: vec![ValueDef {
                 id: "icon_visible".to_owned(),
                 name: "Icon visible".to_owned(),
+                origin: OriginDef::ByHand,
                 screen: ScreenDef {
                     window_size: SizeDef {
                         width: 100,

@@ -217,10 +217,10 @@ mod tests {
             anti_cheat: AntiCheatDef::None,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             values: vec![ValueDef {
                 id: "progress".to_owned(),
                 name: "The progress".to_owned(),
+                origin: OriginDef::ByHand,
                 screen: ScreenDef {
                     window_size: SizeDef {
                         width: 800,
@@ -435,6 +435,7 @@ mod tests {
         example.references = vec![ReferenceDef {
             id: "counter".to_owned(),
             name: "Counter".to_owned(),
+            origin: OriginDef::ByHand,
             ink: ColorDef {
                 red: 255,
                 green: 255,

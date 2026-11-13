@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use appytappy_config::app_file::{
-    AppFile, ColorDef, FixDef, PinDef, RegionDef, SizeChangesDef, StateDef, WindowDef,
+    AppFile, ColorDef, FixDef, OriginDef, PinDef, RegionDef, SizeChangesDef, StateDef, WindowDef,
 };
 use appytappy_config::automation_file::AutomationDef;
 use appytappy_config::window_match::WindowFacts;
@@ -211,6 +211,82 @@ fn save(
     drop_fixes: &[SizeDef],
 ) -> Result<SavedValue, String> {
     harness.ask(|owner| owner.edit_value(spec, drop_fixes))
+}
+
+#[test]
+fn a_value_says_whether_a_recording_of_looks_kept_a_screenshot_it_is_set_up_on() {
+    let (mut harness, mut handler, root) = with_saved_states("edit-origin");
+    let origin = |harness: &Harness, id: &str| {
+        saved_file(harness)
+            .values
+            .into_iter()
+            .find(|value| value.id == id)
+            .expect("the value")
+            .origin
+    };
+    assert_eq!(origin(&harness, "icon_visible"), OriginDef::ByHand);
+    // A recording of the whole frame's looks keeps a red frame as
+    // screenshot 3.
+    let region = serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("JSON");
+    harness
+        .ask(|owner| owner.start_look_recording(region, 10, 0))
+        .expect("records");
+    harness.deliver(
+        &mut handler,
+        Ok(&red_image(SizeDef {
+            width: 4,
+            height: 2,
+        })),
+    );
+    let recorded_state = r#"{"kind":"state","region":{"x":0,"y":0,"width":2,"height":2},
+        "drawnOn":0,"states":[{"name":"Shown","screenshot":0},{"name":"Hidden","screenshot":3}],
+        "tolerance":0}"#;
+    harness
+        .ask(|owner| owner.save(&spec("example", "Icon again", recorded_state)))
+        .expect("saves");
+    assert_eq!(
+        origin(&harness, "icon_again"),
+        OriginDef::Recording,
+        "one of its states is taken from a recorded screenshot"
+    );
+    let mut on_recorded = spec("example", "Progress bar", BAR);
+    on_recorded.screenshot = 3;
+    harness
+        .ask(|owner| owner.save(&on_recorded))
+        .expect("saves");
+    assert_eq!(
+        origin(&harness, "progress_bar"),
+        OriginDef::Recording,
+        "its region is drawn on a recorded screenshot"
+    );
+    // An edit that keeps the region keeps how the value was made.
+    save(
+        &mut harness,
+        &edit("progress_bar", "Progress", KEPT_GREEN_BAR),
+        &[],
+    )
+    .expect("saves");
+    assert_eq!(origin(&harness, "progress_bar"), OriginDef::Recording);
+    // One that draws it again says how it is made now.
+    let drawn_bar = r#"{"kind":"drawn","screenshot":0,"check":{"kind":"barFill",
+        "region":{"x":0,"y":0,"width":4,"height":2},
+        "filled":{"red":255,"green":0,"blue":0},"empty":{"red":40,"green":40,"blue":40}}}"#;
+    save(
+        &mut harness,
+        &edit("progress_bar", "Progress", drawn_bar),
+        &[],
+    )
+    .expect("saves");
+    assert_eq!(origin(&harness, "progress_bar"), OriginDef::ByHand);
+    let drawn_recorded = format!(r#"{{"kind":"drawn","screenshot":0,"check":{recorded_state}}}"#);
+    save(
+        &mut harness,
+        &edit("icon_visible", "Icon visible", &drawn_recorded),
+        &[],
+    )
+    .expect("saves");
+    assert_eq!(origin(&harness, "icon_visible"), OriginDef::Recording);
+    std::fs::remove_dir_all(root).expect("clean up");
 }
 
 #[test]

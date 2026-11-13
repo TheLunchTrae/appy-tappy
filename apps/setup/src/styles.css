@@ -3066,7 +3066,7 @@ tr.draft-row > td:not(.end):not(.row-actions) {
   background: var(--panel);
 }
 
-/* Where an application in the list came from, under its name. */
+/* How a value or a reference in the list was made, under its name. */
 .table .origin {
   display: block;
   overflow-wrap: anywhere;

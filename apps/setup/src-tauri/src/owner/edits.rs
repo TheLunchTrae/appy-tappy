@@ -189,10 +189,15 @@ impl<H: Host> Owner<H> {
             .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
         named_apart(file, Some(&saved.id), name)?;
         let drawn = saved.screen.window_size;
-        let (region, check, pictures) = match &spec.drawing {
+        let (region, check, pictures, origin) = match &spec.drawing {
             EditDrawing::Kept { check } => {
                 keeps_pictures(&saved.screen.check, check)?;
-                (saved.screen.region, check.clone(), Vec::new())
+                (
+                    saved.screen.region,
+                    check.clone(),
+                    Vec::new(),
+                    saved.origin.clone(),
+                )
             },
             EditDrawing::Drawn { check, screenshot } => {
                 if self.capture.screenshots().get(*screenshot).is_none() {
@@ -224,7 +229,12 @@ impl<H: Host> Owner<H> {
                     Some(number),
                 )
                 .map_err(|error| error.to_string())?;
-                (built.region, built.check, built.pictures)
+                (
+                    built.region,
+                    built.check,
+                    built.pictures,
+                    check_spec::origin(check, self.capture.screenshots(), *screenshot),
+                )
             },
         };
         let (fixes, dropped) = if fixes_suit(&saved.screen.check, &check) {
@@ -258,6 +268,7 @@ impl<H: Host> Owner<H> {
         let value = ValueDef {
             id: saved.id.clone(),
             name: name.to_owned(),
+            origin,
             screen: ScreenDef {
                 window_size: drawn,
                 region,

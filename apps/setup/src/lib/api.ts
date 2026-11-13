@@ -23,6 +23,7 @@ import type {
   ColorSpec,
   DebugOverview,
   DraftDef,
+  DraftShot,
   DraftSummary,
   EditPreview,
   EditSpec,
@@ -516,10 +517,11 @@ export async function saveDraft(id: string | null, draft: DraftDef, screenshots:
 
 /**
  * Makes the screenshots of the draft `id` the capture's, in place of any it took, so each has the index it
- * had when the draft was saved; returns those indexes, lowest first.
+ * had when the draft was saved and the mark of a recording of looks if it had one; returns each, lowest
+ * index first.
  */
-export async function restoreDraftScreenshots(id: string): Promise<ReadonlyArray<number>> {
-  return invoke<ReadonlyArray<number>>('restore_draft_screenshots', { id });
+export async function restoreDraftScreenshots(id: string): Promise<ReadonlyArray<DraftShot>> {
+  return invoke<ReadonlyArray<DraftShot>>('restore_draft_screenshots', { id });
 }
 
 /** Deletes the draft `id` with its screenshots. One already gone is fine. */

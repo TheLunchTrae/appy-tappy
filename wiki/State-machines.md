@@ -1406,10 +1406,10 @@ stateDiagram-v2
   screenshot, recorded reading, or find outlives the capture, and the
   [ticket](#how-to-read-this-page) of the closed capture drops what it
   still sends. Saving a draft copies the screenshots to the draft's folder
-  first; a flow that finishes that draft puts them back into `screenshots`
-  after its window is picked (`restore_draft_screenshots`), each under the
-  index it had, and changes no other field. With no window picked, it is
-  refused.
+  first, with which of them a recording of looks kept; a flow that finishes
+  that draft puts them back into `screenshots` after its window is picked
+  (`restore_draft_screenshots`), each under the index it had and with that
+  mark, and changes no other field. With no window picked, it is refused.
   A screen that previews a window says that it holds the capture
   (`useCapture` in `apps/setup/src/lib/capture.ts`): a value or reference
   flow, and a click's target screen. The capture stops when that screen

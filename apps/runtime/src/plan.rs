@@ -395,6 +395,7 @@ mod tests {
         ValueDef {
             id: id.to_owned(),
             name: format!("The {id}"),
+            origin: OriginDef::ByHand,
             screen: ScreenDef {
                 window_size: SizeDef {
                     width: 800,
@@ -432,7 +433,6 @@ mod tests {
             anti_cheat: AntiCheatDef::None,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             values,
             references: Vec::new(),
         }
@@ -826,6 +826,7 @@ mod tests {
         example.references.push(ReferenceDef {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
+            origin: OriginDef::ByHand,
             ink: RED,
             tolerance: 10,
             samples: vec![SampleDef {

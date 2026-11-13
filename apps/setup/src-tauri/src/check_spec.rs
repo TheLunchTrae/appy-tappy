@@ -13,7 +13,7 @@
 //! A reference being taught is a [`CharactersSpec`], which `characters.rs`
 //! turns into a saved reference the same way.
 
-use appytappy_config::app_file::{CheckDef, ColorDef, RegionDef, StateDef};
+use appytappy_config::app_file::{CheckDef, ColorDef, OriginDef, RegionDef, StateDef};
 use appytappy_config::names::state_image_name;
 use appytappy_sources::screen::{EmptyRegion, Image, Region, Rgb, Size};
 use serde::{Deserialize, Serialize};
@@ -326,6 +326,25 @@ pub(crate) fn drawn_size(
         }
     }
     Ok(drawn)
+}
+
+/// How a value is made whose check `spec` has its region drawn on screenshot
+/// `drawn_on`: with a recording when a recording of looks kept any
+/// screenshot the check names, and by hand otherwise.
+pub(crate) fn origin(spec: &CheckSpec, screenshots: &dyn Shots, drawn_on: usize) -> OriginDef {
+    let states: &[StateSpec] = match spec {
+        CheckSpec::State { states, .. } => states,
+        CheckSpec::Number { .. } | CheckSpec::BarFill { .. } | CheckSpec::Color { .. } => &[],
+    };
+    let mut named = states
+        .iter()
+        .map(|state| state.screenshot)
+        .chain([drawn_on]);
+    if named.any(|screenshot| screenshots.is_recorded(screenshot)) {
+        OriginDef::Recording
+    } else {
+        OriginDef::ByHand
+    }
 }
 
 /// The window size of screenshot `screenshot`.

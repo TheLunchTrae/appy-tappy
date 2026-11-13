@@ -17,7 +17,7 @@ export function classToConfirm(inFile: AntiCheatDef): AntiCheatDef {
   return inFile === 'none' ? 'unknown' : inFile;
 }
 
-/** How a definition was made, as the Applications page and the import dialog say it. */
+/** How a value or a reference was made, as the Values and References pages say it. */
 export function originText(origin: OriginDef): string {
   switch (origin.kind) {
     case 'byHand':
@@ -28,6 +28,31 @@ export function originText(origin: OriginDef): string {
       // A shared file says that its maker imported it, and not from which file of theirs.
       return origin.file === '' ? 'Imported from a file' : `Imported from ${origin.file}`;
   }
+}
+
+/**
+ * How a shared file's values and references were made, from the `origins` of them all, as the import dialog says
+ * it: the one way when they share it, and otherwise how many were made each way.
+ */
+export function originsText(origins: readonly OriginDef[]): string {
+  const first = origins[0];
+  if (first === undefined) {
+    return 'Nothing made yet';
+  }
+  const counts = (['byHand', 'recording', 'imported'] as const).map(
+    (kind) => origins.filter((origin) => origin.kind === kind).length,
+  );
+  if (counts.includes(origins.length)) {
+    return originText(first.kind === 'imported' ? { kind: 'imported', file: '' } : first);
+  }
+  const [byHand = 0, recording = 0, imported = 0] = counts;
+  return [
+    byHand === 0 ? null : `${byHand} made by hand`,
+    recording === 0 ? null : `${recording} made with a recording`,
+    imported === 0 ? null : `${imported} imported from a file`,
+  ]
+    .filter((part) => part !== null)
+    .join(', ');
 }
 
 /** Why a picked file of `bytes` bytes is not read, or null for one small enough to read. */
