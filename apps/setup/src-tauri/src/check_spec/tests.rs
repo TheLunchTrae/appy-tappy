@@ -266,10 +266,10 @@ fn what_the_saved_form_breaks_comes_back_in_the_pages_words() {
     let none = problem(&["None"]).expect_err("reserved");
     assert_eq!(
         none.to_string(),
-        "State name \"None\" is \"none\", which stands for no state."
+        "State name \"None\" is \"none\", which stands for no state (state 1)."
     );
     let blank = problem(&[" "]).expect_err("blank");
-    assert_eq!(blank.to_string(), "State name \" \" is empty.");
+    assert_eq!(blank.to_string(), "State name \" \" is empty (state 1).");
     let names: Vec<String> = (0..=MAX_STATES).map(|index| format!("S{index}")).collect();
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
     let too_many = problem(&names).expect_err("too many");

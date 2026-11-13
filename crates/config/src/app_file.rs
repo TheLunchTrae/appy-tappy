@@ -819,8 +819,11 @@ fn check_states(names: &[&str]) -> Result<(), CheckDefError> {
         return Err(CheckDefError::TooManyStates);
     }
     let mut seen = BTreeSet::new();
-    for name in names {
-        StateName::new(name).map_err(CheckDefError::StateName)?;
+    for (index, name) in names.iter().enumerate() {
+        StateName::new(name).map_err(|error| CheckDefError::StateName {
+            position: index.saturating_add(1),
+            error,
+        })?;
         if !seen.insert(name.to_lowercase()) {
             return Err(CheckDefError::SameStateName((*name).to_owned()));
         }
@@ -846,7 +849,12 @@ pub enum CheckDefError {
     /// A state check has more than [`MAX_STATES`] states.
     TooManyStates,
     /// A state's name breaks the rules of [`StateName::new`].
-    StateName(InvalidStateName),
+    StateName {
+        /// Which state, counted from 1, so two names alike say which.
+        position: usize,
+        /// What is wrong with its name.
+        error: InvalidStateName,
+    },
     /// Two states have this name, or names that differ only in case.
     SameStateName(String),
     /// The bar's filled and empty colors are the same.
@@ -863,7 +871,9 @@ impl fmt::Display for CheckDefError {
                 formatter,
                 "its state check has more than {MAX_STATES} states"
             ),
-            Self::StateName(error) => write!(formatter, "its {error}"),
+            Self::StateName { position, error } => {
+                write!(formatter, "its {error} (state {position})")
+            },
             Self::SameStateName(name) => {
                 write!(formatter, "two of its states are named {name:?}")
             },
@@ -1785,7 +1795,10 @@ mod tests {
             let invalid = StateName::new(name).expect_err(name);
             assert_eq!(
                 check_states(&["Paused", name]),
-                Err(CheckDefError::StateName(invalid))
+                Err(CheckDefError::StateName {
+                    position: 2,
+                    error: invalid
+                })
             );
         }
         let gray = ColorDef {
@@ -1802,8 +1815,11 @@ mod tests {
                 "its state check has more than 16 states",
             ),
             (
-                CheckDefError::StateName(StateName::new("None").expect_err("reserved")),
-                "its state name \"None\" is \"none\", which stands for no state",
+                CheckDefError::StateName {
+                    position: 3,
+                    error: StateName::new("None").expect_err("reserved"),
+                },
+                "its state name \"None\" is \"none\", which stands for no state (state 3)",
             ),
             (
                 CheckDefError::SameStateName("Live".to_owned()),
@@ -1826,7 +1842,7 @@ mod tests {
         let error = AppFile::parse(&file.to_json()).expect_err("a spaced state name");
         assert_eq!(
             error.to_string(),
-            "value \"progress\": its state name \"Paused \" starts or ends with a space"
+            "value \"progress\": its state name \"Paused \" starts or ends with a space (state 1)"
         );
     }
 

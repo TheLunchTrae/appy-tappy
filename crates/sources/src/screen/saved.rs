@@ -473,10 +473,15 @@ fn state_match(
     let states = states
         .iter()
         .zip(images)
-        .map(|(state, image)| {
+        .enumerate()
+        .map(|(index, (state, image))| {
             // `CheckDef::check` refused the names `StateName::new` refuses.
-            let name = StateName::new(&state.name)
-                .map_err(|invalid| SavedError::Check(CheckDefError::StateName(invalid)))?;
+            let name = StateName::new(&state.name).map_err(|error| {
+                SavedError::Check(CheckDefError::StateName {
+                    position: index.saturating_add(1),
+                    error,
+                })
+            })?;
             Ok((name, state_picture(image, size, tolerance, picture)?))
         })
         .collect::<Result<_, SavedError>>()?;
@@ -961,7 +966,7 @@ mod tests {
         .expect_err("reserved name");
         assert_eq!(
             error.to_string(),
-            "its state name \"none\" is \"none\", which stands for no state"
+            "its state name \"none\" is \"none\", which stands for no state (state 1)"
         );
         assert!(error.source().is_none());
     }
