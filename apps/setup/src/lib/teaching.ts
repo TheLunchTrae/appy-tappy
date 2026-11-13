@@ -18,7 +18,7 @@ export interface ReferenceSave {
 
 /** What Save reference says while review is open. */
 export const SAVE_AFTER_REVIEW =
-  'Keep the readings or select Back before you save. The reference has only the readings you kept, and saving ends the recording.';
+  "Keep the readings to save them with the reference, or go back to the screenshot to save without review's changes. Saving ends the recording.";
 
 /**
  * Whether the reference can be saved now, and what the editor says when it waits for review. Saving ends the
