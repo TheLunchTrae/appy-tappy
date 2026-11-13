@@ -393,10 +393,9 @@ mod tests {
     const CHARGE: &str = r#"{"kind":"number","region":{"x":6,"y":2,"width":18,"height":9},
         "reference":{"app":"example","id":"percent"},"whole":false}"#;
 
-    /// What the live box says of `379%` read with the digits alone.
-    const DIGITS_ONLY: &str = "Not read on the live window now: a character has a shape the \
-        reference has not learned: it read `3 7 9 ?`, and character 4 is closest to the `3` it \
-        learned.";
+    /// What the live box says of `379%` read without the `7`.
+    const NO_SEVEN: &str = "Not read on the live window now: the value leaves out a character \
+        its number holds: it read `3 7 9 %`.";
 
     /// A harness whose application `example` changes size as `size_changes`
     /// say, with a window that shows `379%` at [`DRAWN`] on screenshot 0 and
@@ -524,12 +523,20 @@ mod tests {
             harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
-        // Read with the digits alone, the percent sign is a shape the value
-        // does not know, as it is for the runtime.
+        // Read with the digits alone, the percent sign ends the number, as
+        // it does for the runtime.
         harness
             .ask(|owner| owner.set_check(&reading("0123456789")))
             .expect("the reference knows three of them");
-        assert_eq!(harness.ask(Owner::reading), Err(DIGITS_ONLY.to_owned()));
+        assert_eq!(
+            harness.ask(Owner::reading),
+            Ok(Some(Reading::Number(379.0)))
+        );
+        // A digit the value leaves out is not read around.
+        harness
+            .ask(|owner| owner.set_check(&reading("39%")))
+            .expect("the reference knows them");
+        assert_eq!(harness.ask(Owner::reading), Err(NO_SEVEN.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.set_check(&reading("2"))),
             Err(
@@ -725,16 +732,16 @@ mod tests {
             harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
-        let digits = ReferenceTrial {
-            reads: Some("0123456789".to_owned()),
+        let no_seven = ReferenceTrial {
+            reads: Some("39%".to_owned()),
             ..teaching(taught.clone())
         };
-        // Made for a value that reads only digits, it reads as that value
-        // will: the percent sign is a shape it does not know.
+        // Made for a value that reads only some characters, it reads as
+        // that value will: not around a digit the value leaves out.
         harness
-            .ask(|owner| owner.set_characters(&digits))
-            .expect("learns the digits");
-        assert_eq!(harness.ask(Owner::reading), Err(DIGITS_ONLY.to_owned()));
+            .ask(|owner| owner.set_characters(&no_seven))
+            .expect("learns them");
+        assert_eq!(harness.ask(Owner::reading), Err(NO_SEVEN.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.set_characters(&ReferenceTrial {
                 reads: Some("2".to_owned()),

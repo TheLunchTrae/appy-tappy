@@ -25,6 +25,9 @@ The same setting adds debug details to the pages that read a window live.
     when one of the two has it and the other has neither it nor a cell beside
     it. A character reads while at most 1 in 32 of the cells either has are
     apart, so a close second means the reference needs more samples of both.
+    A character marked **left out** is one the value's characters do not
+    name: it reads as text, and the read fails when it is a part of the
+    number.
   - **State:** how far the region is from each state, on average per color
     channel, against the state's tolerance. The state read is marked.
   - **Color:** the region's average color beside the color looked for, and the

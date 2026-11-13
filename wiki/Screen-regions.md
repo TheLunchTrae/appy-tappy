@@ -50,12 +50,24 @@ the same answer on every system, and allocate nothing per read.
   text's color; those need a different check. A character drawn as marks
   with blank columns between them, as some fonts draw `%`, is one character
   for each mark. A value may name the characters it reads, `characters` in
-  its check, and then reads with only its reference's glyphs for them, as if
-  the reference had learned nothing else: a shape takes the closest of those
-  glyphs, so a value of digits cannot read a `0` as the `O` its font also
-  has, and any other character counts as not learned. `DigitReader::reading`
-  drops the other glyphs once, when `saved::build` builds the check, so a
-  read matches against fewer glyphs and does nothing more. Characters the
+  its check, and then takes its number from its reference's glyphs for them
+  alone: a shape takes the closest of those glyphs first, so a value of
+  digits cannot read a `0` as the `O` its font also has. A shape that
+  matches none of them is matched against the reference's other glyphs, the
+  ones the value leaves out, and one that matches is text: it ends the
+  number or comes before it, so a value of digits reads `53%` as 53. A
+  letter left out still keeps a `.` after it out of the number, as in
+  `Lv.5`. The read also takes the number as it is with the left-out
+  characters, and fails when that is another number: a left-out `-`, `.`,
+  `,`, or digit that is a part of the number, as in `-5`, `.5`, `87.5`, and
+  `1,234` for a value of digits, is never dropped without a word. A
+  character the value reads that is drawn far enough off to match only a
+  left-out lookalike is text too, so `105` whose `0` matches only a
+  left-out `O` reads as 1; that takes a shape more than 1 cell in 32 from
+  every glyph of its own character and within that of another's, which is
+  rare. `DigitReader::reading` sorts the glyphs once, when
+  `saved::build` builds the check, so a read matches a character the value
+  reads against those glyphs alone. Characters the
   reference has yet to learn are passed over, and a value whose reference
   knows none of its characters is not read (`SavedError::NoCharacters`).
 - **Bar fill** returns how full a bar is, from 0 to 100. The user clicks one
@@ -105,7 +117,7 @@ digits again from pictures that show it.
 
 ### Why a number is not read
 
-A read fails at one of four stages, `ReadError` in `screen/digits.rs`, and
+A read fails at one of five stages, `ReadError` in `screen/digits.rs`, and
 its message says which, in the same words in the setup app and in the
 runtime's log:
 
@@ -115,8 +127,11 @@ runtime's log:
   shows every character the read made out, with a `?` for each unlearned
   one, such as `8 7 ?`, and names the learned character the first of them is
   closest to. No number is made of the characters that did match.
-- **No number.** Every character matched, and they hold no digits, such as
-  `%` alone. The message shows them.
+- **A character left out.** A character the value does not read is a part
+  of the number: with it, the characters hold another number. The message
+  shows the characters.
+- **No number.** Every character matched, and those the value reads hold no
+  digits, such as `%` alone. The message shows them.
 
 The runtime logs each stage a value fails at (`ReadError::stage`) once
 until the value reads again, so a counter that stays unreadable while it
@@ -287,7 +302,8 @@ drawn larger than the content, a reading area, covers every place it shows:
   left to right, so other ink of the text's color beside the number is read
   with it. A shape the reference has not learned fails the read when it
   comes before the number or right after its digits; once a learned
-  character such as `%` has ended the number, a shape after it is skipped.
+  character such as `%` has ended the number, whether the value reads it or
+  leaves it out, a shape after it is skipped.
   The line read is the run of inked rows that holds the most ink, so ink
   above or below the number, with a blank row between, is skipped unless it
   holds more.
