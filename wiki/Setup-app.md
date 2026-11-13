@@ -950,6 +950,8 @@ saved file is held to and takes nothing else from it:
   budget, whatever size the entry claims.
 - `AppFile::parse` checks `app.json` as it checks a saved file, so a file of
   another format, or one that breaks a rule, is refused with the same reason.
+- A zip file with two entries of one name is refused, since which one is
+  read would be the zip reader's choice.
 - A picture the file names and the zip file lacks is refused by name.
 - Each picture takes the name the setup app gives it: `sample_name` for a
   reference's samples in order, and `state_image_name` for a value's states,
@@ -974,8 +976,8 @@ writes into one that is there, and removes it again when the save fails. It
 takes a new ID from `new_app_id`, and refuses a name that a saved
 application has. It saves the anti-cheat class the user picked, never the
 file's, and sets `origin` to `imported` with the picked file's name, without
-control characters and Unicode's format characters, which can turn a name
-around on screen, and at most 60 characters long. The page offers the
+control characters and the format characters that reorder or hide text,
+which can turn a name around on screen, and at most 60 characters long. The page offers the
 file's class in the dialog unless it is `none`, which only the user's own
 pick sets (`classToConfirm` in `src/lib/sharing.ts`).
 

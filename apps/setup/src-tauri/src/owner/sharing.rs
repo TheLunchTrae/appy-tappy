@@ -102,9 +102,11 @@ fn unpack(bytes: &[u8], from: &str) -> Result<Shared, String> {
 }
 
 /// Whether `character` shows nothing itself and changes how the text
-/// around it shows: a control character, or one of Unicode's format
-/// characters, such as U+202E, which turns the text after it around so
-/// that `piz.exe` can read as `exe.zip`.
+/// around it shows: a control character, or one of the format characters
+/// that reorder or hide text, such as U+202E, which turns the text after
+/// it around so that `piz.exe` can read as `exe.zip`, and the tag
+/// characters, which spell text that does not show. Not every format
+/// character: the ones a script writes its numbers with show.
 const fn is_unseen(character: char) -> bool {
     character.is_control()
         || matches!(
@@ -117,6 +119,7 @@ const fn is_unseen(character: char) -> bool {
                 | '\u{2060}'..='\u{206f}'
                 | '\u{feff}'
                 | '\u{fff9}'..='\u{fffb}'
+                | '\u{e0000}'..='\u{e007f}'
         )
 }
 
@@ -320,7 +323,7 @@ mod tests {
         assert_eq!(file_label("\u{1b}[2J \t"), "[2J");
         assert_eq!(file_label(" \u{0} "), "the file");
         assert_eq!(
-            file_label("appytappy-\u{202e}piz.exe\u{200b}\u{feff}"),
+            file_label("appytappy-\u{202e}piz\u{e0041}\u{e007f}.exe\u{200b}\u{feff}"),
             "appytappy-piz.exe",
             "as it is spelled, not turned around"
         );

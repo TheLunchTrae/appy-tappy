@@ -83,6 +83,11 @@ impl Shared {
             return Err(ShareError::TooLarge);
         }
         let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(ShareError::Zip)?;
+        // Which of two entries with one name is read is the reader's
+        // choice, and another tool may show the user the other one.
+        if archive.has_duplicate_names() {
+            return Err(ShareError::SameName);
+        }
         let mut budget = MAX_SHARED_BYTES;
         let json = entry(&mut archive, APP_FILE, &mut budget)?.ok_or(ShareError::NoAppFile)?;
         let json = String::from_utf8(json)
@@ -169,11 +174,11 @@ impl Shared {
     pub(crate) fn pack(&self) -> Result<Vec<u8>, ShareError> {
         let mut zip = ZipPack::new();
         zip.add(APP_FILE, self.file.to_json().as_bytes())
-            .map_err(ShareError::Read)?;
+            .map_err(ShareError::Pack)?;
         for (name, bytes) in &self.pictures {
-            zip.add(name, bytes).map_err(ShareError::Read)?;
+            zip.add(name, bytes).map_err(ShareError::Pack)?;
         }
-        let packed = zip.finish().map_err(ShareError::Read)?;
+        let packed = zip.finish().map_err(ShareError::Pack)?;
         Self::unpack(&packed).map(|_read| packed)
     }
 
@@ -225,6 +230,8 @@ pub(crate) enum ShareError {
     /// The file, or what it unpacks to, is larger than
     /// [`MAX_SHARED_BYTES`].
     TooLarge,
+    /// The zip file holds two entries with one name.
+    SameName,
     /// The zip file holds no `app.json`.
     NoAppFile,
     /// `app.json` cannot be used, such as one of another format.
@@ -233,6 +240,8 @@ pub(crate) enum ShareError {
     NoPicture(String),
     /// A picture or an entry cannot be read.
     Read(io::Error),
+    /// The zip file cannot be made.
+    Pack(io::Error),
     /// The value named `name` cannot be read as saved.
     Value {
         /// The value's name.
@@ -266,10 +275,12 @@ impl fmt::Display for ShareError {
                 "it holds more than {} MB",
                 MAX_SHARED_BYTES / (1024 * 1024)
             ),
+            Self::SameName => formatter.write_str("it holds two files with the same name"),
             Self::NoAppFile => write!(formatter, "it holds no {APP_FILE}"),
             Self::File(error) => write!(formatter, "{error}"),
             Self::NoPicture(name) => write!(formatter, "the picture {name} is missing"),
             Self::Read(error) => write!(formatter, "it cannot be read ({error})"),
+            Self::Pack(error) => write!(formatter, "its file cannot be made ({error})"),
             Self::Value { name, source } => {
                 write!(formatter, "the value {name} cannot be read: {source}")
             },
@@ -285,9 +296,9 @@ impl Error for ShareError {
         match self {
             Self::Zip(error) => Some(error),
             Self::File(error) => Some(error),
-            Self::Read(error) => Some(error),
+            Self::Read(error) | Self::Pack(error) => Some(error),
             Self::Value { source, .. } | Self::Reference { source, .. } => Some(source),
-            Self::TooLarge | Self::NoAppFile | Self::NoPicture(_) => None,
+            Self::TooLarge | Self::SameName | Self::NoAppFile | Self::NoPicture(_) => None,
         }
     }
 }
@@ -582,6 +593,36 @@ mod tests {
             refusal(&bytes),
             "it uses a compression AppyTappy can't read"
         );
+    }
+
+    #[test]
+    fn a_zip_file_with_two_entries_of_one_name_is_refused() {
+        let (file, image, picture) = with_status();
+        // No zip writer packs two entries with one name, so the second
+        // one's name is changed after: in the entry and in the list.
+        let other = image.replace("status", "statuz");
+        let mut bytes = zip_of(&[
+            (APP_FILE, file.to_json().as_bytes()),
+            (&image, &picture),
+            (&other, b"another picture"),
+        ]);
+        Shared::unpack(&bytes).expect("reads while the names differ");
+        let mut renamed = 0_u8;
+        for at in 0..bytes.len() {
+            if bytes[at..].starts_with(other.as_bytes()) {
+                bytes[at..][..image.len()].copy_from_slice(image.as_bytes());
+                renamed = renamed.checked_add(1).expect("two names");
+            }
+        }
+        assert_eq!(renamed, 2);
+        assert_eq!(refusal(&bytes), "it holds two files with the same name");
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_made_does_not_read_as_one_that_cannot_be_read() {
+        let failed = ShareError::Pack(io::Error::other("disk full"));
+        assert_eq!(failed.to_string(), "its file cannot be made (disk full)");
+        assert!(failed.source().is_some(), "the cause is kept");
     }
 
     #[test]
