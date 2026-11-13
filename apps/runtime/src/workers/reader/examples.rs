@@ -4,10 +4,10 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{PinDef, SizeChangesDef};
 use appytappy_config::signal::SignalName;
 use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
+use appytappy_sources::screen::Rgb;
 use appytappy_sources::screen::check::{Check, ColorMatch};
 use appytappy_sources::screen::saved::{SavedCheck, SavedValue};
 use appytappy_sources::screen::{Image, OutsideWindow, Region};
-use appytappy_sources::system::Rgb;
 
 use super::*;
 use crate::plan::{Labels, Runs, ValuePlan};

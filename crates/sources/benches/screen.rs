@@ -25,8 +25,7 @@ use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::find::PictureSearch;
 use appytappy_sources::screen::mask::Mask;
 use appytappy_sources::screen::saved::{SavedCheck, SavedValue};
-use appytappy_sources::screen::{Image, Placed, Region, Size};
-use appytappy_sources::system::Rgb;
+use appytappy_sources::screen::{Image, Placed, Region, Rgb, Size};
 
 /// Samples per operation; odd, so the median is one sample.
 const SAMPLES: usize = 101;

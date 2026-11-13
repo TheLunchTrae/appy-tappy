@@ -6,7 +6,7 @@
 
 use std::io::{self, BufRead, Write};
 
-use appytappy_sources::system::System;
+use appytappy_sources::system::{ScreenPixels, System};
 use serde_json::{Map, Value, json};
 
 use crate::tools::{self, Session};
@@ -33,7 +33,7 @@ application's window and its bounds, then screen_sample to read pixel colors ins
 /// # Errors
 ///
 /// Returns the first read or write error.
-pub(crate) fn serve<S: System>(
+pub(crate) fn serve<S: System + ScreenPixels>(
     mut input: impl BufRead,
     mut output: impl Write,
     session: &Session<S>,
@@ -58,7 +58,7 @@ pub(crate) fn serve<S: System>(
 }
 
 /// Handles one message and returns the response, if it needs one.
-fn handle<S: System>(session: &Session<S>, line: &str) -> Option<Value> {
+fn handle<S: System + ScreenPixels>(session: &Session<S>, line: &str) -> Option<Value> {
     let message: Value = match serde_json::from_str(line) {
         Ok(message) => message,
         Err(error) => return Some(failure(&Value::Null, PARSE_ERROR, &error.to_string())),
@@ -96,7 +96,7 @@ fn handle<S: System>(session: &Session<S>, line: &str) -> Option<Value> {
     })
 }
 
-fn dispatch<S: System>(
+fn dispatch<S: System + ScreenPixels>(
     session: &Session<S>,
     method: &str,
     params: &Value,

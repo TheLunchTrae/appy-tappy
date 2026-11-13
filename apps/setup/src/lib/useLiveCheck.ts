@@ -7,6 +7,7 @@ import { errorText, readValue } from './api.ts';
 import type { Built, CheckState } from './check.ts';
 import { afterRead, type InForce, type LiveRead, type ReadAnswer } from './liveCheck.ts';
 import { useRepeat } from './repeat.ts';
+import { ask } from './request.ts';
 
 /** How long the check waits after the last change before it is tried. */
 const CHECK_DELAY_MS = 250;
@@ -77,28 +78,19 @@ export function useLiveCheck(trial: Trial, again: string | null): LiveCheck {
     }
     setState({ kind: 'pending' });
     setRead((shown) => ({ ...shown, problem: null }));
-    let current = true;
-    const timer = setTimeout(() => {
-      trial
-        .spec()
-        .then((answer) => {
-          if (current) {
-            inForce.current = number;
-            setPreview(answer);
-            setState({ kind: 'set' });
-          }
-        })
-        .catch((error: unknown) => {
-          if (current) {
-            setPreview(null);
-            setState({ kind: 'error', message: errorText(error) });
-          }
-        });
-    }, CHECK_DELAY_MS);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
+    return ask(
+      trial.spec,
+      (answer) => {
+        inForce.current = number;
+        setPreview(answer);
+        setState({ kind: 'set' });
+      },
+      (error) => {
+        setPreview(null);
+        setState({ kind: 'error', message: errorText(error) });
+      },
+      CHECK_DELAY_MS,
+    );
   }, [trial, again]);
 
   const readNow = useCallback(async (): Promise<void> => {

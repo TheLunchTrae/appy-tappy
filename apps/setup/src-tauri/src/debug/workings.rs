@@ -6,11 +6,10 @@ use std::hint;
 use std::time::{Duration, Instant};
 
 use appytappy_config::signal::Value;
-use appytappy_sources::screen::Image;
 use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::digits::{CharacterScore, GlyphScore};
 use appytappy_sources::screen::workings::Workings;
-use appytappy_sources::system::Rgb;
+use appytappy_sources::screen::{Image, Rgb};
 use serde::Serialize;
 
 /// A live reading's debug details.
