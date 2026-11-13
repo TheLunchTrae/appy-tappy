@@ -86,7 +86,11 @@ export const FOUND_HINT =
 
 /** What Check characters steps through, and what an answer changes. */
 export const CHECK_CHARACTERS_HINT =
-  'Goes through the characters one at a time, across the finds listed and the readings a recording keeps. Each step shows one character and every place it appears, and asks once whether that is what it is. Your answer fixes the text of every place that shows it, so a character the text reader misread the same way everywhere needs one fix. You can still change any text by hand.';
+  'Goes through the characters one at a time, across the boxes, the finds listed, and the readings a recording keeps. Each step shows one character and every place it appears, and asks once whether that is what it is. Your answer fixes the text of every place that shows it, so a character the text reader misread the same way everywhere needs one fix. You can still change any text by hand.';
+
+/** Why the reference editor offers Check characters before a save, and that the save does not wait for it. */
+export const CHECK_OFFER_HINT =
+  'AppyTappy read these in text you added or kept without typing it, and keeping a text does not confirm its characters. It tends to misread a character the same way everywhere, and a reference that learns one wrong reads its values wrong. Check characters asks about each once. Saving does not wait for it.';
 
 /** What Reread reads again, and when that changes anything. */
 export const REREAD_HINT =

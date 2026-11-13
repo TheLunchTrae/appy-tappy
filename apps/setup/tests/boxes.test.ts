@@ -87,6 +87,18 @@ describe("a reference's boxes", () => {
     expect(typed.selectedId).toBe(2);
   });
 
+  test("typing a box's text makes it the user's, even when it is the text the reader guessed", () => {
+    const guessed = { id: 5, screenshot: 0, region: at(60), text: '18', guessed: true as const };
+    const start = { ...NONE, boxes: [guessed] };
+    expect(boxOf(start.boxes, 5)?.guessed).toBe(true);
+    const typed = after(start, { type: 'retype', id: 5, text: '1' }, { type: 'retype', id: 5, text: '18' });
+    expect(typed.boxes).toEqual([{ id: 5, screenshot: 0, region: at(60), text: '18' }]);
+    expect(Object.hasOwn(typed.boxes[0] ?? guessed, 'guessed')).toBe(false);
+    // Moving it leaves its text the reader's.
+    const moved = after({ ...start, selectedId: 5 }, { type: 'region', shown: 0, region: at(70), made: 'adjusted' });
+    expect(moved.boxes[0]?.guessed).toBe(true);
+  });
+
   test('restoring puts the box a recording read at back there, first in the list, with its text', () => {
     const restored = after(
       three(null),

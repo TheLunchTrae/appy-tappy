@@ -269,6 +269,27 @@ impl<H: Host> Owner<H> {
         self.found = None;
     }
 
+    /// The characters the box `region` of screenshot `screenshot` shows, as
+    /// the characters' color `ink` within `tolerance` splits them, each
+    /// with the name a find's or a recorded reading's character of the same
+    /// shape has; none for an unknown screenshot or a box that does not fit
+    /// it.
+    pub(crate) fn box_characters(
+        &self,
+        screenshot: usize,
+        region: RegionSpec,
+        ink: ColorSpec,
+        tolerance: u8,
+    ) -> Vec<CharacterView> {
+        let reader = DigitReader::new(ink.into(), tolerance);
+        self.screenshots
+            .get(screenshot)
+            .zip(Region::new(region.x, region.y, region.width, region.height))
+            .and_then(|(image, region)| image.crop(region))
+            .map(|crop| character::of(&crop, &reader))
+            .unwrap_or_default()
+    }
+
     /// For each of `found`, why the reference `spec` teaches cannot learn
     /// it, or `None` when it can; an error when `spec`'s own labels cannot
     /// be learned.
@@ -659,6 +680,21 @@ mod tests {
             found.finds[0].text,
             Text::Failed("The text reader stopped. Type what this shows.".to_owned())
         );
+    }
+
+    #[test]
+    fn a_box_shows_the_characters_a_find_of_the_same_text_does() {
+        let (mut harness, _handler) = searchable();
+        let found = harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
+        let characters = |screenshot: usize, region: RegionSpec| {
+            move |owner: &mut Owner<FakeHost>| owner.box_characters(screenshot, region, red(), 0)
+        };
+        let drawn = harness.ask(characters(0, region(0, 0, 4, 5)));
+        assert_eq!(drawn.len(), 1);
+        assert_eq!(drawn, found.finds[0].characters);
+        assert_eq!(harness.ask(characters(1, region(0, 0, 4, 5))), []);
+        assert_eq!(harness.ask(characters(0, region(18, 0, 4, 5))), []);
+        assert_eq!(harness.ask(characters(0, region(0, 0, 0, 5))), []);
     }
 
     #[test]

@@ -577,13 +577,15 @@ with the columns it came from, and `recording/character.rs` gives the shape
 a name, a hash of it, so the UI can tell that two places show the same
 shape without holding shapes. Finds (`FindView`) and recorded readings
 (`ReadingView`) both carry them, cut with the color and tolerance the place
-was last read with. `lib/confirm.ts` groups the shapes by the character the
-places' texts give them and turns each answer into edits of those texts and
-ticks, so the check keeps no texts of its own, and the list of finds and
-review show what it wrote. An answer edits only the shapes it is about, in
-the turn that gives it and in each place whose text is read afterward, so
-a text typed by hand afterward stays and reopens the question instead. [Character check](State-machines.md#character-check)
-has its states.
+was last read with, and `box_characters` answers them for a box of the
+draft, cut with the characters' color and tolerance the draft has.
+`lib/confirm.ts` groups the shapes by the character the places' texts give
+them and turns each answer into edits of those texts and ticks, so the check
+keeps no texts of its own, and the list of finds and review show what it
+wrote. An answer edits only the shapes it is about, in the turn that gives
+it and in each place whose text is read afterward, so a text typed by hand
+afterward stays and reopens the question instead.
+[Character check](State-machines.md#character-check) has its states.
 
 ### Recording looks
 
