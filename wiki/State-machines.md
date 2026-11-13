@@ -2724,8 +2724,9 @@ ask. **Kept** answers every ask about that reference from memory, a few for
 each edit in the editor. A reference is kept only when every sample's
 picture could be read, so one that is missing a picture is read again on
 each ask and learned once the picture is back. `Owner::write_app` empties it
-before any application is written, whether the write works or fails, and
-keeping another reference replaces it. A file changed outside the setup app
+before any saved application is written or removed, whether that works or
+fails, and keeping another reference replaces it. An import writes a new
+application, which no kept reference is part of. A file changed outside the setup app
 while a reference is kept is not seen until then.
 
 A click's picture is written to the `clicks` folder when its target is set
