@@ -2,10 +2,13 @@ import { describe, expect, test } from 'bun:test';
 
 import { fileSaver, type PickedFile, saveZip, type ZipSaver } from '../src/lib/zipFile.ts';
 
-/** How a fake file's writes go: as asked, or failing the write or the removal. */
+/**
+ * How a fake file's writes go: as asked, or failing the write or the removal. A removal fails by rejecting, or by
+ * throwing before it returns a promise, as a WebView without `remove` does.
+ */
 interface Faults {
   readonly write?: boolean;
-  readonly remove?: boolean;
+  readonly remove?: 'rejects' | 'throws';
 }
 
 /**
@@ -36,13 +39,18 @@ function folder(faults: Faults = {}): {
         },
       });
     },
-    remove: async () => {
-      if (faults.remove === true) {
-        throw new Error('The file is in use.');
-      }
-      files.delete(name);
-      await Promise.resolve();
-    },
+    remove:
+      faults.remove === 'throws'
+        ? () => {
+            throw new TypeError('file.remove is not a function');
+          }
+        : async () => {
+            if (faults.remove === 'rejects') {
+              throw new Error('The file is in use.');
+            }
+            files.delete(name);
+            await Promise.resolve();
+          },
   });
   const pick = async (name: string): Promise<ZipSaver | null> => {
     asked.push(name);
@@ -95,8 +103,8 @@ describe('saving a zip', () => {
     expect([...files]).toEqual([]);
   });
 
-  test('says why it failed even when the file cannot be removed', async () => {
-    const { pick } = folder({ remove: true });
+  test.each(['rejects', 'throws'] as const)('says why it failed even when the removal %s', async (remove) => {
+    const { pick } = folder({ remove });
     expect(await failure(saveZip('bundle.zip', tooLarge, pick))).toEqual(new Error('The bundle is too large.'));
   });
 });
