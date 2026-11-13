@@ -107,7 +107,7 @@ passes.
 `rust:standards:check` runs the diff lane, so the gate finishes in minutes
 rather than hours. In the quality workflow the `quality` job runs the rest of
 the gate, and the `mutants` jobs split the lane: with `MUTANTS_SHARD` set to
-`k/n`, the lane tests only the kth of n shards of the selected mutants, so
+`k/n`, either lane tests only the kth of n shards of the selected mutants, so
 together the jobs test every one. A stack of pull requests that lands on main
 as one squash pushes a diff as large as the whole stack, and the shards keep
 that run within each job's time limit. CI diffs against the base that
@@ -115,32 +115,44 @@ that run within each job's time limit. CI diffs against the base that
 against its base branch and a push to main against the previous tip, which
 with squash merges is exactly the merged pull request or stack.
 
-Nothing runs the full lane unless you start it, so a mutant that survives only
-once two merged changes meet stays until a later change edits its line.
+The **Mutation sweep** workflow, `.github/workflows/mutation-sweep.yml`, runs
+`rust:mutants` over the whole workspace in shards. Only a manual run starts it,
+and it is not a merge gate: run it on `main` as a final check before a
+[release](Installer.md#builds). It catches a mutant that survives only once two
+merged changes meet, which the diff lane misses until a later change edits its
+line. Its shards take the mutants round-robin, so each gets a share of every
+crate's mutants and they take similar time, and each shard keeps its
+`mutants.out/` as a run artifact for 14 days, so a surviving mutant's diff and
+log can be read there.
+
+A runner tests about 200 mutants an hour, and each shard has a three-hour time
+limit. Keep each shard under about 350 mutants, so the sweep
+takes about two hours, and add shards to the workflow's matrix as the
+workspace grows. `cargo mutants --list --workspace --all-features | wc -l`
+counts the mutants without building anything.
 
 The diff lane mutates only changed source lines, so a pull request that only
 removes or weakens tests, or changes only mutation configuration, selects no
-mutants. Run `rust:mutants` on its branch to check the whole workspace before
-merging it.
+mutants. Run the mutation sweep on its branch to check the whole workspace
+before merging it.
 
 Both lanes run two mutants at once (`--jobs=2`), since each mutant's build waits
-on its linker most of the time. CI sets `MUTANTS_COPY_TARGET=true` for the diff
-lane, so cargo-mutants copies `target/` into its build directories and the
-baseline reuses the builds already there. A local diff run leaves it off, so it
+on its linker most of the time. CI sets `MUTANTS_COPY_TARGET=true` for both
+lanes, so cargo-mutants copies `target/` into its build directories and the
+baseline reuses the builds already there. A local run leaves it off, so it
 doesn't copy a developer's whole `target/` twice. The copy gives every file a
 new modification time, so Cargo would take a stale workspace build in it, such
 as one from a build cache saved at an older commit, for a current one. With the
-copy on, the diff lane therefore first runs, in place, the build that
+copy on, each lane therefore first runs, in place, the build that
 cargo-mutants runs for each mutant, which is quick when `target/` is already
-current. The standards gate starts the lane only after the other Cargo tasks
-finish, so the copy never catches a build half written. Both lanes also run
-every workspace package's tests against each mutant (`--test-workspace=true`),
-because a mutant in one crate can be caught by another crate's tests. The
-baseline times only the mutated packages' tests, so a test timeout derived
-from it is too short for a mutant's whole-workspace run; `.cargo/mutants.toml`
-sets a floor under it. Whether
-testing only the mutated package catches the same mutants is still to be
-measured.
+current. The standards gate starts the diff lane only after the other Cargo
+tasks finish, so the copy never catches a build half written. Both lanes also
+run every workspace package's tests against each mutant
+(`--test-workspace=true`), because a mutant in one crate can be caught by
+another crate's tests. The baseline times only the mutated packages' tests, so
+a test timeout derived from it is too short for a mutant's whole-workspace
+run; `.cargo/mutants.toml` sets a floor under it. Whether testing only the
+mutated package catches the same mutants is still to be measured.
 
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. Every

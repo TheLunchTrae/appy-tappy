@@ -2994,43 +2994,72 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         "the diff mutation lane must start after the gate's other Cargo tasks"
     );
 
-    assert!(
-        full.contains("--test-workspace=true"),
-        "the full mutation task must run every workspace test"
-    );
-    assert!(
-        full.lines()
-            .any(|line| line.contains("cargo mutants ") && line.contains("--output=.")),
-        "the full mutation task must force cargo-mutants to write the report under the project root"
-    );
-    assert!(
-        full.contains("sh scripts/verify-mutants.sh full mutants.out"),
-        "the full mutation task must verify post-run outcome evidence"
-    );
-    for contract in [
-        ". scripts/mutants-lock.sh",
-        "acquire_mutants_task_lock full",
-        "run_mutants_task_child",
-        "trap mutants_task_release_lock EXIT",
-    ] {
+    for (lane, task) in [("full", full), ("diff", diff)] {
+        for contract in [
+            ". scripts/mutants-lock.sh",
+            "run_mutants_task_child",
+            "mutants_task_release_lock",
+        ] {
+            assert!(
+                task.contains(contract),
+                "the {lane} mutation task is missing transaction-lock contract {contract}"
+            );
+        }
+        // The copied target/ holds only current workspace builds: the copy
+        // resets modification times, so Cargo cannot tell a stale build from
+        // a current one.
+        let steps = [
+            format!("acquire_mutants_task_lock {lane}"),
+            "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then".to_owned(),
+            "run_mutants_task_child cargo test --no-run --workspace --all-features --locked"
+                .to_owned(),
+            "rm -rf mutants.out".to_owned(),
+            "run_mutants_task_child cargo mutants ".to_owned(),
+            format!("sh scripts/verify-mutants.sh {lane} mutants.out"),
+        ];
+        let positions: Vec<usize> = steps
+            .iter()
+            .map(|step| {
+                task.find(step.as_str())
+                    .unwrap_or_else(|| panic!("the {lane} mutation task is missing {step}"))
+            })
+            .collect();
         assert!(
-            full.contains(contract),
-            "the full mutation task is missing transaction-lock contract {contract}"
+            positions.is_sorted(),
+            "the {lane} mutation task must, under its lock, bring a copied target/ up to date, clear the previous report, then run and verify cargo-mutants"
         );
+        let Some(mutants_run) = task
+            .lines()
+            .find(|line| line.starts_with("run_mutants_task_child cargo mutants "))
+        else {
+            panic!("the {lane} mutation task should run cargo-mutants");
+        };
+        // The in-place build matches the build cargo-mutants runs for each
+        // mutant, so the mutant builds reuse it.
+        for flag in [
+            " --workspace ",
+            " --all-features ",
+            " --cargo-arg=--locked ",
+        ] {
+            assert!(
+                mutants_run.contains(flag),
+                "the {lane} mutation task's cargo-mutants run must keep {} to match its in-place build",
+                flag.trim()
+            );
+        }
+        for flag in [
+            " --output=. ",
+            " --test-workspace=true ",
+            " --copy-target=\"${MUTANTS_COPY_TARGET:-false}\" ",
+            " ${MUTANTS_SHARD:+\"--shard=$MUTANTS_SHARD\"} ",
+        ] {
+            assert!(
+                mutants_run.contains(flag),
+                "the {lane} mutation task's cargo-mutants run must pass {}: the report under the project root, every workspace test against each mutant, and CI's target copy and shard",
+                flag.trim()
+            );
+        }
     }
-    assert!(
-        diff.contains("--test-workspace=true"),
-        "the diff mutation task must run every workspace test"
-    );
-    assert!(
-        diff.lines()
-            .any(|line| line.contains("cargo mutants ") && line.contains("--output=.")),
-        "the diff mutation task must force cargo-mutants to write the report under the project root"
-    );
-    assert!(
-        diff.contains("sh scripts/verify-mutants.sh diff mutants.out"),
-        "the diff mutation task must verify post-run outcome evidence"
-    );
     for contract in [
         "refs/remotes/origin/main^{commit}",
         "refs/heads/main^{commit}",
@@ -3039,56 +3068,20 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         "git ls-files --others --exclude-standard",
         "git add -N <path>",
         "git diff --relative \"$merge_base\" --",
-        ". scripts/mutants-lock.sh",
-        "acquire_mutants_task_lock diff",
-        "run_mutants_task_child",
-        "mutants_task_release_lock",
     ] {
         assert!(
             diff.contains(contract),
             "the diff mutation task is missing base-resolution contract {contract}"
         );
     }
-    let full_positions: Vec<usize> = [
-        "acquire_mutants_task_lock full",
-        "rm -rf mutants.out",
-        "run_mutants_task_child cargo mutants ",
-        "sh scripts/verify-mutants.sh full mutants.out",
-    ]
-    .iter()
-    .map(|step| {
-        full.find(step)
-            .unwrap_or_else(|| panic!("the full mutation task is missing {step}"))
-    })
-    .collect();
-    assert!(
-        full_positions.is_sorted(),
-        "the full mutation task must, under its lock, clear the previous report, then run and verify cargo-mutants"
-    );
-    let Some(full_run) = full
-        .lines()
-        .find(|line| line.starts_with("run_mutants_task_child cargo mutants "))
-    else {
-        panic!("the full mutation task should run cargo-mutants");
-    };
-    for flag in ["--workspace", "--all-features", "--cargo-arg=--locked"] {
-        assert!(
-            full_run.split_whitespace().any(|word| word == flag),
-            "the full mutation task's cargo-mutants run must keep {flag}"
-        );
-    }
-    // The copied target/ holds only current workspace builds: the copy
-    // resets modification times, so Cargo cannot tell a stale build from
-    // a current one.
+    // cargo-mutants writes a report without outcomes when a shard selects no
+    // mutants, so the diff lane lists the selected mutants under its lock and
+    // stops when there are none, before it builds anything.
     let steps = [
         "acquire_mutants_task_lock diff",
         "cargo mutants --list ",
         "if [ -z \"$selected\" ]; then",
         "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then",
-        "run_mutants_task_child cargo test --no-run --workspace --all-features --locked",
-        "rm -rf mutants.out",
-        "run_mutants_task_child cargo mutants ",
-        "sh scripts/verify-mutants.sh diff mutants.out",
     ];
     let positions: Vec<usize> = steps
         .iter()
@@ -3099,35 +3092,21 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         .collect();
     assert!(
         positions.is_sorted(),
-        "the diff mutation task must, under its lock, list the selected mutants and stop when there are none, bring a copied target/ up to date, clear the previous report, then run and verify cargo-mutants"
+        "the diff mutation task must, under its lock, list the selected mutants and stop when there are none before it builds"
     );
-    // The in-place build matches the build cargo-mutants runs for each
-    // mutant, so the mutant builds reuse it.
     let Some(mutants_run) = diff
         .lines()
         .find(|line| line.starts_with("run_mutants_task_child cargo mutants "))
     else {
         panic!("the diff mutation task should run cargo-mutants");
     };
-    for flag in [
-        " --workspace ",
-        " --all-features ",
-        " --cargo-arg=--locked ",
-    ] {
-        assert!(
-            mutants_run.contains(flag),
-            "the diff mutation task's cargo-mutants run must keep {} to match its in-place build",
-            flag.trim()
-        );
-    }
-    // cargo-mutants writes a report without outcomes when a shard selects no
-    // mutants, so the list must select the same mutants as the run.
     let Some(mutants_list) = diff
         .lines()
         .find(|line| line.contains("cargo mutants --list "))
     else {
         panic!("the diff mutation task should list the selected mutants");
     };
+    // The list must select the same mutants as the run.
     for flag in [
         " --workspace ",
         " --all-features ",
