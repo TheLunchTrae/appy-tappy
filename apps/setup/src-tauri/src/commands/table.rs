@@ -93,6 +93,10 @@ macro_rules! with_commands {
             commands::reread_found(search: U64AsNumber, indexes: Vec<usize>, ink: ColorSpec, tolerance: u8) -> Option<FoundView>;
             /// Forgets the search.
             commands::forget_found() -> ();
+            /// The characters the box `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance`,
+            /// each with the name a find's or a recorded reading's character of the same shape has. None for an unknown
+            /// screenshot or a box that does not fit it.
+            commands::box_characters(screenshot: usize, region: RegionSpec, ink: ColorSpec, tolerance: u8) -> Vec<CharacterView>;
             /// Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can.
             commands::found_problems(spec: CharactersSpec, found: Vec<Label>) -> Vec<Option<String>>;
             /// Captures a saved value's region on its application's window, replacing any capture, and returns the

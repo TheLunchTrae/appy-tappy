@@ -44,6 +44,7 @@ use crate::owner::{
     TrialSpec,
 };
 use crate::recording::RecordingView;
+use crate::recording::character::CharacterView;
 use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
@@ -870,6 +871,22 @@ pub(crate) async fn reread_found(
 #[tauri::command]
 pub(crate) async fn forget_found(app: AppHandle) -> Result<(), String> {
     ask(&app, "forget_found", Owner::forget_found).await
+}
+
+/// The characters the box `region` of screenshot `screenshot` shows, in the
+/// characters' color `ink` within `tolerance`.
+#[tauri::command]
+pub(crate) async fn box_characters(
+    app: AppHandle,
+    screenshot: usize,
+    region: RegionSpec,
+    ink: ColorSpec,
+    tolerance: u8,
+) -> Result<Vec<CharacterView>, String> {
+    ask(&app, "box_characters", move |owner| {
+        owner.box_characters(screenshot, region, ink, tolerance)
+    })
+    .await
 }
 
 /// Why the reference `spec` teaches cannot learn each of `found`, in

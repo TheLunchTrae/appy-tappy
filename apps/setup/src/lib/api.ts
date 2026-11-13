@@ -53,6 +53,7 @@ import type {
   SettingsFile,
   SettingsView,
   SharedView,
+  ShownCharacter,
   SizeDef,
   TraceFile,
   TraceMetrics,
@@ -254,6 +255,15 @@ export async function rereadFound(search: number, indexes: ReadonlyArray<number>
 /** Forgets the search. */
 export async function forgetFound(): Promise<void> {
   await invoke('forget_found');
+}
+
+/**
+ * The characters the box `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance`,
+ * each with the name a find's or a recorded reading's character of the same shape has. None for an unknown
+ * screenshot or a box that does not fit it.
+ */
+export async function boxCharacters(screenshot: number, region: RegionSpec, ink: ColorSpec, tolerance: number): Promise<ReadonlyArray<ShownCharacter>> {
+  return invoke<ReadonlyArray<ShownCharacter>>('box_characters', { screenshot, region, ink, tolerance });
 }
 
 /** Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can. */

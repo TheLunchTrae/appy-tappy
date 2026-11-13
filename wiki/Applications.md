@@ -71,8 +71,11 @@ that each value still reads right on your screen.
 AppyTappy imports a file only when it can read all of it: a file made by a
 newer AppyTappy, a file that lacks one of its pictures, or one with a value
 that can't be read is refused with the reason, and nothing is imported. A file
-can be up to 16 MB, and **Export** refuses an application whose pictures
-would make a larger one.
+can be up to 16 MB, and its pictures together can hold as many pixels as one
+picture of 7680 by 4320, the whole screen of an 8K display: four whole
+windows at 4K fill it. **Export** refuses an application whose pictures would
+make a larger file, and says what to change: draw smaller regions or fewer
+states or fixes, or teach a reference that many values read with smaller pictures.
 
 ## How AppyTappy finds the window
 
