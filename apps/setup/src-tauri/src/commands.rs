@@ -222,11 +222,16 @@ pub(crate) async fn set_check(app: AppHandle, trial: TrialSpec) -> Result<(), St
     try_ask(&app, "set_check", move |owner| owner.set_check(&trial)).await
 }
 
-/// Makes the reference `spec` teaches the check the live reading uses.
+/// Makes the reference `spec` teaches the check the live reading uses,
+/// reading only the characters `reads` when it has any.
 #[tauri::command]
-pub(crate) async fn set_characters(app: AppHandle, spec: CharactersSpec) -> Result<(), String> {
+pub(crate) async fn set_characters(
+    app: AppHandle,
+    spec: CharactersSpec,
+    reads: Option<String>,
+) -> Result<(), String> {
     try_ask(&app, "set_characters", move |owner| {
-        owner.set_characters(&spec)
+        owner.set_characters(&spec, reads.as_deref())
     })
     .await
 }

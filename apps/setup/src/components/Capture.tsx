@@ -608,9 +608,11 @@ export function Capture({
   });
   const { drawnOn } = draft;
   const fixPin = fixing?.screen.pin;
+  // A reference made for a number is tried with the characters that number reads, once it has any.
+  const reads = draft.characters === null || draft.characters.length === 0 ? null : draft.characters.join('');
   const trial = useMemo((): Trial => {
     if (characters !== null) {
-      return trialOf(characters, tryCharacters);
+      return trialOf(characters, async (spec) => tryCharacters(spec, reads));
     }
     if (edit.built !== null) {
       return trialOf(edit.built, tryEdit);
@@ -624,7 +626,7 @@ export function Capture({
     // A value is tried as it would be saved, which a fix does at its value's side.
     const spec: TrialSpec = { app: appId, check: valueCheck.spec, screenshot: drawnOn, pin: fixPin ?? pin };
     return trialOf({ ok: true, spec }, tryCheck);
-  }, [characters, edit.built, valueCheck, drawnOn, appId, fixPin, pin]);
+  }, [characters, reads, edit.built, valueCheck, drawnOn, appId, fixPin, pin]);
   const check = useLiveCheck(trial, edit.again);
   const dropFixes = agreedFixes(check.preview, edit.lost);
   // The size of the screenshot the region would show over, when an edited value was drawn at another: its region
@@ -1503,6 +1505,7 @@ export function Capture({
                 selected={draft.reference}
                 hasRegion={draft.region !== null}
                 whole={draft.whole}
+                characters={draft.characters}
                 onSelect={(reference) => {
                   setDraft((current) => ({ ...current, reference }));
                 }}
@@ -1518,6 +1521,9 @@ export function Capture({
                 }}
                 onWhole={(whole) => {
                   setDraft((current) => ({ ...current, whole }));
+                }}
+                onCharacters={(characters) => {
+                  setDraft((current) => ({ ...current, characters }));
                 }}
               />
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
@@ -1609,6 +1615,7 @@ export function Capture({
                   selected={draft.reference}
                   hasRegion={draft.region !== null}
                   whole={draft.whole}
+                  characters={draft.characters}
                   onSelect={(reference) => {
                     setDraft((current) => ({ ...current, reference }));
                   }}
@@ -1624,6 +1631,9 @@ export function Capture({
                   }}
                   onWhole={(whole) => {
                     setDraft((current) => ({ ...current, whole }));
+                  }}
+                  onCharacters={(characters) => {
+                    setDraft((current) => ({ ...current, characters }));
                   }}
                 />
               ) : edited !== null && keepsStates(draft, edited.screen) ? (

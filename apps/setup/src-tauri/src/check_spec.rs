@@ -113,6 +113,11 @@ pub(crate) enum CheckSpec {
         reference: ReferenceRef,
         /// Whether digits after the decimal point are ignored.
         whole: bool,
+        /// The characters the value reads, or `None` for every character
+        /// the reference knows, as [`CheckDef::Number`] saves them.
+        #[serde(default)]
+        #[cfg_attr(test, ts(optional))]
+        characters: Option<String>,
     },
     /// Measures how full a bar is from a filled and an empty color.
     #[serde(rename_all = "camelCase")]
@@ -225,7 +230,10 @@ pub(crate) fn to_saved_fix(
     let mut pictures = Vec::new();
     let check = match spec {
         CheckSpec::Number {
-            reference, whole, ..
+            reference,
+            whole,
+            characters,
+            ..
         } => {
             if app != reference.app {
                 return Err(SpecError::OtherApplication);
@@ -233,6 +241,7 @@ pub(crate) fn to_saved_fix(
             CheckDef::Number {
                 reference: reference.id.clone(),
                 whole: *whole,
+                characters: characters.clone(),
             }
         },
         CheckSpec::BarFill { filled, empty, .. } => CheckDef::BarFill {

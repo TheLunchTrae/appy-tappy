@@ -46,8 +46,9 @@ macro_rules! with_commands {
             /// Reads the live window with the value `trial` would save, where and how the runtime would read it at the
             /// window's size now.
             commands::set_check(trial: TrialSpec) -> ();
-            /// Reads the live window with the reference `spec` teaches, in the region its characters were drawn in.
-            commands::set_characters(spec: CharactersSpec) -> ();
+            /// Reads the live window with the reference `spec` teaches, in the region its characters were drawn in. With
+            /// `reads`, the characters of the value the reference is made for, it reads only those, as that value does.
+            commands::set_characters(spec: CharactersSpec, reads: Option<String>) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;
             /// How the check reads the newest frame, for the debug details, or null without a check or a frame.

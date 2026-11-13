@@ -37,9 +37,12 @@ export function trialOf<Spec>(built: Built<Spec>, attempt: (spec: Spec) => Promi
   return { ok: true, spec: async () => attempt(spec) };
 }
 
-/** Sets the reference `spec` teaches as the check the live window is read with. */
-export async function tryCharacters(spec: CharactersSpec): Promise<null> {
-  await setCharacters(spec);
+/**
+ * Sets the reference `spec` teaches as the check the live window is read with. It reads only the characters
+ * `reads`, those of the value the reference is made for, or every character it is taught for null.
+ */
+export async function tryCharacters(spec: CharactersSpec, reads: string | null): Promise<null> {
+  await setCharacters(spec, reads);
   return null;
 }
 

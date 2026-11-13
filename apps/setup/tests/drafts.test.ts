@@ -145,6 +145,7 @@ describe('what a draft keeps', () => {
       ignoreBackground: false,
       reference: 'percent',
       whole: true,
+      characters: ['1', '%'],
     };
     const drawn: Readonly<Record<string, unknown>> = { ...draft };
     for (const [key, start] of Object.entries(EMPTY_DRAFT)) {
@@ -208,6 +209,7 @@ describe('the shape a draft keeps', () => {
     expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'mayMove', 'recordedShots', 'step', 'valueName']);
     expect(Object.keys(stored.draft).sort()).toEqual([
       'boxes',
+      'characters',
       'color',
       'colorMatch',
       'drawnOn',

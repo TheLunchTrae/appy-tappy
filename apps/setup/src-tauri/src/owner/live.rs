@@ -113,11 +113,24 @@ impl<H: Host> Owner<H> {
 
     /// Makes the reference `spec` teaches the check the live frame is read
     /// with: a number read with it in the region the characters were drawn
-    /// in, which scales with the window as a value's does by default.
-    pub(crate) fn set_characters(&mut self, spec: &CharactersSpec) -> Result<(), String> {
+    /// in, which scales with the window as a value's does by default. With
+    /// `reads`, the characters of the value the reference is made for, the
+    /// number reads only those, as `saved::build` has that value read.
+    pub(crate) fn set_characters(
+        &mut self,
+        spec: &CharactersSpec,
+        reads: Option<&str>,
+    ) -> Result<(), String> {
         let taught = self
             .with_session(|session| spec.teach(session, None, "", ""))
             .map_err(|error| error.to_string())?;
+        let reader = match reads {
+            Some(characters) => taught
+                .reader
+                .reading_only(characters)
+                .ok_or_else(|| SpecError::NoCharacters.to_string())?,
+            None => taught.reader,
+        };
         let size = taught.window_size;
         let region = taught.region.size();
         let pin = PinDef::guess(
@@ -137,7 +150,7 @@ impl<H: Host> Owner<H> {
                 window_size: size,
                 region: taught.region,
                 check: Check::Number {
-                    reader: taught.reader,
+                    reader,
                     whole: false,
                 },
             },
@@ -167,6 +180,7 @@ mod tests {
     use appytappy_config::app_file::{CheckDef, ValueDef};
     use appytappy_sources::screen::saved;
 
+    use crate::check_spec::CheckSpec;
     use crate::debug::workings::WorkingsView;
     use crate::owner::messages::{Reading, ReferenceSaveSpec};
     use crate::owner::test_support::{
@@ -254,7 +268,7 @@ mod tests {
                 "labels":[{"screenshot":0,"text":"1"}]}"#,
         );
         harness
-            .ask(|owner| owner.set_characters(&spec))
+            .ask(|owner| owner.set_characters(&spec, None))
             .expect("valid check");
         assert_eq!(
             harness.ask(|owner| owner.reading()),
@@ -340,6 +354,11 @@ mod tests {
         "labels":[{"screenshot":0,"text":"379%"}]}"#;
     const CHARGE: &str = r#"{"kind":"number","region":{"x":6,"y":2,"width":18,"height":9},
         "reference":{"app":"example","id":"percent"},"whole":false}"#;
+
+    /// What the live box says of `379%` read with the digits alone.
+    const DIGITS_ONLY: &str = "Not read on the live window now: a character has a shape the \
+        reference has not learned: it read `3 7 9 ?`, and character 4 is closest to the `3` it \
+        learned.";
 
     /// A harness whose application `example` changes size as `size_changes`
     /// say, with a window that shows `379%` at [`DRAWN`] on screenshot 0 and
@@ -442,6 +461,50 @@ mod tests {
     }
 
     #[test]
+    fn a_number_tried_with_characters_its_reference_knows_none_of_says_so() {
+        let (mut harness, _handler, root) = with_percent("live-subset", SizeChangesDef::Often);
+        let reading = |characters: &str| {
+            let mut tried = trial(CHARGE);
+            let CheckSpec::Number {
+                characters: reads, ..
+            } = &mut tried.check
+            else {
+                panic!("a number");
+            };
+            *reads = Some(characters.to_owned());
+            tried
+        };
+        harness
+            .ask(|owner| owner.set_check(&reading("0123456789%")))
+            .expect("the reference knows four of them");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(379.0)))
+        );
+        // Read with the digits alone, the percent sign is a shape the value
+        // does not know, as it is for the runtime.
+        harness
+            .ask(|owner| owner.set_check(&reading("0123456789")))
+            .expect("the reference knows three of them");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Err(DIGITS_ONLY.to_owned())
+        );
+        for none in ["2", ""] {
+            assert_eq!(
+                harness.ask(|owner| owner.set_check(&reading(none))),
+                Err(
+                    "The reference knows none of the characters this value reads. Choose \
+                     characters it knows."
+                        .to_owned()
+                ),
+                "{none:?}"
+            );
+        }
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
     fn a_value_tried_at_a_size_the_runtime_does_not_read_it_at_says_so() {
         let (mut harness, mut handler, root) = with_percent("live-rarely", SizeChangesDef::Rarely);
         harness
@@ -494,12 +557,32 @@ mod tests {
             ..characters(PERCENT)
         };
         harness
-            .ask(|owner| owner.set_characters(&taught))
+            .ask(|owner| owner.set_characters(&taught, None))
             .expect("learns");
         assert_eq!(
             harness.ask(|owner| owner.reading()),
             Ok(Some(Reading::Number(379.0)))
         );
+        // Made for a value that reads only digits, it reads as that value
+        // will: the percent sign is a shape it does not know.
+        harness
+            .ask(|owner| owner.set_characters(&taught, Some("0123456789")))
+            .expect("learns the digits");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Err(DIGITS_ONLY.to_owned())
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.set_characters(&taught, Some("2"))),
+            Err(
+                "The reference knows none of the characters this value reads. Choose characters \
+                 it knows."
+                    .to_owned()
+            )
+        );
+        harness
+            .ask(|owner| owner.set_characters(&taught, None))
+            .expect("learns");
         harness.deliver(&mut handler, Ok(&showing("97%", 2)));
         assert_eq!(
             harness.ask(|owner| owner.reading()),

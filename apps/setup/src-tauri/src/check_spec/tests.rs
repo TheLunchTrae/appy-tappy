@@ -361,6 +361,7 @@ fn a_number_is_saved_with_its_applications_reference() {
         region: left(),
         reference: digits_ref(),
         whole: true,
+        characters: Some("1%".to_owned()),
     };
     let saved =
         to_saved(&spec, &[], "app", "progress").expect("a value of the reference's application");
@@ -369,6 +370,7 @@ fn a_number_is_saved_with_its_applications_reference() {
         CheckDef::Number {
             reference: "digits".to_owned(),
             whole: true,
+            characters: Some("1%".to_owned()),
         }
     );
     assert!(
@@ -663,6 +665,7 @@ fn the_ui_describes_checks_in_camel_case_json() {
             region: left(),
             reference: digits_ref(),
             whole: true,
+            characters: None,
         }
     );
 }

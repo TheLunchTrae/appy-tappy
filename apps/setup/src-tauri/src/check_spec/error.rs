@@ -82,6 +82,8 @@ pub(crate) enum SpecError {
         /// The picture's file name.
         picture: String,
     },
+    /// A number reads only characters that its reference knows none of.
+    NoCharacters,
     /// A value's reference belongs to another application.
     OtherApplication,
     /// The saved form cannot be read for a reason the page has no words of
@@ -122,6 +124,9 @@ impl fmt::Display for SpecError {
             Self::Check(CheckDefError::SameStateName(name)) => write!(
                 formatter,
                 "Two states are named \"{name}\". Give each state its own name."
+            ),
+            Self::Check(CheckDefError::NoCharacters) | Self::NoCharacters => formatter.write_str(
+                "The reference knows none of the characters this value reads. Choose characters it knows.",
             ),
             Self::NothingSelected(name) => write!(
                 formatter,
@@ -197,6 +202,7 @@ impl From<SavedError> for SpecError {
             SavedError::OutsideWindow { .. } => Self::Outside,
             SavedError::Check(broken) => Self::Check(broken),
             SavedError::StateName(invalid) => Self::StateName(sentence(&invalid.to_string())),
+            SavedError::NoCharacters { .. } => Self::NoCharacters,
             other => Self::Unreadable(other.to_string()),
         }
     }

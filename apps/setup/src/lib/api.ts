@@ -142,9 +142,12 @@ export async function setCheck(trial: TrialSpec): Promise<void> {
   await invoke('set_check', { trial });
 }
 
-/** Reads the live window with the reference `spec` teaches, in the region its characters were drawn in. */
-export async function setCharacters(spec: CharactersSpec): Promise<void> {
-  await invoke('set_characters', { spec });
+/**
+ * Reads the live window with the reference `spec` teaches, in the region its characters were drawn in. With
+ * `reads`, the characters of the value the reference is made for, it reads only those, as that value does.
+ */
+export async function setCharacters(spec: CharactersSpec, reads: string | null): Promise<void> {
+  await invoke('set_characters', { spec, reads });
 }
 
 /** What the check reads on the newest frame, or null without a check or a frame. */

@@ -4,7 +4,9 @@ A reference is how AppyTappy knows an application's characters: their color,
 and the shape of each digit and sign. A [Number](Values.md#checks) value reads
 its region with one of its application's references, so several values in the
 same font share one reference, and teaching it a new digit teaches all of
-them.
+them. A reference can know a whole font, and each value says which of its
+characters it reads, as
+[Characters a number reads](Values.md#characters-a-number-reads) describes.
 
 The **References** page lists each application's references, with the
 characters each knows and the values that read with it. A reference that has

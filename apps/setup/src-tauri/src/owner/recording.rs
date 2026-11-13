@@ -404,13 +404,13 @@ mod tests {
             .expect("valid JSON")
         };
         assert_eq!(
-            harness.ask(|owner| owner.set_characters(&number(0))),
+            harness.ask(|owner| owner.set_characters(&number(0), None)),
             Ok(())
         );
         harness.ask(Owner::discard_recording);
         assert_eq!(harness.recording(), None);
         assert_eq!(
-            harness.ask(|owner| owner.set_characters(&number(0))),
+            harness.ask(|owner| owner.set_characters(&number(0), None)),
             Err("That recording is gone. Record the region again.".to_owned())
         );
         assert_eq!(

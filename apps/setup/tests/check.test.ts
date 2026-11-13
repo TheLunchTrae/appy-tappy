@@ -45,6 +45,18 @@ describe('buildSpec', () => {
     });
   });
 
+  test('a number names the characters it reads only once some are chosen, and needs one', () => {
+    const number = { ...EMPTY_DRAFT, region, reference: 'percent' };
+    expect(buildSpec({ ...number, characters: ['1', '2', '%'] }, 'example')).toEqual({
+      ok: true,
+      spec: { kind: 'number', region, reference: percent, whole: false, characters: '12%' },
+    });
+    expect(buildSpec({ ...number, characters: [] }, 'example')).toEqual({
+      ok: false,
+      next: 'Choose at least one character for the value to read.',
+    });
+  });
+
   test('builds a bar fill from both colors', () => {
     const bar = withKind({ ...EMPTY_DRAFT, region }, 'barFill');
     expect(buildSpec(bar, 'example')).toEqual({ ok: false, next: "Pick the bar's filled color." });
@@ -397,6 +409,11 @@ describe('fixDraft', () => {
       ...EMPTY_DRAFT,
       reference: 'percent',
       whole: true,
+    });
+    expect(fixDraft({ kind: 'number', reference: 'percent', whole: false, characters: '%10 1' })).toEqual({
+      ...EMPTY_DRAFT,
+      reference: 'percent',
+      characters: ['0', '1', '%'],
     });
     expect(fixDraft({ kind: 'barFill', filled: red, empty: gray })).toEqual({
       ...EMPTY_DRAFT,

@@ -460,7 +460,19 @@ reference: string,
  * Whether only the whole part counts: every digit after the decimal
  * point is ignored, so `87.5%` reads as 87.
  */
-whole: boolean, } | { "kind": "barFill",
+whole: boolean,
+/**
+ * The characters the value reads, such as `0123456789%`, or `None`
+ * for every character its reference knows.
+ *
+ * The value matches what it sees against these characters alone,
+ * so a value that shows only digits cannot read a `0` as an `O`
+ * its reference also knows. Whitespace does not count, as in a
+ * label, and neither does a character the reference has yet to
+ * learn. A fix that reads with its own reference reads these
+ * characters of it.
+ */
+characters?: string, } | { "kind": "barFill",
 /**
  * The bar's filled color.
  */
@@ -495,7 +507,12 @@ export type CheckSpec = DeepReadonly<{ "kind": "number", region: RegionSpec, ref
 /**
  * Whether digits after the decimal point are ignored.
  */
-whole: boolean, } | { "kind": "barFill", region: RegionSpec, filled: ColorSpec, empty: ColorSpec, } | { "kind": "color", region: RegionSpec, color: ColorSpec, tolerance: number, } | { "kind": "state", region: RegionSpec,
+whole: boolean,
+/**
+ * The characters the value reads, or `None` for every character
+ * the reference knows, as [`CheckDef::Number`] saves them.
+ */
+characters?: string, } | { "kind": "barFill", region: RegionSpec, filled: ColorSpec, empty: ColorSpec, } | { "kind": "color", region: RegionSpec, color: ColorSpec, tolerance: number, } | { "kind": "state", region: RegionSpec,
 /**
  * The screenshot the region was drawn on; every state's screenshot
  * must have its window size.
