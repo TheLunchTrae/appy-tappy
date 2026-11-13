@@ -1366,6 +1366,20 @@ mod tests {
             Some(1),
             "and the next frame goes out at once"
         );
+        // A look from before that fails is dropped too: the recording goes
+        // on, where a failed look of its own would stop it.
+        let later = more + SCAN_EVERY;
+        let job = recording.look(&blocks(&[BLOCK]), later).expect("due");
+        recording.stop(later);
+        recording.resume(later);
+        assert_eq!(recording.looked(job.at, None, later), []);
+        let view = recording.view(later);
+        assert!(view.recording, "it records still");
+        assert_eq!(view.problem, None);
+        assert!(
+            recording.look(&blocks(&[BLOCK]), later).is_some(),
+            "and the next frame goes out at once"
+        );
     }
 
     #[test]
