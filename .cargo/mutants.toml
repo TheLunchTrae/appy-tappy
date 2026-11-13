@@ -11,3 +11,9 @@ exclude_globs = [
     "apps/setup/src-tauri/src/main.rs",
     "apps/setup/src-tauri/src/commands.rs",
 ]
+
+# The baseline times only the mutated packages' tests, while each mutant
+# runs every package's tests (`--test-workspace=true`), two mutants to a
+# runner. Keep this floor above how long the whole workspace's tests take
+# under that load.
+minimum_test_timeout = 120
