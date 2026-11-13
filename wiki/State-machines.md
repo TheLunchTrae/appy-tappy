@@ -38,7 +38,9 @@ it was about has gone. Fourteen guards drop such stale messages:
 - **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
   from one counter, so text that the text reader sends back for a recording
   that was discarded, or replaced by one of either kind, is dropped, and so
-  is what a [window look](#window-look) found for one.
+  is what a [window look](#window-look) found for one. Within one recording,
+  the look's gate drops the answer to a look from before **Record more** or
+  a change of the window's size (`Gate::Abandoned`).
 - **Search IDs.** Each search for text like a reference's box gets a new
   `id` from the owner's `search_id`. The owner drops the text reader's text
   for a search that was replaced or forgotten, answers nothing for a picture
@@ -2019,6 +2021,8 @@ stateDiagram-v2
     Out --> Idle: the look answers
     Out --> Idle: the look fails, which stops the recording
     Idle --> Idle: the look thread is gone, which stops the recording
+    Out --> Abandoned: Record more after a stop, or a frame of another size arrives
+    Abandoned --> Idle: the look answers or fails, and the answer is dropped
 ```
 
 - **Idle** holds when the last frame that went out arrived. A frame less
@@ -2027,13 +2031,22 @@ stateDiagram-v2
 - **Out** skips every frame, so the owner holds one frame for the look and
   no queue of them. A look that takes longer than `SCAN_EVERY` makes the
   looks rarer: the next frame goes out when the answer comes.
+- **Abandoned** is a look that is out and whose answer no longer counts. It
+  skips every frame like **Out**, and when the answer comes the next frame
+  goes out at once.
 - The answer (`Message::Looked`) carries the recording's ID and when its
   frame arrived. The owner drops one for a recording that was discarded or
   replaced. The recording counts and keeps the runs it holds, and sends each
   new reading to the [text reader](#text-reader).
 - **An answer after a stop.** The gate opens and what the look saw is
   dropped, since a stopped recording keeps no more. **Record more** sends
-  the next frame.
+  the next frame. When **Record more** comes before the answer, the look is
+  **Abandoned**: its frame is from before the stop, so its answer is dropped
+  too.
+- **An answer after a resize.** A frame of another size than the window had
+  when the region was drawn is a problem and is not looked over. A look that
+  is out then is **Abandoned**, because the places it found text are not
+  where the window shows it now.
 - **Failures.** A look that panics answers that it failed, and a look
   thread that ended refuses the frame. Either stops the recording with
   "Recording stopped: the window could not be looked over. Record more to

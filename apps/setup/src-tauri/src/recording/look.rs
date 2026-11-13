@@ -63,10 +63,15 @@ pub(crate) fn look(job: &Job) -> Vec<Seen> {
         .collect()
 }
 
-/// Looks over each job's frame and sends the owner what it shows, until
-/// the owner drops its sender. A look that panics answers `None`, so the
-/// owner stops the recording with a reason rather than waiting for it.
-pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>) {
+/// Has `look` look over each job's frame and sends the owner what it
+/// shows, until the owner drops its sender. A look that panics answers
+/// `None`, so the owner stops the recording with a reason rather than
+/// waiting for it.
+pub(crate) fn run(
+    jobs: &Receiver<Job>,
+    messages: &Sender<Message>,
+    look: impl Fn(&Job) -> Vec<Seen>,
+) {
     while let Ok(job) = jobs.recv() {
         let seen = panic::catch_unwind(AssertUnwindSafe(|| look(&job))).ok();
         let looked = Message::Looked {
@@ -88,13 +93,49 @@ mod tests {
 
     use super::*;
 
+    const RED: Rgb = Rgb {
+        red: 255,
+        green: 0,
+        blue: 0,
+    };
+
+    #[test]
+    fn a_look_that_panics_answers_that_it_failed_and_the_next_is_looked_over() {
+        let size = appytappy_sources::screen::Size {
+            width: 2,
+            height: 2,
+        };
+        let job = |recording| Job {
+            recording,
+            frame: Image::new(size, [40, 40, 40, 0].repeat(4)).expect("matching length"),
+            at: Instant::now(),
+            sample: 2,
+            near: Region::new(0, 0, 2, 2).expect("not empty"),
+            reader: DigitReader::new(RED, 0),
+        };
+        let (jobs, inbox) = mpsc::channel();
+        let (sender, messages) = mpsc::channel();
+        jobs.send(job(1)).expect("open");
+        jobs.send(job(2)).expect("open");
+        drop(jobs);
+        run(&inbox, &sender, |job| {
+            assert_ne!(job.recording, 1, "a look that fails");
+            Vec::new()
+        });
+        let answers: Vec<(u64, Option<usize>)> = messages
+            .try_iter()
+            .map(|message| match message {
+                Message::Looked {
+                    recording, seen, ..
+                } => (recording, seen.map(|seen| seen.len())),
+                _ => panic!("only looks are answered"),
+            })
+            .collect();
+        assert_eq!(answers, [(1, None), (2, Some(0))]);
+    }
+
     #[test]
     fn each_frame_sent_is_answered_for_its_recording_until_the_owner_goes() {
-        const RED: Rgb = Rgb {
-            red: 255,
-            green: 0,
-            blue: 0,
-        };
         // A 6 by 6 frame with a red stroke 4 tall at its left.
         let pixels = (0..6_u32)
             .flat_map(|y| (0..6_u32).map(move |x| (x, y)))
@@ -124,7 +165,7 @@ mod tests {
         })
         .expect("open");
         drop(jobs);
-        run(&inbox, &sender);
+        run(&inbox, &sender, look);
         let Ok(Message::Looked {
             recording,
             at: answered,
