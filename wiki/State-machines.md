@@ -46,9 +46,15 @@ it was about has gone. Thirteen guards drop such stale messages:
   or replaced capture still sends is dropped, and so is text for a recording
   or a search that was discarded or replaced. A ticket's number names its
   work to the UI: a stop that carries the number of another capture than
-  the picked window's is dropped (`Owner::stop_capture`), the owner answers
-  nothing for a picture asked of another search than the one it holds and
-  rereads nothing for one (`apps/setup/src-tauri/src/owner/found.rs`), and
+  the picked window's is dropped (`Owner::stop_capture`), and so is a stop
+  that carries the number of another recording than the one the capture
+  records (`Owner::stop_recording`). The page sends picks one at a time and
+  drops a pick whose screen went before its turn (`screenCaptures` in
+  `apps/setup/src/lib/capture.ts`), so the capture a stop names is never one
+  that a closed screen's late pick put in place of the next screen's. The
+  owner answers nothing for a picture asked of another search than the one
+  it holds and rereads nothing for one
+  (`apps/setup/src-tauri/src/owner/found.rs`), and
   an ask about another watch than the one it holds is refused. A reading's
   picture is asked for with its recording's number: the owner answers
   nothing for a recording that was discarded or replaced (`recorded_pixels`
@@ -1415,11 +1421,17 @@ stateDiagram-v2
   flow, and a click's target screen. The capture stops when that screen
   goes, on **Change window**, and when a click's target screen looks for
   its window again. The screen stops the capture it started, by the number
-  its pick answered (`ownCapture`), and the owner drops the stop when
-  another capture took that one's place (`Owner::stop_capture`): a stop
-  sent as a screen goes can arrive after the next screen's pick or the
-  automation editor's watch started. While one holds it, the pages' lists are read only
-  after a save.
+  its pick answered (`ownTicket` in `apps/setup/src/lib/ticket.ts`), and the
+  owner drops the stop when another capture took that one's place
+  (`Owner::stop_capture`): a stop sent as a screen goes can arrive after the
+  next screen's pick or the automation editor's watch started. The owner
+  takes what the page sends in no set order, so the screens' picks wait in
+  one line (`screenCaptures`): each is sent once the picks before it
+  answered, and a pick whose screen went by its turn is not sent. Otherwise
+  a pick that a closed screen sent could take the slot after the next
+  screen's, and the closed screen's stop of it would leave the next screen
+  with no capture. While one holds it, the pages' lists are read only after
+  a save.
 - The automation editor's watch (`liveWatchStep` in
   `apps/setup/src/lib/liveWatch.ts`) holds the owner's watch number, the
   time before which it starts no new watch, and why its last reading was
@@ -1530,7 +1542,10 @@ stateDiagram-v2
   read at answer a reading with no new trial.
 - **Failed** (`error`). The owner refused the check, such as a label its
   reference cannot learn, and the box says why. The owner keeps the check it
-  had, and nothing is read until the check changes.
+  had, and nothing is read until the check changes. A change of the draft
+  that sends the same check does not try it again: the owner judges what the
+  check sends, the saved files, and the session's screenshots and
+  recording, and such a change leaves them all as they were.
 - A read notes the number in force when it is asked, and its answer is taken
   only while that number is still in force. So an answer under an older
   check is dropped, reading or problem, and so is one asked between a change
@@ -1626,11 +1641,27 @@ two never run together, and starting one replaces the other. Both hold a
 still records, and whose `problem` says why it skips frames or why it stopped
 by itself.
 
+A start answers the recording's number, which **Record more** keeps, and the
+component that started the recording stops it by that number, on **Stop**
+and when it goes (`useRecorder` in `apps/setup/src/lib/useRecorder.ts`). The
+owner drops a stop that carries another recording's number
+(`Owner::stop_recording`), one of the
+[stale-message guards](#how-to-read-this-page): a stop sent as one
+component goes can arrive after the recording that took its place started,
+as when the reference editor's recording of readings replaces a recording of
+looks. After a start the page reads the recording's state until a read
+answers (`keepsReading` in `apps/setup/src/lib/useRecorder.ts`), so a
+recording whose first read failed still shows with **Stop** and **Discard**,
+and then reads it while it still changes.
+
 A recording of readings keeps a reading for each shape a region shows, for
 the user to review. Its `Sightings` hold `full`, which says why it takes no
 more once a frame did not fit. A reading's picture is answered only for its
 own recording's ticket, one of the
-[stale-message guards](#how-to-read-this-page).
+[stale-message guards](#how-to-read-this-page). The page asks for each
+reading's picture once (`cropsToAsk` in `apps/setup/src/lib/review.ts`); an
+ask that fails is taken back (`cropAskFailed`), and the reading is asked for
+again a second later, so review never keeps a reading without its picture.
 
 ```mermaid
 stateDiagram-v2
@@ -2762,7 +2793,9 @@ states. **Empty** reads the application's file and the pictures for each
 ask. **Kept** answers every ask about that reference from memory, a few for
 each edit in the editor. A reference is kept only when every sample's
 picture could be read, so one that is missing a picture is read again on
-each ask and learned once the picture is back. `Owner::write_app` empties it
+each ask and learned once the picture is back. It keeps the pictures, not a
+reader learned from them: the color and tolerance being taught decide what
+the samples teach, so each ask learns them again. `Owner::write_app` empties it
 before any saved application is written or removed, whether that works or
 fails, and keeping another reference replaces it. An import writes a new
 application, which no kept reference is part of. A file changed outside the setup app

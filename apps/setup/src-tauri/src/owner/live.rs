@@ -18,7 +18,7 @@ use std::time::Instant;
 use appytappy_config::app_file::{CheckDef, PinDef, ScreenDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::check::Check;
-use appytappy_sources::screen::saved::{AtSize, SavedValue, Unread};
+use appytappy_sources::screen::saved::{AtSize, Readers, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Size};
 use serde::Deserialize;
@@ -206,7 +206,12 @@ impl<H: Host> Owner<H> {
             reading_area: false,
             fixes: Vec::new(),
         };
-        let value = read_back(&screen, &found, &saved.pictures)?;
+        let value = read_back(
+            &screen,
+            &found,
+            Readers::new(&found.file.references),
+            &saved.pictures,
+        )?;
         self.go_live(value);
         Ok(())
     }
@@ -224,11 +229,12 @@ impl<H: Host> Owner<H> {
         let taught = self
             .with_session(|session| trial.characters.teach(session, None, TAUGHT, ""))
             .map_err(|error| error.to_string())?;
+        let id = taught.reference.id.clone();
         let screen = ScreenDef {
             window_size: taught.window_size.into(),
             region: taught.region.into(),
             check: CheckDef::Number {
-                reference: taught.reference.id.clone(),
+                reference: id.clone(),
                 whole: trial.whole,
                 characters: trial.reads.clone(),
             },
@@ -237,12 +243,12 @@ impl<H: Host> Owner<H> {
             fixes: Vec::new(),
         };
         // The number reads with the reference as it is taught here, not as
-        // the application's file has it, and from the pictures it was
-        // taught with, not the folder's.
+        // the application's file has it, and with the reader teaching
+        // learned, which reading back would only learn again from the same
+        // pictures.
         found.file.references = vec![taught.reference];
-        let mut pictures = taught.pictures;
-        pictures.extend(taught.kept);
-        let value = read_back(&screen, &found, &pictures)?;
+        let readers = Readers::new(&found.file.references).learned(&id, taught.reader);
+        let value = read_back(&screen, &found, readers, &Vec::new())?;
         self.go_live(value);
         Ok(())
     }
