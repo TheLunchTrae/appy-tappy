@@ -657,7 +657,7 @@ mod tests {
                         class: "OtherWindow",
                         executable: "Other.exe",
                     }),
-                    size_changes: appytappy_config::app_file::SizeChangesDef::Often,
+                    size_changes: SizeChangesDef::Often,
                 },
             )
         });
@@ -759,7 +759,7 @@ mod tests {
                             class: "ExampleWindow",
                             executable,
                         }),
-                        size_changes: appytappy_config::app_file::SizeChangesDef::Often,
+                        size_changes: SizeChangesDef::Often,
                     },
                 )
             })
