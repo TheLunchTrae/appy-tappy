@@ -238,8 +238,9 @@ This page covers what the user guide leaves out.
   closes (`live_values`, `stop_live_values`). The automation editor's
   reading follows its window to each size the same way and keeps its watch's
   number, so the editor's poll goes on. **Fix at this size** opens the
-  capture locked to the value's application. Its first screenshot sets the
-  size, and its region starts where the value reads at that size: its fix
+  capture locked to the value's application. Its first screenshot whose
+  pixels arrive sets the size, and its region starts where the value reads
+  at that size: its fix
   there, or its first drawing scaled (`place_value`). The owner refuses a
   fix at the size of the first drawing, of another kind of check, or with
   other states than the value's, and saves it over any fix at the same size
@@ -296,7 +297,10 @@ This page covers what the user guide leaves out.
   by ID, and saving refuses one of another application. The reference editor
   sends the characters it teaches as a `characters` check, which names the
   saved reference it adds to, if any; the owner learns that reference's saved
-  pictures first, so trying an edit reads as the saved reference will. A
+  pictures first, so trying an edit reads as the saved reference will.
+  `set_characters` learns the characters once and reads the number back with
+  the reader it learned (`Readers::learned`), not one learned again from the
+  same pictures. A
   reference belongs to a saved application. It keeps its ID when renamed, and
   a new one named like a renamed one's old name gets that ID with a number.
   One that a value reads with cannot be deleted.
@@ -363,7 +367,8 @@ a second, in the owner thread, and share when they record and why they stop
 region was drawn on is skipped, a capture failure stops the recording with the
 failure as its problem, and a closed window ends it. Starting one kind
 replaces a recording of the other. Recordings of both kinds are numbered from
-one counter.
+one counter, and the page stops a recording by the number its start answered
+([Recording](State-machines.md#recording)).
 
 On the page, the two kinds share one hook for the recording's state, its
 errors, and its commands (`useRecorder` in `lib/useRecorder.ts`), under
@@ -1347,10 +1352,11 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   lines.
 - `debug_bundle` hands the owner's file locations to a blocking task, which
   builds the zip in memory away from the owner thread, so the page's other
-  commands do not wait for a large trace to be packed. The page saves the
-  returned bytes with the WebView's save picker. Pictures are stored,
-  everything else is deflated, with the `zip` crate and its pure-Rust deflate
-  backend. `setup.log` records the whole time, packing included.
+  commands do not wait for a large trace to be packed. The page asks where to
+  save with the WebView's save picker first, then saves the returned bytes
+  there, as [Application import](State-machines.md#application-import) says
+  of the export dialogs. Pictures are stored, everything else is deflated,
+  with the `zip` crate and its pure-Rust deflate backend. `setup.log` records the whole time, packing included.
 
 The same setting adds debug details to the editors. The page asks for them
 only while `showDebug` is true, so with it off they cost nothing:
@@ -1427,9 +1433,9 @@ which `api.ts` sends as the request's raw body with a `T` about it, as
 
 The file also holds what the page checks a draft against before it saves:
 `LIMITS`, such as the longest app name a media or volume action names, the
-longest path or link, the most states, the highest tolerance, and the most
-pixels a click's search area holds; `KEY_NAMES`, the keys a key press action
-can name; `SHORTCUT_KEYS`, the keys the screenshot shortcut can name;
+longest path or link, the most states, the longest state name, the highest
+tolerance, and the most pixels a click's search area holds; `KEY_NAMES`, the
+keys a key press action can name; `SHORTCUT_KEYS`, the keys the screenshot shortcut can name;
 `ACTIONS`, whether each kind of action sends input and whether undo can put
 it back; `TRACE_CATEGORIES`; `NO_STATE`; and `DEFAULT_SETTINGS`. The test
 reads them from `appytappy-config`, so the page and the save agree, and the

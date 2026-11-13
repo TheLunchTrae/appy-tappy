@@ -11,6 +11,7 @@ import {
   editDraft,
   editStart,
   keepsStates,
+  keptStateNames,
   otherSizeText,
   pickedPin,
   placedOn,
@@ -222,7 +223,18 @@ describe('buildEdit', () => {
         },
       },
     });
-    expect(edit({ ...draft, stateNames: ['Shown', ' '] }, states)).toEqual({ ok: false, next: 'Name each state.' });
+    // Renamed states follow the saved file's name rules too.
+    const next = 'Fix each state name that has a message under it.';
+    for (const names of [
+      ['Shown', ' '],
+      ['Shown', 'shown'],
+      ['Shown', 'None'],
+    ]) {
+      expect(edit({ ...draft, stateNames: names }, states)).toEqual({ ok: false, next });
+    }
+    // A state no name is typed for keeps its saved name.
+    const saved = states.screen.check.kind === 'state' ? states.screen.check.states : [];
+    expect(keptStateNames({ ...draft, stateNames: ['Away'] }, saved)).toEqual(['Away', 'Hidden']);
   });
 
   test('takes every state again once the region changed or one is taken from a screenshot', () => {
@@ -259,7 +271,7 @@ describe('buildEdit', () => {
       ),
     ).toEqual({
       ok: false,
-      next: 'Name each state.',
+      next: 'Fix each state name that has a message under it.',
     });
   });
 

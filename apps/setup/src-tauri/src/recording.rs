@@ -125,6 +125,14 @@ pub(crate) enum Recorder {
 }
 
 impl Recorder {
+    /// The recording's ticket, whose number names it to the UI.
+    pub(crate) const fn id(&self) -> Ticket {
+        match self {
+            Self::Readings(recording) => recording.id,
+            Self::Looks(recording) => recording.id,
+        }
+    }
+
     /// What the user does to record again once the window shows, after a
     /// capture failure stopped the recording.
     pub(crate) const fn after_failure(&self) -> &'static str {

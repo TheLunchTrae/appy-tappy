@@ -941,6 +941,12 @@ div.match-answer {
   place-items: center;
 }
 
+/* A draft's screenshot whose pixels failed to load says so in its tile. */
+.thumb .unloaded {
+  padding: 4px;
+  text-align: center;
+}
+
 .thumb canvas {
   display: block;
   max-width: 100%;
