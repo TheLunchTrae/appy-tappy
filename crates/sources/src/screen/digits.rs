@@ -216,19 +216,19 @@ impl DigitReader {
     /// a reader of digits cannot read a `0` as the `O` its font also has.
     /// The other characters it learned are still characters to it, which
     /// [`DigitReader::read`] takes as text and not as shapes it has yet to
-    /// learn. A check that names no characters reads with the reader as it
-    /// is.
+    /// learn, and so are those an earlier call left out. A check that names
+    /// no characters reads with the reader as it is.
     #[must_use]
     pub fn reading(mut self, characters: Option<&str>) -> Option<Self> {
         let Some(characters) = characters else {
             return Some(self);
         };
-        let (read, left_out) = self
+        let (read, left_out): (Vec<_>, Vec<_>) = self
             .glyphs
             .into_iter()
             .partition(|glyph| characters.contains(glyph.character));
         self.glyphs = read;
-        self.left_out = left_out;
+        self.left_out.extend(left_out);
         (!self.glyphs.is_empty()).then_some(self)
     }
 
@@ -1987,6 +1987,9 @@ mod tests {
         assert_eq!(point.read(&label, false), five);
         let digit = reader.clone().reading(Some("5")).unwrap();
         assert_eq!(digit.read(&label, false), five);
+        // Narrowing a reader again keeps what it left out before.
+        let narrowed = point.reading(Some("5")).unwrap();
+        assert_eq!(narrowed, digit);
         // Without the letter the point is the number's, so a value that
         // leaves it out does not read ".5" as 5.
         let pointed = draw(&["..###", "..#..", "#.###"]);
