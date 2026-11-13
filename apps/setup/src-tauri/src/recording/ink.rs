@@ -43,10 +43,14 @@ impl Line {
         let height = bottom
             .saturating_sub(top)
             .saturating_add(margin.saturating_mul(2));
-        let row = usize::try_from(width).ok()?;
+        let stride = usize::try_from(width).ok()?;
         let skipped = usize::try_from(margin).ok()?;
-        let mut pixels = vec![u8::MAX; row.checked_mul(usize::try_from(height).ok()?)?];
-        for (row, y) in pixels.chunks_exact_mut(row).skip(skipped).zip(top..bottom) {
+        let mut pixels = vec![u8::MAX; stride.checked_mul(usize::try_from(height).ok()?)?];
+        for (row, y) in pixels
+            .chunks_exact_mut(stride)
+            .skip(skipped)
+            .zip(top..bottom)
+        {
             for (pixel, x) in row.iter_mut().skip(skipped).zip(left..right) {
                 if ink.at(x, y) {
                     *pixel = 0;

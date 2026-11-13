@@ -2,7 +2,8 @@
 //!
 //! Each check is integer arithmetic over the region's pixels, so it costs
 //! microseconds and gives the same answer on every platform. Only a number
-//! allocates as it reads: a byte for each pixel, for which of them are ink. `wiki/Screen-regions.md` explains when to use which.
+//! allocates as it reads: a byte for each pixel, for which of them are ink.
+//! `wiki/Screen-regions.md` explains when to use which.
 
 use std::error::Error;
 use std::fmt;

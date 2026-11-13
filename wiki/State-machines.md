@@ -622,7 +622,9 @@ digit, it ends the number, and the rest of the region is ignored, so `12/50`
 reads as 12 once `/` is learned. A character the value leaves out is "any
 other character" whatever it is, a `-`, a `.`, or a `,` included
 (`NumberText::push_text`), and a letter left out still counts as a letter
-before a point. A `,` is skipped when it separates groups of
+before a point. A read runs a second `NumberText` that takes each left-out
+character as itself, and fails with `ReadError::LeftOut` when the two end
+with different numbers. A `,` is skipped when it separates groups of
 three digits before the point, so `1,234` reads as 1234. When the digits after
 a `,` are not a group of three, as in `12,5`, the number ends at the `,` and
 reads as 12. A `.` before any digit reads as `0.`, so `.5` reads as 0.5 (or 0 for
