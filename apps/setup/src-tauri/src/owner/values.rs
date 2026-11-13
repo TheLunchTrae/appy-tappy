@@ -9,12 +9,12 @@ use appytappy_config::app_file::{
     AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, new_value_id,
     value_id,
 };
-use appytappy_sources::screen::saved;
+use appytappy_sources::screen::saved::{self, SavedError};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
 use crate::applications::{self, AppSpec};
 use crate::automations;
-use crate::check_spec::{self, Pictures};
+use crate::check_spec::{self, Pictures, SpecError};
 use crate::drafts::{DraftDef, DraftKind};
 use crate::stores::SavedApp;
 use crate::window_list;
@@ -124,8 +124,7 @@ impl<H: Host> Owner<H> {
         }
         // The value keeps the window size its region was drawn at, which
         // any screenshot it cuts at the region must have too.
-        let size = self
-            .with_session(|session| check_spec::drawn_size(&spec.check, session, spec.screenshot))
+        let size = check_spec::drawn_size(&spec.check, &self.screenshots, spec.screenshot)
             .map_err(|error| error.to_string())?;
         self.update_app(&spec.app, Changed::Values, |owner, found| {
             named_apart(&found.file, None, name)?;
@@ -136,8 +135,7 @@ impl<H: Host> Owner<H> {
                 .map(|value| value.id.as_str())
                 .collect();
             let id = new_value_id(name, &taken);
-            let saved = owner
-                .with_session(|session| check_spec::to_saved(&spec.check, session, &spec.app, &id))
+            let saved = check_spec::to_saved(&spec.check, &owner.screenshots, &spec.app, &id)
                 .map_err(|error| error.to_string())?;
             let screen = ScreenDef {
                 window_size: SizeDef {
@@ -335,24 +333,43 @@ pub(super) fn named_apart(file: &AppFile, own: Option<&str>, name: &str) -> Resu
 
 /// Reads `screen` back as the runtime will, with the references and size
 /// changes of `app`'s file, from `pictures`, about to be saved, and those
-/// already in its folder, so a value that saves is one the runtime can read.
+/// already in its folder. It is the one judge of a value's check: one that
+/// reads back is one the runtime can read, whether it is being tried on the
+/// live window or saved.
+///
+/// # Errors
+///
+/// Returns what to fix, in the page's words where it has some, as
+/// [`SpecError`] says.
 pub(super) fn read_back(
     screen: &ScreenDef,
     app: &SavedApp,
     pictures: &Pictures,
 ) -> Result<saved::SavedValue, String> {
-    saved::build(
-        screen,
-        &app.file.references,
-        app.file.size_changes,
-        |picture| {
-            pictures
-                .iter()
-                .find(|(name, _)| name == picture)
-                .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
+    let file = &app.file;
+    saved::build(screen, &file.references, file.size_changes, |picture| {
+        pictures
+            .iter()
+            .find(|(name, _)| name == picture)
+            .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
+    })
+    .map_err(|error| match error {
+        SavedError::NoReference { .. } => format!("{} no longer has that reference.", file.name),
+        SavedError::NoCharacters { id, characters } => {
+            let saved = file.references.iter().find(|reference| reference.id == id);
+            SpecError::NoCharacters {
+                reference: saved.map_or(id, |reference| reference.name.clone()),
+                characters,
+            }
+            .to_string()
         },
-    )
-    .map_err(|error| format!("AppyTappy could not read this value as saved: {error}."))
+        error => file
+            .references
+            .iter()
+            .find_map(|reference| check_spec::sample_problem_of(&error, reference))
+            .unwrap_or_else(|| SpecError::from(error))
+            .to_string(),
+    })
 }
 
 #[cfg(test)]

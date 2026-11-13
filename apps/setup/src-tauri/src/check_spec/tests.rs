@@ -1,12 +1,20 @@
-//! Tests of building and saving the checks the UI describes.
+//! Tests of turning the checks and characters the UI describes into their
+//! saved form, and of the words for what cannot be saved or read.
 
 use std::error::Error as _;
+use std::io;
 
-use appytappy_config::app_file::MAX_STATES;
-use appytappy_config::signal::{Number, Value};
-use appytappy_sources::screen::Size;
+use appytappy_config::app_file::{
+    CheckDefError, MAX_STATES, ReferenceDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
+    sample_name,
+};
+use appytappy_config::signal::Number;
+use appytappy_sources::screen::check::ImageMatch;
+use appytappy_sources::screen::saved;
 
+use super::characters::{RecordedLabel, Taught, expected_characters};
 use super::*;
+use crate::recording::Recording;
 
 const RED: ColorSpec = ColorSpec {
     red: 255,
@@ -51,10 +59,6 @@ fn states(region: RegionSpec, states: Vec<StateSpec>, tolerance: u8) -> CheckSpe
     }
 }
 
-fn shown(name: &str) -> Value {
-    Value::State(StateName::new(name).expect("valid"))
-}
-
 fn whole() -> RegionSpec {
     RegionSpec {
         x: 0,
@@ -95,11 +99,14 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
             }],
             expects: Some("123".to_owned()),
         },
-        pictures: vec![
+        pictures: vec![(
+            sample_name("digits", 1),
             screenshot()
                 .crop(Region::new(0, 0, 2, 2).expect("not empty"))
-                .expect("inside"),
-        ],
+                .expect("inside")
+                .encode_png()
+                .expect("encodes"),
+        )],
     })
 }
 
@@ -130,8 +137,8 @@ fn characters(
     reference: Option<ReferenceRef>,
     labels: Vec<Label>,
     recorded: Vec<RecordedLabel>,
-) -> CheckSpec {
-    CheckSpec::Characters {
+) -> CharactersSpec {
+    CharactersSpec {
         region,
         screenshot: 0,
         reference,
@@ -140,6 +147,38 @@ fn characters(
         labels,
         recorded,
     }
+}
+
+/// What `spec` teaches a reference saved as `digits`, expecting nothing.
+fn teach(spec: &CharactersSpec, session: Session<'_>) -> Result<Taught, SpecError> {
+    spec.teach(session, Some("digits"), "Digits", "")
+}
+
+/// What saving `spec` on screenshot 0 and reading it back gives: the value
+/// `saved::build` makes of its saved form, or why there is none.
+fn read_back(spec: &CheckSpec, screenshots: &dyn Shots) -> Result<saved::SavedValue, SpecError> {
+    let size = drawn_size(spec, screenshots, 0)?;
+    let saved = to_saved(spec, screenshots, "app", "tried")?;
+    let screen = ScreenDef {
+        window_size: SizeDef {
+            width: size.width,
+            height: size.height,
+        },
+        region: saved.region,
+        check: saved.check,
+        pin: None,
+        reading_area: false,
+        fixes: Vec::new(),
+    };
+    let built = saved::build(&screen, &[], SizeChangesDef::Often, |picture| {
+        saved
+            .pictures
+            .iter()
+            .find(|(name, _)| name == picture)
+            .map(|(_, png)| png.clone())
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+    })?;
+    Ok(built)
 }
 
 fn one(screenshot: usize) -> Vec<Label> {
@@ -157,30 +196,6 @@ fn a_problem_reads_as_a_sentence_of_its_own() {
 }
 
 #[test]
-fn a_bar_fill_reads_the_share_of_filled_pixels() {
-    // Two red columns and one gray column, so a swap of the filled and
-    // empty colors reads a third instead of two thirds.
-    let spec = CheckSpec::BarFill {
-        region: RegionSpec {
-            x: 0,
-            y: 0,
-            width: 3,
-            height: 2,
-        },
-        filled: RED,
-        empty: GRAY,
-    };
-    let built = build(&spec, session(&[], None)).expect("valid bar");
-    assert_eq!(built.region, Region::new(0, 0, 3, 2).expect("not empty"));
-    let bar = screenshot().crop(built.region).expect("inside");
-    let value = built.check.read(&bar).expect("readable");
-    assert_eq!(
-        value,
-        Value::Number(Number::new(400.0 / 6.0).expect("finite"))
-    );
-}
-
-#[test]
 fn each_state_is_cut_from_its_screenshot_at_the_region() {
     // Screenshot 2 is screenshot 1 with its halves swapped, so the left
     // region is red on one and gray on the other.
@@ -191,20 +206,7 @@ fn each_state_is_cut_from_its_screenshot_at_the_region() {
     let swapped = Image::new(screenshot().size(), swapped.concat()).expect("matching length");
     let spec = states(left(), vec![state("Red", 0), state("Gray", 1)], 0);
     let screenshots = [screenshot(), swapped];
-    let built = build(&spec, session(&screenshots, None)).expect("valid states");
-    let red_square = screenshot().crop(built.region).expect("inside");
-    let gray_square = screenshot()
-        .crop(Region::new(2, 0, 2, 2).expect("not empty"))
-        .expect("inside");
-    assert_eq!(built.check.read(&red_square), Ok(shown("Red")));
-    assert_eq!(built.check.read(&gray_square), Ok(shown("Gray")));
-    let white = Image::new(red_square.size(), [255; 16].to_vec()).expect("matching length");
-    assert_eq!(
-        built.check.read(&white),
-        Ok(Value::State(StateName::none()))
-    );
-
-    let saved = to_saved(&spec, session(&screenshots, None), "app", "status").expect("valid");
+    let saved = to_saved(&spec, &screenshots, "app", "status").expect("valid");
     assert_eq!(
         saved.check,
         CheckDef::State {
@@ -227,6 +229,12 @@ fn each_state_is_cut_from_its_screenshot_at_the_region() {
         .map(|(name, _)| name.as_str())
         .collect();
     assert_eq!(names, ["status-1.png", "status-2.png"]);
+    let red_square = screenshot()
+        .crop(Region::new(0, 0, 2, 2).expect("not empty"))
+        .expect("inside");
+    let gray_square = screenshot()
+        .crop(Region::new(2, 0, 2, 2).expect("not empty"))
+        .expect("inside");
     let gray = Image::decode_png(&saved.pictures[1].1).expect("a PNG");
     let gray = ImageMatch::new(gray, None, 0).expect("no mask");
     assert_eq!(gray.matches(&gray_square), Ok(true));
@@ -234,11 +242,11 @@ fn each_state_is_cut_from_its_screenshot_at_the_region() {
 }
 
 #[test]
-fn state_names_must_be_valid_and_differ() {
+fn what_the_saved_form_breaks_comes_back_in_the_pages_words() {
     let screenshots = [screenshot()];
     let problem = |names: &[&str]| {
         let spec = states(left(), names.iter().map(|name| state(name, 0)).collect(), 0);
-        build(&spec, session(&screenshots, None)).map(drop)
+        read_back(&spec, &screenshots).map(drop)
     };
     assert_eq!(problem(&["Paused", "Live"]), Ok(()));
     assert_eq!(problem(&[]), Err(SpecError::Check(CheckDefError::NoStates)));
@@ -271,15 +279,42 @@ fn state_names_must_be_valid_and_differ() {
         SpecError::Check(CheckDefError::SameStateName("Live".to_owned())).to_string(),
         "Two states are named \"Live\". Give each state its own name."
     );
+    assert_eq!(problem(&names[..MAX_STATES]), Ok(()));
+
+    let same_colors = CheckSpec::BarFill {
+        region: whole(),
+        filled: RED,
+        empty: RED,
+    };
+    let error = read_back(&same_colors, &screenshots).expect_err("one color");
+    assert_eq!(error, SpecError::Check(CheckDefError::SameColors));
     assert_eq!(
-        SpecError::Check(CheckDefError::SameColors).to_string(),
+        error.to_string(),
         "Pick a filled color and an empty color that differ."
     );
-    assert_eq!(problem(&names[..MAX_STATES]), Ok(()));
+    let outside = CheckSpec::Color {
+        region: RegionSpec {
+            x: 3,
+            y: 0,
+            width: 2,
+            height: 2,
+        },
+        color: RED,
+        tolerance: 0,
+    };
+    assert_eq!(
+        read_back(&outside, &screenshots).map(drop),
+        Err(SpecError::Outside)
+    );
+    // The page has no words of its own for the rest.
+    assert_eq!(
+        SpecError::from(saved::SavedError::SameSize).to_string(),
+        "AppyTappy could not read this value as saved: it is drawn at this size already."
+    );
 }
 
 #[test]
-fn a_selected_image_compares_only_what_was_selected() {
+fn a_selected_image_keeps_only_what_was_selected() {
     // The click selects the red half, so the gray half is background.
     let spec = |region| {
         states(
@@ -298,34 +333,7 @@ fn a_selected_image_compares_only_what_was_selected() {
             0,
         )
     };
-    let built = build(&spec(whole()), session(&[screenshot()], None)).expect("valid image");
-    let repaint = |columns: std::ops::Range<usize>, color: [u8; 4]| {
-        let mut pixels = screenshot().pixels().to_vec();
-        for (index, pixel) in pixels.iter_mut().enumerate() {
-            if columns.contains(&(index % 4)) {
-                *pixel = color;
-            }
-        }
-        Image::new(screenshot().size(), pixels.concat()).expect("matching length")
-    };
-    let blue = [255, 0, 0, 0];
-    assert_eq!(
-        built.check.read(&repaint(2..4, blue)),
-        Ok(shown("Shown")),
-        "a new background still matches"
-    );
-    assert_eq!(
-        built.check.read(&repaint(0..2, blue)),
-        Ok(Value::State(StateName::none()))
-    );
-
-    let saved = to_saved(
-        &spec(whole()),
-        session(&[screenshot()], None),
-        "app",
-        "icon",
-    )
-    .expect("valid");
+    let saved = to_saved(&spec(whole()), &[screenshot()], "app", "icon").expect("valid");
     let (picture, mask) =
         Image::decode_png_masked(&saved.pictures[0].1).expect("a PNG with a mask");
     assert_eq!(picture.size(), screenshot().size());
@@ -341,54 +349,28 @@ fn a_selected_image_compares_only_what_was_selected() {
         height: 2,
     };
     assert_eq!(
-        build(&spec(gray_half), session(&[screenshot()], None)).err(),
+        to_saved(&spec(gray_half), &[screenshot()], "app", "icon").err(),
         Some(SpecError::NothingSelected("Shown".to_owned())),
         "a region that holds none of the selection has nothing to compare"
     );
 }
 
 #[test]
-fn a_color_check_matches_the_regions_average_color() {
-    let spec = CheckSpec::Color {
-        region: whole(),
-        color: RED,
-        tolerance: 10,
-    };
-    let built = build(&spec, session(&[], None)).expect("valid color");
-    let red_square = screenshot()
-        .crop(Region::new(0, 0, 2, 2).expect("not empty"))
-        .expect("inside");
-    assert_eq!(built.check.read(&red_square), Ok(Value::Flag(true)));
-    assert_eq!(built.check.read(&screenshot()), Ok(Value::Flag(false)));
-}
-
-#[test]
-fn a_number_reads_with_its_saved_reference() {
-    let spec = |whole| CheckSpec::Number {
+fn a_number_is_saved_with_its_applications_reference() {
+    let spec = CheckSpec::Number {
         region: left(),
         reference: digits_ref(),
-        whole,
-        characters: None,
+        whole: true,
+        characters: Some("1%".to_owned()),
     };
-    let built = build(&spec(true), session(&[], None)).expect("a saved reference");
-    let red_square = screenshot().crop(built.region).expect("inside");
-    assert_eq!(
-        built.check.read(&red_square),
-        Ok(Value::Number(Number::new(1.0).expect("finite")))
-    );
-    assert!(matches!(built.check, Check::Number { whole: true, .. }));
-    assert!(matches!(
-        build(&spec(false), session(&[], None)).map(|built| built.check),
-        Ok(Check::Number { whole: false, .. })
-    ));
-    let saved = to_saved(&spec(true), session(&[], None), "app", "progress")
-        .expect("a value of the reference's application");
+    let saved =
+        to_saved(&spec, &[], "app", "progress").expect("a value of the reference's application");
     assert_eq!(
         saved.check,
         CheckDef::Number {
             reference: "digits".to_owned(),
             whole: true,
-            characters: None,
+            characters: Some("1%".to_owned()),
         }
     );
     assert!(
@@ -396,162 +378,89 @@ fn a_number_reads_with_its_saved_reference() {
         "the reference keeps the pictures"
     );
     assert_eq!(
-        to_saved(&spec(true), session(&[], None), "other", "progress"),
+        to_saved(&spec, &[], "other", "progress"),
         Err(SpecError::OtherApplication)
     );
-    let gone = CheckSpec::Number {
-        region: left(),
-        reference: ReferenceRef {
+}
+
+#[test]
+fn characters_being_taught_read_as_their_saved_reference_does() {
+    let spec = characters(left(), None, one(0), Vec::new());
+    let taught = teach(&spec, session(&[screenshot()], None)).expect("learns the 1");
+    assert_eq!(taught.region, Region::new(0, 0, 2, 2).expect("not empty"));
+    assert_eq!(taught.window_size, screenshot().size());
+    let red_square = screenshot().crop(taught.region).expect("inside");
+    assert_eq!(
+        taught.reader.read(&red_square, false),
+        Ok(Number::new(1.0).expect("finite"))
+    );
+    // The file and its pictures give the runtime the same reader.
+    let from_file = saved::reader(&taught.reference, |picture| {
+        taught
+            .pictures
+            .iter()
+            .find(|(name, _)| name == picture)
+            .map(|(_, png)| png.clone())
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+    })
+    .expect("learns from the file");
+    assert_eq!(from_file, taught.reader);
+    // A saved reference teaches on its own, with no new label.
+    let saved_only = characters(left(), Some(digits_ref()), Vec::new(), Vec::new());
+    assert!(teach(&saved_only, session(&[screenshot()], None)).is_ok());
+}
+
+#[test]
+fn a_saved_reference_is_relearned_in_the_color_being_tried() {
+    // The saved reference learned red characters. Tried in gray, its saved
+    // sample is the gray half's shape, which the red square shows none of.
+    let gray = CharactersSpec {
+        ink: GRAY,
+        ..characters(whole(), Some(digits_ref()), Vec::new(), Vec::new())
+    };
+    let error = teach(&gray, session(&[screenshot()], None)).expect_err("no gray in the sample");
+    assert!(
+        matches!(&error, SpecError::Learn { text, .. } if text == "1"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_saved_sample_without_its_picture_says_how_to_recover() {
+    let bare = |reference: &ReferenceRef| {
+        let mut saved = digits(reference)?;
+        saved.pictures.clear();
+        Ok(saved)
+    };
+    let screenshots = [screenshot()];
+    let session = Session {
+        screenshots: &screenshots,
+        recording: None,
+        references: &bare,
+    };
+    let spec = characters(left(), Some(digits_ref()), Vec::new(), Vec::new());
+    assert_eq!(
+        teach(&spec, session)
+            .expect_err("a sample is gone")
+            .to_string(),
+        "The reference Digits is missing its picture ref-digits-1.png. Remove the values that \
+         read with it, then delete the reference and make it again."
+    );
+    let gone = characters(
+        left(),
+        Some(ReferenceRef {
             app: "app".to_owned(),
             id: "gone".to_owned(),
-        },
-        whole: false,
-        characters: None,
-    };
-    let error = build(&gone, session(&[], None)).expect_err("not saved");
+        }),
+        Vec::new(),
+        Vec::new(),
+    );
+    let error = teach(&gone, session).expect_err("not saved");
     assert_eq!(
         error,
         SpecError::Reference("That reference is not saved.".to_owned())
     );
     assert_eq!(error.to_string(), "That reference is not saved.");
-}
-
-/// Rings in red, 16 pixels tall and each as wide as `widths` says, a blank
-/// column apart.
-fn rings(widths: &[usize]) -> Image {
-    let line = |fill: &str| {
-        let rings: Vec<String> = widths
-            .iter()
-            .map(|width| format!("#{}#", fill.repeat(width.saturating_sub(2))))
-            .collect();
-        rings.join(".")
-    };
-    let (edge, middle) = (line("#"), line("."));
-    let mut rows = vec![middle.as_str(); 16];
-    rows[0] = &edge;
-    rows[15] = &edge;
-    let bgra = rows
-        .concat()
-        .chars()
-        .flat_map(|cell| {
-            if cell == '#' {
-                [0, 0, 255, 0]
-            } else {
-                [40, 40, 40, 0]
-            }
-        })
-        .collect();
-    let size = Size {
-        width: u32::try_from(edge.len()).expect("small"),
-        height: 16,
-    };
-    Image::new(size, bgra).expect("matching length")
-}
-
-/// The saved reference `digits` as a font's: a letter and the digit that
-/// looks like it, a column wider, so each shape matches both and the
-/// letter's own glyph is closer.
-fn lookalikes(reference: &ReferenceRef) -> Result<SavedReference, String> {
-    let mut saved = digits(reference)?;
-    saved.reference.samples[0].text = "O0".to_owned();
-    saved.pictures = vec![rings(&[10, 11])];
-    Ok(saved)
-}
-
-#[test]
-fn a_number_reads_and_saves_the_characters_it_is_told_to() {
-    let reading = |characters: Option<&str>| CheckSpec::Number {
-        region: left(),
-        reference: digits_ref(),
-        whole: false,
-        characters: characters.map(str::to_owned),
-    };
-    let font = Session {
-        references: &lookalikes,
-        ..session(&[], None)
-    };
-    let read = |characters| {
-        build(&reading(characters), font)
-            .expect("it knows one")
-            .check
-            .read(&rings(&[10]))
-    };
-    // The letter's shape reads as the letter, which is no number, until
-    // the value reads only digits.
-    assert!(read(None).is_err());
-    assert_eq!(
-        read(Some("0123456789")),
-        Ok(Value::Number(Number::new(0.0).expect("finite")))
-    );
-    assert_eq!(
-        to_saved(&reading(Some("0123456789")), font, "app", "progress").map(|saved| saved.check),
-        Ok(CheckDef::Number {
-            reference: "digits".to_owned(),
-            whole: false,
-            characters: Some("0123456789".to_owned()),
-        })
-    );
-    // Nothing is saved that would read nothing.
-    assert_eq!(
-        to_saved(&reading(Some("2%")), font, "app", "progress"),
-        Err(SpecError::NoCharacters {
-            reference: "Digits".to_owned(),
-            characters: "2%".to_owned(),
-        })
-    );
-    for none in ["", " \t"] {
-        assert_eq!(
-            to_saved(&reading(Some(none)), font, "app", "progress"),
-            Err(SpecError::Check(CheckDefError::NoCharacters)),
-            "{none:?}"
-        );
-    }
-    assert_eq!(
-        build(&reading(Some("2%")), font)
-            .expect_err("it knows none of them")
-            .to_string(),
-        "Digits knows none of the characters this value reads, \"2%\". Teach it one of them, \
-         or change which characters the value reads."
-    );
-    assert_eq!(
-        SpecError::Check(CheckDefError::NoCharacters).to_string(),
-        "Choose at least one character for the value to read."
-    );
-}
-
-#[test]
-fn characters_being_taught_read_but_are_not_a_value() {
-    let spec = characters(left(), None, one(0), Vec::new());
-    let built = build(&spec, session(&[screenshot()], None)).expect("learns the 1");
-    let red_square = screenshot().crop(built.region).expect("inside");
-    assert_eq!(
-        built.check.read(&red_square),
-        Ok(Value::Number(Number::new(1.0).expect("finite")))
-    );
-    let error = to_saved(&spec, session(&[screenshot()], None), "app", "progress")
-        .expect_err("a reference, not a value");
-    assert_eq!(error, SpecError::NotAValue);
-    assert_eq!(
-        error.to_string(),
-        "Pick a reference to read the number with."
-    );
-    assert_eq!(
-        to_saved_reference(
-            &CheckSpec::Color {
-                region: left(),
-                color: RED,
-                tolerance: 0,
-            },
-            session(&[], None),
-            "digits",
-            "Digits",
-            "",
-        ),
-        Err(SpecError::NotAValue)
-    );
-    // A saved reference teaches on its own, with no new label.
-    let saved_only = characters(left(), Some(digits_ref()), Vec::new(), Vec::new());
-    assert!(build(&saved_only, session(&[screenshot()], None)).is_ok());
 }
 
 #[test]
@@ -568,7 +477,8 @@ fn mistakes_come_back_as_errors_the_user_can_fix() {
         width: 2,
         height: 2,
     };
-    let cases = [
+    let screenshots = [screenshot()];
+    let checks = [
         (
             CheckSpec::Color {
                 region: empty,
@@ -578,14 +488,6 @@ fn mistakes_come_back_as_errors_the_user_can_fix() {
             SpecError::EmptyRegion,
         ),
         (
-            CheckSpec::BarFill {
-                region: whole(),
-                filled: RED,
-                empty: RED,
-            },
-            SpecError::Check(CheckDefError::SameColors),
-        ),
-        (
             states(whole(), vec![state("Shown", 1)], 0),
             SpecError::NoScreenshot,
         ),
@@ -593,22 +495,51 @@ fn mistakes_come_back_as_errors_the_user_can_fix() {
             states(outside, vec![state("Shown", 0)], 0),
             SpecError::Outside,
         ),
-        (
-            characters(whole(), None, Vec::new(), Vec::new()),
-            SpecError::NoLabels,
-        ),
     ];
-    for (spec, expected) in cases {
+    for (spec, expected) in checks {
         assert_eq!(
-            build(&spec, session(&[screenshot()], None)),
+            to_saved(&spec, &screenshots, "app", "value"),
             Err(expected),
             "{spec:?}"
         );
     }
+    let taught = [
+        (
+            characters(whole(), None, Vec::new(), Vec::new()),
+            SpecError::NoLabels,
+        ),
+        (
+            characters(empty, None, one(0), Vec::new()),
+            SpecError::EmptyRegion,
+        ),
+        (
+            characters(outside, None, one(0), Vec::new()),
+            SpecError::Outside,
+        ),
+        (
+            CharactersSpec {
+                screenshot: 1,
+                ..characters(whole(), None, one(0), Vec::new())
+            },
+            SpecError::NoScreenshot,
+        ),
+    ];
+    for (spec, expected) in taught {
+        assert_eq!(
+            teach(&spec, session(&screenshots, None)).map(drop),
+            Err(expected),
+            "{spec:?}"
+        );
+    }
+    assert_eq!(
+        drawn(&screenshots, outside, 0),
+        Err(SpecError::Outside),
+        "a recording checks its region the same way"
+    );
 }
 
 #[test]
-fn what_a_check_cuts_at_its_region_has_the_size_it_was_drawn_at() {
+fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
     let small = Image::new(
         Size {
             width: 2,
@@ -627,7 +558,7 @@ fn what_a_check_cuts_at_its_region_has_the_size_it_was_drawn_at() {
         text: "1".to_owned(),
     }];
     let labeled_both = characters(left(), None, [one(0), one(1)].concat(), Vec::new());
-    let error = build(&labeled_both, session(&screenshots, None)).expect_err("two sizes");
+    let error = teach(&labeled_both, session(&screenshots, None)).expect_err("two sizes");
     assert_eq!(
         error.to_string(),
         "Screenshot 2, which a box is on, is 2x2, but the reference reads on screenshot 1, \
@@ -635,43 +566,40 @@ fn what_a_check_cuts_at_its_region_has_the_size_it_was_drawn_at() {
     );
     let recorded_elsewhere = characters(left(), None, one(0), kept.clone());
     assert_eq!(
-        build(&recorded_elsewhere, session(&screenshots, Some(&recording)))
+        teach(&recorded_elsewhere, session(&screenshots, Some(&recording)))
             .expect_err("recorded at another size")
             .to_string(),
         "The recording is of a window of 2x2, but the reference reads on screenshot 1, \
          which is 4x2. Use its settings, or discard the recording."
     );
-    let mut drawn_on_small = characters(left(), None, one(1), kept);
-    if let CheckSpec::Characters { screenshot, .. } = &mut drawn_on_small {
-        *screenshot = 1;
-    }
+    let drawn_on_small = CharactersSpec {
+        screenshot: 1,
+        ..characters(left(), None, one(1), kept)
+    };
     assert!(
-        build(&drawn_on_small, session(&screenshots, Some(&recording))).is_ok(),
+        teach(&drawn_on_small, session(&screenshots, Some(&recording))).is_ok(),
         "all of one size"
     );
     assert_eq!(
-        recorded_problems(&labeled_both, session(&screenshots, None)),
+        labeled_both.recorded_problems(session(&screenshots, None)),
         Err(error),
         "review checks the sizes too"
     );
     let image = states(left(), vec![state("Shown", 1)], 0);
     assert_eq!(
-        drawn_size(&image, session(&screenshots, None), 0)
+        drawn_size(&image, &screenshots, 0)
             .expect_err("compared at another size")
             .to_string(),
         "Screenshot 2, which a state is taken from, is 2x2, but the region was drawn on \
          screenshot 1, which is 4x2. Take that state from a screenshot of that size."
     );
-    assert_eq!(
-        drawn_size(&image, session(&screenshots, None), 1),
-        Ok(small.size())
-    );
+    assert_eq!(drawn_size(&image, &screenshots, 1), Ok(small.size()));
     assert!(
         matches!(
-            build(&image, session(&screenshots, None)),
+            to_saved(&image, &screenshots, "app", "value"),
             Err(SpecError::OtherSize { .. })
         ),
-        "trying the check is refused too"
+        "the saved form is refused too"
     );
 }
 
@@ -687,7 +615,7 @@ fn a_label_the_reference_cannot_learn_names_the_text() {
         }],
         Vec::new(),
     );
-    let error = build(&spec, session(&[screenshot()], None)).expect_err("one blob, two characters");
+    let error = teach(&spec, session(&[screenshot()], None)).expect_err("one blob, two characters");
     assert!(matches!(&error, SpecError::Learn { text, .. } if text == "12"));
     assert!(
         error
@@ -700,13 +628,13 @@ fn a_label_the_reference_cannot_learn_names_the_text() {
 #[test]
 fn the_ui_describes_checks_in_camel_case_json() {
     // The owner's requests parse the other kinds; these are the numbers.
-    let json = r#"{"kind":"characters","region":{"x":1,"y":2,"width":3,"height":4},"screenshot":0,
+    let json = r#"{"region":{"x":1,"y":2,"width":3,"height":4},"screenshot":0,
         "ink":{"red":1,"green":2,"blue":3},"tolerance":5,
         "labels":[{"screenshot":0,"text":"12"}]}"#;
-    let spec: CheckSpec = serde_json::from_str(json).expect("valid JSON");
+    let spec: CharactersSpec = serde_json::from_str(json).expect("valid JSON");
     assert_eq!(
         spec,
-        CheckSpec::Characters {
+        CharactersSpec {
             region: RegionSpec {
                 x: 1,
                 y: 2,
@@ -745,16 +673,16 @@ fn the_ui_describes_checks_in_camel_case_json() {
 #[test]
 fn a_new_reference_names_one_picture_per_label() {
     let spec = characters(left(), None, one(0), Vec::new());
-    let (reference, pictures) = to_saved_reference(
-        &spec,
-        session(&[screenshot()], None),
-        "digits",
-        "Digits",
-        "%9 876543210%",
-    )
-    .expect("valid characters");
+    let taught = spec
+        .teach(
+            session(&[screenshot()], None),
+            Some("digits"),
+            "Digits",
+            "%9 876543210%",
+        )
+        .expect("valid characters");
     assert_eq!(
-        reference,
+        taught.reference,
         ReferenceDef {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
@@ -768,6 +696,7 @@ fn a_new_reference_names_one_picture_per_label() {
             expects: Some("0123456789%".to_owned()),
         }
     );
+    let pictures = taught.pictures;
     assert_eq!(pictures.len(), 1);
     assert_eq!(pictures[0].0, "ref-digits-1.png");
     // A PNG keeps the colors and drops the unused fourth byte.
@@ -815,39 +744,31 @@ fn expected_characters_are_saved_once_each_in_order_up_to_the_most() {
         SpecError::TooManyExpected.to_string(),
         "A reference needs at most 128 characters. Remove some."
     );
-    // The save refuses the list before it writes anything.
+    // The save refuses the list.
     let spec = characters(left(), None, one(0), Vec::new());
     assert_eq!(
-        to_saved_reference(
-            &spec,
+        spec.teach(
             session(&[screenshot()], None),
-            "digits",
+            Some("digits"),
             "Digits",
             &format!("{most}%"),
-        ),
+        )
+        .map(drop),
         Err(SpecError::TooManyExpected)
     );
 }
 
 #[test]
 fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
-    let spec = CheckSpec::Characters {
-        region: left(),
-        screenshot: 0,
-        reference: Some(digits_ref()),
-        ink: RED,
+    let spec = CharactersSpec {
         tolerance: 3,
-        labels: one(0),
-        recorded: Vec::new(),
+        ..characters(left(), Some(digits_ref()), one(0), Vec::new())
     };
-    let (reference, pictures) = to_saved_reference(
-        &spec,
-        session(&[screenshot()], None),
-        "digits",
-        "Red digits",
-        "",
-    )
-    .expect("valid characters");
+    // Without an ID of its own, it is taught under the saved one's.
+    let taught = spec
+        .teach(session(&[screenshot()], None), None, "Red digits", "")
+        .expect("valid characters");
+    let reference = taught.reference;
     assert_eq!(
         reference.expects, None,
         "what it expected goes when the user chooses none"
@@ -862,7 +783,11 @@ fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
         (reference.name.as_str(), reference.tolerance),
         ("Red digits", 3)
     );
-    let names: Vec<&str> = pictures.iter().map(|(name, _)| name.as_str()).collect();
+    let names: Vec<&str> = taught
+        .pictures
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
     assert_eq!(
         names,
         ["ref-digits-2.png"],
@@ -875,31 +800,30 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
     // A file edited by hand left one sample, named as the second.
     let gapped = |reference: &ReferenceRef| {
         let mut saved = digits(reference)?;
+        let second = sample_name("digits", 2);
         if let Some(sample) = saved.reference.samples.first_mut() {
-            sample.image = sample_name("digits", 2);
+            sample.image.clone_from(&second);
+        }
+        if let Some((name, _)) = saved.pictures.first_mut() {
+            *name = second;
         }
         Ok(saved)
     };
-    let spec = CheckSpec::Characters {
-        region: left(),
-        screenshot: 0,
-        reference: Some(digits_ref()),
-        ink: RED,
-        tolerance: 0,
-        labels: one(0),
-        recorded: Vec::new(),
-    };
+    let spec = characters(left(), Some(digits_ref()), one(0), Vec::new());
     let screenshots = [screenshot()];
     let session = Session {
         screenshots: &screenshots,
         recording: None,
         references: &gapped,
     };
-    let (reference, pictures) =
-        to_saved_reference(&spec, session, "digits", "Digits", "").expect("valid characters");
-    let names: Vec<&str> = pictures.iter().map(|(name, _)| name.as_str()).collect();
+    let taught = teach(&spec, session).expect("valid characters");
+    let names: Vec<&str> = taught
+        .pictures
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
     assert_eq!(names, ["ref-digits-3.png"]);
-    assert_eq!(reference.samples.len(), 2);
+    assert_eq!(taught.reference.samples.len(), 2);
 }
 
 #[test]
@@ -914,40 +838,36 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
             text: "1".to_owned(),
         }]
     };
+    let screenshots = [screenshot()];
     let spec = characters(whole(), None, one(0), recorded(0));
-    let (reference, pictures) = to_saved_reference(
-        &spec,
-        session(&[screenshot()], Some(&recording)),
-        "digits",
-        "Digits",
-        "",
-    )
-    .expect("valid characters");
-    let images: Vec<&str> = reference
+    let taught = teach(&spec, session(&screenshots, Some(&recording))).expect("valid characters");
+    let images: Vec<&str> = taught
+        .reference
         .samples
         .iter()
         .map(|sample| sample.image.as_str())
         .collect();
     assert_eq!(images, ["ref-digits-1.png", "ref-digits-2.png"]);
-    let picture = Image::decode_png(&pictures[1].1).expect("a PNG");
+    let picture = Image::decode_png(&taught.pictures[1].1).expect("a PNG");
     assert_eq!(picture.size(), recording.readings()[0].image.size());
 
+    let problem = |spec: &CharactersSpec, recording| {
+        teach(spec, session(&screenshots, recording))
+            .map(drop)
+            .err()
+    };
     let only_recorded = characters(whole(), None, Vec::new(), recorded(0));
-    assert!(build(&only_recorded, session(&[screenshot()], Some(&recording))).is_ok());
+    assert_eq!(problem(&only_recorded, Some(&recording)), None);
+    assert_eq!(problem(&only_recorded, None), Some(SpecError::NoRecording));
     assert_eq!(
-        build(&only_recorded, session(&[screenshot()], None)),
-        Err(SpecError::NoRecording)
-    );
-    assert_eq!(
-        build(
+        problem(
             &characters(whole(), None, Vec::new(), recorded(1)),
-            session(&[screenshot()], Some(&recording))
+            Some(&recording)
         ),
-        Err(SpecError::NoRecording)
+        Some(SpecError::NoRecording)
     );
     let moved = characters(left(), None, Vec::new(), recorded(0));
-    let error =
-        build(&moved, session(&[screenshot()], Some(&recording))).expect_err("another region");
+    let error = problem(&moved, Some(&recording)).expect("another region");
     assert_eq!(error, SpecError::RecordedElsewhere);
     assert_eq!(
         error.to_string(),
@@ -970,23 +890,15 @@ fn recorded_problems_judge_each_reading_after_the_saved_samples() {
     };
     // The saved reference took the red square for a 1.
     let spec = characters(left(), Some(digits_ref()), Vec::new(), as_text("7"));
-    let problems =
-        recorded_problems(&spec, session(&[screenshot()], Some(&recording))).expect("a valid spec");
+    let problems = spec
+        .recorded_problems(session(&[screenshot()], Some(&recording)))
+        .expect("a valid spec");
     assert_eq!(problems.len(), 1);
     assert!(problems[0].is_some(), "{problems:?}");
     let spec = characters(left(), Some(digits_ref()), Vec::new(), as_text("1"));
     assert_eq!(
-        recorded_problems(&spec, session(&[screenshot()], Some(&recording))),
+        spec.recorded_problems(session(&[screenshot()], Some(&recording))),
         Ok(vec![None])
-    );
-    let color = CheckSpec::Color {
-        region: left(),
-        color: RED,
-        tolerance: 0,
-    };
-    assert_eq!(
-        recorded_problems(&color, session(&[screenshot()], Some(&recording))),
-        Ok(Vec::new())
     );
 }
 
@@ -999,13 +911,7 @@ fn saved_checks_keep_their_settings() {
         height: 2,
     };
     let image = states(region, vec![state("Shown", 0)], 7);
-    let saved = to_saved(
-        &image,
-        session(&[screenshot()], None),
-        "app",
-        "icon_visible",
-    )
-    .expect("valid");
+    let saved = to_saved(&image, &[screenshot()], "app", "icon_visible").expect("valid");
     assert_eq!(
         saved.check,
         CheckDef::State {
@@ -1024,7 +930,7 @@ fn saved_checks_keep_their_settings() {
         filled: RED,
         empty: GRAY,
     };
-    let saved = to_saved(&bar, session(&[], None), "app", "bar").expect("valid");
+    let saved = to_saved(&bar, &[], "app", "bar").expect("valid");
     assert_eq!(
         saved.check,
         CheckDef::BarFill {
@@ -1033,6 +939,15 @@ fn saved_checks_keep_their_settings() {
         }
     );
     assert_eq!(saved.pictures, Vec::<(String, Vec<u8>)>::new());
+    assert_eq!(
+        saved.region,
+        RegionDef {
+            x: 2,
+            y: 0,
+            width: 2,
+            height: 2
+        }
+    );
 
     let color = CheckSpec::Color {
         region,
@@ -1040,22 +955,11 @@ fn saved_checks_keep_their_settings() {
         tolerance: 4,
     };
     assert_eq!(
-        to_saved(&color, session(&[], None), "app", "color")
-            .expect("valid")
-            .check,
+        to_saved(&color, &[], "app", "color").expect("valid").check,
         CheckDef::Color {
             color: GRAY.into(),
             tolerance: 4
         }
-    );
-    assert_eq!(
-        to_saved(&bar, session(&[], None), "app", "bar").map(|saved| saved.region),
-        Ok(RegionDef {
-            x: 2,
-            y: 0,
-            width: 2,
-            height: 2
-        })
     );
     assert_eq!(
         SpecError::Picture.to_string(),

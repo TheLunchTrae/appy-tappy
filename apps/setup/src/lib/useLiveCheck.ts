@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { EditPreview, EditSpec } from './bindings.ts';
-import { errorText, readValue, setCheck, tryEdit } from './api.ts';
+import type { EditPreview } from './bindings.ts';
+import { errorText, readValue } from './api.ts';
 import type { Built, CheckState } from './check.ts';
 import { afterRead, type InForce, type LiveRead, type ReadAnswer } from './liveCheck.ts';
 import { useRepeat } from './repeat.ts';
@@ -28,19 +28,25 @@ const NOTHING_READ: LiveRead = { reading: null, problem: null };
  */
 export type Trial = Built<() => Promise<EditPreview | null>>;
 
-/** The trial of `edit`, a saved value's edit, or of `check` while the capture edits no saved value. */
-export function trialOf(check: Built, edit: Built<EditSpec> | null): Trial {
-  if (edit !== null) {
-    const { ok } = edit;
-    return ok ? { ok, spec: async () => tryEdit(edit.spec) } : edit;
+/**
+ * The trial of `built` on the live window, or what `built` still needs. `attempt` tries it: `set`, which sets a
+ * check and answers nothing, or a try that answers what saving would do.
+ */
+export function trialOf<Spec>(
+  built: Built<Spec>,
+  attempt: { readonly set: (spec: Spec) => Promise<void> } | ((spec: Spec) => Promise<EditPreview>),
+): Trial {
+  if (!built.ok) {
+    return built;
   }
-  if (!check.ok) {
-    return check;
+  const { spec } = built;
+  if (typeof attempt === 'function') {
+    return { ok: true, spec: async () => attempt(spec) };
   }
   return {
     ok: true,
     spec: async () => {
-      await setCheck(check.spec);
+      await attempt.set(spec);
       return null;
     },
   };

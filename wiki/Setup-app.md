@@ -105,12 +105,24 @@ This page covers what the user guide leaves out.
 - **Live reading.** `read_value` answers what the check being set up reads
   on the newest frame, or why that frame cannot be read, in the check's own
   words (`CheckError`), which the box under the check shows in place of a
-  reading. A reference being taught is read by the reader its labels teach
-  (`CheckSpec::Characters`), never by the text reader, and the runtime
-  builds the same reader from the saved file
-  (`check_spec/round_trip.rs`). The region is read where it was drawn,
-  whatever size the live window has, so a window resized since its
-  screenshot shows another spot there.
+  reading. The live check is the value the check would save
+  (`owner/live.rs`): `set_check` converts the page's description to its
+  saved form with `check_spec::to_saved` and reads it back with
+  `saved::build`, as a save does, so no second implementation of a check
+  exists for the two to disagree in. The owner then places the value at
+  each frame's window size with `SavedValue::at`, as the runtime does: the
+  drawing made at that size, the first drawing scaled to it while the
+  application's window changes size often, or nothing, and then the box
+  says that the value is not read at that size and why. A reference being
+  taught (`CharactersSpec`, `set_characters`) is never read by the text
+  reader: its labels become the reference's saved form, pictures included,
+  and `saved::reader` learns it as the runtime learns the saved file. It
+  reads as a number in its region, placed as a value of its application
+  is. A reference opened from a number is tried as that number will read
+  with it once both are saved (`ReferenceTrial`): whole when the number
+  is, at its side of the window, and with the characters its choice comes
+  to for the reference as taught (`charactersOnceTaught` in
+  `lib/check.ts`), which the save then gives the number.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
@@ -786,8 +798,8 @@ does a character the reference has yet to learn. A check that names
 characters names at least one, or the file does not load; a value whose
 reference, or whose fix's reference, knows none of them is not read. The
 setup app writes each character once, the digits first, then the rest by
-code point. Its live check builds the same glyphs the runtime reads with
-(`check_spec::build`).
+code point. Its live check reads with the same glyphs, since `saved::build` chooses
+them for both.
 
 A reference's `expects` is the characters the user says it needs to know,
 and is left out when the user chose none. Only the setup app reads it, to

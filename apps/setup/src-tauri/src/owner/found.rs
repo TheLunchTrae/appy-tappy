@@ -8,7 +8,7 @@ use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::{Image, Region};
 use serde::Serialize;
 
-use crate::check_spec::{self, CheckSpec, ColorSpec, Label, RegionSpec};
+use crate::check_spec::{CharactersSpec, ColorSpec, Label, RegionSpec};
 use crate::pixels;
 use crate::recording::{Line, Text, find, ocr};
 
@@ -263,10 +263,10 @@ impl<H: Host> Owner<H> {
     /// be learned.
     pub(crate) fn found_problems(
         &self,
-        spec: &CheckSpec,
+        spec: &CharactersSpec,
         found: &[Label],
     ) -> Result<Vec<Option<String>>, String> {
-        self.with_session(|session| check_spec::label_problems(spec, session, found))
+        self.with_session(|session| spec.label_problems(session, found))
             .map_err(|error| error.to_string())
     }
 }
@@ -632,8 +632,8 @@ mod tests {
     #[test]
     fn found_problems_judge_each_find_on_the_ones_before_it() {
         let (mut harness, _handler) = searchable();
-        let spec: CheckSpec = serde_json::from_str(
-            r#"{"kind":"characters","region":{"x":0,"y":0,"width":4,"height":5},"screenshot":0,
+        let spec: CharactersSpec = serde_json::from_str(
+            r#"{"region":{"x":0,"y":0,"width":4,"height":5},"screenshot":0,
                 "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
                 "labels":[{"screenshot":0,"text":"1"}],"recorded":[]}"#,
         )

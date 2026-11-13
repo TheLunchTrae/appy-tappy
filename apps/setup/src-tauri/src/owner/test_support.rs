@@ -14,12 +14,13 @@ use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
 use crate::applications::AppSpec;
+use crate::check_spec::{CharactersSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayWindow;
 use crate::recording::ocr;
 use crate::stores::{self, Stores};
 
 use super::host::{ClickNow, ClickedWindow, Host};
-use super::messages::{Message, SaveSpec};
+use super::messages::{Message, RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
 use super::{Owner, PREVIEW_INTERVAL};
 
 /// A host with one window whose captures the test drives by hand: each
@@ -435,6 +436,57 @@ pub(super) fn spec(app: &str, value_name: &str, check: &str) -> SaveSpec {
     }
 }
 
+/// `check`, drawn on screenshot 0, to try on the live window for the
+/// application `example`, before a side for it to stay at is picked.
+pub(super) fn trial(check: &str) -> TrialSpec {
+    TrialSpec {
+        app: "example".to_owned(),
+        check: serde_json::from_str(check).expect("valid JSON"),
+        screenshot: 0,
+        pin: None,
+    }
+}
+
+/// The characters `json` describes.
+pub(super) fn characters(json: &str) -> CharactersSpec {
+    serde_json::from_str(json).expect("valid JSON")
+}
+
+/// A recording of `region` of screenshot 0, of characters of the color
+/// `ink` at no tolerance.
+pub(super) fn characters_in(region: RegionSpec, ink: ColorSpec) -> RecordSpec {
+    RecordSpec {
+        region,
+        screenshot: 0,
+        ink,
+        tolerance: 0,
+    }
+}
+
+/// `characters` tried for the application `example` as a reference made
+/// for no number.
+pub(super) fn teaching(characters: CharactersSpec) -> ReferenceTrial {
+    ReferenceTrial {
+        app: "example".to_owned(),
+        characters,
+        reads: None,
+        whole: false,
+        pin: None,
+    }
+}
+
+/// A harness with `Example App` saved and window 7 picked, [`frame_image`]
+/// its newest frame and its screenshot 0, with the capture's handler.
+pub(super) fn capturing(name: &str) -> (Harness, FrameHandler, std::path::PathBuf) {
+    let (stores, root) = scratch_store(name);
+    let mut harness = harness_with(false, Ok(stores));
+    add_example_app(&mut harness);
+    let mut handler = harness.pick();
+    harness.deliver(&mut handler, Ok(&frame_image()));
+    assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+    (harness, handler, root)
+}
+
 /// Saves `Example App`, with no values, as the application `example`.
 pub(super) fn add_example_app(harness: &mut Harness) {
     let saved = harness.ask(|owner| {
@@ -463,12 +515,7 @@ pub(super) const BAR: &str = r#"{"kind":"barFill","region":{"x":0,"y":0,"width":
 /// A harness with the bar `Progress bar` saved for `Example App`, drawn
 /// on the whole of window 7's 4 by 2 frame.
 pub(super) fn with_saved_bar(name: &str) -> (Harness, std::path::PathBuf) {
-    let (stores, root) = scratch_store(name);
-    let mut harness = harness_with(false, Ok(stores));
-    add_example_app(&mut harness);
-    let mut handler = harness.pick();
-    harness.deliver(&mut handler, Ok(&frame_image()));
-    assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+    let (mut harness, _handler, root) = capturing(name);
     harness
         .ask(|owner| owner.save(&spec("example", "Progress bar", BAR)))
         .expect("saves");

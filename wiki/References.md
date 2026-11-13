@@ -55,10 +55,12 @@ The box at the bottom of the panel shows what the reference reads on the
 live window, a few times a second. When it can't read the window, it says why
 instead, in the words
 [A number reads in setup but the automation does nothing](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
-explains. That box is the reference's own reading of the region where you
-drew it. The automation reads with the same reference; at a window size the
-value wasn't drawn at, it reads where the region
-[scales to](Values.md#window-size).
+explains. That box is the reference's own reading of the region you drew, at the
+window's size now, as [Window size](Values.md#window-size) describes for a
+value. A reference you make or edit from a number reads here as that number
+will: only the characters the number reads, and without the digits after
+the decimal point when the number ignores them. The automation reads with
+the same reference, where its value's region is at the window's size.
 
 To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. What it learned before stays;

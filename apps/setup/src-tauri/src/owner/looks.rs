@@ -52,9 +52,11 @@ mod tests {
 
     use appytappy_sources::screen::{FrameHandler, Image, Size};
 
-    use crate::check_spec::{CheckSpec, ColorSpec};
+    use crate::check_spec::ColorSpec;
     use crate::owner::messages::Message;
-    use crate::owner::test_support::{FakeHost, Harness, frame_image, harness};
+    use crate::owner::test_support::{
+        FakeHost, Harness, capturing, characters_in, frame_image, harness, trial,
+    };
     use crate::pixels;
     use crate::recording::Text;
     use crate::recording::looks::MAX_LOOKS;
@@ -96,7 +98,7 @@ mod tests {
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         let ink: ColorSpec =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
-        move |owner: &mut Owner<FakeHost>| owner.start_recording(region, ink, 0, 0, more)
+        move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region, ink), more)
     }
 
     impl Harness {
@@ -494,7 +496,7 @@ mod tests {
 
     #[test]
     fn a_removed_screenshot_is_gone_and_the_others_keep_their_indexes() {
-        let (mut harness, mut handler) = Harness::with_screenshot();
+        let (mut harness, mut handler, root) = capturing("looks-removed");
         harness.deliver(&mut handler, Ok(&shade(100)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(1));
         harness.deliver(&mut handler, Ok(&shade(150)));
@@ -514,12 +516,11 @@ mod tests {
             harness.ask(pixels_of(2)),
             Some(pixels::rgba(&shade(150), 4))
         );
-        let state_from = |screenshot: usize| -> CheckSpec {
-            serde_json::from_str(&format!(
+        let state_from = |screenshot: usize| {
+            trial(&format!(
                 r#"{{"kind":"state","region":{{"x":0,"y":0,"width":4,"height":2}},"drawnOn":0,
                     "states":[{{"name":"Shown","screenshot":{screenshot}}}],"tolerance":0}}"#
             ))
-            .expect("valid JSON")
         };
         assert_eq!(
             harness.ask(|owner| owner.set_check(&state_from(1))),
@@ -527,5 +528,6 @@ mod tests {
         );
         assert_eq!(harness.ask(|owner| owner.set_check(&state_from(2))), Ok(()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(3));
+        std::fs::remove_dir_all(root).expect("clean up");
     }
 }

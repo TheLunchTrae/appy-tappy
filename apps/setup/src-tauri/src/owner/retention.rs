@@ -16,7 +16,8 @@ use crate::stores::Stores;
 
 use super::messages::{FixSpec, ReferenceSaveSpec};
 use super::test_support::{
-    Harness, STATE, WINDOW, add_example_app, frame_image, harness_with, scratch_store, spec,
+    Harness, STATE, WINDOW, add_example_app, characters_in, frame_image, harness_with,
+    scratch_store, spec,
 };
 use super::{ClickPictureView, FoundClick, Owner};
 
@@ -97,7 +98,7 @@ fn with_everything_saved(name: &str) -> (Harness, FrameHandler, Stores, PathBuf,
     assert_eq!(harness.ask(Owner::screenshot), Ok(0));
 
     harness
-        .ask(|owner| owner.start_recording(left(), red(), 0, 0, false))
+        .ask(|owner| owner.start_recording(characters_in(left(), red()), false))
         .expect("records");
     harness.deliver(&mut handler, Ok(&narrow_image()));
     harness.ask(Owner::stop_recording);
@@ -105,8 +106,8 @@ fn with_everything_saved(name: &str) -> (Harness, FrameHandler, Stores, PathBuf,
         app: "example".to_owned(),
         reference_name: "Digits".to_owned(),
         expects: String::new(),
-        check: serde_json::from_str(
-            r#"{"kind":"characters","region":{"x":0,"y":0,"width":2,"height":2},"screenshot":0,
+        characters: serde_json::from_str(
+            r#"{"region":{"x":0,"y":0,"width":2,"height":2},"screenshot":0,
                 "reference":null,"ink":{"red":255,"green":0,"blue":0},"tolerance":0,
                 "labels":[{"screenshot":0,"text":"1"}],"recorded":[{"reading":0,"text":"7"}]}"#,
         )

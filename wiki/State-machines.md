@@ -1272,13 +1272,17 @@ stateDiagram-v2
 
 The capture screen tries a trial on the live window (`useLiveCheck` in
 `apps/setup/src/lib/useLiveCheck.ts`): the check being set up, with
-`set_check`, or a saved value's edit, with `try_edit`, as
-[Value edit](#value-edit) describes. Either way the owner reads the window
-with what it took, so the two share this machine and its one guard. Its
+`set_check`, a reference being taught, with `set_characters`, or a saved
+value's edit, with `try_edit`, as [Value edit](#value-edit) describes. Each
+way the owner reads the window with what it took, a value in its saved
+form (`LiveCheck` in `owner/live.rs`), so they share this machine and its
+one guard. The owner places that value at the window size of each frame, as
+the runtime does, so a read at a size the value is not read at answers why
+and the next frame of a size it is read at answers a reading. Its
 state is `state`, a `CheckState`; `read`, the reading or the problem shown;
 `preview`, what saving an edit would do; `tried`, the number of the newest
 trial; and `inForce`, the number of the trial the owner reads with, or none.
-Below, a check stands for either.
+Below, a check stands for any of the three.
 
 ```mermaid
 stateDiagram-v2
@@ -1306,8 +1310,11 @@ stateDiagram-v2
   until the first read with the new check answers, and a problem is cleared.
 - **Set.** The owner took the check, and its number is in force. The window
   is read every 120 ms with `read_value`, each read after the last answered.
-  An answer replaces what the box shows: a reading, or why the frame cannot
-  be read.
+  An answer replaces what the box shows: a reading, why the frame cannot
+  be read, or that the value is not read at the window's size now, such as
+  `Not read at 1280 × 720, the window's size now: …`. The check stays set
+  through that answer, an edit's included, so the first frame of a size the
+  value is read at answers a reading with no new trial.
 - **Failed** (`error`). The owner refused the check, such as a label its
   reference cannot learn, and the box says why. The owner keeps the check it
   had, and nothing is read until the check changes.
@@ -1856,8 +1863,9 @@ second (`try_edit`, through `useLiveCheck`). The same edit is tried again
 when the window's size changes, which the page asks the owner for twice a
 second (`window_size`), and after a save the owner refused. The owner makes
 the edited value its `check`, placed where the value reads at the newest
-frame's size, or clears `check` when the value is not read at that size or
-the edit cannot be tried, and answers what a save would do. An answer for an
+frame's size, and answers what a save would do. At a size the value is not
+read at, the check stays set and the answer says why. The owner clears
+`check` only when the edit cannot be tried. An answer for an
 edit that has changed since is dropped, as a late check's is.
 
 - **The edit cannot be built or read back.** The reading box says why, such

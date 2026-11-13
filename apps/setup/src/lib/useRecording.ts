@@ -115,7 +115,8 @@ export function useRecording(): {
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
     turn.current += 1;
     try {
-      await startRecording(settings.region, settings.ink, settings.tolerance, settings.drawnOn, more);
+      const { region, ink, tolerance, drawnOn } = settings;
+      await startRecording({ region, screenshot: drawnOn, ink, tolerance }, more);
       if (!more) {
         // A new recording replaced the old one, whose readings' pixels go with it.
         setCrops(NO_CROPS);

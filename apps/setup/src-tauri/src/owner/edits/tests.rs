@@ -7,7 +7,7 @@ use appytappy_config::app_file::{
 use appytappy_config::automation_file::AutomationDef;
 use appytappy_config::window_match::WindowFacts;
 use appytappy_sources::screen::check::Check;
-use appytappy_sources::screen::{FrameHandler, Size};
+use appytappy_sources::screen::{FrameHandler, Image, Size};
 
 use crate::applications::AppSpec;
 use crate::owner::messages::{FixSpec, Reading, ReferenceSaveSpec};
@@ -683,8 +683,8 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
             app: "example".to_owned(),
             reference_name: name.to_owned(),
             expects: String::new(),
-            check: serde_json::from_str(&format!(
-                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":2,"height":2}},
+            characters: serde_json::from_str(&format!(
+                r#"{{"region":{{"x":0,"y":0,"width":2,"height":2}},
                     "screenshot":0,"reference":null,"ink":{{"red":255,"green":0,"blue":0}},
                     "tolerance":0,"labels":[{{"screenshot":0,"text":"{text}"}}]}}"#
             ))
@@ -879,10 +879,7 @@ fn the_region_moves_only_on_a_screenshot_of_the_size_the_value_was_drawn_at() {
     );
     assert_eq!(
         save(&mut harness, &unread, &[]),
-        Err(
-            "AppyTappy could not read this value as saved: its reference gone is not saved."
-                .to_owned()
-        )
+        Err("Example App no longer has that reference.".to_owned())
     );
     let mut elsewhere = edit("icon_visible", "Icon visible", KEPT_COLOR);
     "gone".clone_into(&mut elsewhere.app);
@@ -1027,7 +1024,22 @@ fn trying_an_edit_reads_the_live_frame_as_the_runtime_would_and_saves_nothing() 
             refused: None,
         })
     );
-    assert_eq!(read(&mut harness), Ok(None), "the check before it is gone");
+    assert_eq!(
+        read(&mut harness),
+        Err(
+            "Not read at 8 × 4, the window's size now: it is read only at the window sizes it \
+             was drawn at."
+                .to_owned()
+        ),
+        "each read says why"
+    );
+    // The edit stays the live check, so a frame of a size it is read at
+    // reads with no new try.
+    harness.deliver(&mut handler, Ok(&frame_image()));
+    assert!(
+        matches!(read(&mut harness), Ok(Some(Reading::State(_)))),
+        "read at the size it was drawn at"
+    );
     // Only the application's own save, above, changed its file.
     let pictures = |mut files: BTreeMap<String, Vec<u8>>| {
         files.remove("app.json");

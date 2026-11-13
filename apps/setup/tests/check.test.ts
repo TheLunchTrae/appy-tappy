@@ -24,6 +24,8 @@ import {
   withFixRegion,
   withRecordedInk,
   withKind,
+  charactersOnceTaught,
+  readsOf,
   withReference,
   withoutState,
   withState,
@@ -202,7 +204,6 @@ describe('buildCharacters', () => {
     expect(buildCharacters(draft, null)).toEqual({
       ok: true,
       spec: {
-        kind: 'characters',
         // With no value's region, the reference reads where its first box is.
         region,
         screenshot: 2,
@@ -281,7 +282,6 @@ test('reviewSpec waits for the region and color, and names the reference', () =>
   expect(reviewSpec({ ...EMPTY_DRAFT, region, ink: red }, [], null)).toBeNull();
   const kept = [{ reading: 0, text: '5' }];
   expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1, ink: red }, kept, percent)).toEqual({
-    kind: 'characters',
     region,
     screenshot: 1,
     reference: percent,
@@ -466,6 +466,37 @@ test("a new screenshot carries the value's region when it fits, and clears it wh
   expect(onPicture(saved, 1, false)).toBe(saved);
   // While a size is unknown, such as before the screenshot's pixels arrive, the region stays where it is drawn.
   expect(onPicture(drawn, 1, null)).toBe(drawn);
+});
+
+test('charactersOnceTaught keeps the choice that was picked, for the reference as it is taught', () => {
+  const percent = {
+    id: 'percent',
+    name: 'Percent',
+    ink: red,
+    tolerance: 40,
+    samples: [{ image: 'p.png', text: '10%' }],
+  };
+  const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  const number = { ...EMPTY_DRAFT, reference: 'percent', characters: [...digits, '%'] };
+  const taught = (reference: string | null) => ({
+    region,
+    screenshot: 0,
+    reference: reference === null ? null : { app: 'example', id: reference },
+    ink: red,
+    tolerance: 40,
+    labels: [{ screenshot: 0, text: '3/' }],
+    recorded: [{ reading: 0, text: '7' }],
+  });
+  // Digits and symbols takes up a symbol taught to the reference the number reads with.
+  expect(charactersOnceTaught(number, [percent], taught('percent'))).toEqual([...digits, '%', '/']);
+  // A new reference knows only what it is taught.
+  expect(charactersOnceTaught(number, [percent], taught(null))).toEqual([...digits, '/']);
+  // A chosen set loses only what the reference knew and the taught one does not, and every character stays every
+  // character.
+  expect(charactersOnceTaught({ ...number, characters: ['1', '7', 'L'] }, [percent], taught(null))).toEqual(['7', 'L']);
+  expect(charactersOnceTaught({ ...number, characters: null }, [percent], taught(null))).toBeNull();
+  expect(readsOf(charactersOnceTaught({ ...number, characters: ['1'] }, [percent], taught(null)))).toBeNull();
+  expect(readsOf(['1', '%'])).toBe('1%');
 });
 
 test('withReference keeps the choice of characters that was picked, for the new reference', () => {

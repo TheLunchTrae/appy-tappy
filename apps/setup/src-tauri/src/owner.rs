@@ -22,6 +22,7 @@ mod edits;
 mod fixes;
 mod found;
 mod host;
+mod live;
 mod looks;
 mod messages;
 mod overlays;
@@ -46,7 +47,7 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{AppFile, BuildDef};
 use appytappy_sources::screen::{CaptureSession, Image};
 
-use crate::check_spec::{Pictures, RegionCheck};
+use crate::check_spec::Pictures;
 use crate::debug::log::SetupLog;
 use crate::debug::trace_file::TraceTail;
 use crate::debug::trace_view::TraceView;
@@ -59,10 +60,11 @@ use crate::updates::Downloaded;
 pub(crate) use self::clicks::{ClickPictureView, ClickSent, ClickSpec, FoundClick};
 pub(crate) use self::found::FoundView;
 pub(crate) use self::host::{Desktop, Host};
+use self::live::LiveCheck;
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
-    AppSummary, AppWindows, EditPreview, EditSpec, FixSpec, Live, Message, Reading,
-    ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, EditPreview, EditSpec, FixSpec, Live, Message, Reading, RecordSpec,
+    ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
 };
 use self::watch::Watched;
 
@@ -94,7 +96,9 @@ pub(crate) struct Owner<H: Host> {
     /// Why the picked window's capture failed, until a good frame arrives.
     failure: Option<CaptureFailure>,
     screenshots: Screenshots,
-    check: Option<RegionCheck>,
+    /// The check the capture screen is setting up, which the live frame is
+    /// read with.
+    check: Option<LiveCheck>,
     /// What the capture records: the readings a number's region shows or
     /// the looks a value's region shows, one recording at a time.
     recording: Option<Recorder>,

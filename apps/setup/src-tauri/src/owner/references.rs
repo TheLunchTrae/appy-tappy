@@ -3,9 +3,8 @@
 //! it would, and deleting one waits until no value reads with it.
 
 use appytappy_config::app_file::{new_reference_id, reference_id};
-use appytappy_sources::screen::Image;
 
-use crate::check_spec::{self, ReferenceRef, SavedReference, Session};
+use crate::check_spec::{ReferenceRef, SavedReference, Session};
 
 use super::host::Host;
 use super::messages::{ReferenceSaveSpec, SavedReferenceId};
@@ -23,11 +22,9 @@ impl<H: Host> Owner<H> {
         })
     }
 
-    /// The saved reference `reference` with its samples' pictures.
-    pub(super) fn saved_reference(
-        &self,
-        reference: &ReferenceRef,
-    ) -> Result<SavedReference, String> {
+    /// The saved reference `reference` with those of its samples' pictures
+    /// that can be read. Learning it says which one is missing.
+    fn saved_reference(&self, reference: &ReferenceRef) -> Result<SavedReference, String> {
         let app = self.stores()?.app(&reference.app)?;
         let saved = app
             .file
@@ -37,19 +34,8 @@ impl<H: Host> Owner<H> {
         let pictures = saved
             .samples
             .iter()
-            .map(|sample| {
-                app.picture(&sample.image)
-                    .ok()
-                    .and_then(|bytes| Image::decode_png(&bytes).ok())
-                    .ok_or_else(|| {
-                        format!(
-                            "The reference {} is missing its picture {}. Remove the values that \
-                             read with it, then delete the reference and make it again.",
-                            saved.name, sample.image
-                        )
-                    })
-            })
-            .collect::<Result<_, _>>()?;
+            .filter_map(|sample| Some((sample.image.clone(), app.picture(&sample.image).ok()?)))
+            .collect();
         Ok(SavedReference {
             reference: saved,
             pictures,
@@ -66,11 +52,8 @@ impl<H: Host> Owner<H> {
         if name.is_empty() {
             return Err("Name the reference first.".to_owned());
         }
-        let editing = match &spec.check {
-            check_spec::CheckSpec::Characters { reference, .. } => reference.clone(),
-            _ => return Err("Pick the characters' color to make a reference.".to_owned()),
-        };
-        if let Some(editing) = &editing
+        let editing = spec.characters.reference.as_ref();
+        if let Some(editing) = editing
             && editing.app != spec.app
         {
             return Err("That reference belongs to another application.".to_owned());
@@ -78,7 +61,7 @@ impl<H: Host> Owner<H> {
         let app = &spec.app;
         self.update_app(app, Changed::Values, |owner, found| {
             let file = &mut found.file;
-            let id = editing.as_ref().map_or_else(
+            let id = editing.map_or_else(
                 || {
                     let taken: Vec<&str> = file
                         .references
@@ -102,21 +85,22 @@ impl<H: Host> Owner<H> {
                     file.name, other.name
                 ));
             }
-            let (reference, pictures) = owner
+            let taught = owner
                 .with_session(|session| {
-                    check_spec::to_saved_reference(&spec.check, session, &id, name, &spec.expects)
+                    spec.characters
+                        .teach(session, Some(&id), name, &spec.expects)
                 })
                 .map_err(|error| error.to_string())?;
             match file.references.iter_mut().find(|saved| saved.id == id) {
-                Some(saved) => *saved = reference,
-                None => file.references.push(reference),
+                Some(saved) => *saved = taught.reference,
+                None => file.references.push(taught.reference),
             }
             Ok(Edit::Save(
                 SavedReferenceId {
                     app: app.clone(),
                     reference: id,
                 },
-                pictures,
+                taught.pictures,
             ))
         })
         .map(|saved| saved.answer)
@@ -172,7 +156,7 @@ mod tests {
 
     use crate::owner::messages::SavedValue;
     use crate::owner::test_support::{
-        FakeHost, add_example_app, frame_image, harness_with, scratch_store, spec,
+        FakeHost, add_example_app, frame_image, harness_with, scratch_store, spec, trial,
     };
 
     use super::*;
@@ -189,8 +173,8 @@ mod tests {
             app: app.to_owned(),
             reference_name: name.to_owned(),
             expects: String::new(),
-            check: serde_json::from_str(&format!(
-                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":2,"height":2}},"screenshot":0,
+            characters: serde_json::from_str(&format!(
+                r#"{{"region":{{"x":0,"y":0,"width":2,"height":2}},"screenshot":0,
                     "reference":{editing},"ink":{{"red":255,"green":0,"blue":0}},
                     "tolerance":0,"labels":[{{"screenshot":0,"text":"1"}}]}}"#
             ))
@@ -474,8 +458,7 @@ mod tests {
         std::fs::remove_file(stores.apps.folder("example").join("ref-digits-1.png"))
             .expect("remove the picture");
         assert_eq!(
-            harness
-                .ask(|owner| owner.set_check(&serde_json::from_str(NUMBER).expect("valid JSON"))),
+            harness.ask(|owner| owner.set_check(&trial(NUMBER))),
             Err(
                 "The reference Digits is missing its picture ref-digits-1.png. Remove the values \
                  that read with it, then delete the reference and make it again."
