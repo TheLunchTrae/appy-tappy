@@ -106,11 +106,11 @@ passes.
 
 `rust:standards:check` runs the diff lane, so the gate finishes in minutes
 rather than hours. In the quality workflow the `quality` job runs the rest of
-the gate, and four `mutants` jobs run the lane, each with `MUTANTS_SHARD` set
-to its quarter of the selected mutants (`0/4` to `3/4`), so together they test
-every one. A stack of pull requests that lands on main as one squash pushes a
-diff as large as the whole stack, and the shards keep that run within each
-job's time limit. CI diffs against the base that
+the gate, and the `mutants` jobs split the lane: with `MUTANTS_SHARD` set to
+`k/n`, the lane tests only the kth of n shards of the selected mutants, so
+together the jobs test every one. A stack of pull requests that lands on main
+as one squash pushes a diff as large as the whole stack, and the shards keep
+that run within each job's time limit. CI diffs against the base that
 `.github/workflows/quality.yml` sets for each event: a pull request diffs
 against its base branch and a push to main against the previous tip, which
 with squash merges is exactly the merged pull request or stack.
@@ -153,6 +153,6 @@ process-group signals, so mutation runs on Linux only.
 
 `CODEOWNERS` assigns every path to the owner, because source files can carry
 mutation classifications and lint expectations. The settings that make that a
-gate live on GitHub: require the `quality` check, the four `mutants` checks
+gate live on GitHub: require the `quality`, `windows` and `mutants` checks
 and Code Owner review, dismiss stale approvals on new commits, and disallow
 bypassing protection.

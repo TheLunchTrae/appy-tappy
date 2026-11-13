@@ -117,7 +117,8 @@ bounds.
 ### Portable core, thin Windows adapters
 
 `config` and `engine` contain no Windows calls, so the Linux `quality` job
-lints and tests them in full and mutation-tests every change to them.
+lints and tests them in full, and the Linux `mutants` jobs mutation-test every
+change to them.
 `sources`, `actions`, `platform`, and the runtime wrap Windows APIs. Their
 Windows code sits behind `#[cfg(windows)]` and their Windows-only dependencies
 under `[target.'cfg(windows)'.dependencies]`, so those crates still build on
