@@ -78,7 +78,8 @@ A saved item that has a draft of changes shows **Draft changes**, and
 **Finish draft** in place of **Edit**, so you carry on from the draft. To edit
 it as saved instead, finish the draft and select **Delete draft**; the saved
 item stays as it was. For the same reason, a new value can pick a reference
-that has a draft of changes but can't edit it there, and when you choose an
+that has a draft of changes but can't edit it or record readings for it
+there, and when you choose an
 application for a value or a reference, **Finish draft** takes the place of
 **Change how it's found** for an application that has a draft of changes.
 

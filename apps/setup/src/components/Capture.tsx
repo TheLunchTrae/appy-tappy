@@ -102,7 +102,7 @@ import { type ReportDraft, type Resumed, draftsOf, isKept, keep, useDraft } from
 import { background } from '../lib/repeat.ts';
 import { ask } from '../lib/request.ts';
 import { type Made, savedNote } from '../lib/flow.ts';
-import { referenceSave } from '../lib/teaching.ts';
+import { draftHolds, referenceSave } from '../lib/teaching.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useBarSetup } from '../lib/useBarSetup.ts';
@@ -793,6 +793,9 @@ export function Capture({
   // so recording starts at once; a new one has none, so picking it is next.
   const recordReadings = async (): Promise<void> => {
     const existing = file?.references.find((reference) => reference.id === draft.reference) ?? null;
+    if (existing !== null && draftHolds(existing, drafted) !== null) {
+      return;
+    }
     const { region, drawnOn } = draft;
     await openEditor(existing, null);
     if (region === null || drawnOn === null) {

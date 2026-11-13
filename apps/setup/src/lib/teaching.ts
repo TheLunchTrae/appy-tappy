@@ -30,3 +30,17 @@ export function referenceSave(save: ReferenceSave): { readonly can: boolean; rea
   const ready = save.named && save.built && save.tried && !save.busy && !save.overLimit;
   return { can: ready && !save.reviewing, waits: save.reviewing ? SAVE_AFTER_REVIEW : null };
 }
+
+/**
+ * Why the value's capture changes no saved reference `chosen`, or null when it may: one of the `drafted`, the
+ * references that have a draft of changes, is changed by finishing its draft, which would undo what was changed
+ * apart from it. It holds for every way into the reference's editor from a value: Edit, and Record readings.
+ */
+export function draftHolds(
+  chosen: { readonly id: string; readonly name: string },
+  drafted: ReadonlySet<string>,
+): string | null {
+  return drafted.has(chosen.id)
+    ? `${chosen.name} has a draft of changes. Finish it on the References page to change it.`
+    : null;
+}
