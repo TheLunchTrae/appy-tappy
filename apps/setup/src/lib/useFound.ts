@@ -177,7 +177,7 @@ export function useFound(
   const offer = rereadOffer(rows, flags, draft.ink, draft.tolerance);
 
   const forget = (): void => {
-    turn.begin();
+    turn.drop();
     setView(null);
     setEdits(new Map());
     setError(null);

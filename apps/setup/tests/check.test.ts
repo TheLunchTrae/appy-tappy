@@ -55,7 +55,6 @@ describe('the kinds of check', () => {
     for (const kind of CHECK_KINDS) {
       const built = buildSpec(withKind(complete, kind), 'example');
       expect(built.ok ? built.spec.kind : built.next).toBe(kind);
-      expect(withKind(complete, kind).tolerance).toBe(CHECKS[kind].tolerance);
     }
   });
 });

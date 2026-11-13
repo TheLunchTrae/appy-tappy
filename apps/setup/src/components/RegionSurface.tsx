@@ -246,7 +246,7 @@ export function RegionSurface({
       return;
     }
     const point = at(event);
-    if (pick !== null) {
+    if (picking) {
       pick(pixelAt(point, size));
       return;
     }
