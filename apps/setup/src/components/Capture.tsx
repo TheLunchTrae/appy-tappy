@@ -266,7 +266,6 @@ export function Capture({
   const { shots, full, selected, setSelected, position } = screenshots;
   const shortcut = useScreenshotShortcut(async () => takeShotRef.current());
   const boxes = useBoxes(draft, setDraft, selected);
-  // The box the reference taught by itself read at when its recording started, which Use its settings puts back.
   const recorder = useRecording();
   const recording = recorder.view;
   const looks = useLookRecording(screenshots.adopt);
