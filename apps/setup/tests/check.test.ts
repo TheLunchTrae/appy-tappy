@@ -429,9 +429,15 @@ test('withReference keeps the choice of characters that was picked, for the new 
     reference: 'gone',
     characters: ['1', 'L'],
   });
-  // One taught more in place keeps a chosen set.
+  // The value's own reference taught a `.` in place: the choice was made against what it knew before.
   const taught = [reference('percent', '10%L.')];
-  expect(withReference({ ...number, characters: ['1', '%'] }, 'percent', taught).characters).toEqual(['1', '%']);
+  const inPlace = (characters: readonly string[]) =>
+    withReference({ ...number, characters }, 'percent', taught, references).characters;
+  // The digits and symbols take the new symbol, and keep the digits it has yet to learn.
+  expect(inPlace([...digits, '%'])).toEqual([...digits, '%', '.']);
+  expect(inPlace(digits)).toEqual(digits);
+  // A chosen set loses nothing, even a character the reference never knew.
+  expect(inPlace(['1', '7', '%'])).toEqual(['1', '7', '%']);
   // A first reference has no choice to carry over but the one the draft holds.
   expect(withReference({ ...EMPTY_DRAFT, characters: digits }, 'clock', references).characters).toEqual(digits);
 });

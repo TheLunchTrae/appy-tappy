@@ -443,16 +443,24 @@ export function withFixRegion(draft: Draft, region: Rect | null, shot: number): 
 
 /**
  * `draft`, a number value's, reading with `reference` of `references`, its application's, and the characters of it
- * that its choice of characters comes to, as {@link forReference} says. A reference that `references` do not hold,
- * such as while the file cannot be read, leaves the choice as it is: nothing says what it knows.
+ * that its choice of characters comes to, as {@link forReference} says. `before` is the references as they were
+ * when the draft's own reference was picked, when a save changed them since, such as by teaching that reference
+ * more. A reference that `references` do not hold, such as while the file cannot be read, leaves the choice as it
+ * is: nothing says what it knows.
  */
-export function withReference(draft: Draft, reference: string, references: readonly ReferenceDef[]): Draft {
-  const known = (id: string | null): readonly string[] | null => {
-    const saved = references.find((each) => each.id === id);
+export function withReference(
+  draft: Draft,
+  reference: string,
+  references: readonly ReferenceDef[],
+  before: readonly ReferenceDef[] = references,
+): Draft {
+  const known = (id: string | null, among: readonly ReferenceDef[]): readonly string[] | null => {
+    const saved = among.find((each) => each.id === id);
     return saved === undefined ? null : referenceCharacters(saved);
   };
-  const to = known(reference);
-  const characters = to === null ? draft.characters : forReference(draft.characters, known(draft.reference) ?? [], to);
+  const to = known(reference, references);
+  const characters =
+    to === null ? draft.characters : forReference(draft.characters, known(draft.reference, before) ?? [], to);
   return { ...draft, reference, characters };
 }
 

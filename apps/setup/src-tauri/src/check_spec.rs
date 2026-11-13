@@ -556,6 +556,13 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
             characters,
             ..
         } => {
+            // The file refuses a check that names characters and reads none.
+            if characters
+                .as_deref()
+                .is_some_and(|characters| !characters.chars().any(is_label_character))
+            {
+                return Err(SpecError::Check(CheckDefError::NoCharacters));
+            }
             let saved = (session.references)(reference).map_err(SpecError::Reference)?;
             // The glyphs the runtime reads the saved value with, as
             // `saved::build` chooses them.

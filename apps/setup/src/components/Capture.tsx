@@ -773,12 +773,14 @@ export function Capture({
         onSaved({ app: saved.app, value: null });
         return;
       }
+      // The choice of characters was made against the references as they were before this save.
+      const before = file?.references ?? [];
       const references = (await appFile.reload())?.references ?? [];
       closeEditor();
       // A value's choice of characters follows its reference, as when one is picked. A fix reads its value's.
       setDraft((current) =>
         fixing === null
-          ? withReference({ ...current, kind: 'number' }, saved.reference, references)
+          ? withReference({ ...current, kind: 'number' }, saved.reference, references, before)
           : { ...current, kind: 'number', reference: saved.reference },
       );
     } catch (error: unknown) {

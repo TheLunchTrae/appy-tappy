@@ -492,15 +492,18 @@ fn a_number_reads_and_saves_the_characters_it_is_told_to() {
         })
     );
     // Nothing is saved that would read nothing.
-    for none in ["2%", ""] {
-        let error = to_saved(&reading(Some(none)), font, "app", "progress")
-            .expect_err("it knows none of them");
+    assert_eq!(
+        to_saved(&reading(Some("2%")), font, "app", "progress"),
+        Err(SpecError::NoCharacters {
+            reference: "Digits".to_owned(),
+            characters: "2%".to_owned(),
+        })
+    );
+    for none in ["", " \t"] {
         assert_eq!(
-            error,
-            SpecError::NoCharacters {
-                reference: "Digits".to_owned(),
-                characters: none.to_owned(),
-            }
+            to_saved(&reading(Some(none)), font, "app", "progress"),
+            Err(SpecError::Check(CheckDefError::NoCharacters)),
+            "{none:?}"
         );
     }
     assert_eq!(
