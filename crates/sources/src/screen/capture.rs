@@ -126,7 +126,9 @@ impl Frame<'_> {
 ///
 /// It returns how long to wait before handling another, such as the wait a
 /// [`crate::schedule::ReadSchedule`] gives, and runs on the capture's own
-/// thread.
+/// thread. A panic in it unwinds that thread, so the capture stops and
+/// tells nobody until it is closed: a handler whose owner must hear of a
+/// panic catches its own.
 pub type FrameHandler = Box<dyn FnMut(io::Result<Frame<'_>>) -> Duration + Send>;
 
 /// Captures one window's frames.

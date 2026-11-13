@@ -311,11 +311,11 @@ stateDiagram-v2
     Capturing --> Capturing: Trace, handed on to the frame handler
     Capturing --> Capturing: Resizing, the size settles again from then
     Capturing --> Capturing: a size where no value reads settles, why each is not read
-    Capturing --> Closing: Lost or Failing from the frame handler
+    Capturing --> Closing: Lost, Failing, or Panicked from the frame handler
     Capturing --> Closing: a size where a value reads settles, Resized
     Capturing --> Closing: every CHECK_AGAIN, the window is hidden or session_window picks another
     Closing --> Finding: Resized, or the check, after Unseen
-    Closing --> Backoff: Lost or Failing
+    Closing --> Backoff: Lost, Failing, or Panicked
     Backoff --> Finding: the backoff wait passes
     Capturing --> Closing: Stop
     Closing --> [*]: Stop, during the capture or while it closes
@@ -343,12 +343,12 @@ The thread can also panic in any state, which ends it.
   starts at the first value's drawn size.
 - **Capturing.** `watch` waits on `control` until the next `CHECK_AGAIN` or
   until a new size settles, whichever comes first. The capture's frame handler
-  runs on another thread and sends `Lost`, `Resizing`, `Failing`, or
-  `Recovered` back to this one. A `Trace` from the owner goes on to the frame
-  handler over its own channel, and the capture goes on. Each `CHECK_AGAIN`,
-  `moved_on` checks that the window still shows and that `session_window`
-  still picks it, which it does while the window shows and fits as well as
-  any, because a hidden window sends no frames and no close.
+  runs on another thread and sends `Lost`, `Resizing`, `Failing`,
+  `Panicked`, or `Recovered` back to this one. A `Trace` from the owner goes
+  on to the frame handler over its own channel, and the capture goes on.
+  Each `CHECK_AGAIN`, `moved_on` checks that the window still shows and that
+  `session_window` still picks it, which it does while the window shows and
+  fits as well as any, because a hidden window sends no frames and no close.
 - **Settling.** `Resizing` names the size frames show now, and a `Settle`
   (`crates/sources/src/screen/settle.rs`) waits for it to hold for `SETTLE`,
   250 ms, starting again at each other size. The wait runs on this thread's
@@ -372,13 +372,18 @@ The thread can also panic in any state, which ends it.
   so a new layout needs a new capture.
 - **Closing.** The thread closes the capture first, then drops what the closed
   capture sent after the message that ended it, still counting a `Stop` and a
-  `Recovered`. When the 2 second check ended the capture, it then sends
-  `Unseen`, so no reading from the old capture can follow it.
-- **Backoff.** After `Lost` or `Failing`, the thread waits before it looks
-  again: `FIND_AGAIN` at first, doubling up to `RESTART_WAIT_MAX` while each new
-  capture ends before it reads a frame. It logs the reason once until the reason
-  changes. A restarted capture that reads a frame sends `Recovered`, which
-  resets both.
+  `Recovered`. A `Lost`, `Failing`, or `Panicked` among them, after
+  `Resized` or the check ended the capture, is dropped too: that capture is
+  closed already, and the next one starts at once, without a backoff. When
+  the 2 second check ended the capture, it then sends `Unseen`, so no
+  reading from the old capture can follow it.
+- **Backoff.** After `Lost`, `Failing`, or `Panicked`, the thread waits
+  before it looks again: `FIND_AGAIN` at first, doubling up to
+  `RESTART_WAIT_MAX` while each new capture ends before it reads a frame. It
+  logs the reason once until the reason changes. A restarted capture that
+  reads a frame sends `Recovered`, which resets both. A frame whose reading
+  panicked was not read, so a capture that panics on its first frame waits
+  twice as long as the last and logs nothing new.
 - **A new trace.** `Trace` from the owner reaches the thread in any state.
   While it waits or closes a capture, the thread keeps it for its next
   capture, which starts with it; while it captures, it hands it on too. No
@@ -393,14 +398,6 @@ The thread can also panic in any state, which ends it.
   [Per-application run state](#per-application-run-state) describes, and a
   reader that the session stopped has its `Ended` dropped there.
 
-#### Open problems
-
-- [#318](https://github.com/TheLunchTrae/appy-tappy/issues/318): a panic in
-  the capture's frame handler runs on the capture thread, so the reader keeps
-  waiting for frames and its values stop reading until it closes the
-  capture, which it does when the window changes, the read interval changes,
-  or the session stops.
-
 ### Frame handler
 
 `FrameReader::handle` runs once per frame and acts on what the frame means,
@@ -413,10 +410,10 @@ the reader frames show), `last` (each value's last reading), `problems`
 (the problems said for each value since it was last read, handed to the reader while frames show
 another size), `heard` (where the reader gives it back), `seen` (whether
 it sent a reading since it last sent `Unseen`), `failures` (frames in a
-row that failed), `restarted` (whether the reader started this capture
-again after the last one ended), `ended` (whether it told the reader
-its capture ended), and `trace` (what it records to, the newest that the
-reader handed it before the frame).
+row that failed), `restart` (whether the reader started this capture
+again after the last one ended, and whether a frame came since), `ended` (whether it told the reader
+its capture ended or that handling a frame panicked), and `trace` (what it
+records to, the newest that the reader handed it before the frame).
 
 ```mermaid
 stateDiagram-v2
@@ -427,6 +424,7 @@ stateDiagram-v2
     Reading --> Reading: its own size again, Resizing
     Reading --> Ended: the capture ended, Unseen and Lost
     Reading --> Ended: RESTART_AFTER frame errors in a row, Unseen and Failing
+    Reading --> Ended: handling the frame panics, Unseen and Panicked
     Ended --> [*]: the reader closes the capture
 ```
 
@@ -439,7 +437,16 @@ stateDiagram-v2
 - The capture ends, as when the window closes, the graphics device is lost, or
   the frame pool cannot follow the window to a new size, with a
   `NotConnected` error.
-- After a restart, the first good frame sends `Recovered` to the reader thread.
+- After a restart, the first good frame sends `Recovered` to the reader
+  thread once it is handled without a panic, so a capture that panics on it
+  has not recovered.
+- `handle` runs on the capture's thread, so it catches a panic while it acts
+  on a frame, sends `Unseen` as when the capture ends, and sends `Panicked`
+  with the panic's message. Unwound, the panic would end the capture's
+  thread, and the reader would hear of it only once it closed the capture.
+  `seen` turns true only once a reading was sent and false only once
+  `Unseen` was, so a panic between them cannot leave it wrong, and a
+  capture that panicked before it sent a reading sends no `Unseen`.
 - **Ended.** The capture can still hand frames to the handler until the reader
   closes it. The handler reads none of them, so nothing it sends follows
   `Unseen`.
