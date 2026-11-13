@@ -1,16 +1,19 @@
 // Recording a region on the capture screen: its readings, their pictures, and its commands.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { ExampleSpec, PinDef, RecordingSettings, RecordingView } from './bindings.ts';
-import { discardRecording, errorText, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
+import { discardRecording, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
 import type { Picture } from './pixels.ts';
-import { background, useRepeat } from './repeat.ts';
-import { useNewest } from './request.ts';
+import { background } from './repeat.ts';
 import { type Crops, NO_CROPS, withCrop } from './review.ts';
+import { useRecorder } from './useRecorder.ts';
 
-/** How long the recording's state waits between reads, while it records or text is still being read. */
-const RECORDING_PAUSE_MS = 250;
+/** Whether the recording's state still changes: it records, or the text reader is still reading a reading. */
+function stillRead(view: RecordingView): boolean {
+  return view.recording || view.readings.some((reading) => reading.text.kind === 'pending');
+}
+
 /** The widest a recorded reading is asked for: a region is small, and review shows it a few times larger. */
 const CROP_WIDTH = 480;
 
@@ -50,37 +53,10 @@ export function useRecording(): {
   /** Forgets the recording and its readings; true once it is gone. */
   readonly discard: () => Promise<boolean>;
 } {
-  const [view, setView] = useState<RecordingView | null>(null);
-  // Each error clears only when what set it next succeeds: a start, stop or
-  // discard, or reading the recording's state.
-  const [commandError, setCommandError] = useState<string | null>(null);
-  const [pollError, setPollError] = useState<string | null>(null);
-  // Each start, stop, and discard begins a turn, so a poll sent before one is ignored.
-  const turn = useNewest();
+  const recorder = useRecorder(recordingState, stillRead);
+  const { view, command, show, forget } = recorder;
   // Each recorded reading's pixels, for the recording they belong to.
   const [crops, setCrops] = useState<Crops>(NO_CROPS);
-
-  useEffect(
-    () => () => {
-      background(stopRecording());
-    },
-    [],
-  );
-
-  const poll = useCallback(async (): Promise<void> => {
-    const current = turn.join();
-    try {
-      const state = await recordingState();
-      if (current()) {
-        setView(state);
-        setPollError(null);
-      }
-    } catch (error: unknown) {
-      setPollError(errorText(error));
-    }
-  }, [turn]);
-  const live = view !== null && (view.recording || view.readings.some((reading) => reading.text.kind === 'pending'));
-  useRepeat(poll, RECORDING_PAUSE_MS, live);
 
   // Fetches the pixels of each reading that has none yet, once.
   const asked = useRef<{ id: number; readings: Set<number> }>({ id: -1, readings: new Set() });
@@ -111,58 +87,37 @@ export function useRecording(): {
   // The owner refuses to go on with other settings rather than start over,
   // so kept readings and review edits are never dropped without a discard.
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
-    turn.drop();
-    try {
+    await command(async () => {
       const { app, pin, region, ink, tolerance, drawnOn, scope, examples } = settings;
       await startRecording({ app, region, screenshot: drawnOn, pin, ink, tolerance, scope, examples }, more);
       if (!more) {
         // A new recording replaced the old one, whose readings' pixels go with it.
         setCrops(NO_CROPS);
       }
-      setCommandError(null);
       onStarted();
-      setView(await recordingState());
-    } catch (error: unknown) {
-      setCommandError(errorText(error));
-    }
+      show(await recordingState());
+    });
   };
 
-  const stop = async (): Promise<boolean> => {
-    turn.drop();
-    try {
+  const stop = async (): Promise<boolean> =>
+    command(async () => {
       await stopRecording();
-      setView(await recordingState());
-      setCommandError(null);
-      return true;
-    } catch (error: unknown) {
-      setCommandError(errorText(error));
-      return false;
-    }
-  };
+      show(await recordingState());
+    });
 
-  const discard = async (): Promise<boolean> => {
-    turn.drop();
-    try {
+  const discard = async (): Promise<boolean> =>
+    command(async () => {
       await discardRecording();
-      setView(null);
+      forget();
       setCrops(NO_CROPS);
-      setCommandError(null);
-      setPollError(null);
-      return true;
-    } catch (error: unknown) {
-      setCommandError(errorText(error));
-      return false;
-    }
-  };
+    });
 
   return {
     view,
     crops: crops.id === recordingId ? crops.pictures : new Map<number, Picture>(),
-    commandError,
-    pollError,
-    clearCommandError: () => {
-      setCommandError(null);
-    },
+    commandError: recorder.commandError,
+    pollError: recorder.pollError,
+    clearCommandError: recorder.clearCommandError,
     start,
     stop,
     discard,
