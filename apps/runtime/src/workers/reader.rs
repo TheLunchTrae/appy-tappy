@@ -38,11 +38,10 @@
 //! many applications replace their window as they run, such as when they
 //! switch to full screen. A capture ends when the window closes, when the
 //! capture cannot go on, such as after the graphics device was lost or the
-//! capture's own code panicked, after
-//! [`RESTART_AFTER`] frames in a row fail, and when reading a frame panics,
-//! which the capture's frame handler catches so it does not end the
-//! capture's thread without a word. After a capture ends this
-//! way, the reader waits before it captures again, from [`FIND_AGAIN`] up to
+//! capture's frame loop panicked, after [`RESTART_AFTER`] frames in a row
+//! fail, and when reading a frame panics, which the capture's frame handler
+//! catches so it does not end the capture's thread without a word. After a
+//! capture ends this way, the reader waits before it captures again, from [`FIND_AGAIN`] up to
 //! [`RESTART_WAIT_MAX`], doubling while each new capture ends before it reads
 //! a frame, which a frame whose reading panicked is not, and logs why once
 //! until the reason changes. While capturing, the reader

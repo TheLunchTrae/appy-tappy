@@ -450,7 +450,7 @@ as the capture's `Layout` places them, and those rows land in a buffer that is
 reused for every frame. When the window closes, the capture tells its handler
 and stops. It does the same when it can no longer produce frames: when the
 graphics device is lost, such as after a driver reset or update, and when it
-cannot follow the window to a new size. A panic in the capture's own code tells
+cannot follow the window to a new size. A panic in the capture's frame loop tells
 the handler too, with the panic's message, instead of ending the capture's
 thread unheard (`run_capture` in `crates/sources/src/screen/capture.rs`). A
 closed window and a lost device stop frames rather than fail them, so every

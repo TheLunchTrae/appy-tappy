@@ -347,8 +347,8 @@ The thread can also panic in any state, which ends it.
 - **Capturing.** `watch` waits on `control` until the next `CHECK_AGAIN` or
   until a new size settles, whichever comes first. The capture's frame handler
   runs on another thread and sends `Lost`, `Resizing`, `Failing`,
-  `Panicked`, or `Recovered` back to this one. A panic on the capture's
-  thread outside the handler arrives as `Lost`, as
+  `Panicked`, or `Recovered` back to this one. A panic in the capture's
+  frame loop outside the handler arrives as `Lost`, as
   [Frame handler](#frame-handler) describes. A `Trace` from the owner goes
   on to the frame handler over its own channel, and the capture goes on.
   Each `CHECK_AGAIN`, `moved_on` checks that the window still shows and that
@@ -441,7 +441,7 @@ stateDiagram-v2
   the same way.
 - The capture ends, as when the window closes, the graphics device is lost, or
   the frame pool cannot follow the window to a new size, with a
-  `NotConnected` error. A panic on the capture's thread outside `handle`
+  `NotConnected` error. A panic in the capture's frame loop outside `handle`
   ends it the same way: `run_capture` (`crates/sources/src/screen/capture.rs`)
   runs the Windows capture's frame loop, catches the panic, and hands the
   handler a `NotConnected` error with the panic's message, so the reader
@@ -1313,9 +1313,10 @@ stateDiagram-v2
 - **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
   error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
-- **Ended** is a failure whose `ended` flag is set, for the closed-window
-  error Windows reports. Frames after it are dropped, and a screenshot, a new
-  recording, and **Record more** are refused with "Change window to pick it
+- **Ended** is a failure whose `ended` flag is set, for a `NotConnected`
+  error: a closed window, a lost graphics device, or a capture panic. Frames
+  after it are dropped, and a screenshot, a new recording, and **Record
+  more** are refused with "Change window to pick it
   again". Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show.

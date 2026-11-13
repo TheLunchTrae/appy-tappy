@@ -130,8 +130,8 @@ impl Frame<'_> {
 /// [`crate::schedule::ReadSchedule`] gives, and runs on the capture's own
 /// thread. A panic in it unwinds that thread, so the capture stops and
 /// tells nobody until it is closed: a handler whose owner must hear of a
-/// panic catches its own. A panic elsewhere on that thread reaches the
-/// handler as the capture's end, as [`run_capture`] says.
+/// panic catches its own. A panic elsewhere in the capture's frame loop
+/// reaches the handler as the capture's end, as [`run_capture`] says.
 pub type FrameHandler = Box<dyn FnMut(io::Result<Frame<'_>>) -> Duration + Send>;
 
 /// Runs `work`, which hands a capture's frames to `handler` on the
