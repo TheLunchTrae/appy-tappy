@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { type ReferenceSave, SAVE_AFTER_REVIEW, referenceSave } from '../src/lib/teaching.ts';
+import { type ReferenceSave, SAVE_AFTER_REVIEW, draftHolds, referenceSave } from '../src/lib/teaching.ts';
 
 const READY: ReferenceSave = {
   named: true,
@@ -21,4 +21,12 @@ test('a reference saves once it is named, built and tried', () => {
 test('saving waits while review is open, and says so', () => {
   // Review's edits reach the reference only with Keep, and saving drops the recording they are edits of.
   expect(referenceSave({ ...READY, reviewing: true })).toEqual({ can: false, waits: SAVE_AFTER_REVIEW });
+});
+
+test('a reference with a draft of changes is changed only by finishing the draft', () => {
+  const digits = { id: 'digits', name: 'Digits' };
+  expect(draftHolds(digits, new Set(['digits']))).toBe(
+    'Digits has a draft of changes. Finish it on the References page to change it.',
+  );
+  expect(draftHolds(digits, new Set(['letters']))).toBeNull();
 });
