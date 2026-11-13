@@ -5,7 +5,7 @@ import { useEffect, useMemo, useReducer } from 'react';
 
 import type { Box } from './boxes.ts';
 
-import type { FoundView, RecordingView, ShownCharacter } from './bindings.ts';
+import type { FoundView, RecordedLabel, RecordingView, ShownCharacter } from './bindings.ts';
 import {
   type Answers,
   type Change,
@@ -27,8 +27,16 @@ import type { Finder } from './useFound.ts';
 import type { useRecording } from './useRecording.ts';
 import type { useReview } from './useReview.ts';
 
-/** The reading at `index` of a recording as a place, with the text and the keep `entry` has for it. */
-function readingPlace(reading: RecordingView['readings'][number], index: number, entry: ReviewEntry): Place {
+/**
+ * The reading at `index` of a recording as a place, with the text and the keep `entry` has for it. The check asks
+ * about it when review keeps it or, with `saved`, when a reference saved now would learn it.
+ */
+function readingPlace(
+  reading: RecordingView['readings'][number],
+  index: number,
+  entry: ReviewEntry,
+  saved: boolean,
+): Place {
   return {
     source: 'reading',
     index,
@@ -40,8 +48,22 @@ function readingPlace(reading: RecordingView['readings'][number], index: number,
     keep: entry.keep,
     ticks: true,
     reading: reading.text.kind === 'pending' && entry.text === '',
-    asks: entry.keep,
+    asks: entry.keep || saved,
   };
+}
+
+/**
+ * The readings a reference saved next would learn, each with its text: while review is open, the ones its Keep
+ * would put on the draft, since the save waits for it; otherwise the ones the draft keeps. The offer above Save
+ * reference counts their characters, and the check asks about each of them, so the offer never names a character
+ * the check has no step for.
+ */
+export function savedReadings(
+  reviewing: boolean,
+  keeping: readonly RecordedLabel[],
+  recorded: ReadonlyMap<number, string>,
+): ReadonlyMap<number, string> {
+  return reviewing ? new Map(keeping.map((label) => [label.reading, label.text])) : recorded;
 }
 
 /** A box of the reference, with the characters it shows, or null until they arrive. */
@@ -52,10 +74,11 @@ export interface DrawnBox {
 
 /**
  * The places a check goes over: every box, every find listed, ticked or not, and every recorded reading. It asks
- * about the boxes, the finds, and the readings review keeps. A box whose characters have not arrived waits like text
- * still being read. A reading review leaves out shows only shapes the kept ones show, so it has nothing to ask
- * about, but it gets the answers too: review compares the texts of all the readings, and would flag a kept reading
- * the check fixed against a left-out one it did not.
+ * about the boxes, the finds, the readings review keeps, and the `saved` ones, which {@link savedReadings} lists:
+ * a reading the draft keeps is learned on a save even after review, reopened, left it out without Keep. A box
+ * whose characters have not arrived waits like text still being read. Any other reading review leaves out shows
+ * only shapes the kept ones show, so it has nothing to ask about, but it gets the answers too: review compares the
+ * texts of all the readings, and would flag a kept reading the check fixed against a left-out one it did not.
  */
 export function checkPlaces(
   drawn: readonly DrawnBox[],
@@ -63,6 +86,7 @@ export function checkPlaces(
   rows: readonly FoundRow[],
   recorded: RecordingView['readings'],
   entries: readonly ReviewEntry[],
+  saved: ReadonlyMap<number, string>,
 ): readonly Place[] {
   const boxes = drawn.map(({ box, characters }, at): Place => ({
     source: 'box',
@@ -99,7 +123,7 @@ export function checkPlaces(
   });
   const readings = recorded.flatMap((reading, index): Place[] => {
     const entry = entries[index];
-    return entry === undefined ? [] : [readingPlace(reading, index, entry)];
+    return entry === undefined ? [] : [readingPlace(reading, index, entry, saved.has(index))];
   });
   return [...boxes, ...finds, ...readings];
 }
@@ -124,18 +148,18 @@ export function escapeCloses(
 }
 
 /**
- * The places a reference saved now would learn from: each box of `places` with text, and each of the `recorded`
- * readings the draft keeps, with the text `kept` has for it.
+ * The places a reference saved next would learn from: each box of `places` with text, and each of the `recorded`
+ * readings among `saved`, which {@link savedReadings} lists, with the text it has there.
  */
 export function learnedPlaces(
   places: readonly Place[],
   recorded: RecordingView['readings'],
-  kept: ReadonlyMap<number, string>,
+  saved: ReadonlyMap<number, string>,
 ): readonly Place[] {
   const boxes = places.filter((place) => place.source === 'box' && place.text.trim() !== '');
-  const readings = [...kept].flatMap(([index, text]): Place[] => {
+  const readings = [...saved].flatMap(([index, text]): Place[] => {
     const reading = recorded[index];
-    return reading === undefined ? [] : [readingPlace(reading, index, { keep: true, text })];
+    return reading === undefined ? [] : [readingPlace(reading, index, { keep: true, text }, true)];
   });
   return [...boxes, ...readings];
 }
@@ -270,7 +294,7 @@ export interface CharacterCheck {
   /** Closes it and forgets its answers; the texts they wrote stay. Escape closes it too. */
   readonly close: () => void;
   /**
-   * The characters a reference saved now would learn that nobody has confirmed: the text reader read them, and the
+   * The characters a reference saved next would learn that nobody has confirmed: the text reader read them, and the
    * user neither typed them nor answered for their shapes in a check of this reference.
    */
   readonly unconfirmed: readonly string[];
@@ -294,13 +318,24 @@ export function useCharacterCheck(
   const held = state.guide;
   const { boxes, ink, tolerance, recorded, full } = taught;
   const shown = useBoxCharacters(boxes, ink, tolerance);
+  const saved = useMemo(
+    () => savedReadings(review.reviewing, review.keeping, recorded),
+    [review.reviewing, review.keeping, recorded],
+  );
   const places = useMemo(() => {
     const drawn =
       ink === null
         ? []
         : boxes.map((box) => ({ box, characters: shown.get(boxCharactersKey(box, ink, tolerance)) ?? null }));
-    return checkPlaces(drawn, finder.view?.finds ?? [], finder.rows, recorder.view?.readings ?? [], review.entries);
-  }, [boxes, ink, tolerance, shown, finder.view, finder.rows, recorder.view, review.entries]);
+    return checkPlaces(
+      drawn,
+      finder.view?.finds ?? [],
+      finder.rows,
+      recorder.view?.readings ?? [],
+      review.entries,
+      saved,
+    );
+  }, [boxes, ink, tolerance, shown, finder.view, finder.rows, recorder.view, review.entries, saved]);
   const guide = held === null ? null : settle(held, places, needs);
   const boxCrops = useMemo(
     () =>
@@ -314,8 +349,8 @@ export function useCharacterCheck(
     [boxes, full],
   );
   const notConfirmed = useMemo(
-    () => unconfirmed(learnedPlaces(places, recorder.view?.readings ?? [], recorded), answersOf(state)),
-    [places, recorder.view, recorded, state],
+    () => unconfirmed(learnedPlaces(places, recorder.view?.readings ?? [], saved), answersOf(state)),
+    [places, recorder.view, saved, state],
   );
   const close = (): void => {
     send({ kind: 'close' });

@@ -27,6 +27,7 @@ import {
   heldStep,
   learnedPlaces,
   leftOutOf,
+  savedReadings,
 } from '../src/lib/useCharacterCheck.ts';
 
 /** A place that shows `shapes`, one name each, two pixels wide each, with `text` as the reader or the user has it. */
@@ -223,7 +224,7 @@ describe('a reading review leaves out', () => {
     const readings = [read('18', [0, 1], 'se'), read('1', [0], 's')];
     const start = entries(readings, new Map(), new Map(), new Map(), []);
     expect(start.map((entry) => entry.keep)).toEqual([true, false]);
-    const places = checkPlaces([], [], [], readings, start);
+    const places = checkPlaces([], [], [], readings, start, new Map());
     const next = turn(openGuide(places, []), { kind: 'retype', shape: 's', character: '7' }, places, []);
     const edits = new Map(next.changes.map((change) => [change.index, { keep: change.keep, text: change.text }]));
     const after = entries(readings, edits, new Map(), new Map(), []);
@@ -701,7 +702,7 @@ describe('the places a check goes over', () => {
       { box: { ...box, id: 2, text: '1', guessed: true as const }, characters: null },
     ];
     const readings = [recorded('read'), recorded('read'), recorded('pending')];
-    const places = checkPlaces(drawn, finds, rows, readings, entries);
+    const places = checkPlaces(drawn, finds, rows, readings, entries, new Map());
     expect(places.map((each) => [each.source, each.index, each.text, each.keep, each.asks, each.reading])).toEqual([
       ['box', 7, '7', true, true, false],
       ['box', 2, '1', true, true, true],
@@ -726,7 +727,7 @@ describe('the places a check goes over', () => {
     // A reference saved now learns from the boxes with text and the readings the draft keeps, with their kept text.
     const blank = { box: { ...box, id: 3, text: ' ' }, characters };
     const learned = learnedPlaces(
-      checkPlaces([...drawn, blank], finds, rows, readings, entries),
+      checkPlaces([...drawn, blank], finds, rows, readings, entries, new Map()),
       readings,
       new Map([
         [0, '1'],
@@ -744,6 +745,40 @@ describe('the places a check goes over', () => {
     expect(places[1]).toMatchObject({ characters: [], width: 9 });
     expect(places[2]).toMatchObject({ characters, width: 9 });
     expect(places[5]).toMatchObject({ characters, width: 5 });
+  });
+});
+
+describe('the readings a save would learn', () => {
+  const reading = {
+    firstMs: 0,
+    seen: 1,
+    size: null,
+    text: { kind: 'read' as const, text: '7' },
+    shapes: [1],
+    width: 5,
+    characters: [{ shape: 's', left: 0, right: 3 }],
+  };
+  // The draft keeps the one reading, and review, opened again, leaves it out without Keep.
+  const kept = new Map([[0, '7']]);
+  const leftOut = [{ keep: false, text: '7' }];
+
+  test('are what Keep would keep while review is open, and what the draft keeps otherwise', () => {
+    expect(savedReadings(false, [], kept)).toBe(kept);
+    expect(savedReadings(true, [], kept)).toEqual(new Map());
+    expect(savedReadings(true, [{ reading: 2, text: '41' }], kept)).toEqual(new Map([[2, '41']]));
+  });
+
+  test('are asked about by the check wherever the offer names their characters', () => {
+    for (const reviewing of [false, true]) {
+      const saved = savedReadings(reviewing, [], kept);
+      const places = checkPlaces([], [], [], [reading], leftOut, saved);
+      const offered = unconfirmed(learnedPlaces(places, [reading], saved), new Map());
+      const asked = steps(places, openGuide(places, []), []).map((step) => step.character);
+      // With review closed a save learns the reading, so the offer names its 7 and the check has a step for it.
+      // With review open, Keep would drop it: neither names it.
+      expect(offered).toEqual(reviewing ? [] : ['7']);
+      expect(asked).toEqual([...offered]);
+    }
   });
 });
 

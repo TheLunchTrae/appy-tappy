@@ -2382,9 +2382,13 @@ stateDiagram-v2
 - The places are every [box](#reference-boxes) of the reference, every
   [found text](#found-text) the list holds, ticked or not, and every
   [recording](#recording) reading (`checkPlaces`). The check asks about the
-  boxes, the finds, and the readings that review keeps. A reading that
-  review leaves out joins no step and never changes its keep; it only gets
-  the answers, so its text does not disagree with the kept ones. A box has
+  boxes, the finds, the readings that review keeps, and the readings a
+  save would learn next (`savedReadings`): while review is open, the ones
+  its **Keep** would put on the draft, and otherwise the ones the draft
+  keeps, which review may have left out since without **Keep**. Any other
+  reading that review leaves out joins no step. A reading review leaves out
+  never changes its keep; it gets the answers, so its text does not
+  disagree with the kept ones. A box has
   no tick (`ticks`): it gets the answers in its text, gets its whole text
   from them when it has none, and is never left out, so the tile of a
   shape that is no character names the boxes that still teach it. A box's
@@ -2464,8 +2468,9 @@ stateDiagram-v2
   than the one `leftOut` names is not in it.
 - Closing moves the answers into `past`, which only says what the user has
   confirmed. The characters nobody has confirmed (`unconfirmed`) are the
-  ones a reference saved now would learn from a text reader's guess, a box
-  that is still `guessed` or a kept reading with the reader's text, for a
+  ones a reference saved next would learn from a text reader's guess, a box
+  that is still `guessed` or one of the same `savedReadings` with the
+  reader's text, for a
   shape that neither an answer, open or past, nor a text the user typed
   gives that character. A guessed box that shows no characters counts for
   none, since no answer could confirm it. While there are any, the editor

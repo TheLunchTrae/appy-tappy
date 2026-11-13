@@ -254,7 +254,9 @@ character the step already asks about does nothing.
 
 A find whose characters you all answered for is ticked, and you can clear
 the tick afterward. A reading that review leaves out is not asked about and
-stays left out, and its text gets your answers too.
+stays left out, and its text gets your answers too. A reading you kept and
+then left out in review without keeping again still teaches the reference,
+so the check asks about it until you keep the readings again.
 
 A box has no tick. It gets your answers in its text, and a box with no text
 gets its text once your answers cover every character it shows. A box that
