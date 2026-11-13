@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { LIMITS, type SettingsFile, TRACE_CATEGORIES, type TraceCategory } from '../lib/bindings.ts';
 import { errorText, openTraceFolder, traceFolder } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
+import { ask } from '../lib/request.ts';
 import { type TraceLength, endText, traceEnd, traceRecords, useSettings, withCategory } from '../lib/settings.ts';
 import { TRACE_HINT } from '../lib/hints.ts';
 import { Hint } from './Hint.tsx';
@@ -88,24 +89,13 @@ export function useNowUntil(until: number | null): number {
 function TraceFolder() {
   const [folder, setFolder] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let current = true;
-    traceFolder().then(
-      (found) => {
-        if (current) {
-          setFolder(found);
-        }
-      },
-      (failure: unknown) => {
-        if (current) {
-          setError(errorText(failure));
-        }
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, []);
+  useEffect(
+    () =>
+      ask(traceFolder, setFolder, (failure) => {
+        setError(errorText(failure));
+      }),
+    [],
+  );
   const open = async (): Promise<void> => {
     try {
       await openTraceFolder();

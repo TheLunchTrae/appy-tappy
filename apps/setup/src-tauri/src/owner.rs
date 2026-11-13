@@ -48,7 +48,7 @@ use appytappy_config::app_file::{AppFile, BuildDef};
 use appytappy_config::process::ProcessId;
 use appytappy_sources::screen::{CaptureSession, Image};
 
-use crate::check_spec::Pictures;
+use crate::check_spec::{Pictures, ReferenceRef, SavedReference};
 use crate::debug::log::SetupLog;
 use crate::debug::trace_file::TraceTail;
 use crate::debug::trace_view::TraceView;
@@ -114,6 +114,10 @@ pub(crate) struct Owner<H: Host> {
     /// Counts searches, so text read for one the user dismissed or replaced
     /// is dropped.
     search_id: u64,
+    /// The saved reference the reference editor's characters add to, as
+    /// read when its editor first asked about them, until an application
+    /// is written: [`Owner::keep_reference`].
+    kept_reference: Option<(ReferenceRef, SavedReference)>,
     /// Sends new readings to the text reader's thread.
     ocr: Sender<ocr::Job>,
     /// Where whole-window recordings send the frames to look over.
@@ -164,6 +168,7 @@ impl<H: Host> Owner<H> {
             recording_id: 0,
             found: None,
             search_id: 0,
+            kept_reference: None,
             ocr,
             looks,
             watched: None,
@@ -342,6 +347,8 @@ impl<H: Host> Owner<H> {
         changed: Changed,
         write: Write<'_>,
     ) -> Result<Option<String>, String> {
+        // Whatever the write does, a reference kept from before it is old.
+        self.kept_reference = None;
         let apps = &self.stores()?.apps;
         let written = match write {
             Write::Save(file, pictures) => apps.save(app, file, pictures),

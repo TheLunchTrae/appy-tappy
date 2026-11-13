@@ -171,14 +171,19 @@ fn read_back(spec: &CheckSpec, screenshots: &dyn Shots) -> Result<saved::SavedVa
         reading_area: false,
         fixes: Vec::new(),
     };
-    let built = saved::build(&screen, &[], SizeChangesDef::Often, |picture| {
-        saved
-            .pictures
-            .iter()
-            .find(|(name, _)| name == picture)
-            .map(|(_, png)| png.clone())
-            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
-    })?;
+    let built = saved::build(
+        &screen,
+        &mut saved::Readers::new(&[]),
+        SizeChangesDef::Often,
+        |picture| {
+            saved
+                .pictures
+                .iter()
+                .find(|(name, _)| name == picture)
+                .map(|(_, png)| png.clone())
+                .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+        },
+    )?;
     Ok(built)
 }
 

@@ -10,6 +10,7 @@ use appytappy_config::anti_cheat::known_anti_cheat;
 use appytappy_config::app_file::WindowDef;
 use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowFacts;
+use appytappy_sources::screen::Size;
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 use serde::Serialize;
 
@@ -74,11 +75,9 @@ pub(crate) fn list(
                 && !DESKTOP_CLASSES.contains(&window.class.as_str())
         })
         .filter_map(|window| {
-            let width = u32::try_from(window.bounds.right.checked_sub(window.bounds.left)?).ok()?;
-            let height =
-                u32::try_from(window.bounds.bottom.checked_sub(window.bounds.top)?).ok()?;
+            let Size { width, height } = window.bounds.size()?;
             let executable = executables.get(&window.process.raw())?;
-            (width > 0 && height > 0).then(|| WindowChoice {
+            Some(WindowChoice {
                 handle: window.handle,
                 process: window.process,
                 title: window.title,

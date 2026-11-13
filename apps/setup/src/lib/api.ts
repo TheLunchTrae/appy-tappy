@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 import type {
   AntiCheatDef,
+  AppFile,
   AppSpec,
   AppSummary,
   AppWindows,
@@ -79,13 +80,17 @@ export async function listWindows(): Promise<WindowList> {
   return invoke<WindowList>('list_windows');
 }
 
-export async function pickWindow(window: number): Promise<void> {
-  await invoke('pick_window', { window });
+/** Starts capturing `window` for the preview, and answers the capture's number. */
+export async function pickWindow(window: number): Promise<number> {
+  return invoke<number>('pick_window', { window });
 }
 
-/** Stops capturing and forgets the session's screenshots and check. */
-export async function stopCapture(): Promise<void> {
-  await invoke('stop_capture');
+/**
+ * Stops capture `capture` and forgets the session's screenshots and check, unless another capture took
+ * its place.
+ */
+export async function stopCapture(capture: number): Promise<void> {
+  await invoke('stop_capture', { capture });
 }
 
 /** The newest frame at most `maxWidth` wide, or null before one arrives. */
@@ -204,9 +209,12 @@ export async function lookRecordingState(): Promise<LookRecordingView | null> {
   return invoke<LookRecordingView | null>('look_recording_state');
 }
 
-/** A recorded reading at most `maxWidth` wide, or null for an unknown index. */
-export async function recordedReading(index: number, maxWidth: number): Promise<Picture | null> {
-  return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { index, maxWidth }));
+/**
+ * A reading of recording `recording` at most `maxWidth` wide, or null for an unknown index or a replaced
+ * recording.
+ */
+export async function recordedReading(recording: number, index: number, maxWidth: number): Promise<Picture | null> {
+  return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { recording, index, maxWidth }));
 }
 
 /**
@@ -352,6 +360,14 @@ export async function clickNow(click: ClickSpec): Promise<ClickSent> {
 
 export async function listApps(): Promise<ReadonlyArray<AppSummary>> {
   return invoke<ReadonlyArray<AppSummary>>('list_apps');
+}
+
+/**
+ * The file of the saved application `application`, read without the other applications or the open
+ * windows, or null when it is no longer saved. Rejects with why when its file cannot be read.
+ */
+export async function appFile(application: string): Promise<AppFile | null> {
+  return invoke<AppFile | null>('app_file', { application });
 }
 
 /**

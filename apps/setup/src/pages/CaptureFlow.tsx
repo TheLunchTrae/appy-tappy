@@ -1,29 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import type { AppSummary } from '../lib/bindings.ts';
-import { restoreDraftScreenshots, stopCapture } from '../lib/api.ts';
+import { restoreDraftScreenshots } from '../lib/api.ts';
+import { useCapture } from '../lib/capture.ts';
 import { Capture, type CaptureMode, type Restored } from '../components/Capture.tsx';
 import { type Choice, Picker } from '../components/Picker.tsx';
-import type { Changing, Made } from '../lib/flow.ts';
-import { background } from '../lib/repeat.ts';
+import type { Changing, Made, RefFlow, ValueFlow } from '../lib/flow.ts';
 import type { Held } from '../lib/unsaved.ts';
-import type { ReportDraft, Resumed } from '../lib/drafts.ts';
-
-const VALUE = { kind: 'value' } as const;
+import type { ReportDraft } from '../lib/drafts.ts';
 
 interface Props {
-  /** The saved value to fix or edit, or null to make a new value. */
-  readonly changing: Changing | null;
-  /** The application a new value starts with, such as one just added for it, or null to let the user choose. */
-  readonly app: string | null;
-  /** The draft the flow finishes, or null. */
-  readonly draft: Resumed | null;
+  /**
+   * What the flow makes or changes: a new value, a saved value to fix or edit, or a reference. Its application is
+   * the one a new value or reference starts with, such as one just added for it, and its draft the one it finishes.
+   */
+  readonly flow: ValueFlow | RefFlow;
   /** The way to this flow, for its breadcrumb. */
   readonly trail: readonly string[];
   /** Whether the flow shows because another flow opened it or ended, so the focus has to land somewhere. */
   readonly continued: boolean;
   readonly onCancel: () => void;
-  /** Hears where the value was saved. */
+  /** Hears where the value was saved, or the reference's application. */
   readonly onSaved: (made: Made) => void;
   /** Closes the flow once its draft is saved or deleted. */
   readonly onDrafted: () => void;
@@ -45,12 +42,36 @@ const HEADINGS: Readonly<Record<Changing['how'], (name: string) => string>> = {
   edit: (name) => `Edit ${name}`,
 };
 
-/** Making a value, fixing a saved one at another window size, or editing one: choose the application, then capture
- * its window and check what to read. */
-export function NewValue({
-  changing,
-  app,
-  draft,
+/** How the capture runs for `flow`, the saved application it is locked to, and the picker's heading. */
+function subject(flow: ValueFlow | RefFlow): {
+  readonly mode: CaptureMode;
+  readonly lockedApp: string | null;
+  readonly heading: string;
+} {
+  if (flow.kind === 'reference') {
+    const { existing } = flow;
+    return {
+      mode: { kind: 'reference', existing: existing?.reference ?? null },
+      lockedApp: existing?.app ?? null,
+      heading: existing === null ? 'New reference' : `Edit ${existing.reference.name}`,
+    };
+  }
+  const { changing } = flow;
+  return changing === null
+    ? { mode: { kind: 'value' }, lockedApp: null, heading: 'New value' }
+    : {
+        mode: { kind: changing.how, value: changing.value },
+        lockedApp: changing.app,
+        heading: HEADINGS[changing.how](changing.value.name),
+      };
+}
+
+/**
+ * Making a value, fixing a saved one at another window size, editing one, or making or changing a reference: choose
+ * the application, then capture its window and check what to read or teach the reference its characters.
+ */
+export function CaptureFlow({
+  flow,
   trail,
   continued,
   onCancel,
@@ -62,33 +83,30 @@ export function NewValue({
   onHeld,
   onDraft,
 }: Props) {
+  const draft = flow.resumed;
   const [choice, setChoice] = useState<Choice | null>(null);
   const [picking, setPicking] = useState(true);
   const [restored, setRestored] = useState<Restored | null>(null);
   // Whether a window was picked before: only the first pick brings a draft's screenshots back.
   const [pickedBefore, setPickedBefore] = useState(false);
-  const [mode] = useState<CaptureMode>(changing === null ? VALUE : { kind: changing.how, value: changing.value });
-  // Leaving the flow stops the window's capture, which would otherwise keep
-  // copying frames nobody looks at, and its screenshots and recording go with it.
-  useEffect(
-    () => () => {
-      background(stopCapture());
-    },
-    [],
-  );
+  // What the flow started for: its mode stays the same object while it shows.
+  const [{ mode, lockedApp, heading }] = useState(() => subject(flow));
+  // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at.
+  const { pick, stop } = useCapture();
   if (picking || choice === null) {
     return (
       <Picker
-        heading={changing === null ? 'New value' : HEADINGS[changing.how](changing.value.name)}
+        heading={heading}
         trail={trail}
         continued={continued}
-        lockedApp={changing?.app ?? draft?.def.app ?? null}
-        startApp={choice?.app ?? app}
+        lockedApp={lockedApp ?? draft?.def.app ?? null}
+        startApp={choice?.app ?? flow.app}
         startWindow={choice?.window.handle ?? null}
         onCancel={onCancel}
         onAddApplication={onAddApplication}
         onEditApplication={onEditApplication}
         draftedApps={draftedApps}
+        onCapture={pick}
         onPick={async (picked) => {
           // Picking the window forgets the session's screenshots, so a draft's come back after it, the first time.
           if (draft !== null) {
@@ -111,7 +129,7 @@ export function NewValue({
       onCancel={onCancel}
       onChangeWindow={() => {
         // The capture ends here, not when another window is picked, so nothing keeps its screenshots meanwhile.
-        background(stopCapture());
+        stop();
         setPicking(true);
       }}
       onSaved={onSaved}

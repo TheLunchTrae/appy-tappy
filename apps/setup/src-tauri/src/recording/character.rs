@@ -50,8 +50,7 @@ pub(crate) fn of(image: &Image, reader: &DigitReader) -> Vec<CharacterView> {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_sources::screen::Size;
-    use appytappy_sources::system::Rgb;
+    use appytappy_sources::screen::{Rgb, Size};
 
     use super::*;
 
