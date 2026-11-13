@@ -65,6 +65,7 @@ use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
     AppSummary, AppWindows, EditPreview, EditSpec, FixSpec, Live, Message, Reading, RecordSpec,
     ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
+    at_size,
 };
 use self::watch::Watched;
 

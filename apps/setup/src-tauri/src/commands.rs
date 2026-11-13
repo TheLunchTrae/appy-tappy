@@ -234,7 +234,7 @@ pub(crate) async fn set_characters(app: AppHandle, trial: ReferenceTrial) -> Res
 /// What the check reads on the newest frame, if a check and a frame exist.
 #[tauri::command]
 pub(crate) async fn read_value(app: AppHandle) -> Result<Option<Reading>, String> {
-    try_ask(&app, "read_value", |owner| owner.reading()).await
+    try_ask(&app, "read_value", Owner::reading).await
 }
 
 /// How the check reads the newest frame, for the debug details.

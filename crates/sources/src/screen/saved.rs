@@ -139,6 +139,16 @@ impl SavedValue {
         self.placed(size).map(|(region, _)| region)
     }
 
+    /// Where it reads on a window of the size it was first drawn at, where
+    /// it always reads.
+    #[must_use]
+    pub const fn first(&self) -> AtSize {
+        AtSize {
+            region: self.drawn.region,
+            check: Drawing::First,
+        }
+    }
+
     /// Where and with what it reads on a window of `size`: the drawing made
     /// at that size, the first or a fix; else, while its application's
     /// window changes size often, the first drawing scaled to it, with a

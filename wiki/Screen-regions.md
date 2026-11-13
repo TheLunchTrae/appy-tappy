@@ -5,7 +5,9 @@ as a progress bar, a number counter, or whether an icon is showing. The setup
 app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
 `screen/image.rs` holds images and regions, `screen/layout.rs` where a
-capture packs the regions it copies, `screen/capture.rs` the capture trait
+capture packs the regions it copies, `screen/placed.rs` values placed at
+one window size and what a frame means to their capture,
+`screen/capture.rs` the capture trait
 and where a window's content lies in its frame,
 `screen/check.rs` and `screen/digits.rs` the checks, `screen/detect.rs` the
 proposal of a bar's colors, `screen/mask.rs` and
@@ -231,6 +233,26 @@ settled size. Until a size settles, its values are unseen, so no rule acts
 on them. Why a value does not read at a size leaves the size out, so the
 log says it once for each reason, not once for each size the window
 passes.
+
+A capture is started for one window size, and `FrameMeaning` in
+`screen/placed.rs` says what each of its frames means. The runtime's
+reader, the overlays and the Values page, the automation editor's live
+reading, and the capture screen's live check all ask it, so a frame means
+the same to each:
+
+- **Readable.** The window has the size the capture reads at, and the frame
+  is read.
+- **Resized.** The window has another size, whether the capture copied its
+  regions there or they lie outside the window. Nothing is read, and the
+  size starts to settle.
+- **Unreadable.** The window has the size the capture reads at, and a
+  region lies outside it all the same. The reader says so and keeps the
+  capture, since one started again would find the same.
+
+Any other frame error is the capture's own: the reader counts it or stops,
+as [State machines](State-machines.md) describes for each. `Placed` holds
+several values placed at one size with the layout a capture copies for
+those that read there, so a reader compares no sizes itself.
 
 State pictures are named after the value and the state's place, such as
 `status-1.png`. A fix's pictures, and those of a drawing whose states an

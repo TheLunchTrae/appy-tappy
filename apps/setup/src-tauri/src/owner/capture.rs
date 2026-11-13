@@ -121,7 +121,7 @@ impl<H: Host> Owner<H> {
         self.failure = None;
         self.record(&image, received);
         if let Some(check) = &mut self.check {
-            check.place(image.size());
+            check.saw(image.size(), received);
         }
         self.latest = Some(image);
         self.latest_at = Some(received);
@@ -179,25 +179,31 @@ impl<H: Host> Owner<H> {
     }
 
     /// What the check reads on the newest frame: `None` until a check is
-    /// set up and a frame arrived.
-    pub(crate) fn reading(&self) -> Result<Option<Reading>, String> {
-        let (Some(check), Some(latest)) = (&self.check, &self.latest) else {
+    /// set up and a frame arrived, and while the frame shows a window size
+    /// that has yet to settle. A size that settled since the last frame
+    /// places the value there first, so a window that stopped drawing is
+    /// placed too.
+    pub(crate) fn reading(&mut self) -> Result<Option<Reading>, String> {
+        let now = self.host.now();
+        let (Some(check), Some(latest)) = (&mut self.check, &self.latest) else {
             return Ok(None);
         };
-        check.read(latest).map(|value| Some(value.into()))
+        check.settled(now);
+        Ok(check.read(latest)?.map(Reading::from))
     }
 
     /// How the check reads the newest frame, for the debug details: `None`
-    /// until a check is set up and a frame arrived.
+    /// while [`Owner::reading`] answers none.
     pub(crate) fn explain_reading(&self) -> Result<Option<ReadingDetails>, String> {
         let (Some(check), Some(latest), Some(arrived)) =
             (&self.check, &self.latest, self.latest_at)
         else {
             return Ok(None);
         };
-        let (check, region) = check.region_of(latest)?;
         let age = self.host.now().saturating_duration_since(arrived);
-        Ok(Some(workings::details(check, &region, age)))
+        Ok(check
+            .region_of(latest)?
+            .map(|(check, region)| workings::details(check, &region, age)))
     }
 
     /// The newest frame's pixels, at most `max_width` wide, or `None`

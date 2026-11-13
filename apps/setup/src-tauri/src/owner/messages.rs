@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use appytappy_config::app_file::{AppFile, BuildDef, CheckDef, PanelDef, PinDef, SizeDef};
 use appytappy_config::signal::Value;
+use appytappy_sources::screen::saved::Unread;
 use appytappy_sources::screen::{Image, Size};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -85,16 +86,12 @@ pub(crate) enum Live {
 
 /// What a frame of the watched value's window showed.
 #[derive(Debug)]
-pub(crate) enum Seen {
-    /// The value's region, on a window of `window_size`.
-    Region {
-        /// The window's size.
-        window_size: Size,
-        /// The region's pixels.
-        image: Image,
-    },
-    /// A window of this size, which the region lies outside.
-    Outside(Size),
+pub(crate) struct Seen {
+    /// The window's size.
+    pub(crate) window_size: Size,
+    /// The pixels of the region the capture copies, or `None` when the
+    /// region lies outside a window of this size.
+    pub(crate) image: Option<Image>,
 }
 
 /// A value's check to try on the live window before it is saved, as the UI
@@ -151,6 +148,16 @@ pub(crate) struct RecordSpec {
     pub(crate) ink: ColorSpec,
     /// How far from `ink` a pixel of a character may be.
     pub(crate) tolerance: u8,
+}
+
+/// Where and why a value is not read on a window of `size`, as the end of
+/// a sentence that says it is not read. The live check, the automation
+/// editor's live reading, and the overlays all say it in these words.
+pub(crate) fn at_size(size: Size, unread: Unread) -> String {
+    format!(
+        "at {} × {}, the window's size now: {unread}",
+        size.width, size.height
+    )
 }
 
 /// A value to save, as the UI describes it.
