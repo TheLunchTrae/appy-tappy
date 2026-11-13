@@ -10,6 +10,9 @@
 //! than JSON, which would be several times larger.
 
 pub(crate) mod table;
+mod upload;
+
+pub(crate) use upload::Upload;
 
 use std::sync::mpsc::Sender;
 use std::time::Instant;
@@ -442,29 +445,28 @@ pub(crate) async fn export_app(app: AppHandle, application: String) -> Result<Re
     .map(Response::new)
 }
 
-/// What the shared file `bytes`, named `from`, holds. Nothing is saved.
+/// What the shared file that is `upload`'s body holds; the upload says the
+/// file's name. Nothing is saved.
 #[tauri::command]
 pub(crate) async fn read_shared_app(
     app: AppHandle,
-    bytes: Vec<u8>,
-    from: String,
+    upload: Upload<String>,
 ) -> Result<SharedView, String> {
     try_ask(&app, "read_shared_app", move |owner| {
-        owner.read_shared(&bytes, &from)
+        owner.read_shared(&upload.bytes, &upload.about)
     })
     .await
 }
 
-/// Saves the shared file `bytes` as a new application, as `spec` names and
-/// classes it; answers its ID.
+/// Saves the shared file that is `upload`'s body as a new application, as
+/// the upload's [`ImportSpec`] names and classes it; answers its ID.
 #[tauri::command]
 pub(crate) async fn import_app(
     app: AppHandle,
-    bytes: Vec<u8>,
-    spec: ImportSpec,
+    upload: Upload<ImportSpec>,
 ) -> Result<String, String> {
     try_ask(&app, "import_app", move |owner| {
-        owner.import_app(&bytes, spec)
+        owner.import_app(&upload.bytes, upload.about)
     })
     .await
 }

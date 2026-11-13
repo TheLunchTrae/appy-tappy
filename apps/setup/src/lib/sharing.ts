@@ -42,7 +42,7 @@ interface Asked {
   /** The picked file's name. */
   readonly file: string;
   /** The file's bytes, which the import sends again. */
-  readonly bytes: readonly number[];
+  readonly bytes: Uint8Array;
   readonly view: SharedView;
   /** The name the application is imported under. */
   readonly name: string;
@@ -64,7 +64,7 @@ export type ImportState =
 export type ImportEvent =
   /** The user picked a file; `problem` is why it is not read at all. */
   | { readonly kind: 'picked'; readonly file: string; readonly problem: string | null }
-  | { readonly kind: 'read'; readonly bytes: readonly number[]; readonly view: SharedView }
+  | { readonly kind: 'read'; readonly bytes: Uint8Array; readonly view: SharedView }
   /** The read or the import failed. */
   | { readonly kind: 'failed'; readonly problem: string }
   | { readonly kind: 'named'; readonly name: string }

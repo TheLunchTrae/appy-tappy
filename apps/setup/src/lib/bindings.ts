@@ -1144,7 +1144,8 @@ class: boolean, }>;
 export type OriginDef = DeepReadonly<{ "kind": "byHand" } | { "kind": "recording" } | { "kind": "imported",
 /**
  * The name of the file it was imported from, such as
- * `appytappy-example.zip`.
+ * `appytappy-example.zip`. Empty in a shared file, which says
+ * that its maker imported it and not from which file of theirs.
  */
 file: string, }>;
 

@@ -126,7 +126,7 @@ export function ImportApp({ onImported }: Props) {
       return;
     }
     try {
-      const bytes = Array.from(new Uint8Array(await picked.arrayBuffer()));
+      const bytes = new Uint8Array(await picked.arrayBuffer());
       send({ kind: 'read', bytes, view: await readSharedApp(bytes, picked.name) });
     } catch (failure: unknown) {
       send({ kind: 'failed', problem: errorText(failure) });

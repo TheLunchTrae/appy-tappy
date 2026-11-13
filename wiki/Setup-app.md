@@ -982,7 +982,13 @@ pick sets (`classToConfirm` in `src/lib/sharing.ts`).
 The page reads the picked file and sends its bytes with both
 `read_shared_app` and `import_app`. The owner keeps nothing between the two,
 so there is no pending import to go stale, and the import checks the same
-bytes it saves.
+bytes it saves. The file is each request's raw body, and the file's name or
+the import's choices are JSON in its `about` header (`Upload` in
+`commands/upload.rs`, `aboutHeader` in `src/lib/upload.ts`). As a JSON
+argument the file would be a list of numbers several times its size, which
+Tauri parses whole before a command can refuse it. The page refuses a file
+over the limit before it sends it, and `Upload` refuses one before it copies
+it for the owner thread.
 
 Three choices shape the file:
 
@@ -1305,7 +1311,9 @@ with `#[cfg_attr(test, ts(type = "number"))]` in the setup app, or
 because only those builds derive the types. A command's own `u64` argument or
 answer is `U64AsNumber` in the table, or `OptionalU64AsNumber` when it can be
 missing, and a picture it answers as raw bytes is `Pixels`, which `api.ts`
-decodes. The page imports the types from
+decodes. A file the page sends is `Upload<T>`, the command's only argument,
+which `api.ts` sends as the request's raw body with a `T` about it, as
+[Sharing](#sharing) describes. The page imports the types from
 `bindings.ts` and calls the commands through `api.ts`.
 
 The file also holds what the page checks a draft against before it saves:

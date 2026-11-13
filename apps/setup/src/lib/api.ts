@@ -67,6 +67,7 @@ import type {
   WindowScore,
 } from './bindings.ts';
 import { type Picture, decodePicture } from './pixels.ts';
+import { aboutHeader } from './upload.ts';
 
 /** The message of a failed command, which the Rust side writes for the user. */
 export function errorText(error: unknown): string {
@@ -374,19 +375,19 @@ export async function exportApp(application: string): Promise<Blob> {
 }
 
 /**
- * What the shared file `bytes`, named `from`, holds, and a name for it that no saved application has.
- * Nothing is saved. Rejects with why the file cannot be imported.
+ * What the shared file `file` holds, and a name for it that no saved application has. `about` is the
+ * file's name. Nothing is saved. Rejects with why the file cannot be imported.
  */
-export async function readSharedApp(bytes: ReadonlyArray<number>, from: string): Promise<SharedView> {
-  return invoke<SharedView>('read_shared_app', { bytes, from });
+export async function readSharedApp(file: Uint8Array, about: string): Promise<SharedView> {
+  return invoke<SharedView>('read_shared_app', file, { headers: { about: aboutHeader(about) } });
 }
 
 /**
- * Saves the shared file `bytes` as a new application with the name and the anti-cheat class `spec`
+ * Saves the shared file `file` as a new application with the name and the anti-cheat class `about`
  * gives, whatever class the file holds; returns its ID. It never replaces an application.
  */
-export async function importApp(bytes: ReadonlyArray<number>, spec: ImportSpec): Promise<string> {
-  return invoke<string>('import_app', { bytes, spec });
+export async function importApp(file: Uint8Array, about: ImportSpec): Promise<string> {
+  return invoke<string>('import_app', file, { headers: { about: aboutHeader(about) } });
 }
 
 export async function saveValue(spec: SaveSpec): Promise<SavedValue> {

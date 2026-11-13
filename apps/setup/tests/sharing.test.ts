@@ -35,7 +35,7 @@ function view(antiCheat: AntiCheatDef): SharedView {
   };
 }
 
-const bytes = [80, 75];
+const bytes = Uint8Array.of(80, 75);
 const reading: ImportState = { kind: 'reading', file: 'friend.zip' };
 const refused: ImportState = { kind: 'refused', file: 'friend.zip', problem: 'Not a zip file.' };
 const asking: ImportState = {
@@ -95,7 +95,12 @@ describe('nextImport', () => {
     ['close waits for the import', importing, { kind: 'close' }, importing],
     ['a file picked while one is open does nothing', asking, { kind: 'picked', file: 'b.zip', problem: null }, asking],
     ['a read that was not asked for does nothing', NO_IMPORT, { kind: 'read', bytes, view: view('none') }, NO_IMPORT],
-    ['a late read leaves the question alone', asking, { kind: 'read', bytes: [], view: view('userMode') }, asking],
+    [
+      'a late read leaves the question alone',
+      asking,
+      { kind: 'read', bytes: new Uint8Array(), view: view('userMode') },
+      asking,
+    ],
     ['a late failure leaves a closed dialog closed', NO_IMPORT, { kind: 'failed', problem: 'x' }, NO_IMPORT],
     ['a failure with nothing under way does nothing', asking, { kind: 'failed', problem: 'x' }, asking],
     ['the name is locked while it saves', importing, { kind: 'named', name: 'Mine' }, importing],
