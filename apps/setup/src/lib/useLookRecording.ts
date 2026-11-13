@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 
 import type { LookRecordingView } from './bindings.ts';
-import { discardRecording, lookRecordingState, startLookRecording, stopRecording } from './api.ts';
+import { discardRecording, lookRecordingState, startLookRecording } from './api.ts';
 import type { Rect } from './region.ts';
 import { useRecorder } from './useRecorder.ts';
 
@@ -21,8 +21,8 @@ interface Recordable {
 
 /**
  * The session's recording of looks, kept current while it records. Each screenshot it keeps goes to `adopt` once,
- * which must stay the same function. Leaving the component that uses it stops the recording, since it samples the
- * window until it stops.
+ * which must stay the same function. Leaving the component that uses it stops the recording it started, since it
+ * samples the window until it stops.
  */
 export function useLookRecording(adopt: (index: number) => void): {
   readonly view: LookRecordingView | null;
@@ -30,13 +30,13 @@ export function useLookRecording(adopt: (index: number) => void): {
   readonly error: string | null;
   /** Starts a new recording of `settings`; `onStarted` runs once it has started. */
   readonly start: (settings: Recordable, onStarted: () => void) => Promise<void>;
-  /** Stops recording and answers the stopped recording, or null when it could not stop. */
+  /** Stops the recording it started and answers the stopped recording, or null when it could not stop. */
   readonly stop: () => Promise<LookRecordingView | null>;
   /** Forgets the recording, if there is one. The screenshots it kept stay. */
   readonly discard: () => Promise<void>;
 } {
   const recorder = useRecorder(lookRecordingState, stillRecords);
-  const { view, command, show, forget } = recorder;
+  const { view, command, show, forget, started } = recorder;
 
   // Hands each kept screenshot over once. The session never gives an index twice.
   const adopted = useRef<Set<number>>(new Set());
@@ -52,16 +52,16 @@ export function useLookRecording(adopt: (index: number) => void): {
 
   const start = async (settings: Recordable, onStarted: () => void): Promise<void> => {
     await command(async () => {
-      await startLookRecording(settings.region, settings.tolerance, settings.drawnOn);
+      started(await startLookRecording(settings.region, settings.tolerance, settings.drawnOn));
       onStarted();
-      show(await lookRecordingState());
+      await recorder.readState();
     });
   };
 
   const stop = async (): Promise<LookRecordingView | null> => {
     let stopped: LookRecordingView | null = null;
     const worked = await command(async () => {
-      await stopRecording();
+      await recorder.stop();
       stopped = await lookRecordingState();
       show(stopped);
     });

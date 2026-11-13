@@ -43,8 +43,6 @@ pub(crate) enum SpecError {
     /// The selection of the state with this name leaves no pixel of its
     /// region to compare.
     NothingSelected(String),
-    /// A state's name breaks the rules, and how, as a sentence.
-    StateName(String),
     /// A reference has no saved sample, labeled screenshot, or kept reading
     /// to learn from.
     NoLabels,
@@ -120,6 +118,9 @@ impl fmt::Display for SpecError {
                 formatter,
                 "A value can tell apart at most {MAX_STATES} states. Remove one."
             ),
+            Self::Check(CheckDefError::StateName(invalid)) => {
+                formatter.write_str(&sentence(&invalid.to_string()))
+            },
             Self::Check(CheckDefError::SameStateName(name)) => write!(
                 formatter,
                 "Two states are named \"{name}\". Give each state its own name."
@@ -141,7 +142,6 @@ impl fmt::Display for SpecError {
                 formatter,
                 "Nothing in the region is selected for the state {name:?}. Select it again, clear its selection, or stop ignoring the background.",
             ),
-            Self::StateName(problem) => formatter.write_str(problem),
             Self::NoLabels => formatter.write_str(
                 "Type what at least one box shows, or keep a recorded reading.",
             ),
@@ -218,7 +218,6 @@ impl From<SavedError> for SpecError {
             SavedError::EmptyRegion => Self::EmptyRegion,
             SavedError::OutsideWindow { .. } => Self::Outside,
             SavedError::Check(broken) => Self::Check(broken),
-            SavedError::StateName(invalid) => Self::StateName(sentence(&invalid.to_string())),
             other => Self::Unreadable(other.to_string()),
         }
     }

@@ -2,12 +2,13 @@
 // pictures, and what saving the edit would do.
 
 import type { EditPreview, SizeDef, ValueDef } from '../lib/bindings.ts';
-import type { Draft } from '../lib/check.ts';
-import { droppedFixesText, otherSizeText } from '../lib/edit.ts';
+import { type Draft, stateNameProblems } from '../lib/check.ts';
+import { droppedFixesText, keptStateNames, otherSizeText } from '../lib/edit.ts';
 import { EDIT_HINT } from '../lib/hints.ts';
 import { sizeText } from '../lib/sizes.ts';
 import { ToleranceField } from './Fields.tsx';
 import { Hint } from './Hint.tsx';
+import { StateNameInput } from './StatesField.tsx';
 
 /**
  * Says that this edits the value itself, not one size's fix, and what a window of another size than the value was
@@ -55,6 +56,8 @@ interface SavedStatesProps {
 export function SavedStates({ value, draft, retakeBlocked, onDraft, onRetake }: SavedStatesProps) {
   const { check } = value.screen;
   const states = check.kind === 'state' ? check.states : [];
+  const names = keptStateNames(draft, states);
+  const problems = stateNameProblems(names);
   return (
     <>
       <div className="field">
@@ -63,14 +66,15 @@ export function SavedStates({ value, draft, retakeBlocked, onDraft, onRetake }: 
         <ul className="states" aria-labelledby="saved-states-title">
           {states.map((state, index) => (
             <li key={state.image} className="state saved">
-              <input
-                className="input"
-                aria-label={`Name of state ${index + 1}`}
-                placeholder="Name"
-                value={draft.stateNames[index] ?? ''}
-                onChange={(event) => {
-                  const typed = event.target.value;
-                  onDraft((current) => ({ ...current, stateNames: current.stateNames.with(index, typed) }));
+              <StateNameInput
+                label={`Name of state ${index + 1}`}
+                name={names[index] ?? state.name}
+                problem={problems.get(index) ?? null}
+                onName={(typed) => {
+                  onDraft((current) => ({
+                    ...current,
+                    stateNames: keptStateNames(current, states).with(index, typed),
+                  }));
                 }}
               />
               <small className="note">Saved picture</small>

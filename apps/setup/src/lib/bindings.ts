@@ -2558,8 +2558,8 @@ states: Array<StateView>, }>;
 
 /**
  * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the
- * most states, the most characters a reference expects, the settings' ranges, the highest tolerance, and the most
- * pixels a click's search area holds, as the saved files take them.
+ * most states and the longest state name in characters, the most characters a reference expects, the settings'
+ * ranges, the highest tolerance, and the most pixels a click's search area holds, as the saved files take them.
  */
 export const LIMITS = {
   "fastestReadMs": 1,
@@ -2568,6 +2568,7 @@ export const LIMITS = {
   "maxExpectedCharacters": 128,
   "maxSearchPixels": 160000,
   "maxSharedBytes": 16777216,
+  "maxStateNameChars": 32,
   "maxStates": 16,
   "maxTargetBytes": 2048,
   "maxTolerance": 255,

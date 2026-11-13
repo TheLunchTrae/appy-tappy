@@ -13,3 +13,8 @@ interface SaveFilePickerOptions {
 interface Window {
   readonly showSaveFilePicker?: (options?: SaveFilePickerOptions) => Promise<FileSystemFileHandle>;
 }
+
+// Removing a handle's entry, which WebView2 has and the DOM types leave out.
+interface FileSystemHandle {
+  remove(): Promise<void>;
+}

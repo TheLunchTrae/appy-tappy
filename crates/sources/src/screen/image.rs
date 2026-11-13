@@ -342,7 +342,7 @@ impl Image {
         let height = usize::try_from(region.size().height).ok()?;
         let mut bgra = Vec::with_capacity(region.size().bytes()?);
         for row in self.rows().skip(top).take(height) {
-            bgra.extend(row.get(start..end)?.iter().flatten());
+            bgra.extend_from_slice(row.get(start..end)?.as_flattened());
         }
         Some(Self {
             size: region.size(),

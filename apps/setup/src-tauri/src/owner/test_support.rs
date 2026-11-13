@@ -387,6 +387,19 @@ impl Harness {
         self.reloads.try_iter().count()
     }
 
+    /// Stops the capture's recording by its number, as the screen that
+    /// started it does.
+    pub(super) fn stop_recording(&mut self) {
+        let recording = self
+            .owner
+            .capture
+            .recording()
+            .expect("a recording to stop")
+            .id()
+            .number();
+        self.owner.stop_recording(recording);
+    }
+
     /// Picks window 7 and returns the capture's handler.
     pub(super) fn pick(&mut self) -> FrameHandler {
         self.pick_numbered().1

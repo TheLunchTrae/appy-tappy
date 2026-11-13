@@ -491,6 +491,69 @@ export function keepBlocked(
   return checked ? null : 'Checking the readings…';
 }
 
+/**
+ * The readings of recording `id` whose pixels were asked for, so each is asked for once while its ask stands, and how
+ * many times each reading's ask failed.
+ */
+export interface CropAsks {
+  readonly id: number;
+  readonly readings: ReadonlySet<number>;
+  readonly failures: ReadonlyMap<number, number>;
+}
+
+/** No reading's pixels asked for. */
+export const NO_CROP_ASKS: CropAsks = { id: -1, readings: new Set(), failures: new Map() };
+
+/**
+ * How many times a reading's pixels are asked for when each ask fails, so a page whose asks cannot reach the owner
+ * stops asking.
+ */
+export const CROP_TRIES = 5;
+
+/**
+ * The readings of recording `id`, of its `count`, whose pixels to ask for now: each one `asks` holds no ask for, which
+ * is all of them for another recording than `asks`'s; and `asks` with their asks.
+ */
+export function cropsToAsk(
+  asks: CropAsks,
+  id: number,
+  count: number,
+): { readonly asks: CropAsks; readonly indexes: readonly number[] } {
+  const same = asks.id === id;
+  const readings = new Set(same ? asks.readings : []);
+  const indexes: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    if (!readings.has(index)) {
+      readings.add(index);
+      indexes.push(index);
+    }
+  }
+  return { asks: { id, readings, failures: same ? asks.failures : new Map() }, indexes };
+}
+
+/**
+ * `asks` after the ask for reading `index` of recording `of` failed, and whether to ask for it again. A failure of
+ * another recording's ask is stale and changes nothing. A failed ask is taken back, so the next `cropsToAsk` asks
+ * again, until the reading's asks failed `CROP_TRIES` times; it then stays asked for and is not asked for again.
+ */
+export function cropAskFailed(
+  asks: CropAsks,
+  of: number,
+  index: number,
+): { readonly asks: CropAsks; readonly retry: boolean } {
+  if (asks.id !== of || !asks.readings.has(index)) {
+    return { asks, retry: false };
+  }
+  const failed = (asks.failures.get(index) ?? 0) + 1;
+  const failures = new Map(asks.failures).set(index, failed);
+  if (failed >= CROP_TRIES) {
+    return { asks: { ...asks, failures }, retry: false };
+  }
+  const readings = new Set(asks.readings);
+  readings.delete(index);
+  return { asks: { id: of, readings, failures }, retry: true };
+}
+
 /** Each recorded reading's pixels, by its index, for the recording `id`. */
 export interface Crops {
   readonly id: number;
