@@ -905,14 +905,15 @@ impl AppFile {
     /// another format says so rather than naming whichever of its fields
     /// this format lacks.
     pub fn parse(json: &str) -> Result<Self, AppFileError> {
-        /// Any file's format version, whatever else it holds.
-        #[derive(Deserialize)]
-        struct Versioned {
-            format: u32,
-        }
         let invalid = |error: serde_json::Error| AppFileError::Json(error.to_string());
-        let Versioned { format } = serde_json::from_str(json).map_err(invalid)?;
-        if format != FORMAT {
+        // Any file's format version, whatever else it holds. JSON without a
+        // version it can hold is left for the file's own reading to refuse.
+        let any: serde_json::Value = serde_json::from_str(json).map_err(invalid)?;
+        let format = any
+            .get("format")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|format| u32::try_from(format).ok());
+        if let Some(format) = format.filter(|format| *format != FORMAT) {
             return Err(AppFileError::Format(format));
         }
         let file: Self = serde_json::from_str(json).map_err(invalid)?;
@@ -1709,6 +1710,14 @@ mod tests {
             .to_json()
             .replace("\"format\": 1", "\"format\": 2, \"added\": true");
         assert_eq!(AppFile::parse(&newer), Err(AppFileError::Format(2)));
+        assert_eq!(
+            AppFile::parse("[]"),
+            Err(AppFileError::Json(
+                "invalid length 0, expected struct AppFile with 10 elements at line 1 column 2"
+                    .to_owned()
+            )),
+            "the message names the file, not how it is read"
+        );
     }
 
     #[test]
