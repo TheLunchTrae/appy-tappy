@@ -227,8 +227,9 @@ select {
   padding: 6px 10px;
 }
 
-.input:read-only {
-  color: var(--muted);
+.input:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .seg {
@@ -250,6 +251,11 @@ select {
   font-size: 12px;
   color: var(--muted);
   cursor: pointer;
+}
+
+.seg button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .seg button[aria-pressed='true'] {
@@ -495,6 +501,7 @@ select {
 }
 
 .window-list button:disabled {
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -1947,8 +1954,8 @@ div.match-answer {
   max-height: 34px;
 }
 
-.autofill li.off .crop,
-.autofill li.off .input {
+/* Only the picture fades: typing text into an unkept find keeps it. */
+.autofill li.off .crop {
   opacity: 0.45;
 }
 
@@ -2766,6 +2773,10 @@ tr.draft-row > td:not(.end):not(.row-actions) {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.check-row:has(input:disabled) label {
+  color: var(--muted);
 }
 
 .dialog-actions {

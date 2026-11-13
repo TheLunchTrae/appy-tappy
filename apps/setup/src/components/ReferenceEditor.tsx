@@ -116,8 +116,8 @@ export function ReferenceEditor(props: Props) {
         />
       </div>
       <div className="field">
-        <label htmlFor="reference-app">Application</label>
-        <input id="reference-app" className="input" readOnly value={appName} />
+        <span>Application</span>
+        <p>{appName}</p>
       </div>
       <ColorField
         label="Characters' color"
