@@ -347,7 +347,9 @@ The thread can also panic in any state, which ends it.
 - **Capturing.** `watch` waits on `control` until the next `CHECK_AGAIN` or
   until a new size settles, whichever comes first. The capture's frame handler
   runs on another thread and sends `Lost`, `Resizing`, `Failing`,
-  `Panicked`, or `Recovered` back to this one. A `Trace` from the owner goes
+  `Panicked`, or `Recovered` back to this one. A panic on the capture's
+  thread outside the handler arrives as `Lost`, as
+  [Frame handler](#frame-handler) describes. A `Trace` from the owner goes
   on to the frame handler over its own channel, and the capture goes on.
   Each `CHECK_AGAIN`, `moved_on` checks that the window still shows and that
   `session_window` still picks it, which it does while the window shows and
@@ -439,7 +441,14 @@ stateDiagram-v2
   the same way.
 - The capture ends, as when the window closes, the graphics device is lost, or
   the frame pool cannot follow the window to a new size, with a
-  `NotConnected` error.
+  `NotConnected` error. A panic on the capture's thread outside `handle`
+  ends it the same way: `run_capture` (`crates/sources/src/screen/capture.rs`)
+  runs the Windows capture's frame loop, catches the panic, and hands the
+  handler a `NotConnected` error with the panic's message, so the reader
+  logs it, sends `Unseen`, and captures again after the backoff. Unwound,
+  the panic would end the capture's thread, and the reader would hear of it
+  only once it closed the capture. A panic in `handle` itself never reaches
+  `run_capture`, since `handle` catches its own.
 - After a restart, the first good frame sends `Recovered` to the reader
   thread once it is handled without a panic, so a capture that panics on it
   has not recovered.

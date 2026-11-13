@@ -37,7 +37,8 @@
 //! When the capture ends, the reader looks for the window again, because
 //! many applications replace their window as they run, such as when they
 //! switch to full screen. A capture ends when the window closes, when the
-//! capture cannot go on, such as after the graphics device was lost, after
+//! capture cannot go on, such as after the graphics device was lost or the
+//! capture's own code panicked, after
 //! [`RESTART_AFTER`] frames in a row fail, and when reading a frame panics,
 //! which the capture's frame handler catches so it does not end the
 //! capture's thread without a word. After a capture ends this
@@ -1320,7 +1321,9 @@ mod tests {
     use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::saved::{SavedCheck, SavedFix, SavedValue};
     use appytappy_sources::screen::settle::SETTLE;
-    use appytappy_sources::screen::{FrameHandler, Image, OutsideWindow, Placement, Region};
+    use appytappy_sources::screen::{
+        FrameHandler, Image, OutsideWindow, Placement, Region, run_capture,
+    };
     use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
 
     use super::*;
@@ -3216,6 +3219,62 @@ mod tests {
         );
         assert!(!desk.asks_soon(), "it waits longer");
         drop((first, second, third));
+        stopped(reader, desk, &readings);
+    }
+
+    #[test]
+    fn a_capture_whose_thread_panics_outside_its_handler_starts_again_after_a_wait() {
+        let (system, desk) = FakeSystem::new();
+        let (events, readings) = mpsc::channel::<Reading>();
+        let reader = Reader::checking_every(
+            Duration::from_secs(60),
+            system,
+            job(vec![red_at("icon", 0, 0)]),
+            Trace::OFF,
+            events,
+        )
+        .expect("start");
+        let red = frame_image(2, 2, |_, _| true);
+        desk.answer(Ok(desktop()));
+        let (_, _, mut first) = desk.capture();
+        run_capture(&mut first, |handler| {
+            handler(Ok(frame(&red, WINDOW)));
+            panic!("the copy broke");
+        });
+        let told: Vec<Reading> = (0..3)
+            .filter_map(|_| readings.recv_timeout(PATIENCE).ok())
+            .collect();
+        assert!(
+            matches!(told.first(), Some(Reading::Sample { .. })),
+            "{told:?}"
+        );
+        assert_eq!(
+            told.get(1..),
+            Some(
+                [
+                    Reading::Unseen {
+                        session: SessionId(3),
+                        reader: ReaderNumber(2),
+                    },
+                    Reading::Problem {
+                        session: SessionId(3),
+                        problem: "its capture ended: the capture panicked: the copy broke"
+                            .to_owned(),
+                    },
+                ]
+                .as_slice()
+            ),
+            "it forgets what the capture read and logs why"
+        );
+        assert!(!desk.asks_soon(), "it waits before capturing again");
+        desk.answer(Ok(desktop()));
+        let (_, _, mut second) = desk.capture();
+        second(Ok(frame(&red, WINDOW)));
+        assert!(
+            matches!(readings.recv_timeout(PATIENCE), Ok(Reading::Sample { .. })),
+            "the new capture reads"
+        );
+        drop((first, second));
         stopped(reader, desk, &readings);
     }
 

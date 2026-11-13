@@ -56,7 +56,8 @@ after a wait, which starts at 1 second and gets longer, up to 30 seconds,
 each time it happens again soon after. Its automations stay as
 they were meanwhile. Include both log lines when you report the problem.
 
-If the log says that reading a frame panicked, AppyTappy has a bug as well.
+If the log says that reading a frame panicked, or that a capture panicked,
+AppyTappy has a bug as well.
 It reads the application's values again after the same kind of wait. Include
 the log line when you report the problem.
 

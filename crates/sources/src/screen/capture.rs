@@ -3,8 +3,10 @@
 //! [`Capture`] trait that the operating system's capture implements, with a
 //! stand-in for systems that cannot capture.
 
+use std::any::Any;
 use std::convert::Infallible;
 use std::io;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -128,8 +130,56 @@ impl Frame<'_> {
 /// [`crate::schedule::ReadSchedule`] gives, and runs on the capture's own
 /// thread. A panic in it unwinds that thread, so the capture stops and
 /// tells nobody until it is closed: a handler whose owner must hear of a
-/// panic catches its own.
+/// panic catches its own. A panic elsewhere on that thread reaches the
+/// handler as the capture's end, as [`run_capture`] says.
 pub type FrameHandler = Box<dyn FnMut(io::Result<Frame<'_>>) -> Duration + Send>;
+
+/// Runs `work`, which hands a capture's frames to `handler` on the
+/// capture's thread, and tells the handler when the work panics.
+///
+/// A panic outside the handler reaches it as a
+/// [`io::ErrorKind::NotConnected`] error with the panic's message, as for
+/// any capture that cannot go on. Unwound, the panic would end the thread,
+/// and the handler would hear nothing until the capture closed. A panic in
+/// the handler itself unwinds on, because a handler that panicked is not
+/// called again.
+pub fn run_capture(
+    handler: &mut FrameHandler,
+    work: impl FnOnce(&mut dyn FnMut(io::Result<Frame<'_>>) -> Duration),
+) {
+    let mut handling = false;
+    // The handler is called again only when the panic did not come from it,
+    // so it never sees itself half changed.
+    let worked = panic::catch_unwind(AssertUnwindSafe(|| {
+        work(&mut |frame| {
+            handling = true;
+            let wait = handler(frame);
+            handling = false;
+            wait
+        });
+    }));
+    let Err(payload) = worked else {
+        return;
+    };
+    if handling {
+        panic::resume_unwind(payload);
+    }
+    let ended = io::Error::new(
+        io::ErrorKind::NotConnected,
+        format!("the capture panicked: {}", panic_reason(payload.as_ref())),
+    );
+    // The wait is moot: nothing more will arrive.
+    let _wait = handler(Err(ended));
+}
+
+/// The message a panic left.
+fn panic_reason(payload: &(dyn Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("an unknown reason")
+}
 
 /// Captures one window's frames.
 ///
@@ -520,6 +570,82 @@ mod tests {
                 prop_assert_eq!(placed.size(), region.size());
             }
         }
+    }
+
+    /// A handler that records what it was handed: each frame's gray, or
+    /// each error's kind and message. It panics on a frame of gray 0.
+    fn recording() -> (FrameHandler, mpsc::Receiver<Result<u8, String>>) {
+        let (handed, received) = mpsc::channel();
+        let handler: FrameHandler = Box::new(move |frame| {
+            let what = match frame {
+                Ok(frame) => {
+                    let gray = frame.image.pixels()[0][0];
+                    assert_ne!(gray, 0, "the handler broke");
+                    Ok(gray)
+                },
+                Err(error) => Err(format!("{:?}: {error}", error.kind())),
+            };
+            handed.send(what).unwrap();
+            Duration::ZERO
+        });
+        (handler, received)
+    }
+
+    fn hand(handler: &mut dyn FnMut(io::Result<Frame<'_>>) -> Duration, image: &Image) {
+        handler(Ok(Frame {
+            window_size: image.size(),
+            image,
+            received: Instant::now(),
+            delay: Duration::ZERO,
+        }));
+    }
+
+    #[test]
+    fn a_capture_that_panics_after_a_frame_tells_its_handler_it_ended() {
+        let (mut handler, handed) = recording();
+        run_capture(&mut handler, |handler| {
+            hand(handler, &pixel(10));
+            panic!("the copy broke");
+        });
+        assert_eq!(
+            handed.try_iter().collect::<Vec<_>>(),
+            [
+                Ok(10),
+                Err("NotConnected: the capture panicked: the copy broke".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_capture_that_ends_without_a_panic_tells_its_handler_nothing_more() {
+        let (mut handler, handed) = recording();
+        run_capture(&mut handler, |handler| hand(handler, &pixel(10)));
+        assert_eq!(handed.try_iter().collect::<Vec<_>>(), [Ok(10)]);
+    }
+
+    #[test]
+    fn a_handler_that_panics_is_not_called_again() {
+        let (mut handler, handed) = recording();
+        let unwound = panic::catch_unwind(AssertUnwindSafe(|| {
+            run_capture(&mut handler, |handler| {
+                hand(handler, &pixel(10));
+                hand(handler, &pixel(0));
+            });
+        }));
+        let payload = unwound.expect_err("the handler's panic unwinds on");
+        let reason = panic_reason(payload.as_ref());
+        assert!(reason.contains("the handler broke"), "{reason}");
+        assert_eq!(handed.try_iter().collect::<Vec<_>>(), [Ok(10)]);
+    }
+
+    #[test]
+    fn a_panic_reason_is_its_message() {
+        let fixed: Box<dyn Any + Send> = Box::new("fixed");
+        let formatted: Box<dyn Any + Send> = Box::new(format!("formatted {}", 1));
+        let other: Box<dyn Any + Send> = Box::new(1_u8);
+        let reasons =
+            [fixed, formatted, other].map(|payload| panic_reason(payload.as_ref()).to_owned());
+        assert_eq!(reasons, ["fixed", "formatted 1", "an unknown reason"]);
     }
 
     #[test]
