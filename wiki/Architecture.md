@@ -725,9 +725,9 @@ design enforces the block in three places:
    that a bar's two colors differ, and that a number check told which
    characters to read reads at least one, so a file that breaks one does
    not load; `saved::build` and the setup app's check editor report its
-   error, with the state's position for a bad name. A value that breaks a rule that
-   `saved::build` checks itself, such as a region that fits or a picture of
-   the region's size, stops only itself.
+   error, with the state's position for a bad name. A value that breaks a
+   rule that `saved::build` checks itself, such as a region that fits or a
+   picture of the region's size, stops only itself.
 
 The setup app can also send one click itself, when the user asks for it on
 the click target screen. No automation is compiled for that click, so the
