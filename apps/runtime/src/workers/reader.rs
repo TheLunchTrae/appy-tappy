@@ -855,7 +855,7 @@ mod tests {
     use appytappy_config::app_file::SizeChangesDef;
     use appytappy_config::settings_file::TraceCategory;
     use appytappy_sources::screen::{FrameHandler, Region, run_capture};
-    use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
+    use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
     use super::examples::*;
     use super::*;
@@ -1060,10 +1060,6 @@ mod tests {
             &self,
             _process: appytappy_config::anti_cheat::ProcessId,
         ) -> io::Result<appytappy_config::app_file::BuildDef> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn screen_pixel(&self, _: i32, _: i32) -> io::Result<Rgb> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
     }
@@ -1660,10 +1656,6 @@ mod tests {
             &self,
             _process: appytappy_config::anti_cheat::ProcessId,
         ) -> io::Result<appytappy_config::app_file::BuildDef> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn screen_pixel(&self, _: i32, _: i32) -> io::Result<Rgb> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
     }

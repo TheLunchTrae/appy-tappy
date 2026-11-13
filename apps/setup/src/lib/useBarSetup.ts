@@ -17,6 +17,7 @@ import {
   measuredFor,
 } from './detect.ts';
 import { background } from './repeat.ts';
+import { ask } from './request.ts';
 
 /** How long a measure waits after the last change before it is made, so a dragged region asks once. */
 const MEASURE_DELAY_MS = 150;
@@ -107,24 +108,16 @@ export function useBarSetup(
     if (wanted === null || key === null || colors === null) {
       return undefined;
     }
-    let current = true;
-    const timer = setTimeout(() => {
-      measureBar(key.region, key.drawnOn, colors.filled, colors.empty)
-        .then((measure) => {
-          if (current) {
-            setMade({ key: wanted, measure, error: null });
-          }
-        })
-        .catch((error: unknown) => {
-          if (current) {
-            setMade({ key: wanted, measure: null, error: errorText(error) });
-          }
-        });
-    }, MEASURE_DELAY_MS);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
+    return ask(
+      async () => measureBar(key.region, key.drawnOn, colors.filled, colors.empty),
+      (measure) => {
+        setMade({ key: wanted, measure, error: null });
+      },
+      (error) => {
+        setMade({ key: wanted, measure: null, error: errorText(error) });
+      },
+      MEASURE_DELAY_MS,
+    );
     // `wanted` spells out the key and the colors.
   }, [wanted]);
   const measure = measuredFor(made, wanted)?.measure ?? null;

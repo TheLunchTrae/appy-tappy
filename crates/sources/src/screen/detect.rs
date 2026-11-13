@@ -30,9 +30,8 @@ use std::fmt;
 use std::iter;
 use std::ops::Range;
 
-use super::Image;
 use super::check::{BarFill, BarPixel, distance};
-use crate::system::Rgb;
+use super::{Image, Rgb};
 
 /// The shortest long side, in pixels, that a bar is looked for on.
 pub const MIN_LENGTH: usize = 12;

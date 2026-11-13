@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 
 import type { SizeDef, ValueDef } from '../../lib/bindings.ts';
-import { type Draft, CHECK_KINDS, KIND_NAMES, withKind } from '../../lib/check.ts';
+import { type Draft, CHECKS, CHECK_KINDS, withKind } from '../../lib/check.ts';
 import { CHECK_HINT } from '../../lib/hints.ts';
 import type { MovingContent } from '../../lib/moving.ts';
 import type { PinView } from '../../lib/pin.ts';
@@ -93,7 +93,7 @@ export function WhereFields({
                 onStopPicking();
               }}
             >
-              {KIND_NAMES[kind]}
+              {CHECKS[kind].label}
             </button>
           ))}
         </div>
