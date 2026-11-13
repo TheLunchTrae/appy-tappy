@@ -2071,7 +2071,7 @@ mod tests {
             process: ProcessId::new(7),
             executable: "Example.exe".to_owned(),
         };
-        let interval = ReadInterval::default();
+        let interval = ReadInterval::DEFAULT;
         let (job, started) = crew.reader_job(
             SessionId(3),
             ReaderNumber(1),
