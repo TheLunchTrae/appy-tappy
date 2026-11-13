@@ -154,7 +154,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   application's window with its [window match](Setup-app.md#window-matching),
   copies only the regions of the values that read at the window's current
   size, packed one under another, and reads each value from its place in
-  that packed image. Where each value reads at a size, drawn there, fixed
+  that packed image; a value that reads alone has the whole image, so its
+  pixels are read where the capture put them, without another copy. Where each value reads at a size, drawn there, fixed
   there, or scaled from its first drawing, is resolved once each time the
   window settles at the size, after it showed that size alone for 250 ms
   ([Window sizes](Screen-regions.md#window-sizes)). A `Layout` in
