@@ -1404,8 +1404,14 @@ stateDiagram-v2
   one.
 - **Record more** needs the same region, ink, tolerance, and window size, and
   clears the problem. When any of them differs (`settingsDiffer`), **Use its
-  settings** shows and puts all of them back, with the region on a screenshot
-  of the recording's size.
+  settings** shows and puts the ink and the tolerance back
+  (`withRecordedInk`). A reference taught by itself read at a box, and the UI
+  keeps the ID of the box each new recording starts at. **Use its settings**
+  puts that box back where the recording read, first in the list
+  ([Reference boxes](#reference-boxes)), on its own screenshot when that has
+  the recording's size or else on the newest that has (`recordedPlace`). A
+  reference taught for a value reads at the value's region, which the editor
+  cannot change, so there the boxes stay. It never sets the draft's `region`.
 - **Ended** is a stopped recording whose capture slot is **Ended**
   (`Recording::end`). Its problem says to change window, and **Record more**
   and a new **Record** are refused. Its readings stay for review, so a
@@ -1526,7 +1532,7 @@ stateDiagram-v2
     Idle --> Pressed: press, which starts taking a screenshot
     Pressed --> Pressed: the drag draws a box
     Pressed --> Pressed: release, while the screenshot is still being taken
-    Pressed --> Pressed: the screenshot arrives or fails, before the release
+    Pressed --> Pressed: the screenshot arrives or fails, before the release, and shows once it has arrived
     Pressed --> Idle: the release and the screenshot have both come, which places the region
 ```
 
@@ -1537,7 +1543,15 @@ stateDiagram-v2
   the [region drag](#region-drag) hands over, in the pixels of the live
   frame, whether the pointer was let go, and the screenshot: being taken,
   arrived, or failed. A box that arrives after the release is ignored. A
-  second press changes nothing.
+  second press changes nothing. `liveShown` says what the stage shows of it:
+  - A screenshot that arrives before the release shows in place of the frame
+    held still, once its pixels are there, and the drag goes on over it. A
+    failed one leaves the frame.
+  - From the release until the screenshot arrives, the box drawn stays
+    outlined, and the surface takes no new drag.
+  - A live frame asked for before the press can arrive after it. Its size is
+    not taken while the view holds still (`liveSizeAfter`), since the box is
+    measured in the size held.
 - **Placed.** Once the pointer is let go and the screenshot has arrived or
   failed, in either order, the machine returns to **Idle** and emits what the
   press placed: the screenshot and the box. The capture screen then shows the
@@ -1580,11 +1594,13 @@ stateDiagram-v2
 
 - **Where** (**Where to read**) names the value, picks its check, and sets
   its place on one screenshot, by a [live draw](#live-draw) or on a
-  screenshot the user takes. The strip lists only that screenshot. A new
-  screenshot becomes the one the place is on: the region moves onto it when
-  it has the size the region is drawn at, and is cleared when it has
-  another (`onPicture` in `apps/setup/src/lib/check.ts`). This step records
-  nothing.
+  screenshot the user takes. The strip lists only that screenshot, and
+  entering the step shows it (`shownOnStep`), whichever screenshot a later
+  step showed. A new screenshot becomes the one the place is on: the region
+  moves onto it when it has the size the region is drawn at, and is cleared
+  when it has another (`onPicture` in `apps/setup/src/lib/check.ts`). While
+  either size is unknown, such as a screenshot whose pixels did not arrive,
+  the region stays as it is. This step records nothing.
 - **How** is **Characters** for a number that is not a fix: it picks the
   reference, opens the reference editor, or records readings. For every
   other value it is **How to read it**: the check's fields, the reading on
@@ -1605,9 +1621,10 @@ stateDiagram-v2
 
 A reference being taught learns from `Draft.boxes`
 (`apps/setup/src/lib/boxes.ts`): each box has an ID no other box of the draft
-has, the screenshot it is on, its region, and its text. `useBoxes` in
-`apps/setup/src/lib/useBoxes.ts` keeps the ID of the selected box beside
-them.
+has, the screenshot it is on, its region, and its text. `boxStep` there is the
+pure `(state, event)` transition over the boxes and the ID of the selected
+box, and `useBoxes` in `apps/setup/src/lib/useBoxes.ts` holds that ID and
+sends each event to the draft's boxes.
 
 ```mermaid
 stateDiagram-v2
@@ -1616,6 +1633,8 @@ stateDiagram-v2
     Selected --> Selected: select another box, or move, resize, or retype this one
     Selected --> NoneSelected: delete the selected box
     Selected --> NoneSelected: the reference editor opens or closes
+    NoneSelected --> Selected: Use its settings puts the reading box back
+    Selected --> Selected: Use its settings puts the reading box back
 ```
 
 - **Selected.** The stage draws the selected box as the region surface's
@@ -1623,18 +1642,37 @@ stateDiagram-v2
   boxes there as outlines. Selecting a box in the list shows its screenshot.
   **Find more like it** samples the selected box, and the matching pixels
   preview counts the pixels in it.
+- **A drag** on the screenshot shown hands over a region as drawn or
+  adjusted ([Region drag](#region-drag)). A drawn one adds a box there and
+  selects it, and focus moves to its text in the list. An adjusted one
+  changes the selected box when that is on the screenshot shown, and no
+  other box.
 - **A selected box on another screenshot** than the one shown stays
-  selected, but the stage has no region: a drag there draws a new box.
+  selected, but the stage has no region: a drag there adds a new box, an
+  adjusted one too.
+- **A new box's ID** is one past the highest ID among the boxes the event is
+  applied to, so two events before a render each go on from the boxes the
+  last one left, and a deleted box's ID is not used again while a higher one
+  is in use.
+- **Delete** in a box's row, or the Delete key on the stage while the box is
+  selected there, removes it. Deleting the selected box selects none.
 - **A deleted box's ID** selects nothing (`boxOf`), so a selection that
   outlives its box reads as **NoneSelected**.
 - A box with no text teaches nothing (`boxLabels`). Added
   [found text](#found-text) becomes boxes with text.
 - The reference reads, and records, at the value's region when it is taught
   for a value, or else at its first box (`readingOf` in
-  `apps/setup/src/lib/check.ts`). Every box must be on a screenshot of that
-  one's size; on a screenshot of another size the stage refuses a new box
-  and says which size they go on (`boxBlocked`). While the editor is open,
-  the stage shows the boxes and not the value's region.
+  `apps/setup/src/lib/check.ts`), whose row the list marks **Reads here**.
+  Every box must be on a screenshot of that one's size; on a screenshot of
+  another size the stage refuses a new box and says which size they go on
+  (`boxBlocked`). While the editor is open, the stage shows the boxes and
+  not the value's region, and nothing in the editor changes the draft's
+  `region`.
+- **Use its settings** after a [recording](#recording) of a reference taught
+  by itself sends `restore`: the box the recording read at moves back to
+  where it read and to the top of the list, and is selected. When that box
+  was deleted, a new box with no text takes its place, which reads there and
+  teaches nothing.
 - Opening and closing the reference editor drops the boxes (`toReference`,
   `fromReference`); a draft of a reference keeps them.
 
@@ -1919,9 +1957,10 @@ stateDiagram-v2
   A find that is still `Pending` is left waiting, so one read at a time is
   out for a find, and the reader's next answer for it is for its newest
   read. A reread that names a search that was replaced or forgotten reads
-  nothing and answers nothing. The reader reads the same ink as the same
-  text, so a reread changes a find's text only after the color or the
-  tolerance changed.
+  nothing and answers nothing. A find named twice is read once. The reader
+  reads the same ink as the same text, so a reread changes a find's text
+  only after the color or the tolerance changed, and each find's view
+  carries the color and tolerance its ink was last cut with (`read_with`).
 - The UI keeps each find's tick, its text, and whether the user typed it
   (`useFound`) until a new search or a dismissal; a reread keeps them. A find
   starts unticked. It is listed when its text may show only characters the
@@ -1939,8 +1978,17 @@ stateDiagram-v2
 - **Deselect flagged** unticks every flagged find (`withoutFlagged`), which
   leaves **Add** the rest. It shows while a ticked find is flagged.
 - The UI offers **Reread** for the listed finds the reader could not read
-  and the flagged ones whose text is the reader's guess (`rereadable`). Text
-  the user typed is never read again.
+  and the flagged ones whose text is the reader's guess (`rereadOffer`). Text
+  the user typed is never read again. It reads again each find whose read
+  failed, since a failure can pass, and each guess last read with another
+  color or tolerance than the draft has now. When that leaves none, the
+  button stays, does nothing, and says to change the color or the
+  tolerance.
+- The screenshot outlines the finds the list holds (`listed`), each under
+  its number in the search, so a skipped find leaves a gap in the numbers.
+  A find ticked while it was being read is skipped like any other once its
+  text shows characters the reference does not need, and the note that
+  counts the skipped finds says so.
 - **Add** appends the ticked finds to the draft's boxes
   ([Reference boxes](#reference-boxes)), each with its own region and text,
   and forgets the search. A later search of the same screenshot is given the
