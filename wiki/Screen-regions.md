@@ -174,8 +174,9 @@ client area's (`GetWindowInfo`, which gives it in screen pixels whole, also
 for a window the system stretches or one laid out right to left), as the
 capture reads them for each frame it copies, and `screen::in_frame` places
 each region it copies in the frame. `screen::content_on_screen` gives the same
-area on the screen, which `System::content_size` and
-`System::content_bounds` return. Where the client area cannot be read or
+area on the screen, which `System::content_bounds` returns: the one read of
+where a window's content is, for the size the reader places values at and for
+where a click lands. Where the client area cannot be read or
 covers none of the frame, the whole frame is the content.
 
 ## Window sizes

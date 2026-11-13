@@ -836,7 +836,7 @@ mod tests {
 
     use super::*;
     use crate::screen::{Image, Layout, Region};
-    use crate::system::System;
+    use crate::system::{Bounds, System};
     use crate::win::window_handle;
 
     /// Captures a visible window on the desktop of whoever runs it. It is
@@ -967,7 +967,8 @@ mod tests {
             })
             .expect("a visible window with a title bar");
         let (size, image) = capture_once(&system, window.handle, Crop::Whole);
-        assert_eq!(Some(size), system.content_size(window.handle).unwrap());
+        let content = system.content_bounds(window.handle).unwrap();
+        assert_eq!(Some(size), content.and_then(Bounds::size));
         assert_eq!(image.size(), size);
     }
 

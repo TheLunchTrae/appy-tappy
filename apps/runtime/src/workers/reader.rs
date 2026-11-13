@@ -80,7 +80,7 @@ use appytappy_sources::screen::check::CheckError;
 use appytappy_sources::screen::saved::Unread;
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, Frame, FrameMeaning, Placed, Size};
-use appytappy_sources::system::{Pick, SessionWindow, System, session_window, shows};
+use appytappy_sources::system::{Bounds, Pick, SessionWindow, System, session_window, shows};
 
 use crate::model::{ReaderNumber, SessionId};
 use crate::plan::AppPlan;
@@ -807,9 +807,10 @@ fn settled_elsewhere(
 /// needs no case of its own.
 fn framed_at<S: System>(system: &S, job: &Job, window: u64, placed: Placed) -> Placed {
     system
-        .content_size(window)
+        .content_bounds(window)
         .ok()
         .flatten()
+        .and_then(Bounds::size)
         .map(|size| place(&job.plan, size))
         .filter(|placed| placed.layout().is_some())
         .unwrap_or(placed)
@@ -2401,8 +2402,14 @@ mod tests {
             }))
         }
 
-        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
-            Ok(self.framed)
+        fn content_bounds(&self, _window: u64) -> io::Result<Option<Bounds>> {
+            // Away from the screen's corner, as a window's content is.
+            Ok(self.framed.map(|size| Bounds {
+                left: 100,
+                top: 50,
+                right: 100_i32.checked_add_unsigned(size.width).unwrap(),
+                bottom: 50_i32.checked_add_unsigned(size.height).unwrap(),
+            }))
         }
 
         fn executable_build(
@@ -2959,10 +2966,6 @@ mod tests {
                 shown: !self.minimized.contains(&window),
                 front: false,
             }))
-        }
-
-        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 
         fn executable_build(
