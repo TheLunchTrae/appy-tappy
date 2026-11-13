@@ -343,12 +343,17 @@ pub(super) fn read_back(
     pictures: &Pictures,
 ) -> Result<saved::SavedValue, String> {
     let file = &app.file;
-    saved::build(screen, &file.references, file.size_changes, |picture| {
-        pictures
-            .iter()
-            .find(|(name, _)| name == picture)
-            .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
-    })
+    saved::build(
+        screen,
+        &mut saved::Readers::new(&file.references),
+        file.size_changes,
+        |picture| {
+            pictures
+                .iter()
+                .find(|(name, _)| name == picture)
+                .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
+        },
+    )
     .map_err(|error| match error {
         SavedError::NoReference { .. } => format!("{} no longer has that reference.", file.name),
         SavedError::NoCharacters { id, characters } => {

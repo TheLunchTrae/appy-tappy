@@ -714,8 +714,11 @@ design enforces the block in three places:
    that only their checked constructors make, and neither has `Deserialize` or
    `Default`, so code that skips validation does not compile. The screen
    source has no such split: `saved::build` in `appytappy-sources` takes the
-   raw `ScreenDef` and `ReferenceDef` from `app.json` and builds the check it
-   reads with. `CheckDef::check` in `config` owns how many states a state
+   raw `ScreenDef` from `app.json` and builds the check it reads with. It
+   takes the application's `saved::Readers` too, which learn each
+   `ReferenceDef` the first time a value reads with it, so loading an
+   application decodes a reference's pictures once however many values read
+   with it. `CheckDef::check` in `config` owns how many states a state
    check has, that their names differ, and that a bar's two colors differ,
    so a file that breaks one does not load; `saved::build` and the setup
    app's check editor report its error. A value that breaks a rule that
