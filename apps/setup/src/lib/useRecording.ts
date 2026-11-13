@@ -123,7 +123,7 @@ export function useRecording(): {
   // The owner refuses to go on with other settings rather than start over,
   // so kept readings and review edits are never dropped without a discard.
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
-    turn.begin();
+    turn.drop();
     try {
       const { app, pin, region, ink, tolerance, drawnOn, scope, examples } = settings;
       await startRecording({ app, region, screenshot: drawnOn, pin, ink, tolerance, scope, examples }, more);
@@ -140,7 +140,7 @@ export function useRecording(): {
   };
 
   const stop = async (): Promise<boolean> => {
-    turn.begin();
+    turn.drop();
     try {
       await stopRecording();
       setView(await recordingState());
@@ -153,7 +153,7 @@ export function useRecording(): {
   };
 
   const discard = async (): Promise<boolean> => {
-    turn.begin();
+    turn.drop();
     try {
       await discardRecording();
       setView(null);

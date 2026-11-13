@@ -49,6 +49,11 @@ const status = value('status', 'Status', {
   ],
   tolerance: 16,
 });
+const loaded = value('loaded', 'Loaded', {
+  kind: 'barFill',
+  filled: white,
+  empty: { red: 0, green: 0, blue: 0 },
+});
 
 const apps: readonly AppSummary[] = [
   {
@@ -66,7 +71,7 @@ const apps: readonly AppSummary[] = [
       sizeChanges: 'often',
       antiCheat: 'unknown',
       origin: { kind: 'byHand' },
-      values: [progress, iconVisible, status],
+      values: [progress, iconVisible, status, loaded],
       references: [],
     },
     error: null,
@@ -93,10 +98,12 @@ const pauseMusic: AutomationDef = {
 
 describe('values', () => {
   test('a value says what it reads', () => {
-    const [number, flag, state] = choices;
-    if (number === undefined || flag === undefined || state === undefined) {
+    const [number, flag, state, bar] = choices;
+    if (number === undefined || flag === undefined || state === undefined || bar === undefined) {
       throw new Error('values exist');
     }
+    // How full a bar is reads as a number, like text does.
+    expect(readsText(bar)).toBe('Loaded reads a number.');
     expect(readsText(number)).toBe('Progress reads a number.');
     expect(readsText(flag)).toBe('Icon visible reads yes or no.');
     expect(readsText(state)).toBe('Status reads a state: Paused, Live, or none.');
@@ -121,6 +128,7 @@ describe('values', () => {
       ['example', 'Example App', 'progress', 'number'],
       ['example', 'Example App', 'icon_visible', 'flag'],
       ['example', 'Example App', 'status', 'state'],
+      ['example', 'Example App', 'loaded', 'number'],
     ]);
     expect(findValue(choices, { app: 'example', value: 'icon_visible' })?.value).toBe(iconVisible);
     expect(findValue(choices, { app: 'other', value: 'progress' })).toBeNull();

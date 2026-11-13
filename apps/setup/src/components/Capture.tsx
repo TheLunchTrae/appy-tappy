@@ -445,7 +445,10 @@ export function Capture({
   });
   // The check, like review, shows in place of the window's picture.
   const checking = guided.guide !== null;
-  const sheeted = reviewing || checking;
+  // The recording review shows. Review is open only on a recording, and one name decides everything review changes
+  // on the screen, so the bar, the size, and the sheet never disagree.
+  const reviewed = reviewing ? recording : null;
+  const sheeted = reviewed !== null || checking;
   const checkStep = guided.guide === null ? null : progress(guided.guide, guided.places, needs);
   const recordError = recorder.commandError ?? review.error ?? recorder.pollError;
 
@@ -925,7 +928,7 @@ export function Capture({
     tried: check.state.kind === 'set',
     busy,
     overLimit,
-    reviewing: reviewing && recording !== null,
+    reviewing: reviewed !== null,
   });
   const whereDone = named && draft.region !== null;
   const fixName = fixing === null ? null : `Fix ${fixing.name}`;
@@ -1109,7 +1112,7 @@ export function Capture({
             />
           ),
         }
-      : reviewing && recording !== null
+      : reviewed !== null
         ? {
             actions: (
               <ReviewActions
@@ -1128,7 +1131,7 @@ export function Capture({
             ),
             content: (
               <ReviewSheet
-                view={recording}
+                view={reviewed}
                 found={found}
                 needs={needs}
                 adds={review.adds}
@@ -1157,11 +1160,11 @@ export function Capture({
             ...trail,
             ...(mode.kind !== 'reference' && editing !== null ? [flowName] : []),
             ...(sheeted ? [editedName] : []),
-            ...(checking && reviewing ? ['Review recording'] : []),
+            ...(checking && reviewed !== null ? ['Review recording'] : []),
           ],
           current: checking
             ? 'Check characters'
-            : reviewing
+            : reviewed !== null
               ? 'Review recording'
               : editing === null
                 ? flowName
@@ -1171,8 +1174,8 @@ export function Capture({
               ? { kind: 'recording', elapsedMs: recordingNow.elapsedMs }
               : checking
                 ? { kind: 'checking', step: checkStep }
-                : reviewing && recording !== null
-                  ? { kind: 'reviewing', recording }
+                : reviewed !== null
+                  ? { kind: 'reviewing', recording: reviewed }
                   : { kind: 'live', appName: choice.name },
           size: sheeted ? null : (native ?? null),
         }}
