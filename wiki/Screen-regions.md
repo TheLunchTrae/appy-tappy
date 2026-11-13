@@ -55,8 +55,10 @@ byte for each pixel of its region, for which of them are ink.
   its check, and then takes its number from its reference's glyphs for them
   alone: a shape takes the closest of those glyphs first, so a value of
   digits cannot read a `0` as the `O` its font also has. A digit the value
-  leaves out is the exception: a shape closer to it than to every glyph the
-  value reads is that digit, so a value that leaves out `9` fails to read a
+  leaves out is the exception: when the closest of the glyphs the value
+  leaves out is a digit, matches the shape, and is closer to it than every
+  glyph the value reads, the shape is that digit, so a value that leaves
+  out `9` fails to read a
   `9` rather than reading it as the `3` it may look like. A shape that
   matches none of them is matched against the reference's other glyphs, the
   ones the value leaves out, and one that matches is text: it ends the
