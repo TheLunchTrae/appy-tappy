@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
   RecordingScope,
@@ -23,6 +23,7 @@ import {
 } from '../lib/api.ts';
 import {
   type Built,
+  type CheckKind,
   type Draft,
   boxBlocked,
   buildCharacters,
@@ -59,7 +60,7 @@ import { agreedFixes, editStart, keepsStates, placedOn, saveable } from '../lib/
 import { TOO_MANY, coverage, startingExpected, tooMany } from '../lib/expected.ts';
 import { knownCharacters, readers } from '../lib/reference.ts';
 import { BarDetect, BarReadings } from './BarFields.tsx';
-import { type ColorTarget, ColorFields } from './CheckFields.tsx';
+import { BarColorFields, type ColorTarget, ColorFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
 import { ReadingDetailsBox } from './ReadingDetails.tsx';
 import { FoundMarks, FoundPanel } from './Found.tsx';
@@ -1002,6 +1003,76 @@ export function Capture({
     </button>
   );
 
+  const colorsOf = {
+    draft,
+    picking,
+    canPick: shownPicture !== null,
+    preview: previewField,
+    onPicking: setPicking,
+  };
+  const firstDrawing = <p className="note">At this size it reads with the colors of its first drawing.</p>;
+  // What each kind of check is set up with in the step that reads and saves it, keyed by kind, so a new kind does
+  // not compile until it has fields. A number's reference has a step of its own, so here it only has a fix's.
+  const howFields: Readonly<Record<CheckKind, () => ReactNode>> = {
+    number: () =>
+      fixing === null || sharedReference === null ? null : (
+        <ReadWith
+          references={file?.references ?? null}
+          shared={sharedReference}
+          selected={draft.reference}
+          onShared={() => {
+            setDraft((current) => ({ ...current, reference: sharedReference }));
+          }}
+          onLearn={(like) => {
+            background(openEditor(null, like));
+          }}
+        />
+      ),
+    barFill: () =>
+      fixing === null ? (
+        <>
+          <BarDetect bar={bar} picked={draft} position={position} blocked={detectBlocked} />
+          <BarColorFields {...colorsOf} />
+          <BarReadings bar={bar} position={position} />
+        </>
+      ) : (
+        firstDrawing
+      ),
+    color: () => (fixing === null ? <ColorFields {...colorsOf} onDraft={setDraft} /> : firstDrawing),
+    state: () =>
+      edited !== null && keepsStates(draft, edited.screen) ? (
+        <SavedStates
+          value={edited}
+          draft={draft}
+          retakeBlocked={
+            selected === null
+              ? 'Select a screenshot that shows the first state.'
+              : otherSize === null
+                ? null
+                : `Select a screenshot at ${sizeText(edited.screen.windowSize)}.`
+          }
+          onDraft={setDraft}
+          onRetake={() => {
+            if (selected !== null) {
+              setDraft((current) => withState(current, selected));
+            }
+          }}
+        />
+      ) : (
+        <StatesField
+          draft={draft}
+          full={full}
+          selected={selected}
+          masks={selection.masks}
+          reading={check.reading}
+          position={position}
+          onDraft={setDraft}
+          onShow={setSelected}
+          fix={fixing !== null}
+        />
+      ),
+  };
+
   // What shows in place of the window's picture, with its buttons: the check of the characters, or review.
   const sheet =
     guided.guide !== null
@@ -1329,68 +1400,7 @@ export function Capture({
             </>
           ) : (
             <>
-              {fixing !== null && draft.kind === 'number' && sharedReference !== null ? (
-                <ReadWith
-                  references={file?.references ?? null}
-                  shared={sharedReference}
-                  selected={draft.reference}
-                  onShared={() => {
-                    setDraft((current) => ({ ...current, reference: sharedReference }));
-                  }}
-                  onLearn={(like) => {
-                    background(openEditor(null, like));
-                  }}
-                />
-              ) : fixing !== null && (draft.kind === 'barFill' || draft.kind === 'color') ? (
-                <p className="note">At this size it reads with the colors of its first drawing.</p>
-              ) : threeSteps ? null : draft.kind === 'number' ? (
-                referencePicker
-              ) : edited !== null && keepsStates(draft, edited.screen) ? (
-                <SavedStates
-                  value={edited}
-                  draft={draft}
-                  retakeBlocked={
-                    selected === null
-                      ? 'Select a screenshot that shows the first state.'
-                      : otherSize === null
-                        ? null
-                        : `Select a screenshot at ${sizeText(edited.screen.windowSize)}.`
-                  }
-                  onDraft={setDraft}
-                  onRetake={() => {
-                    if (selected !== null) {
-                      setDraft((current) => withState(current, selected));
-                    }
-                  }}
-                />
-              ) : draft.kind === 'state' ? (
-                <StatesField
-                  draft={draft}
-                  full={full}
-                  selected={selected}
-                  masks={selection.masks}
-                  reading={check.reading}
-                  position={position}
-                  onDraft={setDraft}
-                  onShow={setSelected}
-                  fix={fixing !== null}
-                />
-              ) : (
-                <>
-                  {draft.kind === 'barFill' ? (
-                    <BarDetect bar={bar} picked={draft} position={position} blocked={detectBlocked} />
-                  ) : null}
-                  <ColorFields
-                    draft={draft}
-                    picking={picking}
-                    canPick={shownPicture !== null}
-                    preview={previewField}
-                    onDraft={setDraft}
-                    onPicking={setPicking}
-                  />
-                  {draft.kind === 'barFill' ? <BarReadings bar={bar} position={position} /> : null}
-                </>
-              )}
+              {howFields[draft.kind]()}
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
               {lookPanel}
               {check.state.kind === 'set' && check.preview !== null && check.preview.unread !== null ? (
