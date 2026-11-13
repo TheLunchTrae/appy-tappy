@@ -26,6 +26,7 @@ mod settings;
 mod stores;
 mod updates;
 mod window_list;
+mod zip_pack;
 
 use std::env;
 use std::process::{self, ExitCode};
