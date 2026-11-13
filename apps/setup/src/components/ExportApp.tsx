@@ -14,9 +14,8 @@ interface Props {
 }
 
 /**
- * Says what an exported application's file holds and shows, then makes it and saves it where the user picks, asking
- * where only once it is made.
- * Nothing is sent anywhere.
+ * Says what an exported application's file holds and shows, then makes it and saves it where the user picks. Nothing
+ * is sent anywhere.
  */
 export function ExportApp({ app, name, onClose }: Props) {
   const [busy, setBusy] = useState(false);

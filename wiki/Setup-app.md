@@ -1352,10 +1352,11 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   lines.
 - `debug_bundle` hands the owner's file locations to a blocking task, which
   builds the zip in memory away from the owner thread, so the page's other
-  commands do not wait for a large trace to be packed. The page saves the
-  returned bytes with the WebView's save picker. Pictures are stored,
-  everything else is deflated, with the `zip` crate and its pure-Rust deflate
-  backend. `setup.log` records the whole time, packing included.
+  commands do not wait for a large trace to be packed. The page asks where to
+  save with the WebView's save picker first, then saves the returned bytes
+  there, as [Application import](State-machines.md#application-import) says
+  of the export dialogs. Pictures are stored, everything else is deflated,
+  with the `zip` crate and its pure-Rust deflate backend. `setup.log` records the whole time, packing included.
 
 The same setting adds debug details to the editors. The page asks for them
 only while `showDebug` is true, so with it off they cost nothing:
