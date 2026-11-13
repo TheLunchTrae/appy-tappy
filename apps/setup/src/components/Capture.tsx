@@ -938,13 +938,17 @@ export function Capture({
   const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
   const editedName = editing === null || editing.name.trim() === '' ? 'New reference' : editing.name.trim();
   // What the recording found, against what the reference needs and knows without it.
-  const found = discovery(
-    needs,
-    knownCharacters([...taught.saved, ...taught.labeled]),
-    recording?.readings ?? [],
-    review.entries,
-    review.checked,
-    recording?.shapes.length ?? 0,
+  const found = useMemo(
+    () =>
+      discovery(
+        needs,
+        knownCharacters([...taught.saved, ...taught.labeled]),
+        recording?.readings ?? [],
+        review.entries,
+        review.checked,
+        recording?.shapes.length ?? 0,
+      ),
+    [needs, taught, recording, review.entries, review.checked],
   );
 
   // A number's characters and its check are steps of their own; other kinds read and save in their second step.
@@ -1082,7 +1086,7 @@ export function Capture({
           full={full}
           selected={selected}
           masks={selection.masks}
-          reading={check.reading}
+          reads={check.reads}
           position={position}
           onDraft={setDraft}
           onShow={setSelected}
@@ -1424,12 +1428,7 @@ export function Capture({
               {check.state.kind === 'set' && check.preview !== null && check.preview.unread !== null ? (
                 <p className="reading note">{check.preview.unread}</p>
               ) : (
-                <ReadingBox
-                  built={trial.ok ? null : trial.next}
-                  state={check.state}
-                  reading={check.reading}
-                  problem={check.problem}
-                />
+                <ReadingBox built={trial.ok ? null : trial.next} state={check.state} reads={check.reads} />
               )}
               {edit.built === null || check.preview === null ? null : (
                 <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
@@ -1572,12 +1571,7 @@ export function Capture({
               />
             }
           />
-          <ReadingBox
-            built={built.ok ? null : built.next}
-            state={check.state}
-            reading={check.reading}
-            problem={check.problem}
-          />
+          <ReadingBox built={built.ok ? null : built.next} state={check.state} reads={check.reads} />
           {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
           <ReadingDetailsBox key={builtKind} ask={check.state.kind === 'set' ? explainReading : null} />
           <div className="sep" />

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { EMPTY_DRAFT, buildCharacters } from '../src/lib/check.ts';
-import { afterRead, type LiveRead, type ReadAnswer } from '../src/lib/liveCheck.ts';
+import { afterRead, type LiveRead, liveReads, NOTHING_READ, type ReadAnswer } from '../src/lib/liveCheck.ts';
 import { trialOf } from '../src/lib/useLiveCheck.ts';
 
 const shown: LiveRead = { reading: { kind: 'number', value: 87 }, problem: null };
@@ -78,5 +78,38 @@ describe('trialOf', () => {
       ok: false,
       next: 'Draw a box around the characters on a screenshot.',
     });
+  });
+});
+
+describe('a reading that shows already', () => {
+  test('is the same object after a read that answers it again, reading or problem', () => {
+    expect(afterRead(shown, 2, 2, { ok: true, reading: { kind: 'number', value: 87 } })).toBe(shown);
+    expect(afterRead(failing, 2, 2, { ok: false, problem: 'Not read on the live window now.' })).toBe(failing);
+    expect(afterRead(NOTHING_READ, 2, 2, { ok: true, reading: null })).toBe(NOTHING_READ);
+    // Another value, another kind with the same value, and a reading in place of a problem all show anew.
+    expect(afterRead(shown, 2, 2, read)).not.toBe(shown);
+    const on: LiveRead = { reading: { kind: 'state', value: 'true' }, problem: null };
+    expect(afterRead(on, 2, 2, { ok: true, reading: { kind: 'flag', value: true } })).not.toBe(on);
+    expect(afterRead(failing, 2, 2, { ok: true, reading: null })).toEqual(NOTHING_READ);
+  });
+
+  test('tells no one, so only a reading that changed renders anything', () => {
+    const reads = liveReads();
+    let told = 0;
+    const stop = reads.subscribe(() => {
+      told += 1;
+    });
+    expect(reads.shown()).toBe(NOTHING_READ);
+    reads.change((was) => afterRead(was, 1, 1, read));
+    expect([told, reads.shown()]).toEqual([1, { reading: { kind: 'number', value: 12 }, problem: null }]);
+    // The window reads the same eight times a second.
+    reads.change((was) => afterRead(was, 1, 1, read));
+    reads.change((was) => afterRead(was, 1, 1, read));
+    expect(told).toBe(1);
+    reads.change((was) => afterRead(was, 1, 1, failed));
+    expect(told).toBe(2);
+    stop();
+    reads.change(() => NOTHING_READ);
+    expect([told, reads.shown()]).toEqual([2, NOTHING_READ]);
   });
 });

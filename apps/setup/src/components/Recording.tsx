@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import type { RecordedReading, RecordingScope, RecordingView } from '../lib/bindings.ts';
 import { CHECK_CHARACTERS_HINT, RECORD_RESIZED_HINT, RECORD_SCOPE_HINT, TEXT_SIZES_HINT } from '../lib/hints.ts';
@@ -455,6 +455,9 @@ export function ReviewSheet(props: SheetProps) {
   useEffect(() => {
     head.current?.focus();
   }, []);
+  // The order follows the readings' shapes alone, and working it out compares every reading with the others.
+  const { readings } = view;
+  const order = useMemo(() => reviewOrder(readings), [readings]);
   return (
     <>
       <div className="sheet-head">
@@ -544,7 +547,7 @@ export function ReviewSheet(props: SheetProps) {
         </p>
       ) : (
         <ul className="sheet" aria-label="Recorded readings">
-          {reviewOrder(view.readings).map((index) => {
+          {order.map((index) => {
             const reading = view.readings[index];
             if (reading === undefined) {
               return null;
