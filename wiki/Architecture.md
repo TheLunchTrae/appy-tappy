@@ -812,7 +812,8 @@ the others, and a removal or overlay change that worked is not undone by such
 a report. With no monitors listed, a panel opens where it was left. The
 picture-in-picture panel reports where it was moved, and the owner saves that
 once the panel stops moving, or at once when that application's overlay reads
-its file again or its window closes. Other panels still wait to stop moving.
+its file again or its window closes. Other panels still wait to stop moving,
+and every panel's place is saved when the setup app shuts down.
 
 ## Unsafe code
 
