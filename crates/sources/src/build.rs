@@ -19,7 +19,7 @@ use appytappy_config::app_file::BuildDef;
 ///
 /// Returns the error from reading the file's size or the time it was
 /// written.
-pub fn read(path: &Path, version: Option<String>) -> io::Result<BuildDef> {
+pub(crate) fn read(path: &Path, version: Option<String>) -> io::Result<BuildDef> {
     let metadata = fs::metadata(path)?;
     // A file written before 1970 counts as written at its start.
     let modified = metadata
@@ -37,7 +37,7 @@ pub fn read(path: &Path, version: Option<String>) -> io::Result<BuildDef> {
 /// halves, or `None` for `0.0.0.0`, which a file without a real version
 /// carries.
 #[must_use]
-pub fn version_text(high: u32, low: u32) -> Option<String> {
+pub(crate) fn version_text(high: u32, low: u32) -> Option<String> {
     ((high, low) != (0, 0)).then(|| {
         format!(
             "{}.{}.{}.{}",
@@ -58,7 +58,7 @@ pub fn version_text(high: u32, low: u32) -> Option<String> {
 /// drive's connection, such as `\;LanmanRedirector\;Z:000000000002a7b1`.
 /// `None` when no drive names the path's device.
 #[must_use]
-pub fn drive_path(device_path: &str, drives: &[(String, String)]) -> Option<PathBuf> {
+pub(crate) fn drive_path(device_path: &str, drives: &[(String, String)]) -> Option<PathBuf> {
     let under = |device: &str| {
         let rest = device_path.get(device.len()..)?;
         (device_path

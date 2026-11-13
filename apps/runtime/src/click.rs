@@ -110,7 +110,7 @@ pub(crate) mod tests {
     use appytappy_sources::screen::{
         CaptureSession, Crop, Frame, FrameHandler, Image, Region, Size,
     };
-    use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
+    use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
     use std::io;
     use std::time::{Duration, Instant};
 
@@ -232,15 +232,7 @@ pub(crate) mod tests {
             }))
         }
 
-        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
         fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
     }
