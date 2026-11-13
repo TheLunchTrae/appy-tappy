@@ -36,8 +36,9 @@ automation and pick the value in it.
   **This content may move**, the check with its colors, states, and
   tolerances, the reference it reads with, the labels, the characters a
   reference needs, and the text you added with **Find more like it**.
-  Screenshots that **Record screenshots** kept are kept like the ones you
-  took.
+  Screenshots that **Record screenshots** kept stay marked as recorded, so a
+  value or reference you finish from the draft still says it was
+  [made with a recording](Values.md#how-a-value-was-made).
 
 A draft doesn't keep these, so finish them before you save it:
 

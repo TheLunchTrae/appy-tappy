@@ -61,8 +61,8 @@ function Asking({ state, onName, onClass }: AskingProps) {
         <dd>{checked === null ? 'Not recorded' : checked.replace(/^checked /u, '')}</dd>
         <dt>
           <span className="with-hint">
-            How it was made
-            <Hint topic="How it was made">{ORIGIN_HINT}</Hint>
+            How they were made
+            <Hint topic="How they were made">{ORIGIN_HINT}</Hint>
           </span>
         </dt>
         <dd>{originsText([...file.values, ...file.references].map((made) => made.origin))}</dd>

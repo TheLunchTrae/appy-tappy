@@ -3,7 +3,7 @@
 
 use appytappy_sources::screen::{Image, ImageError};
 
-use crate::drafts::{DraftDef, DraftSummary};
+use crate::drafts::{DraftDef, DraftShot, DraftSummary};
 use crate::screenshots::Screenshots;
 
 use super::Owner;
@@ -24,7 +24,8 @@ impl<H: Host> Owner<H> {
 
     /// Saves `draft` over the draft `id`, or as a new one, and answers its
     /// ID. With `screenshots`, it keeps this session's screenshots with it,
-    /// so the flow that finishes it can draw on them again. A screenshot
+    /// and which of them a recording of looks kept, so the flow that
+    /// finishes it can draw on them again. A screenshot
     /// larger than AppyTappy reads back is left out, and the draft says so
     /// with what is still to do.
     pub(crate) fn save_draft(
@@ -36,17 +37,10 @@ impl<H: Host> Owner<H> {
         let stores = self.stores()?;
         let mut pictures = Vec::new();
         let mut left_out = false;
-        let slots = if screenshots {
-            self.capture.screenshots().slots()
-        } else {
-            &[]
-        };
-        for (index, slot) in slots.iter().enumerate() {
-            let Some(image) = slot else {
-                continue;
-            };
+        let kept = self.capture.screenshots().kept().filter(|_| screenshots);
+        for (shot, image) in kept {
             match image.encode_png() {
-                Ok(bytes) => pictures.push((index, bytes)),
+                Ok(bytes) => pictures.push((shot, bytes)),
                 Err(ImageError::TooLarge { .. }) => left_out = true,
                 Err(error) => return Err(format!("A screenshot could not be kept ({error}).")),
             }
@@ -62,16 +56,17 @@ impl<H: Host> Owner<H> {
     }
 
     /// Makes the screenshots of the draft `id` this session's, in place of
-    /// any it took, each under the index it had when the draft was saved.
-    /// Answers those indexes, lowest first.
-    pub(crate) fn restore_draft_screenshots(&mut self, id: &str) -> Result<Vec<usize>, String> {
+    /// any it took, each under the index it had when the draft was saved and
+    /// marked recorded if a recording of looks had kept it. Answers each,
+    /// lowest index first.
+    pub(crate) fn restore_draft_screenshots(&mut self, id: &str) -> Result<Vec<DraftShot>, String> {
         let screenshots = self
             .stores()?
             .drafts
             .screenshots(id)
             .map_err(|error| error.to_string())?
             .into_iter()
-            .map(|(index, bytes)| Ok((index, Image::decode_png(&bytes)?)))
+            .map(|(shot, bytes)| Ok((shot, Image::decode_png(&bytes)?)))
             .collect::<Result<Vec<_>, ImageError>>()
             .map_err(|error| {
                 format!(
@@ -83,9 +78,9 @@ impl<H: Host> Owner<H> {
             .capture
             .picked_mut()
             .ok_or_else(|| "Pick the window first.".to_owned())?;
-        let indexes = screenshots.iter().map(|(index, _)| *index).collect();
+        let shots = screenshots.iter().map(|(shot, _)| *shot).collect();
         picked.screenshots = Screenshots::restored(screenshots);
-        Ok(indexes)
+        Ok(shots)
     }
 
     /// Deletes the draft `id`.
@@ -114,13 +109,16 @@ impl<H: Host> Owner<H> {
 mod tests {
     use std::fs;
 
+    use appytappy_config::app_file::OriginDef;
     use appytappy_sources::screen::Size;
     use serde_json::json;
 
     use super::{Image, LEFT_OUT};
-    use crate::drafts::{DraftDef, DraftKind};
+    use crate::drafts::{DraftDef, DraftKind, DraftShot};
     use crate::owner::Owner;
-    use crate::owner::test_support::{NO_STORE, frame_image, harness, harness_with, scratch_store};
+    use crate::owner::test_support::{
+        BAR, NO_STORE, capturing, frame_image, harness, harness_with, scratch_store, spec,
+    };
     use crate::pixels;
 
     fn value_draft() -> DraftDef {
@@ -164,7 +162,16 @@ mod tests {
         assert_eq!(harness.ask(|owner| owner.screenshot_pixels(0, 4)), None);
         assert_eq!(
             harness.ask(|owner| owner.restore_draft_screenshots(&id)),
-            Ok(vec![0, 2])
+            Ok(vec![
+                DraftShot {
+                    index: 0,
+                    recorded: false
+                },
+                DraftShot {
+                    index: 2,
+                    recorded: false
+                },
+            ])
         );
         for index in [0, 2] {
             assert_eq!(
@@ -184,6 +191,61 @@ mod tests {
             .expect("deletes");
         let left = harness.ask(|owner| owner.list_drafts()).expect("lists");
         assert_eq!(left.len(), 1);
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_draft_brings_back_which_screenshots_a_recording_of_looks_kept() {
+        let (mut harness, mut handler, root) = capturing("owner-drafts-recorded");
+        let region = serde_json::from_str(r#"{"x":2,"y":0,"width":2,"height":2}"#).expect("JSON");
+        harness
+            .ask(|owner| owner.start_look_recording(region, 0, 0))
+            .expect("records");
+        // The right half is red here and gray on screenshot 0, so the
+        // recording keeps this frame as screenshot 1.
+        let red = Image::new(
+            Size {
+                width: 4,
+                height: 2,
+            },
+            [0, 0, 255, 0].repeat(8),
+        )
+        .expect("matching length");
+        harness.deliver(&mut handler, Ok(&red));
+        harness.ask(Owner::stop_recording);
+        let id = harness
+            .ask(|owner| owner.save_draft(None, &value_draft(), true))
+            .expect("saves");
+
+        // A new window forgets the session's screenshots; the draft brings
+        // them back with the mark.
+        let _next = harness.pick();
+        assert_eq!(
+            harness.ask(|owner| owner.restore_draft_screenshots(&id)),
+            Ok(vec![
+                DraftShot {
+                    index: 0,
+                    recorded: false
+                },
+                DraftShot {
+                    index: 1,
+                    recorded: true
+                },
+            ])
+        );
+        let mut on_recorded = spec("example", "Progress bar", BAR);
+        on_recorded.screenshot = 1;
+        harness
+            .ask(|owner| owner.save(&on_recorded))
+            .expect("saves");
+        let saved = harness
+            .owner
+            .stores()
+            .expect("stores")
+            .app("example")
+            .expect("saved")
+            .file;
+        assert_eq!(saved.values[0].origin, OriginDef::Recording);
         fs::remove_dir_all(root).expect("clean up");
     }
 

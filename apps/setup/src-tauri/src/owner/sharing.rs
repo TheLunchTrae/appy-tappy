@@ -83,12 +83,7 @@ impl<H: Host> Owner<H> {
         applications::check_name_free(&saved, None, name)?;
         name.clone_into(&mut file.name);
         file.anti_cheat = spec.anti_cheat;
-        let origins = file
-            .values
-            .iter_mut()
-            .map(|value| &mut value.origin)
-            .chain(file.references.iter_mut().map(|saved| &mut saved.origin));
-        for origin in origins {
+        for origin in file.origins_mut() {
             *origin = OriginDef::Imported { file: from.clone() };
         }
         let id = self

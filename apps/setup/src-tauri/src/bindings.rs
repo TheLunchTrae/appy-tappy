@@ -73,7 +73,7 @@ use crate::debug::trace_file::TraceFile;
 use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows};
 use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
-use crate::drafts::{DraftDef, DraftSummary};
+use crate::drafts::{DraftDef, DraftShot, DraftSummary};
 use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;

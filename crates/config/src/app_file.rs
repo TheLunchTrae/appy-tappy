@@ -943,6 +943,15 @@ impl AppFile {
             .collect()
     }
 
+    /// How each value, then each reference, was made, to change.
+    pub fn origins_mut(&mut self) -> impl Iterator<Item = &mut OriginDef> {
+        self.values.iter_mut().map(|value| &mut value.origin).chain(
+            self.references
+                .iter_mut()
+                .map(|reference| &mut reference.origin),
+        )
+    }
+
     /// The reference with the ID `id`, if the file has one.
     #[must_use]
     pub fn reference(&self, id: &str) -> Option<&ReferenceDef> {

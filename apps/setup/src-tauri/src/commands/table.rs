@@ -204,8 +204,9 @@ macro_rules! with_commands {
             /// capture's screenshots with it. Another draft of the same saved item goes, so each has one at most.
             commands::save_draft(id: Option<String>, draft: DraftDef, screenshots: bool) -> String;
             /// Makes the screenshots of the draft `id` the capture's, in place of any it took, so each has the index it
-            /// had when the draft was saved; returns those indexes, lowest first.
-            commands::restore_draft_screenshots(id: String) -> Vec<usize>;
+            /// had when the draft was saved and the mark of a recording of looks if it had one; returns each, lowest
+            /// index first.
+            commands::restore_draft_screenshots(id: String) -> Vec<DraftShot>;
             /// Deletes the draft `id` with its screenshots. One already gone is fine.
             commands::delete_draft(id: String) -> ();
             /// Saves `automation` over the automation `existing`, or as a new one; returns its ID.
