@@ -51,11 +51,9 @@ impl<H: Host> Owner<H> {
     /// The saved application `app` as the bytes of a file to share.
     pub(crate) fn export_app(&self, app: &str) -> Result<Vec<u8>, String> {
         let saved = self.stores()?.app(app)?;
-        let cannot =
-            |error: &ShareError| format!("AppyTappy cannot export {}: {error}.", saved.file.name);
         Shared::of(&saved)
             .and_then(|shared| shared.pack())
-            .map_err(|error| cannot(&error))
+            .map_err(|error| cannot_export(&saved.file.name, &error))
     }
 
     /// What the shared file `bytes`, named `from`, holds, for the user to
@@ -96,6 +94,19 @@ impl<H: Host> Owner<H> {
         self.tell(Changed::Values);
         Ok(id)
     }
+}
+
+/// Why the application named `name` cannot be exported, as the user reads
+/// it, with what to change when the cause is the user's to change.
+fn cannot_export(name: &str, error: &ShareError) -> String {
+    let change = match error {
+        ShareError::TooManyPixels => " Draw smaller regions or fewer states, then export it again.",
+        ShareError::DecodesTooMuch => {
+            " Teach its references with smaller pictures, then export it again."
+        },
+        _ => "",
+    };
+    format!("AppyTappy cannot export {name}: {error}.{change}")
 }
 
 /// The shared file `bytes`, or why the file named `from` cannot be
@@ -332,6 +343,26 @@ mod tests {
             Err("That application is no longer saved.".to_owned())
         );
         std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn an_export_too_large_to_read_back_says_what_to_change() {
+        assert_eq!(
+            cannot_export("Example App", &ShareError::TooManyPixels),
+            "AppyTappy cannot export Example App: its pictures together hold more pixels than \
+             one 7680x4320 picture. Draw smaller regions or fewer states, then export it again."
+        );
+        assert_eq!(
+            cannot_export("Example App", &ShareError::DecodesTooMuch),
+            "AppyTappy cannot export Example App: its values read their references' pictures \
+             so often that reading them decodes more pixels than 4 pictures of 7680x4320. Teach \
+             its references with smaller pictures, then export it again."
+        );
+        assert_eq!(
+            cannot_export("Example App", &ShareError::NoAppFile),
+            "AppyTappy cannot export Example App: it holds no app.json.",
+            "nothing to change"
+        );
     }
 
     #[test]

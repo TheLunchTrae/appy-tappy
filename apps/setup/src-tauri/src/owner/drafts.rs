@@ -9,6 +9,9 @@ use crate::screenshots::Screenshots;
 use super::Owner;
 use super::host::Host;
 
+/// What a draft says is still to do when a screenshot was too large to keep.
+const LEFT_OUT: &str = "A screenshot was too large to keep, so take it again.";
+
 impl<H: Host> Owner<H> {
     /// Every saved draft.
     pub(crate) fn list_drafts(&self) -> Result<Vec<DraftSummary>, String> {
@@ -20,7 +23,9 @@ impl<H: Host> Owner<H> {
 
     /// Saves `draft` over the draft `id`, or as a new one, and answers its
     /// ID. With `screenshots`, it keeps this session's screenshots with it,
-    /// so the flow that finishes it can draw on them again.
+    /// so the flow that finishes it can draw on them again. A screenshot
+    /// larger than AppyTappy reads back is left out, and the draft says so
+    /// with what is still to do.
     pub(crate) fn save_draft(
         &self,
         id: Option<&str>,
@@ -28,21 +33,30 @@ impl<H: Host> Owner<H> {
         screenshots: bool,
     ) -> Result<String, String> {
         let stores = self.stores()?;
-        let pictures = if screenshots {
-            self.screenshots
-                .slots()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, slot)| Some((index, slot.as_ref()?)))
-                .map(|(index, image)| Ok((index, image.encode_png()?)))
-                .collect::<Result<Vec<_>, ImageError>>()
-                .map_err(|error| format!("A screenshot could not be kept: {error}."))?
+        let mut pictures = Vec::new();
+        let mut left_out = false;
+        let slots = if screenshots {
+            self.screenshots.slots()
         } else {
-            Vec::new()
+            &[]
         };
+        for (index, slot) in slots.iter().enumerate() {
+            let Some(image) = slot else {
+                continue;
+            };
+            match image.encode_png() {
+                Ok(bytes) => pictures.push((index, bytes)),
+                Err(ImageError::TooLarge { .. }) => left_out = true,
+                Err(error) => return Err(format!("A screenshot could not be kept ({error}).")),
+            }
+        }
+        let mut kept = draft.clone();
+        if left_out {
+            kept.missing.push(LEFT_OUT.to_owned());
+        }
         stores
             .drafts
-            .save(id, draft, &pictures)
+            .save(id, &kept, &pictures)
             .map_err(|error| error.to_string())
     }
 
@@ -82,8 +96,10 @@ impl<H: Host> Owner<H> {
 mod tests {
     use std::fs;
 
+    use appytappy_sources::screen::Size;
     use serde_json::json;
 
+    use super::{Image, LEFT_OUT};
     use crate::drafts::{DraftDef, DraftKind};
     use crate::owner::Owner;
     use crate::owner::test_support::{NO_STORE, frame_image, harness, harness_with, scratch_store};
@@ -150,6 +166,46 @@ mod tests {
             .expect("deletes");
         let left = harness.ask(|owner| owner.list_drafts()).expect("lists");
         assert_eq!(left.len(), 1);
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_screenshot_too_large_to_keep_is_left_out_and_the_draft_says_so() {
+        let (stores, root) = scratch_store("owner-drafts-large");
+        let mut harness = harness_with(false, Ok(stores));
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // One pixel wider than AppyTappy reads.
+        let wide = Size {
+            width: 8193,
+            height: 1,
+        };
+        let large = Image::new(wide, vec![0; 32_772]).expect("matching length");
+        harness.deliver(&mut handler, Ok(&large));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(1));
+        let id = harness
+            .ask(|owner| owner.save_draft(None, &value_draft(), true))
+            .expect("saves without it");
+        let listed = harness.ask(|owner| owner.list_drafts()).expect("lists");
+        let [summary] = listed.as_slice() else {
+            panic!("one draft");
+        };
+        assert_eq!((summary.id.as_str(), summary.screenshots), (id.as_str(), 1));
+        assert_eq!(
+            summary.draft.as_ref().expect("reads").missing,
+            ["Pick the filled color", LEFT_OUT]
+        );
+        let kept = harness
+            .ask(|owner| owner.save_draft(None, &value_draft(), false))
+            .expect("saves");
+        let listed = harness.ask(|owner| owner.list_drafts()).expect("lists");
+        let fresh = listed.iter().find(|each| each.id == kept).expect("listed");
+        assert_eq!(
+            fresh.draft.as_ref().expect("reads").missing,
+            ["Pick the filled color"],
+            "without screenshots, nothing is left out"
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 

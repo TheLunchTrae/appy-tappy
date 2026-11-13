@@ -11,11 +11,13 @@
 //! An imported file is a trust boundary. [`Shared::unpack`] takes only what
 //! `app.json` names, reads no more than [`MAX_SHARED_BYTES`], decodes no
 //! picture until every picture's header says that together they hold no
-//! more pixels than [`LARGEST_PICTURE`], and holds the file to the rules a
-//! saved file is held to: [`AppFile::parse`], then `saved::build` for each
-//! value and `saved::reader` for each reference, as the runtime reads them. Each picture takes the name the setup app gives
-//! it, whatever the file calls it, so no two values or references share a
-//! picture and a later save in the setup app replaces only its own.
+//! more pixels than [`LARGEST_PICTURE`], decodes no more pixels in all than
+//! [`MAX_DECODED_PIXELS`], and holds the file to the rules a saved file is
+//! held to: [`AppFile::parse`], then `saved::build` for each value and
+//! `saved::reader` for each reference, as the runtime reads them. Each
+//! picture takes the name the setup app gives it, whatever the file calls
+//! it, so no two values or references share a picture and a later save in
+//! the setup app replaces only its own.
 //! [`Shared::of`] holds an application to the same rules before it is
 //! exported, and [`Shared::pack`] reads back what it packed, so a file
 //! AppyTappy exports is one it imports.
@@ -30,7 +32,7 @@ use appytappy_config::app_file::{
 };
 use appytappy_config::store::APP_FILE;
 use appytappy_sources::screen::saved::{self, SavedError};
-use appytappy_sources::screen::{Image, ImageError, LARGEST_PICTURE};
+use appytappy_sources::screen::{Image, LARGEST_PICTURE};
 use zip::ZipArchive;
 use zip::result::ZipError;
 
@@ -42,6 +44,18 @@ use crate::zip_pack::ZipPack;
 /// pictures may unpack to, in bytes. A definition is far smaller: its
 /// pictures are crops of a window.
 pub(crate) const MAX_SHARED_BYTES: usize = 16 * 1024 * 1024;
+
+/// How many pictures of [`LARGEST_PICTURE`] checking a shared file may
+/// decode in all. The file's own pictures fit in one, and the other three
+/// leave room for its values to read their references again.
+const DECODES: u64 = 4;
+
+/// The most pixels checking a shared file decodes. A reference's pictures
+/// are decoded again for each value and fix that reads with it, so a file
+/// whose pictures hold few pixels can still ask for many to be decoded.
+/// Small pictures, which a reference's text is, cost little however often
+/// they are read.
+const MAX_DECODED_PIXELS: u64 = LARGEST_PICTURE.pixels().saturating_mul(DECODES);
 
 /// An application as it is shared: its file, without an overlay, and every
 /// picture the file names, each of which the runtime can read and each
@@ -61,15 +75,19 @@ impl Shared {
     /// Returns a [`ShareError`] when a picture its file names is missing or
     /// cannot be read, or a value or a reference cannot be read as saved.
     pub(crate) fn of(app: &SavedApp) -> Result<Self, ShareError> {
-        Self::new(app.file.clone(), |name| {
-            app.picture(name).map_err(|source| {
-                if source.kind() == io::ErrorKind::NotFound {
-                    ShareError::NoPicture(name.to_owned())
-                } else {
-                    ShareError::Read(source)
-                }
-            })
-        })
+        Self::new(
+            app.file.clone(),
+            |name| {
+                app.picture(name).map_err(|source| {
+                    if source.kind() == io::ErrorKind::NotFound {
+                        ShareError::NoPicture(name.to_owned())
+                    } else {
+                        ShareError::Read(source)
+                    }
+                })
+            },
+            MAX_DECODED_PIXELS,
+        )
     }
 
     /// Reads a shared file's bytes.
@@ -95,10 +113,14 @@ impl Shared {
         let json = String::from_utf8(json)
             .map_err(|error| ShareError::File(AppFileError::Json(error.to_string())))?;
         let file = AppFile::parse(&json).map_err(ShareError::File)?;
-        Self::new(file, |name| {
-            entry(&mut archive, name, &mut budget)?
-                .ok_or_else(|| ShareError::NoPicture(name.to_owned()))
-        })
+        Self::new(
+            file,
+            |name| {
+                entry(&mut archive, name, &mut budget)?
+                    .ok_or_else(|| ShareError::NoPicture(name.to_owned()))
+            },
+            MAX_DECODED_PIXELS,
+        )
     }
 
     /// `file`, which passed [`AppFile::check`], as it is shared, with the
@@ -116,68 +138,96 @@ impl Shared {
     /// is decoded unless all of them together hold no more pixels than
     /// [`LARGEST_PICTURE`]: a picture's pixels cost many times the bytes of
     /// a file that compresses them, so the file's own limit bounds none.
+    /// Reading the values then decodes no more than `decoding` pixels in
+    /// all, which [`Shared::of`] and [`Shared::unpack`] set to
+    /// [`MAX_DECODED_PIXELS`].
     fn new(
         mut file: AppFile,
         mut picture: impl FnMut(&str) -> Result<Vec<u8>, ShareError>,
+        decoding: u64,
     ) -> Result<Self, ShareError> {
         file.overlay = None;
         if let OriginDef::Imported { file: from } = &mut file.origin {
             from.clear();
         }
         let mut pictures = BTreeMap::new();
-        let mut pixels = 0_u64;
-        let mut take = |image: &mut String, name: String| {
+        let mut held = 0_u64;
+        let mut take = |image: &mut String,
+                        name: String,
+                        owner: &dyn Fn(SavedError) -> ShareError|
+         -> Result<(), ShareError> {
             let bytes = picture(image)?;
-            let size = Image::png_size(&bytes).map_err(|source| ShareError::Picture {
-                name: image.clone(),
-                source,
+            let size = Image::png_size(&bytes).map_err(|source| {
+                owner(SavedError::Picture {
+                    name: image.clone(),
+                    source,
+                })
             })?;
-            pixels = pixels.saturating_add(size.pixels());
-            if pixels > LARGEST_PICTURE.pixels() {
+            held = held.saturating_add(size.pixels());
+            if held > LARGEST_PICTURE.pixels() {
                 return Err(ShareError::TooManyPixels);
             }
-            pictures.insert(name.clone(), bytes);
+            pictures.insert(name.clone(), (bytes, size.pixels()));
             *image = name;
             Ok(())
         };
         for reference in &mut file.references {
+            let owner = |source| ShareError::Reference {
+                name: reference.name.clone(),
+                source,
+            };
             for (sample, number) in reference.samples.iter_mut().zip(1..) {
-                take(&mut sample.image, sample_name(&reference.id, number))?;
+                take(
+                    &mut sample.image,
+                    sample_name(&reference.id, number),
+                    &owner,
+                )?;
             }
         }
         for value in &mut file.values {
+            let owner = |source| ShareError::Value {
+                name: value.name.clone(),
+                source,
+            };
             if let CheckDef::State { states, .. } = &mut value.screen.check {
                 for (state, number) in states.iter_mut().zip(1..) {
-                    take(&mut state.image, state_image_name(&value.id, None, number))?;
+                    take(
+                        &mut state.image,
+                        state_image_name(&value.id, None, number),
+                        &owner,
+                    )?;
                 }
             }
             for (fix, set) in value.screen.fixes.iter_mut().zip(1..) {
                 for (image, number) in fix.images.iter_mut().zip(1..) {
-                    take(image, state_image_name(&value.id, Some(set), number))?;
+                    take(
+                        image,
+                        state_image_name(&value.id, Some(set), number),
+                        &owner,
+                    )?;
                 }
             }
         }
-        let saved = |name: &str| {
-            pictures
+        let mut left = decoding;
+        let mut spent = false;
+        let read = read_all(&file, |name| {
+            let (bytes, pixels) = pictures
                 .get(name)
-                .cloned()
-                .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
-        };
-        for value in &file.values {
-            saved::build(&value.screen, &file.references, file.size_changes, saved).map_err(
-                |source| ShareError::Value {
-                    name: value.name.clone(),
-                    source,
-                },
-            )?;
-        }
-        // A reference no value reads with is shared too, so it has to learn.
-        for reference in &file.references {
-            saved::reader(reference, saved).map_err(|source| ShareError::Reference {
-                name: reference.name.clone(),
-                source,
+                .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+            left = left.checked_sub(*pixels).ok_or_else(|| {
+                spent = true;
+                io::Error::from(io::ErrorKind::OutOfMemory)
             })?;
+            Ok(bytes.clone())
+        });
+        if spent {
+            return Err(ShareError::DecodesTooMuch);
         }
+        read?;
+        let pictures = pictures
+            .into_iter()
+            .map(|(name, (bytes, _pixels))| (name, bytes))
+            .collect();
         Ok(Self { file, pictures })
     }
 
@@ -208,6 +258,34 @@ impl Shared {
     pub(crate) fn into_parts(self) -> (AppFile, Pictures) {
         (self.file, self.pictures.into_iter().collect())
     }
+}
+
+/// Reads each value of `file` and each of its references, as the runtime
+/// does, from the pictures `saved` answers for their names.
+fn read_all(
+    file: &AppFile,
+    mut saved: impl FnMut(&str) -> io::Result<Vec<u8>>,
+) -> Result<(), ShareError> {
+    for value in &file.values {
+        saved::build(
+            &value.screen,
+            &file.references,
+            file.size_changes,
+            &mut saved,
+        )
+        .map_err(|source| ShareError::Value {
+            name: value.name.clone(),
+            source,
+        })?;
+    }
+    // A reference no value reads with is shared too, so it has to learn.
+    for reference in &file.references {
+        saved::reader(reference, &mut saved).map_err(|source| ShareError::Reference {
+            name: reference.name.clone(),
+            source,
+        })?;
+    }
+    Ok(())
 }
 
 /// The bytes of the entry `name` of `archive`, or `None` when it has none.
@@ -255,16 +333,11 @@ pub(crate) enum ShareError {
     File(AppFileError),
     /// A picture `app.json` names is not with it.
     NoPicture(String),
-    /// A picture's header cannot be read, or says it is larger than
-    /// AppyTappy reads.
-    Picture {
-        /// The picture's file name.
-        name: String,
-        /// Why.
-        source: ImageError,
-    },
     /// The pictures together hold more pixels than [`LARGEST_PICTURE`].
     TooManyPixels,
+    /// Reading the values would decode more pixels than
+    /// [`MAX_DECODED_PIXELS`].
+    DecodesTooMuch,
     /// A picture or an entry cannot be read.
     Read(io::Error),
     /// The zip file cannot be made.
@@ -306,20 +379,14 @@ impl fmt::Display for ShareError {
             Self::NoAppFile => write!(formatter, "it holds no {APP_FILE}"),
             Self::File(error) => write!(formatter, "{error}"),
             Self::NoPicture(name) => write!(formatter, "the picture {name} is missing"),
-            Self::Picture {
-                name,
-                source: ImageError::TooLarge { size },
-            } => write!(
-                formatter,
-                "the picture {name} is {size}, larger than AppyTappy reads"
-            ),
-            Self::Picture { name, .. } => write!(
-                formatter,
-                "the picture {name} is not a PNG file AppyTappy can read"
-            ),
             Self::TooManyPixels => write!(
                 formatter,
                 "its pictures together hold more pixels than one {LARGEST_PICTURE} picture"
+            ),
+            Self::DecodesTooMuch => write!(
+                formatter,
+                "its values read their references' pictures so often that reading them \
+                 decodes more pixels than {DECODES} pictures of {LARGEST_PICTURE}"
             ),
             Self::Read(error) => write!(formatter, "it cannot be read ({error})"),
             Self::Pack(error) => write!(formatter, "its file cannot be made ({error})"),
@@ -339,13 +406,13 @@ impl Error for ShareError {
             Self::Zip(error) => Some(error),
             Self::File(error) => Some(error),
             Self::Read(error) | Self::Pack(error) => Some(error),
-            Self::Picture { source, .. } => Some(source),
             Self::Value { source, .. } | Self::Reference { source, .. } => Some(source),
             Self::TooLarge
             | Self::SameName
             | Self::NoAppFile
             | Self::NoPicture(_)
-            | Self::TooManyPixels => None,
+            | Self::TooManyPixels
+            | Self::DecodesTooMuch => None,
         }
     }
 }
@@ -540,41 +607,40 @@ mod tests {
             refusal(&zip_of(&[(APP_FILE, json.as_bytes())])),
             "the picture status-1.png is missing"
         );
-        let unread = Shared::unpack(&zip_of(&[(APP_FILE, json.as_bytes()), (&image, b"text")]))
-            .expect_err("not a PNG file");
-        assert_eq!(
-            unread.to_string(),
-            "the picture status-1.png is not a PNG file AppyTappy can read"
-        );
-        assert!(
-            unread.source().is_some_and(<dyn Error>::is::<ImageError>),
-            "the cause is kept"
-        );
-        assert_eq!(
-            refusal(&zip_of(&[
-                (APP_FILE, json.as_bytes()),
-                (&image, &header(2, 2))
-            ])),
-            "the value Value status cannot be read: its picture status-1.png is not a PNG file \
-             it can read",
-            "a header with no pixels after it"
-        );
+        // Refused from its header, or once its pixels are found missing,
+        // each in the words a saved file's would be.
+        for (bytes, read) in [(&b"text"[..], "no header"), (&header(2, 2), "no pixels")] {
+            let unread = Shared::unpack(&zip_of(&[(APP_FILE, json.as_bytes()), (&image, bytes)]))
+                .expect_err(read);
+            assert_eq!(
+                unread.to_string(),
+                "the value Value status cannot be read: its picture status-1.png is not a PNG \
+                 file it can read",
+                "{read}"
+            );
+            assert!(
+                unread.source().is_some_and(<dyn Error>::is::<SavedError>),
+                "the cause is kept"
+            );
+        }
         let mut taught = app("Example App");
         taught.references.push(digits(1));
-        let unread = Shared::unpack(&zip_of(&[
-            (APP_FILE, taught.to_json().as_bytes()),
-            ("ref-digits-1.png", &header(2, 2)),
-        ]))
-        .expect_err("a reference no value reads with is read too");
-        assert_eq!(
-            unread.to_string(),
-            "the reference Digits cannot be read: its picture ref-digits-1.png is not a PNG \
-             file it can read"
-        );
-        assert!(
-            unread.source().is_some_and(<dyn Error>::is::<SavedError>),
-            "the cause is kept"
-        );
+        for bytes in [&b"text"[..], &header(2, 2)] {
+            let unread = Shared::unpack(&zip_of(&[
+                (APP_FILE, taught.to_json().as_bytes()),
+                ("ref-digits-1.png", bytes),
+            ]))
+            .expect_err("a reference no value reads with is read too");
+            assert_eq!(
+                unread.to_string(),
+                "the reference Digits cannot be read: its picture ref-digits-1.png is not a PNG \
+                 file it can read"
+            );
+            assert!(
+                unread.source().is_some_and(<dyn Error>::is::<SavedError>),
+                "the cause is kept"
+            );
+        }
         let other_size = png(3, 2, [0, 0, 255, 255]);
         assert!(
             refusal(&zip_of(&[
@@ -695,9 +761,45 @@ mod tests {
         .expect_err("wider than AppyTappy reads");
         assert_eq!(
             wide.to_string(),
-            "the picture status-1.png is 8193x2, larger than AppyTappy reads"
+            "the value Value status cannot be read: its picture status-1.png is 8193x2, larger \
+             than AppyTappy reads"
         );
         assert!(wide.source().is_some(), "the cause is kept");
+    }
+
+    /// A number value with the ID `id` that reads an 8 by 4 region with the
+    /// reference `digits`.
+    fn number_value(id: &str) -> ValueDef {
+        let (mut value, _image) = state_value(id, 8, 4);
+        value.screen.check = CheckDef::Number {
+            reference: "digits".to_owned(),
+            whole: false,
+            characters: None,
+        };
+        value
+    }
+
+    #[test]
+    fn a_reference_s_pictures_cost_their_pixels_each_time_a_value_reads_them() {
+        // One reference whose picture is all the file holds, read by three
+        // values and once more on its own: four decodes of its 32 pixels.
+        let mut file = app("Example App");
+        file.references.push(digits(1));
+        file.values = ["first", "second", "third"].map(number_value).to_vec();
+        let picture = eleven(2);
+        let shared = |decoding| {
+            Shared::new(file.clone(), |_name| Ok(picture.clone()), decoding)
+                .map(|shared| shared.file)
+        };
+        assert!(shared(4 * 32).is_ok(), "four decodes fit");
+        let error = shared(4 * 32 - 1).expect_err("the fourth does not");
+        assert!(matches!(error, ShareError::DecodesTooMuch));
+        assert_eq!(
+            error.to_string(),
+            "its values read their references' pictures so often that reading them decodes \
+             more pixels than 4 pictures of 7680x4320"
+        );
+        assert!(error.source().is_none());
     }
 
     proptest! {
@@ -723,7 +825,7 @@ mod tests {
             assert_eq!(name, image);
             Ok(large.clone())
         };
-        let shared = Shared::new(file, held).expect("each value reads");
+        let shared = Shared::new(file, held, MAX_DECODED_PIXELS).expect("each value reads");
         assert_eq!(
             shared.pack().expect_err("too large to import").to_string(),
             "it holds more than 16 MB"
@@ -945,7 +1047,8 @@ mod tests {
                 }
                 file.references.push(reference);
             }
-            Shared::new(file, |name| Ok(held[name].clone())).expect("every value reads")
+            Shared::new(file, |name| Ok(held[name].clone()), MAX_DECODED_PIXELS)
+                .expect("every value reads")
         }
     }
 

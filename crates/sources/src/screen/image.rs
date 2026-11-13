@@ -12,13 +12,13 @@ use crate::system::Rgb;
 /// The widest or tallest picture AppyTappy reads or writes, in pixels.
 const MAX_PNG_SIDE: u32 = 8192;
 
-/// The most pixels a picture AppyTappy reads or writes may hold: the whole
-/// of an 8K display.
+/// The most pixels a picture AppyTappy reads or writes may hold: an 8K
+/// display's worth.
 ///
-/// That is the largest window content one display shows, and every picture
-/// AppyTappy saves is a window's content or a part of it. So this holds what
-/// a decoded picture costs, about 10 bytes a pixel while it decodes, to what
-/// AppyTappy itself could have saved.
+/// Every picture AppyTappy saves is a window's content or a part of it. A
+/// window can span displays and grow past this, but AppyTappy chooses this
+/// bound, a whole 8K display, so that what one picture costs, about 10 bytes
+/// a pixel while it decodes, stays bounded wherever the file came from.
 pub const LARGEST_PICTURE: Size = Size {
     width: 7680,
     height: 4320,
@@ -523,8 +523,8 @@ impl fmt::Display for ImageError {
             },
             Self::TooLarge { size } => write!(
                 formatter,
-                "a {size} picture is larger than AppyTappy reads: at most {MAX_PNG_SIDE} pixels \
-                 on a side, and no more pixels than {LARGEST_PICTURE}"
+                "a {size} picture is larger than AppyTappy reads, which is at most \
+                 {MAX_PNG_SIDE} pixels on a side and no more pixels than {LARGEST_PICTURE}"
             ),
             Self::Unsupported => formatter.write_str("the PNG file uses an unsupported layout"),
             Self::Decode(_) => formatter.write_str("the PNG file could not be decoded"),
@@ -925,8 +925,8 @@ mod tests {
             ),
             (
                 ImageError::TooLarge { size },
-                "a 3x2 picture is larger than AppyTappy reads: at most 8192 pixels on a side, \
-                 and no more pixels than 7680x4320",
+                "a 3x2 picture is larger than AppyTappy reads, which is at most 8192 pixels on \
+                 a side and no more pixels than 7680x4320",
             ),
             (
                 ImageError::Unsupported,

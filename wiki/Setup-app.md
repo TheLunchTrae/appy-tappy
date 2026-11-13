@@ -958,9 +958,15 @@ saved file is held to and takes nothing else from it:
   `LARGEST_PICTURE`, 7680 by 4320, the most one picture may hold
   ([Saved pictures](Screen-regions.md#saved-pictures)). A picture's pixels
   can cost thousands of times its file's bytes, so the 16 MB budget bounds
-  none of them. One whole window of the largest display is far more than a
-  definition's crops of a window hold. A picture without a PNG header, or
-  larger than AppyTappy reads, is refused by name.
+  none of them. An 8K display's worth is far more than a definition's crops
+  of a window hold. A picture without a PNG header, or larger than AppyTappy
+  reads, is refused with the value or reference that names it, in the words
+  a saved file's would be.
+- Reading the values decodes no more than `MAX_DECODED_PIXELS`, four pictures
+  of `LARGEST_PICTURE`, in all. `saved::build` decodes a reference's pictures
+  again for each value and fix that reads with it, so a file that holds few
+  pixels can still ask for many. A reference's text is small, so many values
+  can read with it.
 - Each picture takes the name the setup app gives it: `sample_name` for a
   reference's samples in order, and `state_image_name` for a value's states,
   with each fix's pictures in the set of its place among the fixes. The file's
@@ -974,9 +980,10 @@ saved file is held to and takes nothing else from it:
 
 `Shared::of` holds an application to the same rules, and `pack` reads back
 what it packed with `unpack` and refuses what that refuses, such as an
-application whose pictures hold more bytes or pixels than an import reads. So an application
-that AppyTappy exports is one it imports; a property test packs and unpacks
-generated definitions.
+application whose pictures hold more bytes or pixels than an import reads.
+So an application that AppyTappy exports is one it imports; a property test
+packs and unpacks generated definitions. A refused export says what to
+change when the pixels are the cause.
 
 `import_app` unpacks the bytes again and saves the application with
 `AppStore::create`. It makes the folder under a new ID from `new_app_id`,
@@ -1029,7 +1036,9 @@ The setup app keeps each in its own folder under
 first saved (`apps/setup/src-tauri/src/drafts.rs`). The folder holds
 `draft.json` and, for a value, fix, or reference, the capture's screenshots,
 each as `shot-{index}.png` under the index it has in the capture, so the
-indexes of removed screenshots stay empty. The runtime never reads this
+indexes of removed screenshots stay empty. A screenshot larger than
+AppyTappy reads back is left out too, and `save_draft` adds a sentence to the
+draft's to-do list to take it again. The runtime never reads this
 folder, so a draft never runs and the authoring files never hold an
 unfinished item.
 

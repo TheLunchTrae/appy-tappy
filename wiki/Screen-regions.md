@@ -141,15 +141,16 @@ read
 
 A reference's samples and a state check's pictures are PNG files. AppyTappy
 reads any PNG, converting it to 8-bit color. It refuses a picture over 8192
-pixels on a side or with more pixels than `LARGEST_PICTURE`, 7680 by 4320,
-the whole of an 8K display: every picture AppyTappy saves is a window's
-content or part of it, and none is larger. `Image::decode_png` reads the size
-from the PNG header and refuses a larger picture before it allocates its
-pixels, which take about 10 bytes each while they decode, so a small,
-highly compressed file cannot claim gigabytes. Beside the pixels, the decoder
-may allocate 4 MB, for its rows and the file's metadata. A sample is read as
-it looks, ignoring alpha. In a state
-picture, alpha is the mask: a pixel at least half opaque is compared,
+pixels on a side or with more pixels than `LARGEST_PICTURE`, 7680 by 4320.
+Every picture AppyTappy saves is a window's content or part of it. A window
+that spans displays can be larger, but AppyTappy chooses this bound, an 8K
+display's worth, so a picture's cost stays bounded wherever it came from.
+`Image::decode_png` reads the size from the PNG header and refuses a larger
+picture before it allocates its pixels, which take about 10 bytes each while
+they decode, so a small, highly compressed file cannot claim gigabytes.
+Beside the pixels, the decoder may allocate 4 MB, for its rows and the file's
+metadata. A sample is read as it looks, ignoring alpha. In a state picture,
+alpha is the mask: a pixel at least half opaque is compared,
 and a more transparent one is left out. A picture with no transparent pixel is
 compared whole, and one with no opaque pixel is refused. AppyTappy writes
 8-bit RGB, or RGBA with the left-out pixels fully transparent when a mask
