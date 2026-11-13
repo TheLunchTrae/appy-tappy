@@ -1652,7 +1652,10 @@ A recording of readings keeps a reading for each shape a region shows, for
 the user to review. Its `Sightings` hold `full`, which says why it takes no
 more once a frame did not fit. A reading's picture is answered only for its
 own recording's ticket, one of the
-[stale-message guards](#how-to-read-this-page).
+[stale-message guards](#how-to-read-this-page). The page asks for each
+reading's picture once (`cropsToAsk` in `apps/setup/src/lib/review.ts`); an
+ask that fails is taken back (`cropAskFailed`), and the reading is asked for
+again a second later, so review never keeps a reading without its picture.
 
 ```mermaid
 stateDiagram-v2
