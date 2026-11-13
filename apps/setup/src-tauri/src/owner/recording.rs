@@ -174,8 +174,9 @@ impl<H: Host> Owner<H> {
     /// `spec`'s application says its window changes size ([`Follows`]). A
     /// recording of the whole window looks for text of the size of each of
     /// `spec`'s examples too, and going on with one adds the sizes of the
-    /// examples drawn since.
-    pub(crate) fn start_recording(&mut self, spec: RecordSpec, more: bool) -> Result<(), String> {
+    /// examples drawn since. Answers the recording's number, which going on
+    /// keeps.
+    pub(crate) fn start_recording(&mut self, spec: RecordSpec, more: bool) -> Result<u64, String> {
         let (region, window_size) = self.recordable(spec.region, spec.screenshot)?;
         let size_changes = self.stores()?.app(&spec.app)?.file.size_changes;
         let follows = Follows::of(size_changes, spec.pin, region, window_size);
@@ -194,23 +195,20 @@ impl<H: Host> Owner<H> {
             {
                 recording.resume(follows, now);
                 recording.look_for(examples);
+                Ok(recording.id.number())
             },
-            Some(Recorder::Readings(recording)) if more => {
-                return Err(format!(
-                    "Recording more needs the settings it was recorded with: the same place, \
-                     the characters' color, a tolerance of {}, a screenshot of the same window \
-                     size, and the same choice of where to look. Use its settings, or discard \
-                     the recording to start a new one.",
-                    recording.view(now).settings.tolerance
-                ));
-            },
-            Some(Recorder::Looks(_)) | None if more => {
-                return Err(
-                    "That recording is gone, so there is nothing to record more of. Start a new \
-                     recording."
-                        .to_owned(),
-                );
-            },
+            Some(Recorder::Readings(recording)) if more => Err(format!(
+                "Recording more needs the settings it was recorded with: the same place, \
+                 the characters' color, a tolerance of {}, a screenshot of the same window \
+                 size, and the same choice of where to look. Use its settings, or discard \
+                 the recording to start a new one.",
+                recording.view(now).settings.tolerance
+            )),
+            Some(Recorder::Looks(_)) | None if more => Err(
+                "That recording is gone, so there is nothing to record more of. Start a new \
+                 recording."
+                    .to_owned(),
+            ),
             _ => {
                 // The region's own text is the first example, so it is
                 // measured before anything is replaced.
@@ -226,9 +224,9 @@ impl<H: Host> Owner<H> {
                     recording.look_for(examples);
                 }
                 self.record_with(Recorder::Readings(recording));
+                Ok(id.number())
             },
         }
-        Ok(())
     }
 
     /// How tall the characters are that `region` of screenshot `screenshot`
@@ -284,11 +282,17 @@ impl<H: Host> Owner<H> {
             .collect()
     }
 
-    /// Stops the recording, of readings or of looks, which keeps what it
-    /// recorded.
-    pub(crate) fn stop_recording(&mut self) {
-        if let Some(recording) = self.capture.recording_mut() {
-            recording.stop(Instant::now());
+    /// Stops recording `recording`, of readings or of looks, the number its
+    /// start answered, which keeps what it recorded, unless another
+    /// recording took its place: a screen that goes stops its own
+    /// recording, and its stop can arrive after the next one started.
+    pub(crate) fn stop_recording(&mut self, recording: u64) {
+        if let Some(current) = self
+            .capture
+            .recording_mut()
+            .filter(|current| current.id().number() == recording)
+        {
+            current.stop(Instant::now());
         }
     }
 
@@ -409,7 +413,7 @@ mod tests {
     fn start_recording(
         red: u8,
         more: bool,
-    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let region: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         let ink: ColorDef = serde_json::from_str(&format!(r#"{{"red":{red},"green":0,"blue":0}}"#))
@@ -441,7 +445,7 @@ mod tests {
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         assert_eq!(harness.recording(), None);
-        assert_eq!(harness.ask(start_recording(255, false)), Ok(()));
+        harness.ask(start_recording(255, false)).expect("records");
         for frame in [
             red_columns(2),
             red_columns(2),
@@ -488,7 +492,7 @@ mod tests {
         );
         assert_eq!(harness.ask(pixels_of(2)), None);
 
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         harness.deliver(&mut handler, Ok(&red_columns(4)));
         let stopped = harness.recording().expect("kept for review");
         assert!(!stopped.recording);
@@ -502,12 +506,57 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_names_its_recording_and_leaves_one_that_took_its_place() {
+        let (mut harness, root) = with_example_app("rec-stop-names-its-own");
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let records = |harness: &mut Harness| harness.recording().map(|view| view.recording);
+        let readings = harness.ask(start_recording(255, false)).expect("records");
+        assert_eq!(harness.recording().expect("a recording").id, readings);
+        harness.ask(move |owner| owner.stop_recording(readings));
+        assert_eq!(records(&mut harness), Some(false));
+        assert_eq!(
+            harness.ask(start_recording(255, true)),
+            Ok(readings),
+            "going on keeps the number"
+        );
+
+        // A recording of looks takes its place, and the stop the readings'
+        // screen sends as it goes leaves the looks alone.
+        let region: RegionSpec =
+            serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
+        let looks = harness
+            .ask(move |owner| owner.start_look_recording(region, 0, 0))
+            .expect("records");
+        assert_ne!(looks, readings);
+        let looking = |harness: &mut Harness| {
+            harness
+                .ask(|owner| owner.look_recording_state())
+                .map(|view| (view.id, view.recording))
+        };
+        harness.ask(move |owner| owner.stop_recording(readings));
+        assert_eq!(looking(&mut harness), Some((looks, true)));
+        harness.ask(move |owner| owner.stop_recording(looks));
+        assert_eq!(looking(&mut harness), Some((looks, false)));
+
+        // And a recording of readings that takes the looks' place is left
+        // by their stop.
+        let newer = harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(move |owner| owner.stop_recording(looks));
+        assert_eq!(records(&mut harness), Some(true));
+        harness.ask(move |owner| owner.stop_recording(newer));
+        assert_eq!(records(&mut harness), Some(false));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
     fn a_reading_s_pixels_are_answered_only_for_its_own_recording() {
         let (mut harness, root) = with_example_app("rec-pixels-of-its-own");
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        assert_eq!(harness.ask(start_recording(255, false)), Ok(()));
+        harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         let old = harness.recording().expect("a recording").id;
         let pixels = |harness: &mut Harness, recording| {
@@ -518,7 +567,7 @@ mod tests {
         // Discarded and recorded again at once: the page's late ask for the
         // old recording's first reading gets none of the new one's pixels.
         harness.ask(Owner::discard_recording);
-        assert_eq!(harness.ask(start_recording(255, false)), Ok(()));
+        harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(3)));
         let new = harness.recording().expect("a recording").id;
         assert_ne!(new, old);
@@ -643,7 +692,7 @@ mod tests {
     fn start_window_recording(
         x: u32,
         more: bool,
-    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let region: RegionDef = serde_json::from_str(&format!(
             r#"{{"x":{x},"y":0,"width":{},"height":2}}"#,
             4_u32.saturating_sub(x)
@@ -707,7 +756,7 @@ mod tests {
         let view = harness.recording().expect("a recording");
         assert_eq!(view.settings.scope, Scope::Window);
         assert_eq!(view.spots.len(), 1, "where it found the text");
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         assert!(
             harness
                 .ask(start_recording(255, true))
@@ -744,7 +793,7 @@ mod tests {
         scope: Scope,
         examples: &[(usize, u32, u32)],
         more: bool,
-    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let region = |x: u32, y: u32, height: u32| -> RegionDef {
             serde_json::from_str(&format!(
                 r#"{{"x":{x},"y":{y},"width":4,"height":{height}}}"#
@@ -793,7 +842,7 @@ mod tests {
         harness.deliver(&mut handler, Ok(&three_sizes(30)));
         let job = harness.looks.try_iter().next().expect("a look goes out");
         assert_eq!(job.sizes.heights(), [4, 8]);
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         // Going on adds the size of a box drawn since, and keeps the others.
         harness
             .ask(start_recording_sizes(Scope::Window, &[(0, 19, 9)], true))
@@ -821,7 +870,7 @@ mod tests {
     /// staying at `pin`.
     fn start_recording_right(
         pin: Option<PinDef>,
-    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let region: RegionDef =
             serde_json::from_str(r#"{"x":2,"y":0,"width":2,"height":2}"#).expect("valid JSON");
         let ink: ColorDef =
@@ -984,12 +1033,12 @@ mod tests {
         assert!(harness.recording().is_none());
         harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         harness.ask(start_recording(255, true)).expect("goes on");
         assert!(harness.recording().expect("kept").recording);
         harness.deliver(&mut handler, Ok(&red_columns(3)));
         assert_eq!(harness.readings().len(), 2, "the same recording went on");
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         assert_eq!(
             harness.ask(start_recording(200, true)),
             Err(
@@ -1128,7 +1177,7 @@ mod tests {
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
         assert_eq!(
             harness.recording().expect("kept").problem,

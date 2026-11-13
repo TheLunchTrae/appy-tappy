@@ -745,23 +745,28 @@ pub(crate) async fn overlay_card(
 
 /// Records the region of the picked window that `spec` names, keeping each
 /// reading it shows in the characters' color. With `more`,
-/// goes on with the stopped recording; otherwise starts a new one.
+/// goes on with the stopped recording; otherwise starts a new one. Answers
+/// the recording's number, which going on keeps.
 #[tauri::command]
 pub(crate) async fn start_recording(
     app: AppHandle,
     spec: RecordSpec,
     more: bool,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     try_ask(&app, "start_recording", move |owner| {
         owner.start_recording(spec, more)
     })
     .await
 }
 
-/// Stops the recording, of readings or of looks, keeping what it recorded.
+/// Stops recording `recording`, of readings or of looks, keeping what it
+/// recorded, unless another recording took its place.
 #[tauri::command]
-pub(crate) async fn stop_recording(app: AppHandle) -> Result<(), String> {
-    ask(&app, "stop_recording", Owner::stop_recording).await
+pub(crate) async fn stop_recording(app: AppHandle, recording: u64) -> Result<(), String> {
+    ask(&app, "stop_recording", move |owner| {
+        owner.stop_recording(recording);
+    })
+    .await
 }
 
 /// Forgets the recording, of readings or of looks.
@@ -778,14 +783,14 @@ pub(crate) async fn recording_state(app: AppHandle) -> Result<Option<RecordingVi
 
 /// Records the looks of `region` of the picked window, drawn on
 /// `screenshot`, keeping a screenshot of each look no screenshot shows yet,
-/// in place of any recording.
+/// in place of any recording, and answers the recording's number.
 #[tauri::command]
 pub(crate) async fn start_look_recording(
     app: AppHandle,
     region: RegionDef,
     tolerance: u8,
     screenshot: usize,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     try_ask(&app, "start_look_recording", move |owner| {
         owner.start_look_recording(region, tolerance, screenshot)
     })

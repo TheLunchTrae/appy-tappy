@@ -120,10 +120,8 @@ pub(crate) struct Taught {
     pub(crate) reference: ReferenceDef,
     /// The pictures of its new samples.
     pub(crate) pictures: Pictures,
-    /// The pictures of the saved reference's samples, as the session had
-    /// them.
-    pub(crate) kept: Pictures,
-    /// The reader `saved::reader` learns from the two.
+    /// The reader `saved::reader` learns from those pictures and the saved
+    /// reference's, as the session had them.
     pub(crate) reader: DigitReader,
 }
 
@@ -284,7 +282,6 @@ impl CharactersSpec {
             window_size,
             reference,
             pictures,
-            kept,
             reader,
         })
     }

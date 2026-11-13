@@ -9,9 +9,10 @@ import type {
   PinDef,
   ScreenDef,
   SizeDef,
+  StateDef,
   ValueDef,
 } from './bindings.ts';
-import { type Built, type Draft, buildSpec, fixDraft } from './check.ts';
+import { type Built, type Draft, buildSpec, fixDraft, stateNamesNext } from './check.ts';
 import { AUTOMATIC, type PinChoice } from './pin.ts';
 import { andList } from './reference.ts';
 import { sameRect } from './region.ts';
@@ -70,6 +71,14 @@ export function keepsStates(draft: Draft, saved: ScreenDef): boolean {
   );
 }
 
+/**
+ * The names `draft` gives `states`, a saved state check's states that keep their saved pictures, as typed: each
+ * state's saved name until a name is typed for it.
+ */
+export function keptStateNames(draft: Draft, states: readonly StateDef[]): readonly string[] {
+  return states.map((state, index) => draft.stateNames[index] ?? state.name);
+}
+
 /** Says that `value` was drawn at another window size than `shown`, the size of the screenshot the region would
  * show over, where its region cannot be moved. */
 export function otherSizeText(value: ValueDef, shown: SizeDef): string {
@@ -125,12 +134,13 @@ function fileCheck(spec: CheckSpec): CheckDef | null {
 function editDrawing(draft: Draft, saved: ValueDef, app: string): Built<EditDrawing> {
   const { screen } = saved;
   if (screen.check.kind === 'state' && keepsStates(draft, screen)) {
-    const names = screen.check.states.map((state, index) => draft.stateNames[index]?.trim() ?? state.name);
-    if (names.includes('')) {
-      return missing('Name each state.');
+    const names = keptStateNames(draft, screen.check.states);
+    const next = stateNamesNext(names);
+    if (next !== null) {
+      return missing(next);
     }
     const states = screen.check.states.map((state, index) => ({
-      name: names[index] ?? state.name,
+      name: names[index]?.trim() ?? state.name,
       image: state.image,
     }));
     return { ok: true, spec: { kind: 'kept', check: { kind: 'state', states, tolerance: draft.tolerance } } };

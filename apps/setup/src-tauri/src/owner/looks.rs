@@ -15,13 +15,13 @@ impl<H: Host> Owner<H> {
     /// Records `region` of the picked window, drawn on `screenshot`,
     /// keeping a screenshot each time it shows a look that no screenshot of
     /// that window size shows yet, within `tolerance`. Starts a new
-    /// recording in place of any recording.
+    /// recording in place of any recording, and answers its number.
     pub(crate) fn start_look_recording(
         &mut self,
         region: RegionDef,
         tolerance: u8,
         screenshot: usize,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         let (region, window_size) = self.recordable(region, screenshot)?;
         let id = self.tickets.next();
         let recording = LookRecording::new(
@@ -33,7 +33,7 @@ impl<H: Host> Owner<H> {
             Instant::now(),
         );
         self.record_with(Recorder::Looks(recording));
-        Ok(())
+        Ok(id.number())
     }
 
     /// The recording of looks as the interface shows it, or `None` without
@@ -86,7 +86,7 @@ mod tests {
 
     /// Records the looks of the whole 4 by 2 frame, drawn on screenshot 0,
     /// where shades at most 10 apart are one look.
-    fn start_looks(owner: &mut Owner<FakeHost>) -> Result<(), String> {
+    fn start_looks(owner: &mut Owner<FakeHost>) -> Result<u64, String> {
         let region: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         owner.start_look_recording(region, 10, 0)
@@ -94,7 +94,7 @@ mod tests {
 
     /// Records the readings of the whole 4 by 2 frame, drawn on screenshot
     /// 0, with red as ink: a new recording, or with `more` the stopped one.
-    fn start_readings(more: bool) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
+    fn start_readings(more: bool) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let region: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         let ink: ColorDef =
@@ -128,7 +128,7 @@ mod tests {
     fn a_recording_keeps_a_screenshot_of_each_look_once() {
         let (mut harness, mut handler) = Harness::with_screenshot();
         assert_eq!(harness.looks(), None);
-        assert_eq!(harness.ask(start_looks), Ok(()));
+        harness.ask(start_looks).expect("records");
         let started = harness.looks().expect("it records");
         assert!(started.recording);
         assert_eq!(started.kept, Vec::<usize>::new());
@@ -169,7 +169,7 @@ mod tests {
             "a screenshot the user takes follows the recorded ones"
         );
 
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         harness.deliver(&mut handler, Ok(&shade(200)));
         let stopped = harness.looks().expect("it stays to say what it kept");
         assert!(!stopped.recording);
@@ -187,7 +187,7 @@ mod tests {
         assert_eq!(harness.ask(Owner::screenshot), Ok(1));
         harness.ask(start_looks).expect("records");
         harness.deliver(&mut handler, Ok(&shade(100)));
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         assert_eq!(harness.kept(), [2]);
 
         harness.ask(start_looks).expect("records again");
@@ -202,7 +202,7 @@ mod tests {
             [3],
             "only the look no screenshot of this window size shows"
         );
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         // A removed screenshot's look is not known any more.
         assert_eq!(harness.ask(|owner| owner.remove_screenshots(&[2])), Ok(()));
         harness.ask(start_looks).expect("records once more");
@@ -312,7 +312,7 @@ mod tests {
         );
         harness.deliver(&mut handler, Ok(&shade(100)));
         assert_eq!(harness.kept(), [1], "so the look it kept is still known");
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         assert_eq!(harness.ask(|owner| owner.remove_screenshots(&[1])), Ok(()));
         assert_eq!(harness.ask(|owner| owner.screenshot_pixels(1, 4)), None);
 
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(harness.looks(), None);
         harness.ask(start_looks).expect("records");
         harness.deliver(&mut handler, Ok(&shade(100)));
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         harness.deliver(
             &mut handler,
             Err(io::Error::new(

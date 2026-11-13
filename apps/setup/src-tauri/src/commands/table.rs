@@ -60,10 +60,11 @@ macro_rules! with_commands {
             commands::explain_reading() -> Option<ReadingDetails>;
             /// Records the region of the picked window that `spec` names, in the characters' color. With
             /// `more`, goes on with the stopped recording, which needs the same region, ink and window size;
-            /// otherwise starts a new one.
-            commands::start_recording(spec: RecordSpec, more: bool) -> ();
-            /// Stops the recording, of readings or of looks, keeping what it recorded.
-            commands::stop_recording() -> ();
+            /// otherwise starts a new one. Answers the recording's number, which going on keeps.
+            commands::start_recording(spec: RecordSpec, more: bool) -> U64AsNumber;
+            /// Stops recording `recording`, of readings or of looks, keeping what it recorded, unless another recording
+            /// took its place.
+            commands::stop_recording(recording: U64AsNumber) -> ();
             /// Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay.
             commands::discard_recording() -> ();
             /// The recording of readings and its readings so far, or null without one.
@@ -71,7 +72,8 @@ macro_rules! with_commands {
             /// Records the looks of `region` of the picked window, drawn on `screenshot`, in place of any recording: a
             /// screenshot is kept each time the region shows a look that no screenshot of that window size shows yet.
             /// Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
-            commands::start_look_recording(region: RegionDef, tolerance: u8, screenshot: usize) -> ();
+            /// Answers the recording's number.
+            commands::start_look_recording(region: RegionDef, tolerance: u8, screenshot: usize) -> U64AsNumber;
             /// The recording of looks and the screenshots it kept so far, or null without one.
             commands::look_recording_state() -> Option<LookRecordingView>;
             /// A reading of recording `recording` at most `maxWidth` wide, or null for an unknown index or a replaced
