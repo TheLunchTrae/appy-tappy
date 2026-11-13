@@ -5,6 +5,7 @@
 //! unusable removes them only with the user's word for it.
 
 use appytappy_config::app_file::{CheckDef, FixDef, PinDef, ScreenDef, SizeDef, ValueDef};
+use appytappy_sources::screen::saved::Readers;
 use serde::{Deserialize, Serialize};
 
 use crate::automations;
@@ -127,7 +128,12 @@ impl<H: Host> Owner<H> {
     fn tried(&mut self, spec: &EditSpec) -> Result<EditPreview, String> {
         let found = self.stores()?.app(&spec.app)?;
         let edited = self.edited(spec, &found)?;
-        let value = read_back(&edited.value.screen, &found, &edited.pictures)?;
+        let value = read_back(
+            &edited.value.screen,
+            &found,
+            Readers::new(&found.file.references),
+            &edited.pictures,
+        )?;
         // A value that is not read at the window's size stays the live
         // check: the answer says why, as each read does until a frame has
         // a size it is read at.
@@ -157,7 +163,12 @@ impl<H: Host> Owner<H> {
             if !agreed {
                 return Err(unagreed(&edited.value.name, &edited.dropped));
             }
-            read_back(&edited.value.screen, found, &edited.pictures)?;
+            read_back(
+                &edited.value.screen,
+                found,
+                Readers::new(&found.file.references),
+                &edited.pictures,
+            )?;
             let answer = SavedValue {
                 app: spec.app.clone(),
                 value: edited.value.id.clone(),
