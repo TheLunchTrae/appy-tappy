@@ -97,6 +97,16 @@ each game session. `apps/setup/src-tauri`
 is a workspace member like the other programs; the setup app takes `engine`
 once it previews automations.
 
+`appytappy-sources` holds what both programs read with, so a change to it
+rebuilds the runtime. Code that only the setup app needs and that stands by
+itself lives in the setup app, such as selecting the thing a state check
+looks for (`apps/setup/src-tauri/src/selection/select.rs`). A setup-only
+item stays in `sources` when it is the other half of something the runtime
+uses: writing the PNG files the runtime decodes, and the shapes and ink a
+number read decides with. Its crate documentation lists them. Reading a
+pixel of the screen serves only the MCP server, so it is the `ScreenPixels`
+trait, apart from the `System` trait that every fake implements.
+
 The design uses the [`windows`](https://github.com/microsoft/windows-rs) crate
 rather than `windows-sys`. Media sessions and Core Audio are WinRT and COM
 APIs, which only `windows` covers; `windows-sys` covers plain Win32 functions.
@@ -107,7 +117,8 @@ bounds.
 ### Portable core, thin Windows adapters
 
 `config` and `engine` contain no Windows calls, so the Linux `quality` job
-lints and tests them in full and mutation-tests every change to them.
+lints and tests them in full, and the Linux `mutants` jobs mutation-test every
+change to them.
 `sources`, `actions`, `platform`, and the runtime wrap Windows APIs. Their
 Windows code sits behind `#[cfg(windows)]` and their Windows-only dependencies
 under `[target.'cfg(windows)'.dependencies]`, so those crates still build on
@@ -154,7 +165,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   application's window with its [window match](Setup-app.md#window-matching),
   copies only the regions of the values that read at the window's current
   size, packed one under another, and reads each value from its place in
-  that packed image. Where each value reads at a size, drawn there, fixed
+  that packed image; a value that reads alone has the whole image, so its
+  pixels are read where the capture put them, without another copy. Where each value reads at a size, drawn there, fixed
   there, or scaled from its first drawing, is resolved once each time the
   window settles at the size, after it showed that size alone for 250 ms
   ([Window sizes](Screen-regions.md#window-sizes)). A `Layout` in
@@ -169,7 +181,7 @@ Each thread below is a plain `std::thread`, and each channel is a
   lost or the capture's own code panicked, and after `RESTART_AFTER`
   frames in a row fail, it sends `Unseen` and looks for the window again.
   After a capture ends that way it waits
-  first, from `FIND_AGAIN`, doubling up to `RESTART_WAIT_MAX` while each
+  first, from `RESTART_WAIT_MIN`, doubling up to `RESTART_WAIT_MAX` while each
   new capture ends before reading a frame, and it logs why once until the
   reason changes.
   Every `CHECK_AGAIN` it checks that the window still shows and that no other
@@ -327,7 +339,7 @@ When a session starts, the lifecycle thread sends the `Started` change, then
 reads which build of the application's executable runs and sends it as an
 `Identified` change, so reading the file never holds back the session. A
 build is the executable's file version, its size, and when it was written
-(`appytappy_sources::build`). The Windows adapter
+(`crates/sources/src/build.rs`). The Windows adapter
 (`crates/sources/src/win/build.rs`) asks `NtQuerySystemInformation` for the
 process's executable path by its process ID, which needs no process handle, so
 it is allowed for every anti-cheat class, and turns the device path it gives
@@ -703,8 +715,11 @@ design enforces the block in three places:
    that only their checked constructors make, and neither has `Deserialize` or
    `Default`, so code that skips validation does not compile. The screen
    source has no such split: `saved::build` in `appytappy-sources` takes the
-   raw `ScreenDef` and `ReferenceDef` from `app.json` and builds the check it
-   reads with. `CheckDef::check` in `config` owns how many states a state
+   raw `ScreenDef` from `app.json` and builds the check it reads with. It
+   takes the application's `saved::Readers` too, which learn each
+   `ReferenceDef` the first time a value reads with it, so loading an
+   application decodes a reference's pictures once however many values read
+   with it. `CheckDef::check` in `config` owns how many states a state
    check has, that their names differ, and that a bar's two colors differ,
    so a file that breaks one does not load; `saved::build` and the setup
    app's check editor report its error. A value that breaks a rule that

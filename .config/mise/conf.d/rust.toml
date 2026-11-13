@@ -117,7 +117,6 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
 run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --cargo-arg=--locked
 run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
@@ -126,6 +125,9 @@ run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 # The standards gate runs this lane, so it finishes in minutes rather than
 # hours; see wiki/Rust-standards.md#mutation-testing. It waits for the other
 # Cargo tasks, so a copied target/ never holds a build half written.
+#
+# MUTANTS_SHARD=k/n tests only the kth of n shards of the selected mutants,
+# counting from 0; unset, the lane tests every one.
 #
 # cargo-mutants builds in its own copy of the tree and leaves target/ out of
 # it. MUTANTS_COPY_TARGET=true copies target/ too, so the baseline reuses the
@@ -188,16 +190,20 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# When this shard selects no mutants, cargo-mutants writes a report without
+# outcomes.json, which verification rejects, so the lane lists the mutants
+# first and stops when there are none. Listing builds nothing.
+selected="$(cargo mutants --list --workspace --all-features --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file")"
+if [ -z "$selected" ]; then
+  echo "The diff selects no mutants${MUTANTS_SHARD:+ in shard $MUTANTS_SHARD}; nothing to test."
+  exit 0
+fi
+
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
   run_mutants_task_child cargo test --no-run --workspace --all-features --locked
 fi
-# cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked --in-diff "$diff_file"
-if [ ! -d mutants.out ]; then
-  echo "The diff selects no mutants; nothing to verify."
-  exit 0
-fi
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file"
 run_mutants_task_child sh scripts/verify-mutants.sh diff mutants.out
 """
 
@@ -218,8 +224,10 @@ run = "cargo deny --workspace --all-features --locked check"
 description = "Run the Rust standards workflow with autofixes"
 depends = ["rust:fmt"]
 
-[tasks."rust:standards:check"]
-description = "Run the Rust standards CI gate"
+# CI runs the mutation lane in shards of its own, so its quality job runs the
+# gate without it.
+[tasks."rust:standards:check:base"]
+description = "Run the Rust standards CI gate without the mutation lane"
 depends = [
   "rust:fmt:check",
   "rust:lint",
@@ -227,7 +235,10 @@ depends = [
   "rust:doc",
   "rust:test",
   "rust:package",
-  "rust:mutants:diff",
   "rust:machete",
   "rust:deny",
 ]
+
+[tasks."rust:standards:check"]
+description = "Run the Rust standards CI gate"
+depends = ["rust:standards:check:base", "rust:mutants:diff"]
