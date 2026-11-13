@@ -557,15 +557,14 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
             ..
         } => {
             let saved = (session.references)(reference).map_err(SpecError::Reference)?;
-            let all = saved_reader(&saved.reference, &saved.pictures, None)?;
             // The glyphs the runtime reads the saved value with, as
             // `saved::build` chooses them.
-            let reader = match characters {
-                Some(characters) => all
-                    .reading_only(characters)
-                    .ok_or(SpecError::NoCharacters)?,
-                None => all,
-            };
+            let reader = saved_reader(&saved.reference, &saved.pictures, None)?
+                .reading(characters.as_deref())
+                .ok_or_else(|| SpecError::NoCharacters {
+                    reference: saved.reference.name.clone(),
+                    characters: characters.clone().unwrap_or_default(),
+                })?;
             Check::Number {
                 reader,
                 whole: *whole,

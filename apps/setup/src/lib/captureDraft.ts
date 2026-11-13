@@ -100,7 +100,7 @@ export function refreshedEditing(editing: Editing | null, references: readonly R
 
 /**
  * Whether the fix draft `def` no longer fits `value`: a fix reads its value the way that was first drawn, and the
- * value's check, colors, or states were changed since the draft copied them.
+ * value's check, colors, states, or number settings were changed since the draft copied them.
  */
 export function fixOutdated(def: DraftDef, value: ValueDef): boolean {
   const kept = keptSetup(def)?.draft;
@@ -108,7 +108,15 @@ export function fixOutdated(def: DraftDef, value: ValueDef): boolean {
     return false;
   }
   const now = fixDraft(value.screen.check);
-  const taken = (draft: Draft): unknown => [draft.kind, draft.filled, draft.empty, draft.color, draft.stateNames];
+  const taken = (draft: Draft): unknown => [
+    draft.kind,
+    draft.filled,
+    draft.empty,
+    draft.color,
+    draft.stateNames,
+    draft.whole,
+    draft.characters,
+  ];
   return !sameContent(taken(now), taken(kept));
 }
 

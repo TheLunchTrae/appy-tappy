@@ -30,6 +30,7 @@ import {
   settingsDiffer,
   toReference,
   withFixRegion,
+  withReference,
   withState,
 } from '../lib/check.ts';
 import { boxNumber, boxOf } from '../lib/boxes.ts';
@@ -894,7 +895,7 @@ export function Capture({
       whole={draft.whole}
       characters={draft.characters}
       onSelect={(reference) => {
-        setDraft((current) => ({ ...current, reference }));
+        setDraft((current) => withReference(current, reference, file?.references ?? []));
       }}
       onEdit={(id) => {
         background(openEditor(file?.references.find((reference) => reference.id === id) ?? null, null));

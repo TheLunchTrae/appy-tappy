@@ -20,6 +20,7 @@ import {
   toReference,
   withFixRegion,
   withKind,
+  withReference,
   withoutState,
   withState,
   withStateAt,
@@ -403,6 +404,27 @@ test("a new screenshot carries the value's region when it fits, and clears it wh
   // A saved value's region waits, on no screenshot, for one of the size it was drawn at.
   const saved = { ...EMPTY_DRAFT, region };
   expect(onPicture(saved, 1, false)).toBe(saved);
+});
+
+test('withReference keeps the choice of characters that was picked, for the new reference', () => {
+  const reference = (id: string, text: string) => ({
+    id,
+    name: id,
+    ink: red,
+    tolerance: 40,
+    samples: [{ image: `ref-${id}-1.png`, text }],
+  });
+  const references = [reference('percent', '10%L'), reference('clock', '12:')];
+  const number = { ...EMPTY_DRAFT, reference: 'percent' };
+  expect(withReference(number, 'clock', references)).toEqual({ ...number, reference: 'clock' });
+  const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  expect(withReference({ ...number, characters: [...digits, '%'] }, 'clock', references).characters).toEqual([
+    ...digits,
+    ':',
+  ]);
+  expect(withReference({ ...number, characters: ['1', 'L'] }, 'clock', references).characters).toEqual(['1']);
+  // A first reference has no choice to carry over but the one the draft holds.
+  expect(withReference({ ...EMPTY_DRAFT, characters: digits }, 'clock', references).characters).toEqual(digits);
 });
 
 describe('fixDraft', () => {

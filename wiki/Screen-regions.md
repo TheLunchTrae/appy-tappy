@@ -49,7 +49,7 @@ the same answer on every system, and allocate nothing per read.
   its check, and then reads with only its reference's glyphs for them, as if
   the reference had learned nothing else: a shape takes the closest of those
   glyphs, so a value of digits cannot read a `0` as the `O` its font also
-  has, and any other character counts as not learned. `DigitReader::reading_only`
+  has, and any other character counts as not learned. `DigitReader::reading`
   drops the other glyphs once, when `saved::build` builds the check, so a
   read matches against fewer glyphs and does nothing more. Characters the
   reference has yet to learn are passed over, and a value whose reference

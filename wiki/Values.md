@@ -314,10 +314,16 @@ chooses them:
 - **Digits and symbols** reads the digits and each character the reference
   knows that is neither a digit nor a letter, such as `%`, `.`, `,`, `:`,
   `/`, `-`, and `+`. It shows while the reference knows such a character. A
-  symbol the reference learns later is not added: choose
-  **Digits and symbols** again to read it.
-- **Choose…** shows each character the reference knows with a box. Turn on
-  the ones the value shows, at least one.
+  symbol the reference learns later is not added: the value then shows
+  **Choose…** with the characters it reads turned on, and choosing
+  **Digits and symbols** again adds the new symbol.
+- **Choose…** shows each character the reference knows with a box, with the
+  ones the value reads so far turned on. Turn on the ones the value shows, at
+  least one.
+
+Picking another reference keeps **All it knows** and **Digits**, takes
+**Digits and symbols** from the new reference's symbols, and keeps of a
+**Choose…** set the characters the new reference knows.
 
 Under the list, the value shows the characters it reads. The choice belongs
 to the value. The reference keeps every character it knows, so another value
@@ -325,12 +331,16 @@ can read more of the same reference, and the References page still lists them
 all.
 
 The value reads as if its reference knew nothing else. A character it does
-not read counts as one the reference has not learned, so the value reads
-nothing while its region shows one before or inside the number. Choose
-**Digits** for a region that shows only a number, and add what else it shows,
-such as the `L`, `v`, and `.` of `Lv.5`. Text after the number, such as the
-`HP` in `37 HP`, needs no characters. To read `87.5%`, the value reads the
-`.` as well as the digits, with **Whole number only** on too.
+not read counts as one the reference has not learned, and the value reads
+nothing while its region shows one before the number, inside it, or right
+after it. So **Digits** reads a region that shows only digits, such as `87`.
+It cannot read `87%`, `1,234`, or `37 HP`: the value has to read the
+character that follows the digits to know that the number ended. Add what
+the region shows: the `%` of `87%`, the `,` of `1,234`, the `L`, `v`, and
+`.` of `Lv.5`. Only text after such a character needs none, such as the `HP`
+in `37% HP` once the value reads the `%`. To read `87.5%`, the value reads
+the digits, the `.`, and the `%`; with **Whole number only** on, the number
+ends at the `.`, so the digits and the `.` are enough.
 
 A [fix](#fix-a-value-at-one-size) that reads with its own reference reads the
 same characters of that reference.

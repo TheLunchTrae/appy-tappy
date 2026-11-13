@@ -12,8 +12,9 @@ import {
   type StateSpec,
 } from './bindings.ts';
 import { type Box, boxLabels } from './boxes.ts';
-import { savedCharacters } from './charactersRead.ts';
+import { forReference, savedCharacters } from './charactersRead.ts';
 import { AUTOMATIC, type PinChoice } from './pin.ts';
+import { referenceCharacters } from './reference.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { sameSize, sizeText } from './sizes.ts';
@@ -438,6 +439,18 @@ export function fixDraft(check: CheckDef): Draft {
  */
 export function withFixRegion(draft: Draft, region: Rect | null, shot: number): Draft {
   return region === null || draft.region !== null ? draft : { ...draft, region, drawnOn: shot };
+}
+
+/**
+ * `draft`, a number value's, reading with `reference` of `references`, its application's, and the characters of it
+ * that its choice of characters comes to, as {@link forReference} says.
+ */
+export function withReference(draft: Draft, reference: string, references: readonly ReferenceDef[]): Draft {
+  const known = (id: string | null): readonly string[] => {
+    const saved = references.find((each) => each.id === id);
+    return saved === undefined ? [] : referenceCharacters(saved);
+  };
+  return { ...draft, reference, characters: forReference(draft.characters, known(draft.reference), known(reference)) };
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */
