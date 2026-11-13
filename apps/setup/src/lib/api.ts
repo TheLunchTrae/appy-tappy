@@ -175,15 +175,18 @@ export async function explainReading(): Promise<ReadingDetails | null> {
 /**
  * Records the region of the picked window that `spec` names, in the characters' color. With
  * `more`, goes on with the stopped recording, which needs the same region, ink and window size;
- * otherwise starts a new one.
+ * otherwise starts a new one. Answers the recording's number, which going on keeps.
  */
-export async function startRecording(spec: RecordSpec, more: boolean): Promise<void> {
-  await invoke('start_recording', { spec, more });
+export async function startRecording(spec: RecordSpec, more: boolean): Promise<number> {
+  return invoke<number>('start_recording', { spec, more });
 }
 
-/** Stops the recording, of readings or of looks, keeping what it recorded. */
-export async function stopRecording(): Promise<void> {
-  await invoke('stop_recording');
+/**
+ * Stops recording `recording`, of readings or of looks, keeping what it recorded, unless another recording
+ * took its place.
+ */
+export async function stopRecording(recording: number): Promise<void> {
+  await invoke('stop_recording', { recording });
 }
 
 /** Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay. */
@@ -200,9 +203,10 @@ export async function recordingState(): Promise<RecordingView | null> {
  * Records the looks of `region` of the picked window, drawn on `screenshot`, in place of any recording: a
  * screenshot is kept each time the region shows a look that no screenshot of that window size shows yet.
  * Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
+ * Answers the recording's number.
  */
-export async function startLookRecording(region: RegionSpec, tolerance: number, screenshot: number): Promise<void> {
-  await invoke('start_look_recording', { region, tolerance, screenshot });
+export async function startLookRecording(region: RegionSpec, tolerance: number, screenshot: number): Promise<number> {
+  return invoke<number>('start_look_recording', { region, tolerance, screenshot });
 }
 
 /** The recording of looks and the screenshots it kept so far, or null without one. */

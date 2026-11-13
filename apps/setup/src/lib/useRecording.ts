@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { ExampleSpec, PinDef, RecordingSettings, RecordingView } from './bindings.ts';
-import { discardRecording, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
+import { discardRecording, recordedReading, recordingState, startRecording } from './api.ts';
 import type { Picture } from './pixels.ts';
 import { background } from './repeat.ts';
 import { type Crops, NO_CROPS, withCrop } from './review.ts';
@@ -31,7 +31,8 @@ type Recordable = Omit<RecordingSettings, 'windowSize'> & {
 
 /**
  * The session's recording, kept current while it records or its text is still being read, with each reading's
- * pixels. Leaving the component that uses it stops the recording, since it samples the window until it stops.
+ * pixels. Leaving the component that uses it stops the recording it started, since it samples the window until it
+ * stops.
  */
 export function useRecording(): {
   readonly view: RecordingView | null;
@@ -48,13 +49,13 @@ export function useRecording(): {
    * runs when that read fails.
    */
   readonly start: (settings: Recordable, more: boolean, onStarted: () => void) => Promise<void>;
-  /** Stops recording, keeping its readings; true once it stopped. */
+  /** Stops the recording it started, keeping its readings; true once it stopped. */
   readonly stop: () => Promise<boolean>;
   /** Forgets the recording and its readings; true once it is gone. */
   readonly discard: () => Promise<boolean>;
 } {
   const recorder = useRecorder(recordingState, stillRead);
-  const { view, command, show, forget } = recorder;
+  const { view, command, show, forget, started } = recorder;
   // Each recorded reading's pixels, for the recording they belong to.
   const [crops, setCrops] = useState<Crops>(NO_CROPS);
 
@@ -89,7 +90,7 @@ export function useRecording(): {
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
     await command(async () => {
       const { app, pin, region, ink, tolerance, drawnOn, scope, examples } = settings;
-      await startRecording({ app, region, screenshot: drawnOn, pin, ink, tolerance, scope, examples }, more);
+      started(await startRecording({ app, region, screenshot: drawnOn, pin, ink, tolerance, scope, examples }, more));
       if (!more) {
         // A new recording replaced the old one, whose readings' pixels go with it.
         setCrops(NO_CROPS);
@@ -101,7 +102,7 @@ export function useRecording(): {
 
   const stop = async (): Promise<boolean> =>
     command(async () => {
-      await stopRecording();
+      await recorder.stop();
       show(await recordingState());
     });
 
