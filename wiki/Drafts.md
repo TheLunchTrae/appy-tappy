@@ -93,4 +93,6 @@ be read at all shows under the automations on the **Automations** page, and
 can only be deleted too. Until you delete it, AppyTappy keeps every picture
 that clicks look for, because it can't tell which of them that draft uses. If
 a draft's screenshot can't be read when you finish it, AppyTappy says so where
-you chose the window: select **Cancel**, then delete the draft on its page.
+you chose the window: select **Cancel**, then delete the draft on its page. A
+screenshot of a window larger than AppyTappy reads isn't kept with its draft,
+and the draft's row says to make the window smaller and take it again.
