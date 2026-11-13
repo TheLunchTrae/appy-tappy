@@ -1344,7 +1344,8 @@ stateDiagram-v2
   more** are refused with "Change window to pick it
   again". Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
-  to show.
+  to show. Nothing starts the capture again, at any window size: the
+  editor watches the value again.
 - **Watching** keeps `reads`, the window size its capture reads the value at
   and where the value reads there, and each poll asks `FrameMeaning::of`
   what the newest frame means, as the runtime's frame handler does. A frame at that

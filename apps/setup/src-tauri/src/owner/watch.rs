@@ -214,10 +214,14 @@ impl<H: Host> Owner<H> {
     /// and starts again when the value's region there is another than the
     /// one copied, keeping the watch's number. Where it does not, the
     /// capture goes on, and the watch says why while frames show that size.
+    /// A watch whose capture stopped is placed nowhere.
     fn settle_watch(&mut self, now: Instant) {
         let Some(watching) = self.capture.watching_mut() else {
             return;
         };
+        if watching.ticket().is_none() {
+            return;
+        }
         let watched = &mut watching.watched;
         let placed = watched
             .settle
@@ -674,6 +678,40 @@ mod tests {
                     .to_owned()
             })
         );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_watch_whose_capture_stopped_is_not_started_again() {
+        let (mut harness, root) = with_saved_bar("watch-lost");
+        let (watch, mut handler) = watch_bar(&mut harness);
+        assert_eq!(harness.closed.try_recv(), Ok(7), "the pick's capture");
+        // The window takes a size where the bar's region is another, and
+        // its capture stops before that size settles.
+        let large = Size {
+            width: 8,
+            height: 4,
+        };
+        let red = Image::new(large, [0, 0, 255, 0].repeat(32)).expect("matching length");
+        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        harness.deliver_at(
+            &mut handler,
+            Err(io::Error::other("the window closed")),
+            WATCH_INTERVAL,
+        );
+        assert_eq!(harness.closed.try_recv(), Ok(7), "the capture closes");
+        let lost = Ok(Live::Lost {
+            message: "Progress bar cannot be read: the window closed.".to_owned(),
+        });
+        harness.wait(SETTLE);
+        assert_eq!(harness.ask(watched(watch, None)), lost);
+        assert!(harness.handlers.try_recv().is_err(), "no capture starts");
+        // What the stopped capture still sends is dropped.
+        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        harness.wait(SETTLE);
+        assert_eq!(harness.ask(watched(watch, None)), lost);
+        assert!(harness.handlers.try_recv().is_err(), "nor then");
+        assert!(harness.closed.try_recv().is_err(), "and none is left open");
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
