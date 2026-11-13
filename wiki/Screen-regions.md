@@ -140,13 +140,21 @@ read
 ## Saved pictures
 
 A reference's samples and a state check's pictures are PNG files. AppyTappy
-reads any PNG, converting it to 8-bit color, and refuses images over 8192
-pixels on a side. A sample is read as it looks, ignoring alpha. In a state
-picture, alpha is the mask: a pixel at least half opaque is compared,
+reads any PNG, converting it to 8-bit color. It refuses a picture over 8192
+pixels on a side or with more pixels than `LARGEST_PICTURE`, 7680 by 4320.
+Every picture AppyTappy saves is a window's content or part of it. A window
+that spans displays can be larger, but AppyTappy chooses this bound, an 8K
+display's worth, so a picture's cost stays bounded wherever it came from.
+`Image::decode_png` reads the size from the PNG header and refuses a larger
+picture before it allocates its pixels, which take about 10 bytes each while
+they decode, so a small, highly compressed file cannot claim gigabytes.
+Beside the pixels, the decoder may allocate 4 MB, for its rows and the file's
+metadata. A sample is read as it looks, ignoring alpha. In a state picture,
+alpha is the mask: a pixel at least half opaque is compared,
 and a more transparent one is left out. A picture with no transparent pixel is
 compared whole, and one with no opaque pixel is refused. AppyTappy writes
 8-bit RGB, or RGBA with the left-out pixels fully transparent when a mask
-leaves any out.
+leaves any out, and writes no picture larger than it reads.
 
 ## Window content
 
@@ -450,12 +458,15 @@ as the capture's `Layout` places them, and those rows land in a buffer that is
 reused for every frame. When the window closes, the capture tells its handler
 and stops. It does the same when it can no longer produce frames: when the
 graphics device is lost, such as after a driver reset or update, and when it
-cannot follow the window to a new size. A closed window and a lost device stop
-frames rather than fail them, so every `HEALTH_CHECK`, 2 seconds, whatever
-arrives meanwhile, the capture checks that its window is still there and still
-belongs to the process that owned it at the start, and that its device still
-works (`crates/sources/src/win/capture.rs`). It does not use the capture item's
-own Closed event, which would say sooner that the window closed: registering a
+cannot follow the window to a new size. A panic in the capture's frame loop tells
+the handler too, with the panic's message, instead of ending the capture's
+thread unheard (`run_capture` in `crates/sources/src/screen/capture.rs`). A
+closed window and a lost device stop frames rather than fail them, so every
+`HEALTH_CHECK`, 2 seconds, whatever arrives meanwhile, the capture checks that
+its window is still there and still belongs to the process that owned it at
+the start, and that its device still works
+(`crates/sources/src/win/capture.rs`). It does not use the capture item's own
+Closed event, which would say sooner that the window closed: registering a
 handler for it left a thread handle, events and thread pool waits open after
 every capture, even once the handler was removed.
 
