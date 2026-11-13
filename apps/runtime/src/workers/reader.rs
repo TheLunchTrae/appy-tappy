@@ -43,7 +43,8 @@
 //! capture's thread without a word. After a capture ends this
 //! way, the reader waits before it captures again, from [`FIND_AGAIN`] up to
 //! [`RESTART_WAIT_MAX`], doubling while each new capture ends before it reads
-//! a frame, and logs why once until the reason changes. While capturing, the reader
+//! a frame, which a frame whose reading panicked is not, and logs why once
+//! until the reason changes. While capturing, the reader
 //! checks every [`CHECK_AGAIN`] that the window still shows and still fits
 //! the application best, because a hidden window sends no frames and no
 //! close, and the application may open a better window, such as its main
@@ -552,17 +553,16 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
             return;
         }
         known_size = matches!(next, Ok(Ended::Resized(..)));
-        // Sent when the frame handler could not send it itself: it cannot
-        // see why the check ended the capture, and once it panicked, it
-        // sends nothing. It is sent after the capture closed, so no reading
-        // from it can follow.
-        let unseen = || Reading::Unseen {
-            session: job.session,
-            reader: job.reader,
-        };
         match next {
             Err(problem) => {
-                if !report(&mut reported, problem) || !send(events, unseen()) {
+                // The frame handler cannot see why, so it does not send
+                // `Unseen` itself. It is sent after the capture closed, so
+                // no reading from it can follow.
+                let unseen = Reading::Unseen {
+                    session: job.session,
+                    reader: job.reader,
+                };
+                if !report(&mut reported, problem) || !send(events, unseen) {
                     return;
                 }
             },
@@ -585,17 +585,6 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                 );
                 let (pause_for, new) = recovery.failed(problem.clone(), Some(error));
                 if (new && !report(&mut reported, problem))
-                    || !pause(control, pause_for, &mut trace)
-                {
-                    return;
-                }
-            },
-            Ok(Ended::Panicked(reason)) => {
-                let problem =
-                    format!("reading a frame panicked, so its capture starts again: {reason}");
-                let (pause_for, new) = recovery.failed(problem.clone(), None);
-                if (new && !report(&mut reported, problem))
-                    || !send(events, unseen())
                     || !pause(control, pause_for, &mut trace)
                 {
                     return;
@@ -653,7 +642,7 @@ fn pause(control: &Receiver<Control>, time: Duration, trace: &mut Trace) -> bool
 enum Ended {
     /// The session ended.
     Stop,
-    /// See [`Control::Lost`].
+    /// See [`Control::Lost`], which [`Control::Panicked`] also ends in.
     Lost(String),
     /// The window settled at a size where some values read, placed here,
     /// with each value's last problem, so the capture starts again for
@@ -661,8 +650,6 @@ enum Ended {
     Resized(Placed, Problems),
     /// See [`Control::Failing`].
     Failing(String),
-    /// See [`Control::Panicked`].
-    Panicked(String),
 }
 
 /// Says why each value is not read where `placed` places it, unless
@@ -769,7 +756,11 @@ fn watch<S: System, E: From<Reading>>(
                 }
             },
             Ok(Control::Failing(error)) => return Ok(Ended::Failing(error)),
-            Ok(Control::Panicked(reason)) => return Ok(Ended::Panicked(reason)),
+            Ok(Control::Panicked(reason)) => {
+                return Ok(Ended::Lost(format!(
+                    "reading a frame panicked, so its capture starts again: {reason}"
+                )));
+            },
             Err(RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
                 if let Some(other) = settled_elsewhere(&mut settle, now, &job.plan, reads_at) {
@@ -920,6 +911,19 @@ fn not_read(unread: Unread) -> String {
     format!("is not read at the window's size now: {unread}; {advice}")
 }
 
+/// How far a capture that the reader started again after the last one
+/// ended has got toward telling the reader that it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Restart {
+    /// The capture was not started again, or it told the reader it reads.
+    Done,
+    /// No frame has come yet.
+    Waiting,
+    /// A frame came, and once it is handled without a panic, the handler
+    /// sends [`Control::Recovered`].
+    Read,
+}
+
 /// The capture's frame handler: reads each value that reads at one window
 /// size from a frame and sends what changed.
 struct FrameReader<E> {
@@ -944,9 +948,9 @@ struct FrameReader<E> {
     frame_problem: Option<String>,
     /// How many frames in a row failed.
     failures: u32,
-    /// Whether the reader started this capture again for failing frames,
-    /// and waits to hear that it read one.
-    restarted: bool,
+    /// Whether the reader started this capture again after the last one
+    /// ended, and whether it has heard that this one reads.
+    restart: Restart,
     /// Whether it sent a reading since it last sent [`Reading::Unseen`].
     seen: bool,
     /// Whether it told the reader that its capture ended, or that reading a
@@ -988,7 +992,7 @@ impl<E: From<Reading>> FrameReader<E> {
             heard,
             frame_problem: None,
             failures: 0,
-            restarted: false,
+            restart: Restart::Done,
             seen: false,
             ended: false,
             schedule: ReadSchedule::new(job.interval),
@@ -1008,12 +1012,22 @@ impl<E: From<Reading>> FrameReader<E> {
         if self.ended {
             return FIND_AGAIN;
         }
-        // Once it panicked, it reads no more frames, so nothing reads its
-        // state half changed.
+        // Once it panicked, it reads no more frames. What it still reads of
+        // its state is what a panic cannot leave half changed: a value
+        // counts as seen once its reading was sent.
         match panic::catch_unwind(AssertUnwindSafe(|| self.act(frame))) {
-            Ok(wait) => wait,
+            Ok(wait) => {
+                // Only a frame handled without a panic shows that a capture
+                // started again reads.
+                if self.restart == Restart::Read {
+                    self.restart = Restart::Done;
+                    self.tell(Control::Recovered);
+                }
+                wait
+            },
             Err(payload) => {
                 let reason = appytappy_platform::panic_reason(payload.as_ref()).to_owned();
+                self.unseen();
                 self.tell(Control::Panicked(reason));
                 FIND_AGAIN
             },
@@ -1058,13 +1072,13 @@ impl<E: From<Reading>> FrameReader<E> {
     }
 
     /// Notes that the capture handed over a frame: no frame problem
-    /// stands, and a capture started again has recovered.
+    /// stands, and a capture started again has recovered once the frame is
+    /// handled.
     fn captured(&mut self) {
         self.frame_problem = None;
         self.failures = 0;
-        if self.restarted {
-            self.restarted = false;
-            self.tell(Control::Recovered);
+        if self.restart == Restart::Waiting {
+            self.restart = Restart::Read;
         }
     }
 
@@ -1135,7 +1149,11 @@ impl<E: From<Reading>> FrameReader<E> {
     /// one failed, the frame error it logged already, and each value's last
     /// problem, which a capture started for a new size carries.
     fn carry(&mut self, recovery: &Recovery, problems: Problems) {
-        self.restarted = recovery.problem.is_some();
+        self.restart = if recovery.problem.is_some() {
+            Restart::Waiting
+        } else {
+            Restart::Done
+        };
         self.frame_problem = recovery.frame_error.as_deref().map(frame_problem);
         if problems.len() == self.problems.len() {
             self.problems = problems;
@@ -1187,7 +1205,6 @@ impl<E: From<Reading>> FrameReader<E> {
             return false;
         }
         *last = Some(reading.clone());
-        self.seen = true;
         let session = self.session;
         self.trace.record(What::Changed, |record| Record {
             session: Some(session),
@@ -1207,6 +1224,9 @@ impl<E: From<Reading>> FrameReader<E> {
             value: reading,
             at: frame.received,
         }));
+        // Only once it was sent, so a panic that kept it from going leaves
+        // nothing to say `Unseen` for.
+        self.seen = true;
         true
     }
 
@@ -1242,7 +1262,6 @@ impl<E: From<Reading>> FrameReader<E> {
     /// Every value then reads as new when it is seen again.
     fn unseen(&mut self) {
         if self.seen {
-            self.seen = false;
             self.last.fill(None);
             #[expect(
                 clippy::let_underscore_must_use,
@@ -1252,6 +1271,7 @@ impl<E: From<Reading>> FrameReader<E> {
                 session: self.session,
                 reader: self.reader,
             }));
+            self.seen = false;
         }
     }
 
@@ -2150,6 +2170,31 @@ mod tests {
         frames.handle(Ok(frame(&black, WINDOW)));
         assert_eq!(readings.try_recv(), Err(TryRecvError::Empty));
         assert_eq!(told.try_recv(), Err(TryRecvError::Empty));
+    }
+
+    #[test]
+    fn a_restarted_capture_whose_first_frame_panics_has_not_recovered() {
+        let (events, _readings) = mpsc::channel::<Tripwire>();
+        let (control, told) = mpsc::channel();
+        let job = job(vec![red_at("icon", 0, 0)]);
+        let placed = place(&job.plan, WINDOW);
+        let mut frames = FrameReader::new(
+            &job,
+            placed,
+            events,
+            control,
+            mpsc::channel().1,
+            mpsc::channel().1,
+        );
+        let mut recovery = Recovery::new();
+        recovery.failed("reading a frame panicked".to_owned(), None);
+        frames.carry(&recovery, Vec::new());
+        let red = frame_image(2, 2, |_, _| true);
+        frames.handle(Ok(frame(&red, WINDOW)));
+        assert_eq!(
+            told.try_iter().collect::<Vec<_>>(),
+            [Control::Panicked("broke".to_owned())]
+        );
     }
 
     #[test]
@@ -3203,22 +3248,37 @@ mod tests {
         assert_eq!(
             after,
             [
+                Tripwire(Reading::Unseen {
+                    session: SessionId(3),
+                    reader: ReaderNumber(2),
+                }),
                 Tripwire(Reading::Problem {
                     session: SessionId(3),
                     problem: "reading a frame panicked, so its capture starts again: broke"
                         .to_owned(),
                 }),
-                Tripwire(Reading::Unseen {
-                    session: SessionId(3),
-                    reader: ReaderNumber(2),
-                }),
             ],
-            "it logs why and forgets what the capture read"
+            "it forgets what the capture read and logs why"
         );
         assert!(!desk.asks_soon(), "it waits before capturing again");
         desk.answer(Ok(desktop()));
         let (_, _, mut second) = desk.capture();
-        second(Ok(frame(&black, WINDOW)));
+        second(Ok(frame(&red, WINDOW)));
+        assert!(
+            matches!(readings.recv_timeout(QUIET), Err(RecvTimeoutError::Timeout)),
+            "a capture that panicked before it read anything has nothing new to say"
+        );
+        // The second wait is twice the first, so it outlasts FIND_AGAIN.
+        assert!(
+            matches!(
+                desk.lists.recv_timeout(FIND_AGAIN),
+                Err(RecvTimeoutError::Timeout)
+            ),
+            "it waits longer"
+        );
+        desk.answer(Ok(desktop()));
+        let (_, _, mut third) = desk.capture();
+        third(Ok(frame(&black, WINDOW)));
         assert!(
             matches!(
                 readings.recv_timeout(PATIENCE),
@@ -3226,7 +3286,7 @@ mod tests {
             ),
             "the new capture reads"
         );
-        drop((first, second));
+        drop((first, second, third));
         stopped(reader, desk, &readings);
     }
 
