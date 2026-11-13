@@ -54,6 +54,17 @@ impl Sizes {
         }
     }
 
+    /// The sizes `scaled` makes of each height, such as those at another
+    /// window size, leaving out a height it makes nothing of. Heights that
+    /// scale to one size are that one size.
+    pub(crate) fn each(&self, scaled: impl Fn(u32) -> Option<u32>) -> Self {
+        let mut sizes = Self(Vec::new());
+        for height in self.0.iter().filter_map(|&height| scaled(height)) {
+            sizes.add(height);
+        }
+        sizes
+    }
+
     /// Each height, smallest first.
     pub(crate) fn heights(&self) -> &[u32] {
         &self.0
@@ -694,6 +705,19 @@ mod tests {
         assert_eq!(sizes(20, &[25, 16]).heights(), [16, 20, 25]);
         // A look for 7 takes text 5 tall, though one for 5 would not take 7.
         assert_eq!(sizes(7, &[5]).heights(), [7]);
+    }
+
+    #[test]
+    fn sizes_made_of_each_height_hold_what_is_made_apart_and_leave_out_what_is_not() {
+        let held = sizes(8, &[20, 40]);
+        let twice = held.each(|height| height.checked_mul(2));
+        assert_eq!(twice.heights(), [16, 40, 80]);
+        // 8 and 20 both come to 2 at a tenth, rounded, so they are one size.
+        let tenth = held.each(|height| Some(height.saturating_add(5).checked_div(10)?.max(2)));
+        assert_eq!(tenth.heights(), [2, 4]);
+        let some = held.each(|height| (height != 20).then_some(height));
+        assert_eq!(some.heights(), [8, 40]);
+        assert_eq!(held.each(|_| None).heights(), [0_u32; 0]);
     }
 
     #[test]

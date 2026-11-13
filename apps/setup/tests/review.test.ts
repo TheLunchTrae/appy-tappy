@@ -115,6 +115,31 @@ describe('text sizes', () => {
   });
 });
 
+describe('a recording at another window size', () => {
+  const drawn = { width: 1920, height: 1080 };
+  const settings = {
+    region: { x: 0, y: 0, width: 10, height: 10 },
+    ink: { red: 255, green: 255, blue: 255 },
+    tolerance: 10,
+    windowSize: drawn,
+  };
+
+  test('says nothing at the size its place was drawn at', () => {
+    expect(review.followingNote({ at: { ...drawn }, settings: { ...settings, scope: 'window' } })).toBeNull();
+  });
+
+  test('says what is scaled to the size the window has now', () => {
+    const narrower = { width: 1280, height: 1080 };
+    expect(review.followingNote({ at: narrower, settings: { ...settings, scope: 'place' } })).toBe(
+      'The window is 1280 × 1080 now, so the place is scaled to it.',
+    );
+    const smaller = { width: 1920, height: 720 };
+    expect(review.followingNote({ at: smaller, settings: { ...settings, scope: 'window' } })).toBe(
+      'The window is 1920 × 720 now, so the place and the text sizes are scaled to it.',
+    );
+  });
+});
+
 describe('what a reading adds', () => {
   const all = (readings: readonly RecordedReading[]): boolean[] => readings.map(() => true);
 

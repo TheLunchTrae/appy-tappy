@@ -378,11 +378,26 @@ a reference cannot learn it as one character:
 [What a reference can't learn](#what-a-reference-cant-learn) says what to
 type for it.
 
-Keep the window the size it was when you took the screenshot the recorded
-region is on: at another size, recording pauses and says to resize the
-window. Every screenshot with a box, and the recording, must have that size
-too, and the reference says which one does not. What a reference learned still reads
-at other sizes. If the window's capture fails for a moment, recording stops
+You can change the window's size while you record. How the recording
+follows depends on what you answered for the application under
+**How often does this window change size?**:
+
+- **Often.** Recording goes on. Once the window has kept its new size for a
+  moment, the recorded place is scaled to it and keeps its distance from
+  the side of the window the value stays at, or the side it is nearest when
+  the reference is taught by itself, and a recording of the whole window looks
+  for the text sizes scaled the same way. **Recording** then says so, such
+  as **The window is 1280 × 720 now, so the place is scaled to it.** A
+  character that looks the same at two window sizes is kept once. If the
+  scaled place would reach outside the window, recording pauses and says to
+  resize the window.
+- **Rarely.** Recording pauses at another size and says to resize the
+  window. It goes on when the window is back at the size it had on the
+  screenshot the recorded place is on.
+
+Every screenshot with a box that teaches the reference, and the recording,
+must have the size the reference reads at, and the reference says which one
+does not. What a reference learned still reads at other sizes. If the window's capture fails for a moment, recording stops
 and says why; select **Record more** once the window shows again. If the
 window closes, nothing more can be recorded from it. Review and keep the
 readings you want, then select **Save reference**, which still works after

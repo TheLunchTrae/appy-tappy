@@ -21,10 +21,7 @@ use super::{Region, Size};
 /// that window.
 #[must_use]
 pub fn scaled(region: Region, drawn: Size, now: Size, pin: PinDef) -> Option<Region> {
-    let factor = Factor {
-        new: i128::from(now.height),
-        old: i128::from(drawn.height),
-    };
+    let factor = Factor::between(drawn, now);
     let (x, width) = span(
         pin.horizontal(),
         region.x(),
@@ -46,6 +43,19 @@ pub fn scaled(region: Region, drawn: Size, now: Size, pin: PinDef) -> Option<Reg
         u32::try_from(height).ok()?,
     )?;
     scaled.fits(now).then_some(scaled)
+}
+
+/// How long `length`, in pixels on a window of `drawn`, is on a window of
+/// `now`.
+///
+/// It scales by the factor a region scales by, rounds as a region's edges
+/// do, and is at least 1. A reader that looks for something of a size, such
+/// as text of a height, scales the size with it. `None` when the window had
+/// no height or the length does not fit a `u32`.
+#[must_use]
+pub fn scaled_length(length: u32, drawn: Size, now: Size) -> Option<u32> {
+    let scaled = Factor::between(drawn, now).of(i128::from(length))?;
+    u32::try_from(scaled.max(1)).ok()
 }
 
 /// Where a span from `start` that is `length` long, along a side that was
@@ -74,6 +84,15 @@ struct Factor {
 }
 
 impl Factor {
+    /// The factor from a window of `drawn` to one of `now`: the new height
+    /// over the old.
+    fn between(drawn: Size, now: Size) -> Self {
+        Self {
+            new: i128::from(now.height),
+            old: i128::from(drawn.height),
+        }
+    }
+
     /// `length` scaled and rounded, or `None` when the factor has no `old`.
     fn of(self, length: i128) -> Option<i128> {
         rounded(length.checked_mul(self.new)?, self.old)
@@ -295,6 +314,34 @@ mod tests {
         assert_eq!(
             scaled(bottom, DRAWN, shorter, PinDef::BottomLeft),
             Some(region(0, 1039, 100, 40))
+        );
+    }
+
+    #[test]
+    fn a_length_scales_by_the_height_alone_rounds_as_an_edge_and_keeps_a_pixel() {
+        let tall = |height| Size {
+            width: 1920,
+            height,
+        };
+        // Half the height: 12 is 6, and 13 is 6.5, which rounds up.
+        assert_eq!(scaled_length(12, DRAWN, tall(540)), Some(6));
+        assert_eq!(scaled_length(13, DRAWN, tall(540)), Some(7));
+        // A third taller: 10 is 13.33, and 11 is 14.67.
+        assert_eq!(scaled_length(10, DRAWN, tall(1440)), Some(13));
+        assert_eq!(scaled_length(11, DRAWN, tall(1440)), Some(15));
+        // A quarter of the height: 1 is 0.25, and a length keeps a pixel.
+        assert_eq!(scaled_length(1, DRAWN, tall(270)), Some(1));
+        // The width says nothing of a length.
+        let narrow = Size {
+            width: 800,
+            height: 1080,
+        };
+        assert_eq!(scaled_length(12, DRAWN, narrow), Some(12));
+        assert_eq!(scaled_length(12, tall(0), DRAWN), None, "no height");
+        assert_eq!(
+            scaled_length(u32::MAX, DRAWN, tall(2160)),
+            None,
+            "twice as long fits no u32"
         );
     }
 }

@@ -1,6 +1,7 @@
-import type { RecordedLabel, RecordedReading, RecordedShape } from './bindings.ts';
+import type { RecordedLabel, RecordedReading, RecordedShape, RecordingView } from './bindings.ts';
 import { fitsNeeds, mayBeNeeded } from './found.ts';
 import { andList, knownCharacters, labelCharacters } from './reference.ts';
+import { sameSize, sizeText } from './sizes.ts';
 // Reviewing a recording: which readings the user keeps, what each shows, and what each adds.
 //
 // A recording keeps a reading for a shape no reading before it showed, and a reference learns one character for
@@ -50,6 +51,18 @@ export function sizesNote(sizes: readonly number[]): string | null {
     return null;
   }
   return sizes.length === 1 ? `text ${heights(sizes)} tall` : `text of ${sizes.length} sizes: ${heights(sizes)} tall`;
+}
+
+/**
+ * What a recording says of the window size it records at when that is not the size its place was drawn at, such as
+ * "The window is 1280 × 720 now, so the place and the text sizes are scaled to it."; null at the size it was drawn at.
+ */
+export function followingNote(view: Pick<RecordingView, 'at' | 'settings'>): string | null {
+  if (sameSize(view.at, view.settings.windowSize)) {
+    return null;
+  }
+  const scaled = view.settings.scope === 'window' ? 'the place and the text sizes are' : 'the place is';
+  return `The window is ${sizeText(view.at)} now, so ${scaled} scaled to it.`;
 }
 
 /**

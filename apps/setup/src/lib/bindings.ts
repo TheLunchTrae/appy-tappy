@@ -1368,6 +1368,12 @@ problem: string | null, }>;
  */
 export type RecordSpec = DeepReadonly<{
 /**
+ * The saved application whose window is recorded, whose answer on how
+ * often its window changes size says whether the recording follows
+ * the window to another size.
+ */
+app: string,
+/**
  * The region of the window to record.
  */
 region: RegionSpec,
@@ -1376,6 +1382,11 @@ region: RegionSpec,
  * recording keeps.
  */
 screenshot: number,
+/**
+ * The side of the window the region stays at as the window changes
+ * size, or `None` for the side the region is nearest.
+ */
+pin: PinDef | null,
 /**
  * The characters' color.
  */
@@ -1527,15 +1538,22 @@ problem: string | null,
  */
 settings: RecordingSettings,
 /**
+ * The window size it is placed at: the size the region was drawn at,
+ * or the one frames settled at since. The region and the sizes of
+ * text are scaled from the one to the other where they differ.
+ */
+at: SizeView,
+/**
  * How tall the characters are that a recording of the whole window
- * looks for, in pixels, smallest first: one size for each example of
- * text that differs from the others. Empty for a recording of the
- * region alone.
+ * looks for, smallest first, in pixels of the window the region was
+ * drawn on: one size for each example of text that differs from the
+ * others. Empty for a recording of the region alone.
  */
 sizes: Array<number>,
 /**
  * Where a recording of the whole window found text like its region's
- * the last time it looked, while it records; empty otherwise.
+ * the last time it looked, on a window of the size it is placed at,
+ * while it records; empty otherwise.
  */
 spots: Array<RegionView>,
 /**

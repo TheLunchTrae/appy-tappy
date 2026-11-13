@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn no_screenshot_is_removed_while_looks_are_recorded() {
-        let (mut harness, mut handler) = Harness::with_screenshot();
+        let (mut harness, mut handler, root) = capturing("looks-no-removal");
         harness.ask(start_looks).expect("records");
         harness.deliver(&mut handler, Ok(&shade(100)));
         assert_eq!(
@@ -320,6 +320,7 @@ mod tests {
             .ask(start_readings(false))
             .expect("records readings");
         assert_eq!(harness.ask(|owner| owner.remove_screenshots(&[7])), Ok(()));
+        std::fs::remove_dir_all(root).expect("clean up");
     }
 
     #[test]
@@ -416,7 +417,7 @@ mod tests {
 
     #[test]
     fn one_recording_runs_at_a_time_and_each_has_its_own_number() {
-        let (mut harness, mut handler) = Harness::with_screenshot();
+        let (mut harness, mut handler, root) = capturing("looks-one-at-a-time");
         harness
             .ask(start_readings(false))
             .expect("records readings");
@@ -492,6 +493,7 @@ mod tests {
             Some(pixels::rgba(&shade(100), 4)),
             "the screenshot the recording of looks kept stays"
         );
+        std::fs::remove_dir_all(root).expect("clean up");
     }
 
     #[test]

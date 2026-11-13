@@ -31,11 +31,19 @@
 //! owner sends a frame at most once every [`SCAN_EVERY`], and none while a
 //! look is out, and skips the frames between.
 //!
+//! A recording is drawn on a screenshot of one window size. It follows the
+//! window to another size the way [`follow`] says, the one place that rule
+//! lives: once frames have kept a new size for a while, its region and the
+//! sizes of text it looks for are placed there, or it waits with a problem
+//! where it is not recorded at that size. The same grid makes a shape that
+//! shows at two window sizes one shape.
+//!
 //! A digit, a `%`, and a `.` are all shapes the same way: whatever the
 //! check's own sampling makes one character is one shape here.
 
 pub(crate) mod character;
 pub(crate) mod find;
+pub(crate) mod follow;
 mod ink;
 mod lifecycle;
 pub(crate) mod look;
@@ -46,12 +54,14 @@ mod sightings;
 use std::time::{Duration, Instant};
 
 use appytappy_sources::screen::digits::{DigitReader, ReadError, Shape};
-use appytappy_sources::screen::{Image, Region, Size};
+use appytappy_sources::screen::settle::Settle;
+use appytappy_sources::screen::{FrameMeaning, Image, Region, Size};
 use appytappy_sources::system::Rgb;
 use serde::{Deserialize, Serialize};
 
 use self::character::CharacterView;
 use self::find::Sizes;
+use self::follow::Follows;
 use self::ink::Ink;
 pub(crate) use self::ink::Line;
 pub(crate) use self::lifecycle::Lifecycle;
@@ -88,8 +98,9 @@ pub(crate) struct Kept {
     /// How many frames showed exactly this reading.
     pub(crate) seen: u32,
     /// How tall the characters are that a look over the whole window took
-    /// it for when it first showed, in pixels: the one of the recording's
-    /// sizes it has. `None` for a reading of the region itself.
+    /// it for when it first showed: the one of the recording's sizes it
+    /// has, in pixels of the window the examples were drawn on. `None` for
+    /// a reading of the region itself.
     size: Option<u32>,
     /// What the text reader made of it.
     pub(crate) text: Text,
@@ -141,24 +152,33 @@ impl Recorder {
     }
 }
 
-/// Why a frame of a window of `size` cannot be recorded when the region
-/// was drawn on one of `window_size`: it shows other pixels there.
-fn resized(window_size: Size, size: Size) -> String {
-    format!(
-        "The region was drawn when the window was {window_size}, and it is {size} now. Resize \
-         the window to record."
-    )
+/// Why a window of `size` is not recorded when the region was drawn on one
+/// of `window_size` and the recording `follows` it as it does: it does not
+/// follow the window there, or the scaled region reaches outside it.
+fn unplaced(follows: Follows, window_size: Size, size: Size) -> String {
+    match follows {
+        Follows::Drawn => format!(
+            "The region was drawn when the window was {window_size}, and it is {size} now. \
+             Resize the window to record."
+        ),
+        Follows::Scaled(_) => format!(
+            "The region was drawn when the window was {window_size}. Scaled to {size}, the \
+             window's size now, it reaches outside the window. Resize the window to record."
+        ),
+    }
 }
 
-/// The pixels of `region` on `frame`, a whole window's frame, or why the
-/// frame cannot be recorded: the window is not `window_size`, the size it
-/// had when the region was drawn, so the frame shows other pixels there.
+/// The pixels of `region` on `frame`, a whole window's frame, for a
+/// recording of looks, which does not follow its window to another size:
+/// its pictures compare pixel for pixel. Otherwise why the frame cannot be
+/// recorded: the window is not `window_size`, the size it had when the
+/// region was drawn.
 fn cut(frame: &Image, region: Region, window_size: Size) -> Result<Image, String> {
     let size = frame.size();
     frame
         .crop(region)
         .filter(|_| size == window_size)
-        .ok_or_else(|| resized(window_size, size))
+        .ok_or_else(|| unplaced(Follows::Drawn, window_size, size))
 }
 
 /// The least time between two looks over the whole window. A look reads
@@ -211,8 +231,9 @@ enum Gate {
     /// A look is out, and every frame is skipped until it is answered.
     Out,
     /// A look is out whose answer is dropped: its frame is from before the
-    /// user recorded more, or from before the window changed size. Every
-    /// frame is skipped until it is answered.
+    /// user recorded more, or from before a frame showed the window at
+    /// another size than the recording is placed at. Every frame is skipped
+    /// until it is answered.
     Abandoned,
 }
 
@@ -229,9 +250,15 @@ pub(crate) struct Recording {
     /// How far a pixel may be from `ink` and still be ink.
     tolerance: u8,
     reader: DigitReader,
-    /// The window's size when the region was drawn; a frame of another size
-    /// shows other pixels there.
+    /// The window's size when the region was drawn.
     window_size: Size,
+    /// How it follows the window to another size.
+    follows: Follows,
+    /// The window size frames show, settled.
+    settle: Settle,
+    /// The window size it is placed at, the one frames settled at last, and
+    /// where it records there, or `None` when it does not.
+    placed: (Size, Option<Region>),
     /// When it records, and why the latest frame could not be recorded or
     /// why it stopped by itself.
     pub(crate) life: Lifecycle,
@@ -246,12 +273,14 @@ pub(crate) struct Recording {
 
 impl Recording {
     /// Starts recording `region`, drawn on a window of `window_size`, where
-    /// a pixel within `tolerance` of the `ink` color is ink.
+    /// a pixel within `tolerance` of the `ink` color is ink. It `follows`
+    /// the window to another size, and is placed at the size it was drawn
+    /// at until frames settle at another.
     pub(crate) const fn new(
         id: u64,
         region: Region,
         (ink, tolerance): (Rgb, u8),
-        window_size: Size,
+        (window_size, follows): (Size, Follows),
         started: Instant,
     ) -> Self {
         Self {
@@ -261,6 +290,9 @@ impl Recording {
             tolerance,
             reader: DigitReader::new(ink, tolerance),
             window_size,
+            follows,
+            settle: Settle::new(window_size),
+            placed: (window_size, Some(region)),
             life: Lifecycle::new(started),
             looking: Looking::Place,
             readings: Vec::new(),
@@ -300,8 +332,42 @@ impl Recording {
         }
     }
 
+    /// Where it records on a frame that arrived at `at` and shows the
+    /// window at `size`, or `None` when the frame is not recorded. Each
+    /// frame means what it means to every reader of a place on the window
+    /// ([`FrameMeaning`]). At the size it is placed at, it records where
+    /// [`Follows`] places its region, or has a problem when that is nowhere.
+    /// At another size nothing is recorded until frames have settled there
+    /// ([`Settle`]), and it is then placed there once, so a drag across
+    /// many sizes records none of them. A frame it does not record forgets
+    /// the places the last look found text and drops the answer to a look
+    /// that is out, since both are of the window as it was.
+    fn place(&mut self, size: Size, at: Instant) -> Option<Region> {
+        self.settle.saw(size, at);
+        if let Some(settled) = self.settle.settled(at) {
+            let region = self.follows.region(self.region, self.window_size, settled);
+            self.placed = (settled, region);
+        }
+        let (placed_at, region) = self.placed;
+        match FrameMeaning::of(placed_at, size, region) {
+            FrameMeaning::Readable(region) => return Some(region),
+            FrameMeaning::Resized(_) => {},
+            FrameMeaning::Unreadable(_) => {
+                self.life
+                    .set_problem(Some(unplaced(self.follows, self.window_size, size)));
+            },
+        }
+        if let Looking::Window(scan) = &mut self.looking {
+            scan.spots.clear();
+            if scan.gate == Gate::Out {
+                scan.gate = Gate::Abandoned;
+            }
+        }
+        None
+    }
+
     /// Records `frame`, a whole window's frame that arrived at `at`, in its
-    /// region. Answers the reading to read as text when the frame shows one
+    /// region, where that is at the window's size. Answers the reading to read as text when the frame shows one
     /// that is worth keeping, since it shows a shape no kept reading has,
     /// or carries cleanly one that none carries so. Of several such
     /// readings for a shape, the first is kept. A full recording keeps and
@@ -311,13 +377,9 @@ impl Recording {
         if !self.life.is_recording() || matches!(self.looking, Looking::Window(_)) {
             return None;
         }
-        let crop = match cut(frame, self.region, self.window_size) {
-            Ok(crop) => crop,
-            Err(problem) => {
-                self.life.set_problem(Some(problem));
-                return None;
-            },
-        };
+        let region = self.place(frame.size(), at)?;
+        // A region placed at the frame's size lies inside the frame.
+        let crop = frame.crop(region)?;
         let shapes = match self.reader.shapes(&crop) {
             Ok(shapes) => shapes,
             // A crop with none of the characters' color, such as under a
@@ -343,25 +405,20 @@ impl Recording {
     /// out, and the last was of a frame at least [`SCAN_EVERY`] before
     /// this one. The look is then out until [`Self::looked`] answers it, so
     /// a look that takes long holds one frame and not a queue of them. A
-    /// frame of another size than the window had is a problem and is not
-    /// looked over, and the answer to a look that is out then is dropped,
-    /// since the places it found text are not where the window shows it.
+    /// frame that is not recorded at its size ([`Self::place`]) is not
+    /// looked over. The look searches near where the region is at the
+    /// frame's size, for text of each example's height scaled to that size.
     pub(crate) fn look(&mut self, frame: &Image, at: Instant) -> Option<look::Job> {
         if !self.life.is_recording() {
             return None;
         }
+        if !matches!(self.looking, Looking::Window(_)) {
+            return None;
+        }
+        let near = self.place(frame.size(), at)?;
         let Looking::Window(scan) = &mut self.looking else {
             return None;
         };
-        let size = frame.size();
-        if size != self.window_size {
-            scan.spots.clear();
-            if scan.gate == Gate::Out {
-                scan.gate = Gate::Abandoned;
-            }
-            self.life.set_problem(Some(resized(self.window_size, size)));
-            return None;
-        }
         self.life.set_problem(None);
         match scan.gate {
             Gate::Out | Gate::Abandoned => return None,
@@ -375,8 +432,10 @@ impl Recording {
             recording: self.id,
             frame: frame.clone(),
             at,
-            sizes: scan.sizes.clone(),
-            near: self.region,
+            sizes: scan
+                .sizes
+                .each(|height| self.follows.height(height, self.window_size, self.placed.0)),
+            near,
             reader: self.reader.clone(),
         })
     }
@@ -411,10 +470,23 @@ impl Recording {
             return Vec::new();
         };
         scan.spots = seen.iter().map(|seen| seen.spot).collect();
+        // A look finds text of an example's height at the size the window
+        // has, and a reading says which example it is like.
+        let (follows, drawn, now) = (self.follows, self.window_size, self.placed.0);
+        let examples: Vec<(u32, u32)> = scan
+            .sizes
+            .heights()
+            .iter()
+            .filter_map(|&example| Some((follows.height(example, drawn, now)?, example)))
+            .collect();
         seen.into_iter()
             .filter_map(|seen| {
                 let (crop, shapes) = seen.reading?;
-                self.keep(crop, &shapes, Some(seen.size), at)
+                let example = examples
+                    .iter()
+                    .find(|(scaled, _)| *scaled == seen.size)
+                    .map_or(seen.size, |&(_, example)| example);
+                self.keep(crop, &shapes, Some(example), at)
             })
             .collect()
     }
@@ -440,10 +512,15 @@ impl Recording {
         self.forget_spots();
     }
 
-    /// Goes on recording at `at` after a stop. A look that is still out
-    /// is of a frame from before the stop, so its answer is dropped.
-    pub(crate) fn resume(&mut self, at: Instant) {
+    /// Goes on recording at `at` after a stop, and `follows` the window as
+    /// the user has it now, placed again at the size frames last settled
+    /// at. A look that is still out is of a frame from before the stop, so
+    /// its answer is dropped.
+    pub(crate) fn resume(&mut self, follows: Follows, at: Instant) {
         self.life.resume(at);
+        self.follows = follows;
+        let size = self.placed.0;
+        self.placed.1 = follows.region(self.region, self.window_size, size);
         if let Looking::Window(scan) = &mut self.looking {
             // A stop by a failure left the spots, and they are from before
             // it.
@@ -551,6 +628,10 @@ impl Recording {
                 },
                 scope: self.scope(),
             },
+            at: SizeView {
+                width: self.placed.0.width,
+                height: self.placed.0.height,
+            },
             sizes: match &self.looking {
                 Looking::Window(scan) => scan.sizes.heights().to_vec(),
                 Looking::Place => Vec::new(),
@@ -631,13 +712,18 @@ pub(crate) struct RecordingView {
     pub(crate) problem: Option<String>,
     /// What it records, which going on with it needs again.
     pub(crate) settings: Settings,
+    /// The window size it is placed at: the size the region was drawn at,
+    /// or the one frames settled at since. The region and the sizes of
+    /// text are scaled from the one to the other where they differ.
+    pub(crate) at: SizeView,
     /// How tall the characters are that a recording of the whole window
-    /// looks for, in pixels, smallest first: one size for each example of
-    /// text that differs from the others. Empty for a recording of the
-    /// region alone.
+    /// looks for, smallest first, in pixels of the window the region was
+    /// drawn on: one size for each example of text that differs from the
+    /// others. Empty for a recording of the region alone.
     pub(crate) sizes: Vec<u32>,
     /// Where a recording of the whole window found text like its region's
-    /// the last time it looked, while it records; empty otherwise.
+    /// the last time it looked, on a window of the size it is placed at,
+    /// while it records; empty otherwise.
     pub(crate) spots: Vec<RegionView>,
     /// The readings it kept, in the order they first showed.
     pub(crate) readings: Vec<ReadingView>,
@@ -735,6 +821,7 @@ pub(crate) struct ReadingView {
 mod tests {
     use std::collections::BTreeSet;
 
+    use appytappy_config::app_file::PinDef;
     use proptest::prelude::*;
 
     use super::*;
@@ -770,13 +857,19 @@ mod tests {
     };
 
     fn recording(started: Instant) -> Recording {
-        Recording::new(1, region(), (RED, 0), size(), started)
+        Recording::new(1, region(), (RED, 0), (size(), Follows::Drawn), started)
     }
 
     /// A recording of a `width` by `height` window, all of it the region.
     fn recording_of(width: u32, height: u32, started: Instant) -> Recording {
         let region = Region::new(0, 0, width, height).expect("not empty");
-        Recording::new(1, region, (RED, 0), Size { width, height }, started)
+        Recording::new(
+            1,
+            region,
+            (RED, 0),
+            (Size { width, height }, Follows::Drawn),
+            started,
+        )
     }
 
     /// A `0` eight pixels wide and 32 tall, its strokes two pixels thick.
@@ -1071,7 +1164,7 @@ mod tests {
             height: 10,
         };
         let region = Region::new(0, 0, 1, 10).expect("not empty");
-        let mut recording = Recording::new(1, region, (RED, 0), tall, start);
+        let mut recording = Recording::new(1, region, (RED, 0), (tall, Follows::Drawn), start);
         let line = recording
             .offer(&frame(1, 10, |_, _| true), start)
             .expect("a new reading")
@@ -1104,29 +1197,187 @@ mod tests {
         );
     }
 
+    /// `start` and `millis` more.
+    fn after(start: Instant, millis: u64) -> Instant {
+        start
+            .checked_add(Duration::from_millis(millis))
+            .expect("in range")
+    }
+
+    /// `character` drawn `times` as large.
+    fn larger(times: u32, character: fn(u32, u32) -> bool) -> impl Fn(u32, u32) -> bool {
+        move |x, y| {
+            character(
+                x.checked_div(times).expect("not zero"),
+                y.checked_div(times).expect("not zero"),
+            )
+        }
+    }
+
     #[test]
-    fn a_frame_without_ink_or_of_another_size_keeps_nothing() {
+    fn a_frame_without_ink_keeps_nothing() {
         let start = Instant::now();
         let mut recording = recording(start);
         assert_eq!(recording.offer(&frame(8, 4, |_, _| false), start), None);
         assert_eq!(recording.view(start).problem, None);
-        assert_eq!(recording.offer(&frame(9, 4, |_, _| true), start), None);
+        assert!(recording.offer(&frame(8, 4, |_, _| true), start).is_some());
+        assert_eq!(recording.readings().len(), 1);
+    }
+
+    #[test]
+    fn a_recording_that_does_not_follow_its_window_waits_for_the_size_it_was_drawn_at() {
+        let start = Instant::now();
+        let mut recording = recording(start);
+        let wider = frame(9, 4, |_, _| true);
+        // A new size says nothing until frames have shown it for a while.
+        assert_eq!(recording.offer(&wider, start), None);
+        assert_eq!(recording.offer(&wider, after(start, 249)), None);
+        assert_eq!(recording.view(after(start, 249)).problem, None);
+        assert_eq!(recording.offer(&wider, after(start, 250)), None);
+        let view = recording.view(after(start, 250));
         assert_eq!(
-            recording.view(start).problem.as_deref(),
+            view.problem.as_deref(),
             Some(
                 "The region was drawn when the window was 8x4, and it is 9x4 now. Resize the \
                  window to record."
             )
         );
-        assert_eq!(recording.offer(&frame(4, 4, |_, _| true), start), None);
-        assert!(recording.view(start).problem.is_some(), "too small to crop");
-        assert!(recording.offer(&frame(8, 4, |_, _| true), start).is_some());
         assert_eq!(
-            recording.view(start).problem,
-            None,
-            "a fitting frame clears it"
+            view.at,
+            SizeView {
+                width: 9,
+                height: 4
+            }
         );
-        assert_eq!(recording.readings().len(), 1);
+        assert_eq!(recording.readings().len(), 0);
+        // Back at its size, once that has settled, it records again.
+        let fits = frame(8, 4, |_, _| true);
+        assert_eq!(recording.offer(&fits, after(start, 300)), None);
+        assert!(recording.offer(&fits, after(start, 550)).is_some());
+        let view = recording.view(after(start, 550));
+        assert_eq!(view.problem, None, "a frame it records clears it");
+        assert_eq!(
+            view.at,
+            SizeView {
+                width: 8,
+                height: 4
+            }
+        );
+    }
+
+    /// A recording of the 16 by 32 window's left half, which follows the
+    /// window to another size from its top-left corner.
+    fn following(started: Instant) -> Recording {
+        let region = Region::new(0, 0, 8, 32).expect("not empty");
+        let size = Size {
+            width: 16,
+            height: 32,
+        };
+        Recording::new(
+            1,
+            region,
+            (RED, 0),
+            (size, Follows::Scaled(PinDef::TopLeft)),
+            started,
+        )
+    }
+
+    #[test]
+    fn a_recording_that_follows_its_window_records_its_scaled_region_once_the_size_settles() {
+        let start = Instant::now();
+        let mut recording = following(start);
+        assert!(recording.offer(&frame(16, 32, zero), start).is_some());
+        // The window grows to twice its size by way of another: the 0 shows
+        // twice as large in the left half, and an 8 in the right half,
+        // outside the scaled region.
+        let passing = frame(24, 48, |_, _| true);
+        let twice = frame(32, 64, |x, y| {
+            larger(2, zero)(x, y) || (x >= 16 && larger(2, eight)(x.saturating_sub(16), y))
+        });
+        assert_eq!(recording.offer(&passing, after(start, 100)), None);
+        assert_eq!(recording.offer(&twice, after(start, 300)), None);
+        assert_eq!(
+            recording.offer(&twice, after(start, 549)),
+            None,
+            "the size it passed never settled, and this one has yet to"
+        );
+        assert_eq!(recording.view(after(start, 549)).problem, None);
+        assert_eq!(recording.readings()[0].seen, 1, "nothing is counted yet");
+        // Settled, the same shape at another size is the same reading.
+        assert_eq!(recording.offer(&twice, after(start, 550)), None);
+        assert_eq!(recording.readings()[0].seen, 2);
+        let view = recording.view(after(start, 550));
+        assert_eq!(view.problem, None);
+        assert_eq!(
+            view.at,
+            SizeView {
+                width: 32,
+                height: 64
+            }
+        );
+        // A new shape there is kept from the scaled region alone.
+        let eights = frame(32, 64, larger(2, eight));
+        let new = recording.offer(&eights, after(start, 600));
+        assert_eq!(new.map(|new| new.index), Some(1));
+        assert_eq!(
+            recording.readings()[1].image.size(),
+            Size {
+                width: 16,
+                height: 64
+            }
+        );
+    }
+
+    #[test]
+    fn a_region_that_scales_past_the_window_s_edge_says_so_until_the_window_fits_it() {
+        let start = Instant::now();
+        let region = Region::new(8, 0, 8, 32).expect("not empty");
+        let drawn = Size {
+            width: 16,
+            height: 32,
+        };
+        let follows = Follows::Scaled(PinDef::TopLeft);
+        let mut recording = Recording::new(1, region, (RED, 0), (drawn, follows), start);
+        // As tall and narrower: pinned left, the region keeps its place,
+        // which is past the right edge.
+        let narrow = frame(12, 32, |_, _| true);
+        assert_eq!(recording.offer(&narrow, start), None);
+        assert_eq!(recording.offer(&narrow, after(start, 250)), None);
+        assert_eq!(
+            recording.view(after(start, 250)).problem.as_deref(),
+            Some(
+                "The region was drawn when the window was 16x32. Scaled to 12x32, the window's \
+                 size now, it reaches outside the window. Resize the window to record."
+            )
+        );
+        let wide = frame(20, 32, |x, y| x >= 8 && zero(x.saturating_sub(8), y));
+        assert_eq!(recording.offer(&wide, after(start, 300)), None);
+        assert!(recording.offer(&wide, after(start, 550)).is_some());
+        assert_eq!(recording.view(after(start, 550)).problem, None);
+    }
+
+    #[test]
+    fn recording_more_follows_the_window_as_the_user_has_it_now() {
+        let start = Instant::now();
+        let mut recording = recording_of(16, 32, start);
+        let twice = frame(32, 64, larger(2, zero));
+        assert_eq!(recording.offer(&twice, start), None);
+        assert_eq!(recording.offer(&twice, after(start, 250)), None);
+        assert!(recording.view(after(start, 250)).problem.is_some());
+        recording.stop(after(start, 300));
+        // The window is still at the size it settled at, where the
+        // recording is placed at once.
+        recording.resume(Follows::Scaled(PinDef::TopLeft), after(start, 400));
+        assert!(recording.offer(&twice, after(start, 400)).is_some());
+        assert_eq!(recording.view(after(start, 400)).problem, None);
+        // And back: it waits for the size it was drawn at again.
+        recording.stop(after(start, 500));
+        recording.resume(Follows::Drawn, after(start, 600));
+        assert_eq!(
+            recording.offer(&frame(32, 64, larger(2, eight)), after(start, 600)),
+            None
+        );
+        assert!(recording.view(after(start, 600)).problem.is_some());
     }
 
     #[test]
@@ -1270,7 +1521,7 @@ mod tests {
             width: 60,
             height: 40,
         };
-        Recording::new(1, region, (RED, 0), size, started).across_window(8)
+        Recording::new(1, region, (RED, 0), (size, Follows::Drawn), started).across_window(8)
     }
 
     const STROKE: (u32, u32, u32, u32) = (2, 2, 3, 8);
@@ -1446,7 +1697,7 @@ mod tests {
         assert_eq!(recording.looked(job.at, Some(look::look(&job)), late), []);
         assert_eq!(recording.readings().len(), 1, "what it saw is not kept");
         assert_eq!(recording.view(late).spots, []);
-        recording.resume(late);
+        recording.resume(Follows::Drawn, late);
         assert_eq!(
             looked_over(&mut recording, &blocks(&[STROKE, BLOCK]), late),
             Some(1)
@@ -1462,7 +1713,7 @@ mod tests {
             .expect("the first frame goes out");
         recording.stop(start);
         let more = start + SCAN_EVERY;
-        recording.resume(more);
+        recording.resume(Follows::Drawn, more);
         assert!(
             recording.look(&blocks(&[BLOCK]), more).is_none(),
             "one look is out still"
@@ -1480,7 +1731,7 @@ mod tests {
         let later = more + SCAN_EVERY;
         let job = recording.look(&blocks(&[BLOCK]), later).expect("due");
         recording.stop(later);
-        recording.resume(later);
+        recording.resume(Follows::Drawn, later);
         assert_eq!(recording.looked(job.at, None, later), []);
         let view = recording.view(later);
         assert!(view.recording, "it records still");
@@ -1503,12 +1754,11 @@ mod tests {
         assert_eq!(recording.looked(job.at, Some(look::look(&job)), start), []);
         let view = recording.view(start);
         assert_eq!(view.spots, [], "no places from the other size are shown");
-        assert!(view.problem.is_some(), "and the problem stands");
         assert_eq!(recording.readings().len(), 0);
         assert_eq!(
             looked_over(&mut recording, &blocks(&[BLOCK]), start),
             Some(1),
-            "back at its size it looks at once"
+            "back at its size before the other settled, it looks at once"
         );
     }
 
@@ -1534,7 +1784,7 @@ mod tests {
             )
         );
         assert_eq!(view.spots, []);
-        recording.resume(start + SCAN_EVERY);
+        recording.resume(Follows::Drawn, start + SCAN_EVERY);
         assert_eq!(
             looked_over(&mut recording, &blocks(&[BLOCK]), start + SCAN_EVERY),
             Some(1)
@@ -1549,12 +1799,14 @@ mod tests {
             looked_over(&mut recording, &blocks(&[STROKE]), start),
             Some(1)
         );
+        assert_eq!(recording.view(start).spots.len(), 1);
         let wider = frame(61, 40, |x, y| x < 3 && y < 8);
-        assert_eq!(
-            looked_over(&mut recording, &wider, start + SCAN_EVERY),
-            None
-        );
-        let view = recording.view(start + SCAN_EVERY);
+        assert_eq!(looked_over(&mut recording, &wider, after(start, 500)), None);
+        let unsettled = recording.view(after(start, 500));
+        assert_eq!(unsettled.spots, [], "they are of the window as it was");
+        assert_eq!(unsettled.problem, None);
+        assert_eq!(looked_over(&mut recording, &wider, after(start, 750)), None);
+        let view = recording.view(after(start, 750));
         assert_eq!(
             view.problem.as_deref(),
             Some(
@@ -1563,13 +1815,81 @@ mod tests {
             )
         );
         assert_eq!(view.spots, []);
-        // Back at its size it looks again at once, and the problem clears.
-        let back = start + SCAN_EVERY + Duration::from_millis(1);
+        // Back at its size, once that has settled, it looks again at once,
+        // and the problem clears.
         assert_eq!(
-            looked_over(&mut recording, &blocks(&[BLOCK]), back),
+            looked_over(&mut recording, &blocks(&[BLOCK]), after(start, 800)),
+            None
+        );
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[BLOCK]), after(start, 1050)),
             Some(1)
         );
-        assert_eq!(recording.view(back).problem, None);
+        assert_eq!(recording.view(after(start, 1050)).problem, None);
+    }
+
+    #[test]
+    fn a_whole_window_that_changes_size_is_looked_over_for_the_scaled_sizes_near_the_scaled_region()
+    {
+        let start = Instant::now();
+        let follows = Follows::Scaled(PinDef::TopLeft);
+        let region = Region::new(0, 0, 12, 12).expect("not empty");
+        let drawn = Size {
+            width: 60,
+            height: 40,
+        };
+        let mut recording =
+            Recording::new(1, region, (RED, 0), (drawn, follows), start).across_window(8);
+        recording.look_for([16]);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[STROKE]), start),
+            Some(1)
+        );
+        // Twice the size: a stroke 16 tall is the text that was 8 tall.
+        let twice = frame(120, 80, |x, y| (4..10).contains(&x) && (4..20).contains(&y));
+        assert!(recording.look(&twice, after(start, 500)).is_none());
+        let job = recording
+            .look(&twice, after(start, 750))
+            .expect("the settled size is looked over at once");
+        assert_eq!(job.sizes.heights(), [16, 32]);
+        assert_eq!(job.near, Region::new(0, 0, 24, 24).expect("not empty"));
+        let new = recording.looked(job.at, Some(look::look(&job)), after(start, 750));
+        assert_eq!(
+            new,
+            [],
+            "the same shape at another size is the same reading"
+        );
+        let view = recording.view(after(start, 750));
+        assert_eq!(view.sizes, [8, 16], "as they were drawn");
+        assert_eq!(
+            view.at,
+            SizeView {
+                width: 120,
+                height: 80
+            }
+        );
+        // The stroke with a margin of a quarter of 16 pixels, on the window
+        // as it is.
+        assert_eq!(
+            view.spots,
+            [RegionView {
+                x: 0,
+                y: 0,
+                width: 14,
+                height: 24
+            }]
+        );
+        assert_eq!(recording.readings()[0].seen, 2);
+        // A new shape there is of the example it is as tall as, scaled.
+        let block = frame(120, 80, |x, y| {
+            (60..72).contains(&x) && (40..56).contains(&y)
+        });
+        let job = recording
+            .look(&block, after(start, 1250))
+            .expect("a look is due");
+        let new = recording.looked(job.at, Some(look::look(&job)), after(start, 1250));
+        assert_eq!(new.len(), 1);
+        assert_eq!(recording.view(after(start, 1250)).readings[1].size, Some(8));
     }
 
     #[test]
@@ -1592,7 +1912,14 @@ mod tests {
     #[test]
     fn the_ui_sees_what_it_records() {
         let region = Region::new(2, 1, 5, 3).expect("not empty");
-        let view = Recording::new(1, region, (RED, 7), size(), Instant::now()).view(Instant::now());
+        let view = Recording::new(
+            1,
+            region,
+            (RED, 7),
+            (size(), Follows::Drawn),
+            Instant::now(),
+        )
+        .view(Instant::now());
         let json = serde_json::to_string(&view.settings).expect("serializes");
         assert_eq!(
             json,
