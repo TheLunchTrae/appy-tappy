@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 /** Lets `task` finish on its own; its errors are already shown to the user, so any left are only logged. */
 export function background(task: Promise<unknown>): void {
@@ -42,26 +42,6 @@ export function useRepeat(task: () => Promise<void>, pauseMs: number, active: bo
       clearTimeout(timer);
     };
   }, [active, pauseMs]);
-}
-
-/**
- * Starts reads where only the newest counts. Each call makes the reads started before it stale, as does unmounting,
- * and gives the new read its check: whether it is still the newest, to ask between steps and before showing what it
- * read.
- */
-export function useNewest(): () => () => boolean {
-  const newest = useRef(0);
-  useEffect(
-    () => () => {
-      newest.current += 1;
-    },
-    [],
-  );
-  return useCallback(() => {
-    newest.current += 1;
-    const mine = newest.current;
-    return () => newest.current === mine;
-  }, []);
 }
 
 /** Runs `task` each time it changes, but not as the component mounts, when a {@link useRepeat} runs it already. */

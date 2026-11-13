@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { type ShortcutEvent, register, unregister } from '@tauri-apps/plugin-global-shortcut';
 
 import { background } from './repeat.ts';
+import { ask } from './request.ts';
 import { shortcutLabel } from './shortcut.ts';
 import { useShortcutChoice } from './useShortcutChoice.ts';
 
@@ -34,26 +35,27 @@ export function useScreenshotShortcut(onPress: () => Promise<unknown>): Omit<
     if (choosing) {
       return undefined;
     }
-    let current = true;
     const pressed = (event: ShortcutEvent): void => {
       if (event.state === 'Pressed') {
         background(latest.current());
       }
     };
-    queue.current = queue.current
-      .then(async () => register(shortcut, pressed))
-      .then(() => {
-        if (current) {
-          setError(null);
-        }
-      })
-      .catch(() => {
-        if (current) {
-          setError(`${shortcutLabel(shortcut)} could not be set up. Another app may use it; choose another.`);
-        }
-      });
+    const cancel = ask(
+      async () => {
+        const registered = queue.current.then(async () => register(shortcut, pressed));
+        // The queue goes on whether or not the shortcut registered.
+        queue.current = registered.catch(() => undefined);
+        return registered;
+      },
+      () => {
+        setError(null);
+      },
+      () => {
+        setError(`${shortcutLabel(shortcut)} could not be set up. Another app may use it; choose another.`);
+      },
+    );
     return () => {
-      current = false;
+      cancel();
       queue.current = queue.current
         .then(async () => unregister(shortcut))
         .catch(() => {

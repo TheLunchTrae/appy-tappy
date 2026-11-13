@@ -99,6 +99,7 @@ import {
 } from '../lib/captureDraft.ts';
 import { type ReportDraft, type Resumed, draftsOf, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { background } from '../lib/repeat.ts';
+import { ask } from '../lib/request.ts';
 import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
@@ -302,29 +303,25 @@ export function Capture({
   // The application's references that have a draft of changes. Drafts change only in flows, and this is the open
   // one, so reading them once is enough; when they cannot be read, every reference can be edited.
   const [drafted, setDrafted] = useState<ReadonlySet<string>>(() => new Set());
-  useEffect(() => {
-    let live = true;
-    background(
-      listDrafts()
-        .then((drafts) => {
-          if (live) {
-            setDrafted(
-              new Set(
-                draftsOf(drafts, 'reference').flatMap(({ def }) =>
-                  def.app === appId && def.changes !== null ? [def.changes] : [],
-                ),
+  useEffect(
+    () =>
+      ask(
+        listDrafts,
+        (drafts) => {
+          setDrafted(
+            new Set(
+              draftsOf(drafts, 'reference').flatMap(({ def }) =>
+                def.app === appId && def.changes !== null ? [def.changes] : [],
               ),
-            );
-          }
-        })
-        .catch(() => {
+            ),
+          );
+        },
+        () => {
           // Without the drafts, nothing is held back.
-        }),
-    );
-    return () => {
-      live = false;
-    };
-  }, [appId]);
+        },
+      ),
+    [appId],
+  );
 
   // The saved reference the editor adds to, or null for a new one or while no editor is open.
   const existingId = editing?.existing?.id ?? null;
