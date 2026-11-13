@@ -1483,8 +1483,11 @@ stateDiagram-v2
 - **Idle.** The draft lacks something, and the box says what. Nothing is
   shown as read.
 - **Setting** (`pending`). The check waits 250 ms for the draft to hold
-  still, then goes to the owner. Each change of the check, and each time the
-  same edit is tried again, as when the window's size changes,
+  still, then goes to the owner. A check is the same check while what it
+  sends is the same (`key` of `trialOf` in `useLiveCheck.ts`), so a change
+  of the draft that sends nothing new, such as an empty box added or moved
+  in the reference editor, changes no check. Each change of the check, and
+  each time the same edit is tried again, as when the window's size changes,
   takes the next number, starts the wait again, and leaves no number in
   force, and the owner's answer for a check the draft has left is ignored.
   The box says it is trying the check. The last reading is kept, to show
@@ -2711,6 +2714,20 @@ gone saves nothing and tells no one, but still removes the pictures an
 earlier delete left behind. An edit that leaves a value as it was saved
 writes nothing and tells no one. Moving a panel writes the application's
 file without telling anyone.
+
+The owner keeps one saved reference in memory, `kept_reference`: the one the
+reference editor's characters add to, with its samples' pictures, as
+`Owner::keep_reference` read it when the editor first asked about those
+characters (`apps/setup/src-tauri/src/owner/references.rs`). It has two
+states. **Empty** reads the application's file and the pictures for each
+ask. **Kept** answers every ask about that reference from memory, a few for
+each edit in the editor. A reference is kept only when every sample's
+picture could be read, so one that is missing a picture is read again on
+each ask and learned once the picture is back. `Owner::write_app` empties it
+before any saved application is written or removed, whether that works or
+fails, and keeping another reference replaces it. An import writes a new
+application, which no kept reference is part of. A file changed outside the setup app
+while a reference is kept is not seen until then.
 
 A click's picture is written to the `clicks` folder when its target is set
 up, before its automation is saved. Each save of the automations removes the

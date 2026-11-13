@@ -590,10 +590,10 @@ export function Capture({
   }, [characters, fixing, draft, references, mode.kind, appId, fixPin, pin]);
   const trial = useMemo((): Trial => {
     if (taughtTrial !== null) {
-      return trialOf(taughtTrial, { set: setCharacters });
+      return trialOf('characters', taughtTrial, { set: setCharacters });
     }
     if (edit.built !== null) {
-      return trialOf(edit.built, tryEdit);
+      return trialOf('edit', edit.built, tryEdit);
     }
     if (!valueCheck.ok) {
       return valueCheck;
@@ -603,7 +603,7 @@ export function Capture({
     }
     // A value is tried as it would be saved, which a fix does at its value's side.
     const spec: TrialSpec = { app: appId, check: valueCheck.spec, screenshot: drawnOn, pin: fixPin ?? pin };
-    return trialOf({ ok: true, spec }, { set: setCheck });
+    return trialOf('check', { ok: true, spec }, { set: setCheck });
   }, [taughtTrial, edit.built, valueCheck, drawnOn, appId, fixPin, pin]);
   const check = useLiveCheck(trial, edit.again);
   const dropFixes = agreedFixes(check.preview, edit.lost);
