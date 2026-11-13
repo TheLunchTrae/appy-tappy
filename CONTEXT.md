@@ -65,7 +65,10 @@ parts fit.
   different character shape a number region shows, for the user to review
   and label; kept readings teach a reference like labeled screenshots. It
   looks in the region alone, or over the whole window for text like the
-  region's. A recording of looks keeps a screenshot each time a value's region shows a
+  region's, at the size of each example the user drew. It follows its window
+  to another size as a saved value does: scaled where the application's
+  window changes size often, and not at all where it rarely does. A
+  recording of looks keeps a screenshot each time a value's region shows a
   look that no screenshot shows yet. A capture records one of the two at a
   time.
 - **Reference.** The characters of one font in one application, learned from

@@ -61,6 +61,7 @@ const shapesOf = (text: string): number[] => Array.from(text.trim(), (character)
 const read = (text: string, shapes: readonly number[] = shapesOf(text), firstMs = 0): RecordedReading => ({
   firstMs,
   seen: 1,
+  size: null,
   text: { kind: 'read', text },
   shapes,
   ...cut,
@@ -69,15 +70,17 @@ const read = (text: string, shapes: readonly number[] = shapesOf(text), firstMs 
 const unread = (shapes: readonly number[]): RecordedReading => ({
   firstMs: 0,
   seen: 1,
+  size: null,
   text: { kind: 'pending' },
   shapes,
   ...cut,
 });
 const keeps = (all: readonly { readonly keep: boolean }[]): boolean[] => all.map((entry) => entry.keep);
-const pending: RecordedReading = { firstMs: 0, seen: 1, text: { kind: 'pending' }, shapes: [1], ...cut };
+const pending: RecordedReading = { firstMs: 0, seen: 1, size: null, text: { kind: 'pending' }, shapes: [1], ...cut };
 const failed: RecordedReading = {
   firstMs: 0,
   seen: 1,
+  size: null,
   text: { kind: 'failed', text: 'No model.' },
   shapes: [2],
   ...cut,
@@ -93,6 +96,52 @@ describe('clock and seen', () => {
     expect(sighted({ frames: 1, readings: 1 })).toBe('seen once');
     expect(sighted({ frames: 5, readings: 1 })).toBe('seen 5 times in 1 reading');
     expect(sighted({ frames: 214, readings: 37 })).toBe('seen 214 times in 37 readings');
+  });
+});
+
+describe('text sizes', () => {
+  test('a recording says which sizes of text it looks for, and one place says nothing', () => {
+    expect(review.sizesNote([])).toBeNull();
+    expect(review.sizesNote([8])).toBe('text 8 px tall');
+    expect(review.sizesNote([8, 16])).toBe('text of 2 sizes: 8 px and 16 px tall');
+    expect(review.sizesNote([8, 16, 24])).toBe('text of 3 sizes: 8 px, 16 px and 24 px tall');
+  });
+
+  test('a reading says its size only when the recording looked for more than one', () => {
+    const large = { ...read('5'), size: { height: 16, example: 16 } };
+    expect(review.readingSize(large, [8, 16])).toBe('text 16 px tall');
+    expect(review.readingSize(large, [16])).toBeNull();
+    expect(review.readingSize(read('5'), [8, 16])).toBeNull();
+  });
+
+  test('a reading taken at another window size says how tall it is and which size it was scaled from', () => {
+    const scaled = { ...read('5'), size: { height: 16, example: 8 } };
+    expect(review.readingSize(scaled, [8, 16])).toBe('text 16 px tall, the 8 px size scaled');
+  });
+});
+
+describe('a recording at another window size', () => {
+  const drawn = { width: 1920, height: 1080 };
+  const settings = {
+    region: { x: 0, y: 0, width: 10, height: 10 },
+    ink: { red: 255, green: 255, blue: 255 },
+    tolerance: 10,
+    windowSize: drawn,
+  };
+
+  test('says nothing at the size its place was drawn at', () => {
+    expect(review.followingNote({ at: { ...drawn }, settings: { ...settings, scope: 'window' } })).toBeNull();
+  });
+
+  test('says what is scaled to the size the window has now', () => {
+    const narrower = { width: 1280, height: 1080 };
+    expect(review.followingNote({ at: narrower, settings: { ...settings, scope: 'place' } })).toBe(
+      'The window is 1280 × 1080 now, so the place is scaled to it.',
+    );
+    const smaller = { width: 1920, height: 720 };
+    expect(review.followingNote({ at: smaller, settings: { ...settings, scope: 'window' } })).toBe(
+      'The window is 1920 × 720 now, so the place and the text sizes are scaled to it.',
+    );
   });
 });
 

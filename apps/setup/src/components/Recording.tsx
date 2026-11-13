@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import type { RecordedReading, RecordingScope, RecordingView } from '../lib/bindings.ts';
-import { CHECK_CHARACTERS_HINT, RECORD_SCOPE_HINT } from '../lib/hints.ts';
+import { CHECK_CHARACTERS_HINT, RECORD_RESIZED_HINT, RECORD_SCOPE_HINT, TEXT_SIZES_HINT } from '../lib/hints.ts';
 import type { Size } from '../lib/region.ts';
 import { Hint } from './Hint.tsx';
 import { PictureCanvas } from './canvas.tsx';
@@ -13,9 +13,12 @@ import {
   type Untaught,
   addedShapes,
   clock,
+  followingNote,
+  readingSize,
   reviewOrder,
   seen,
   sighted,
+  sizesNote,
   tileNote,
   untaughtNote,
 } from '../lib/review.ts';
@@ -36,10 +39,10 @@ function spotsNote(count: number): string {
 
 /**
  * Outlines over the live window where a recording of the whole window found text like its region's the last time it
- * looked, scaled from the window's `size` to `shown`.
+ * looked, scaled from the window size it records at to `shown`.
  */
 export function RecordingSpots({ view, shown }: { readonly view: RecordingView; readonly shown: Size }) {
-  const { width, height } = view.settings.windowSize;
+  const { width, height } = view.at;
   if (view.spots.length === 0 || width === 0 || height === 0) {
     return null;
   }
@@ -54,6 +57,42 @@ export function RecordingSpots({ view, shown }: { readonly view: RecordingView; 
           style={{ left: spot.x * x, top: spot.y * y, width: spot.width * x, height: spot.height * y }}
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * `lead` and the sizes of text a recording of the whole window looks for, with what a size is; nothing for a recording
+ * of one place.
+ */
+function TextSizes({ view, lead, id }: { readonly view: RecordingView; readonly lead: string; readonly id: string }) {
+  const sizes = sizesNote(view.sizes);
+  return sizes === null ? null : (
+    <div className="field">
+      <span className="name">
+        {lead} {sizes}.
+        <Hint topic="Text sizes" id={id}>
+          {TEXT_SIZES_HINT}
+        </Hint>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * That a recording records at another window size than its place was drawn at, with what it does there; nothing at
+ * the size it was drawn at, or while a problem says why it records nothing.
+ */
+function Following({ view }: { readonly view: RecordingView }) {
+  const note = view.problem === null ? followingNote(view) : null;
+  return note === null ? null : (
+    <div className="field">
+      <span className="name">
+        {note}
+        <Hint topic="Window size" id="hint-record-resized">
+          {RECORD_RESIZED_HINT}
+        </Hint>
+      </span>
     </div>
   );
 }
@@ -254,6 +293,8 @@ export function RecordPanel(props: PanelProps) {
           {plural(view.shapes.length, 'different shape', 'different shapes')} so far, in{' '}
           {plural(count, 'kept reading', 'kept readings')}.
         </p>
+        <TextSizes view={view} lead="Looking for" id="hint-record-sizes" />
+        <Following view={view} />
         {view.settings.scope === 'window' && view.problem === null ? (
           <p className="note">{spotsNote(view.spots.length)}</p>
         ) : null}
@@ -424,6 +465,9 @@ export function ReviewSheet(props: SheetProps) {
             Check each reading&apos;s text and fix any the reader got wrong. Kept readings teach the number check its
             characters, as the boxes you draw do. A reading is kept for the characters no other kept reading shows.
           </p>
+          {view.sizes.length < 2 ? null : (
+            <TextSizes view={view} lead="This recording looked for" id="hint-review-sizes" />
+          )}
           {view.readings.length === 0 ? null : (
             <Discovered found={found} needs={needs.length > 0} ink={view.settings.ink} />
           )}
@@ -511,6 +555,7 @@ export function ReviewSheet(props: SheetProps) {
             const note = tileNote(reading, entry, problem, clash, needs);
             const flagged = (problem !== undefined && entry.keep) || clash !== undefined;
             const noteId = `reading-${index}-note`;
+            const size = readingSize(reading, view.sizes);
             return (
               <li key={index} className={entry.keep ? 'tile kept' : 'tile off'}>
                 <label className="top">
@@ -541,6 +586,7 @@ export function ReviewSheet(props: SheetProps) {
                 />
                 <span className="meta">
                   First at {when}, {seen(reading.seen)}
+                  {size === null ? null : `, ${size}`}
                 </span>
                 <Adds reading={reading} entry={entry} places={adds[index] ?? []} view={view} />
                 {note === null ? null : (

@@ -839,6 +839,20 @@ readingArea: boolean,
 drawing: EditDrawing, }>;
 
 /**
+ * One more example of the text a recording of the whole window looks for:
+ * a box the user drew around some of it.
+ */
+export type ExampleSpec = DeepReadonly<{
+/**
+ * The box.
+ */
+region: RegionSpec,
+/**
+ * The screenshot it is drawn on.
+ */
+screenshot: number, }>;
+
+/**
  * [`WindowMatch::fallback`] as the file spells it.
  */
 export type FallbackDef = DeepReadonly<"none" | "executable">;
@@ -1354,6 +1368,12 @@ problem: string | null, }>;
  */
 export type RecordSpec = DeepReadonly<{
 /**
+ * The saved application whose window is recorded, whose answer on how
+ * often its window changes size says whether the recording follows
+ * the window to another size.
+ */
+app: string,
+/**
  * The region of the window to record.
  */
 region: RegionSpec,
@@ -1362,6 +1382,11 @@ region: RegionSpec,
  * recording keeps.
  */
 screenshot: number,
+/**
+ * The side of the window the region stays at as the window changes
+ * size, or `None` for the side the region is nearest.
+ */
+pin: PinDef | null,
 /**
  * The characters' color.
  */
@@ -1374,7 +1399,12 @@ tolerance: number,
  * Where to look for characters: in the region alone, or wherever the
  * window shows text like the region's.
  */
-scope: RecordingScope, }>;
+scope: RecordingScope,
+/**
+ * The reference's boxes: more examples of its text, which a recording
+ * of the whole window looks for the sizes of too.
+ */
+examples: Array<ExampleSpec>, }>;
 
 /**
  * What one recorded reading shows, as the user confirmed it in review, so
@@ -1402,6 +1432,11 @@ firstMs: number,
  * How many frames showed exactly this reading.
  */
 seen: number,
+/**
+ * The size of text a recording of the whole window took it for when
+ * it first showed. `None` for a reading of the region itself.
+ */
+size: RecordedSize | null,
 /**
  * What the text reader made of it.
  */
@@ -1436,6 +1471,22 @@ frames: number,
  * How many different readings showed it.
  */
 readings: number, }>;
+
+/**
+ * The size of text a reading was taken for, as the UI shows it.
+ */
+export type RecordedSize = DeepReadonly<{
+/**
+ * How tall its characters are in its picture, in pixels: about as
+ * tall as the look searched for at the window's size then.
+ */
+height: number,
+/**
+ * The one of the recording's sizes it is: how tall the characters of
+ * that example were on the screenshot it was drawn on. It differs
+ * from `height` when the window had another size.
+ */
+example: number, }>;
 
 /**
  * What the text reader made of a reading.
@@ -1502,8 +1553,22 @@ problem: string | null,
  */
 settings: RecordingSettings,
 /**
+ * The window size it is placed at: the size the region was drawn at,
+ * or the one frames settled at since. The region and the sizes of
+ * text are scaled from the one to the other where they differ.
+ */
+at: SizeView,
+/**
+ * How tall the characters are that a recording of the whole window
+ * looks for, smallest first, in pixels of the window the region was
+ * drawn on: one size for each example of text that differs from the
+ * others. Empty for a recording of the region alone.
+ */
+sizes: Array<number>,
+/**
  * Where a recording of the whole window found text like its region's
- * the last time it looked, while it records; empty otherwise.
+ * the last time it looked, on a window of the size it is placed at,
+ * while it records; empty otherwise.
  */
 spots: Array<RegionView>,
 /**

@@ -21,24 +21,7 @@ use super::{Region, Size};
 /// that window.
 #[must_use]
 pub fn scaled(region: Region, drawn: Size, now: Size, pin: PinDef) -> Option<Region> {
-    let factor = Factor {
-        new: i128::from(now.height),
-        old: i128::from(drawn.height),
-    };
-    let (x, width) = span(
-        pin.horizontal(),
-        region.x(),
-        region.size().width,
-        (drawn.width, now.width),
-        factor,
-    )?;
-    let (y, height) = span(
-        pin.vertical(),
-        region.y(),
-        region.size().height,
-        (drawn.height, now.height),
-        factor,
-    )?;
+    let ((x, width), (y, height)) = spans(region, drawn, now, pin)?;
     let scaled = Region::new(
         u32::try_from(x).ok()?,
         u32::try_from(y).ok()?,
@@ -46,6 +29,73 @@ pub fn scaled(region: Region, drawn: Size, now: Size, pin: PinDef) -> Option<Reg
         u32::try_from(height).ok()?,
     )?;
     scaled.fits(now).then_some(scaled)
+}
+
+/// The part of a window of `now` nearest where `region` lies there.
+///
+/// It is [`scaled`]'s region where that fits the window, and otherwise that
+/// region moved and cut to lie inside it, for a reader that only asks what
+/// is near the region. `None` when a window has no width or no height.
+#[must_use]
+pub fn scaled_within(region: Region, drawn: Size, now: Size, pin: PinDef) -> Option<Region> {
+    let (across, down) = spans(region, drawn, now, pin)?;
+    let (x, width) = within(across, now.width)?;
+    let (y, height) = within(down, now.height)?;
+    Region::new(x, y, width, height)
+}
+
+/// Where `region`'s span across the window and its span down it lie on a
+/// window of `now`, each as its start and its length.
+fn spans(
+    region: Region,
+    drawn: Size,
+    now: Size,
+    pin: PinDef,
+) -> Option<((i128, i128), (i128, i128))> {
+    let factor = Factor::between(drawn, now);
+    let across = span(
+        pin.horizontal(),
+        region.x(),
+        region.size().width,
+        (drawn.width, now.width),
+        factor,
+    )?;
+    let down = span(
+        pin.vertical(),
+        region.y(),
+        region.size().height,
+        (drawn.height, now.height),
+        factor,
+    )?;
+    Some((across, down))
+}
+
+/// The span from `start` that is `length` long, moved and cut to lie on a
+/// side `side` long: its start and its length, at least 1. `None` for a
+/// side with no length.
+fn within((start, length): (i128, i128), side: u32) -> Option<(u32, u32)> {
+    let side = i128::from(side);
+    let first = start.clamp(0, side.checked_sub(1).filter(|last| *last >= 0)?);
+    let end = start
+        .checked_add(length)?
+        .clamp(first.checked_add(1)?, side);
+    Some((
+        u32::try_from(first).ok()?,
+        u32::try_from(end.checked_sub(first)?).ok()?,
+    ))
+}
+
+/// How long `length`, in pixels on a window of `drawn`, is on a window of
+/// `now`.
+///
+/// It scales by the factor a region scales by, rounds as a region's edges
+/// do, and is at least 1. A reader that looks for something of a size, such
+/// as text of a height, scales the size with it. `None` when the window had
+/// no height or the length does not fit a `u32`.
+#[must_use]
+pub fn scaled_length(length: u32, drawn: Size, now: Size) -> Option<u32> {
+    let scaled = Factor::between(drawn, now).of(i128::from(length))?;
+    u32::try_from(scaled.max(1)).ok()
 }
 
 /// Where a span from `start` that is `length` long, along a side that was
@@ -74,6 +124,15 @@ struct Factor {
 }
 
 impl Factor {
+    /// The factor from a window of `drawn` to one of `now`: the new height
+    /// over the old.
+    fn between(drawn: Size, now: Size) -> Self {
+        Self {
+            new: i128::from(now.height),
+            old: i128::from(drawn.height),
+        }
+    }
+
     /// `length` scaled and rounded, or `None` when the factor has no `old`.
     fn of(self, length: i128) -> Option<i128> {
         rounded(length.checked_mul(self.new)?, self.old)
@@ -296,5 +355,97 @@ mod tests {
             scaled(bottom, DRAWN, shorter, PinDef::BottomLeft),
             Some(region(0, 1039, 100, 40))
         );
+    }
+
+    #[test]
+    fn a_length_scales_by_the_height_alone_rounds_as_an_edge_and_keeps_a_pixel() {
+        let tall = |height| Size {
+            width: 1920,
+            height,
+        };
+        // Half the height: 12 is 6, and 13 is 6.5, which rounds up.
+        assert_eq!(scaled_length(12, DRAWN, tall(540)), Some(6));
+        assert_eq!(scaled_length(13, DRAWN, tall(540)), Some(7));
+        // A third taller: 10 is 13.33, and 11 is 14.67.
+        assert_eq!(scaled_length(10, DRAWN, tall(1440)), Some(13));
+        assert_eq!(scaled_length(11, DRAWN, tall(1440)), Some(15));
+        // A quarter of the height: 1 is 0.25, and a length keeps a pixel.
+        assert_eq!(scaled_length(1, DRAWN, tall(270)), Some(1));
+        // The width says nothing of a length.
+        let narrow = Size {
+            width: 800,
+            height: 1080,
+        };
+        assert_eq!(scaled_length(12, DRAWN, narrow), Some(12));
+        assert_eq!(scaled_length(12, tall(0), DRAWN), None, "no height");
+        assert_eq!(
+            scaled_length(u32::MAX, DRAWN, tall(2160)),
+            None,
+            "twice as long fits no u32"
+        );
+    }
+
+    #[test]
+    fn a_region_that_scales_outside_the_window_is_near_the_edge_it_passed() {
+        let scaled_to = |pin, now| scaled_within(region(40, 60, 100, 40), DRAWN, now, pin);
+        // Where it fits, it is where it scales to.
+        let larger = Size {
+            width: 3440,
+            height: 1440,
+        };
+        assert_eq!(
+            scaled_to(PinDef::TopRight, larger),
+            Some(region(933, 80, 134, 53))
+        );
+        // Half the height and narrower: pinned to the right it spans −140
+        // to −90 across, left of the window, so it is the first column.
+        let half = Size {
+            width: 800,
+            height: 540,
+        };
+        assert_eq!(
+            scaled_to(PinDef::TopRight, half),
+            Some(region(0, 30, 1, 20))
+        );
+        // Pinned to the center it spans −60 to −10: the same column.
+        assert_eq!(
+            scaled_to(PinDef::TopCenter, half),
+            Some(region(0, 30, 1, 20))
+        );
+        // Pinned left on a window 60 wide, it spans 40 to 140: cut at the
+        // right edge. On one 40 wide it starts on the edge: the last column.
+        let wide = |width| Size {
+            width,
+            height: 1080,
+        };
+        assert_eq!(
+            scaled_to(PinDef::TopLeft, wide(60)),
+            Some(region(40, 60, 20, 40))
+        );
+        assert_eq!(
+            scaled_to(PinDef::TopLeft, wide(41)),
+            Some(region(40, 60, 1, 40))
+        );
+        assert_eq!(
+            scaled_to(PinDef::TopLeft, wide(40)),
+            Some(region(39, 60, 1, 40))
+        );
+        // The same down the window: pinned to the bottom, 1020 from it.
+        let short = Size {
+            width: 1920,
+            height: 1080,
+        };
+        let low = region(0, 1040, 100, 40);
+        assert_eq!(
+            scaled_within(low, short, wide(1920), PinDef::TopLeft),
+            Some(low),
+            "touching the edge fits"
+        );
+        assert_eq!(scaled_to(PinDef::TopLeft, wide(0)), None, "no width");
+        let flat = Size {
+            width: 1920,
+            height: 0,
+        };
+        assert_eq!(scaled_to(PinDef::TopLeft, flat), None, "no height");
     }
 }

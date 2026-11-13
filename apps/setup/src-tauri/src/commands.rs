@@ -751,7 +751,7 @@ pub(crate) async fn discard_recording(app: AppHandle) -> Result<(), String> {
 /// The recording of readings and its readings so far; `None` without one.
 #[tauri::command]
 pub(crate) async fn recording_state(app: AppHandle) -> Result<Option<RecordingView>, String> {
-    ask(&app, "recording_state", |owner| owner.recording_state()).await
+    ask(&app, "recording_state", Owner::recording_state).await
 }
 
 /// Records the looks of `region` of the picked window, drawn on

@@ -194,7 +194,9 @@ added. A reference with no list of what it needs lists every find.
 
 Draw the box tightly around the text first, since the finds' characters must
 be about as tall as the text in it; a comma or a mark below them does not
-count. Text of another size is skipped, and the list says how much. One search
+count. Text of another size is skipped, and the list says how much. To find
+that text, select a box around some text of that size, or draw one, and then
+select **Find more like it**. One search
 lists at most 12 finds; add those, then select **Find more like it** again, and
 it lists the rest, leaving out what you added.
 
@@ -409,11 +411,32 @@ a reference cannot learn it as one character:
 [What a reference can't learn](#what-a-reference-cant-learn) says what to
 type for it.
 
-Keep the window the size it was when you took the screenshot the recorded
-region is on: at another size, recording pauses and says to resize the
-window. Every screenshot with a box, and the recording, must have that size
-too, and the reference says which one does not. What a reference learned still reads
-at other sizes. If the window's capture fails for a moment, recording stops
+You can change the window's size while you record. How the recording
+follows depends on what you answered for the application under
+**How often does this window change size?**:
+
+- **Often.** Recording goes on. Once the window has kept its new size for a
+  moment, the recorded place is scaled to it and keeps its distance from
+  the side of the window the value stays at, or the side it is nearest when
+  the reference is taught by itself, and a recording of the whole window looks
+  for the text sizes scaled the same way. **Recording** then says so, such
+  as **The window is 1280 × 720 now, so the place is scaled to it.** A
+  character that looks the same at two window sizes is kept once.
+  Recording pauses and says why in two cases. A recording of one place
+  pauses when the scaled place would reach outside the window. A recording
+  of the whole window still looks there, starting near the edge the place
+  passed. Either pauses when the window is so small that the scaled text is
+  under 5 pixels tall, too small to tell the characters apart. Recording
+  goes on when you make the window larger. The window need not redraw for
+  any of this: a window that shows nothing new at its new size is followed
+  too.
+- **Rarely.** Recording pauses at another size and says to resize the
+  window. It goes on when the window is back at the size it had on the
+  screenshot the recorded place is on.
+
+Every screenshot with a box that teaches the reference, and the recording,
+must have the size the reference reads at, and the reference says which one
+does not. What a reference learned still reads at other sizes. If the window's capture fails for a moment, recording stops
 and says why; select **Record more** once the window shows again. If the
 window closes, nothing more can be recorded from it. Review and keep the
 readings you want, then select **Save reference**, which still works after
@@ -461,6 +484,29 @@ the place itself. While it records, the window shows an
 outline around each piece it found the last time it looked, and **Recording
 the whole window** says in how many places that was.
 
+An application can show the same characters at more than one size, such as a
+small counter and a large total. Each [box](#boxes) is one more example of a
+size:
+
+1. Before you start, draw a box around some text of the other size, on a
+   screenshot of the same window size. The box needs no text typed in it to
+   be an example, and a box you typed text in is one too.
+2. Select **Start recording**. **Recording the whole window** says which
+   sizes it looks for, such as
+   **Looking for text of 2 sizes: 14 px and 28 px tall**. Two examples of
+   nearly the same height count as one size.
+3. In review, each reading says which size it is, such as
+   **text 28 px tall**, when the recording looked for more than one. That
+   is how tall the text is in the reading's picture. A reading recorded
+   while the window had another size names the size it was scaled from too,
+   such as **text 28 px tall, the 14 px size scaled**.
+
+To add a size to a recording you stopped, draw a box around some text of
+that size and select **Record more**. A recording keeps the sizes it has: to
+drop one, **Discard** the recording and start a new one. A character that
+looks the same at two sizes is kept once, so a second size adds readings only
+for the shapes it draws differently.
+
 It has limits, and review is where you deal with them:
 
 - **It can pick up other text.** A menu's label or a name in the same color
@@ -479,9 +525,9 @@ It has limits, and review is where you deal with them:
   longer than one place, and on a large window one look can take longer
   than half a second, so text that shows only briefly can be missed.
   **This place** looks about 30 times a second.
-- **It finds one size.** Text much larger or smaller than the example's is
-  not collected. What the reference learns still reads at other
-  sizes.
+- **It finds the sizes it has an example of.** Text much larger or smaller
+  than every example's is not collected. What the reference learns still
+  reads at other sizes.
 - **It reads text by itself on a line.** Text that touches other things in
   the same color, or a line of more than 24 characters, is skipped.
 

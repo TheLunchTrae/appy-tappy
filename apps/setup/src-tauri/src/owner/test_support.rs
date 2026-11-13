@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
-use appytappy_config::app_file::{BuildDef, WindowDef};
+use appytappy_config::app_file::{BuildDef, SizeChangesDef, WindowDef};
 use appytappy_config::click::{ClickButton, ClickDelivery, Spot};
 use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::screen::place::Target;
@@ -456,15 +456,18 @@ pub(super) fn characters(json: &str) -> CharactersSpec {
     serde_json::from_str(json).expect("valid JSON")
 }
 
-/// A recording of `region` of screenshot 0, of characters of the color
-/// `ink` at no tolerance.
+/// A recording of `region` of screenshot 0 of the application `example`'s
+/// window, of characters of the color `ink` at no tolerance.
 pub(super) fn characters_in(region: RegionSpec, ink: ColorSpec) -> RecordSpec {
     RecordSpec {
+        app: "example".to_owned(),
         region,
         screenshot: 0,
+        pin: None,
         ink,
         tolerance: 0,
         scope: Scope::Place,
+        examples: Vec::new(),
     }
 }
 
@@ -480,34 +483,43 @@ pub(super) fn teaching(characters: CharactersSpec) -> ReferenceTrial {
     }
 }
 
-/// A harness with `Example App` saved and window 7 picked, [`frame_image`]
-/// its newest frame and its screenshot 0, with the capture's handler.
-pub(super) fn capturing(name: &str) -> (Harness, FrameHandler, std::path::PathBuf) {
+/// A harness with `Example App` saved, whose window changes size often,
+/// and the folder its stores are in, for the test to remove.
+pub(super) fn with_example_app(name: &str) -> (Harness, std::path::PathBuf) {
     let (stores, root) = scratch_store(name);
     let mut harness = harness_with(false, Ok(stores));
     add_example_app(&mut harness);
+    (harness, root)
+}
+
+/// A harness with `Example App` saved and window 7 picked, [`frame_image`]
+/// its newest frame and its screenshot 0, with the capture's handler.
+pub(super) fn capturing(name: &str) -> (Harness, FrameHandler, std::path::PathBuf) {
+    let (mut harness, root) = with_example_app(name);
     let mut handler = harness.pick();
     harness.deliver(&mut handler, Ok(&frame_image()));
     assert_eq!(harness.ask(Owner::screenshot), Ok(0));
     (harness, handler, root)
 }
 
-/// Saves `Example App`, with no values, as the application `example`.
+/// `Example App` as the user describes it, with a window that changes
+/// size as `size_changes` says.
+pub(super) fn example_app(size_changes: SizeChangesDef) -> AppSpec {
+    AppSpec {
+        name: " Example App ".to_owned(),
+        window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+            title: "Example App",
+            class: "ExampleWindow",
+            executable: "Example.exe",
+        }),
+        size_changes,
+    }
+}
+
+/// Saves `Example App`, with no values and a window that changes size
+/// often, as the application `example`.
 pub(super) fn add_example_app(harness: &mut Harness) {
-    let saved = harness.ask(|owner| {
-        owner.save_app(
-            None,
-            AppSpec {
-                name: " Example App ".to_owned(),
-                window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
-                    title: "Example App",
-                    class: "ExampleWindow",
-                    executable: "Example.exe",
-                }),
-                size_changes: appytappy_config::app_file::SizeChangesDef::Often,
-            },
-        )
-    });
+    let saved = harness.ask(|owner| owner.save_app(None, example_app(SizeChangesDef::Often)));
     assert_eq!(saved, Ok("example".to_owned()));
 }
 

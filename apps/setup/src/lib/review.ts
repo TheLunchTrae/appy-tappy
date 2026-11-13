@@ -1,6 +1,7 @@
-import type { RecordedLabel, RecordedReading, RecordedShape } from './bindings.ts';
+import type { RecordedLabel, RecordedReading, RecordedShape, RecordingView } from './bindings.ts';
 import { fitsNeeds, mayBeNeeded } from './found.ts';
 import { andList, knownCharacters, labelCharacters } from './reference.ts';
+import { sameSize, sizeText } from './sizes.ts';
 // Reviewing a recording: which readings the user keeps, what each shows, and what each adds.
 //
 // A recording keeps a reading for a shape no reading before it showed, and a reference learns one character for
@@ -32,6 +33,50 @@ export function clock(ms: number): string {
 /** How often a reading showed, such as "seen 3 times". */
 export function seen(times: number): string {
   return times === 1 ? 'seen once' : `seen ${times} times`;
+}
+
+/** `sizes` as a list of heights, such as "8 px", "8 px and 16 px", or "8 px, 16 px and 24 px". */
+function heights(sizes: readonly number[]): string {
+  const each = sizes.map((size) => `${size} px`);
+  const last = each.at(-1) ?? '';
+  return each.length < 2 ? last : `${each.slice(0, -1).join(', ')} and ${last}`;
+}
+
+/**
+ * The text a recording of the whole window looks for, by its `sizes`, such as "text 8 px tall" or "text of 2 sizes:
+ * 8 px and 16 px tall"; null for a recording of one place, which looks for no size.
+ */
+export function sizesNote(sizes: readonly number[]): string | null {
+  if (sizes.length === 0) {
+    return null;
+  }
+  return sizes.length === 1 ? `text ${heights(sizes)} tall` : `text of ${sizes.length} sizes: ${heights(sizes)} tall`;
+}
+
+/**
+ * What a recording says of the window size it records at when that is not the size its place was drawn at, such as
+ * "The window is 1280 × 720 now, so the place and the text sizes are scaled to it."; null at the size it was drawn at.
+ */
+export function followingNote(view: Pick<RecordingView, 'at' | 'settings'>): string | null {
+  if (sameSize(view.at, view.settings.windowSize)) {
+    return null;
+  }
+  const scaled = view.settings.scope === 'window' ? 'the place and the text sizes are' : 'the place is';
+  return `The window is ${sizeText(view.at)} now, so ${scaled} scaled to it.`;
+}
+
+/**
+ * Which of the recording's `sizes` of text `reading` is, such as "text 16 px tall": how tall its characters are in
+ * its picture. On a window of another size than the examples were drawn at, it names the size it was scaled from too:
+ * "text 16 px tall, the 8 px size scaled". Null when the recording looked for one size or none, so there is nothing
+ * to tell apart.
+ */
+export function readingSize(reading: RecordedReading, sizes: readonly number[]): string | null {
+  if (sizes.length < 2 || reading.size === null) {
+    return null;
+  }
+  const { height, example } = reading.size;
+  return height === example ? `text ${height} px tall` : `text ${height} px tall, the ${example} px size scaled`;
 }
 
 /**
