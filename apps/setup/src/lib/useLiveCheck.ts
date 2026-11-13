@@ -78,7 +78,9 @@ export function trialOf<Spec>(
 /**
  * Tries `trial` on the live window once what it tries has not changed for a moment, and reads the window with it
  * while it is set. A trial with the same key as the one before is the same trial: an edit of the draft that leaves
- * the spec as it was, such as an empty box added or moved, tries nothing again. It is tried again when `again`
+ * the spec as it was, such as an empty box added or moved, tries nothing again, even after it failed: the Rust side
+ * judges the spec against the saved files and the session's screenshots and recording, which such an edit leaves as
+ * they were. It is tried again when `again`
  * changes, which says that the same trial may answer otherwise now, as an edit does once the window has another
  * size.
  */
