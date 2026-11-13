@@ -102,6 +102,7 @@ import { type ReportDraft, type Resumed, draftsOf, isKept, keep, useDraft } from
 import { background } from '../lib/repeat.ts';
 import { ask } from '../lib/request.ts';
 import { type Made, savedNote } from '../lib/flow.ts';
+import { referenceSave } from '../lib/teaching.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useBarSetup } from '../lib/useBarSetup.ts';
@@ -117,6 +118,9 @@ import { focusNext, useRecordFocus, useReview } from '../lib/useReview.ts';
 import type { Taken } from '../lib/useScreenshots.ts';
 import { useStateSelections } from '../lib/useStateSelections.ts';
 import { useValueEdit } from '../lib/useValueEdit.ts';
+
+/** The id of the note that says why Save reference waits, which the button points at. */
+const SAVE_WAITS_ID = 'save-reference-waits';
 
 /** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
 const NO_NEEDS: readonly string[] = [];
@@ -907,8 +911,14 @@ export function Capture({
   const canSave = ready && check.state.kind === 'set' && !busy;
   // A reference that expects more characters than one saves cannot be saved, and the editor says so.
   const overLimit = editing !== null && tooMany(editing.expects);
-  const canSaveRef =
-    editing !== null && editing.name.trim().length > 0 && built.ok && check.state.kind === 'set' && !busy && !overLimit;
+  const refSave = referenceSave({
+    named: editing !== null && editing.name.trim().length > 0,
+    built: built.ok,
+    tried: check.state.kind === 'set',
+    busy,
+    overLimit,
+    reviewing: reviewing && recording !== null,
+  });
   const whereDone = named && draft.region !== null;
   const fixName = fixing === null ? null : `Fix ${fixing.name}`;
   const flowName = fixName ?? (edited === null ? 'New value' : `Edit ${edited.name}`);
@@ -1562,7 +1572,12 @@ export function Capture({
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
           {overLimit ? <p className="warn">{TOO_MANY}</p> : null}
-          {canSaveRef && covered.missing.length > 0 ? (
+          {refSave.waits === null ? null : (
+            <p id={SAVE_WAITS_ID} className="note">
+              {refSave.waits}
+            </p>
+          )}
+          {refSave.can && covered.missing.length > 0 ? (
             <p className="note">
               It has yet to learn every character it needs. You can save now and teach the rest later.
             </p>
@@ -1588,8 +1603,14 @@ export function Capture({
             <button
               type="button"
               className="btn primary"
-              disabled={!canSaveRef}
-              aria-describedby={checking || guided.unconfirmed.length === 0 ? undefined : CHECK_OFFER_ID}
+              disabled={!refSave.can}
+              aria-describedby={
+                refSave.waits !== null
+                  ? SAVE_WAITS_ID
+                  : checking || guided.unconfirmed.length === 0
+                    ? undefined
+                    : CHECK_OFFER_ID
+              }
               onClick={() => {
                 background(saveRef());
               }}

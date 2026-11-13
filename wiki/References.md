@@ -408,7 +408,9 @@ stray shape and draw a box around it instead.
    **Keep 12 readings**. The kept readings teach the reference like boxes
    do. **Review recording** opens them again with your choices, and
    **Record more** goes on with the same recording. **Back** leaves review
-   without keeping, and your changes stay for next time. To record more, keep
+   without keeping, and your changes stay for next time. **Save reference**
+   is off while review is open, since the reference has only the readings
+   you kept: keep them or go **Back** first. To record more, keep
    the place it reads, the characters' color, and the tolerance as they
    were, on a screenshot of the same window size: if you changed them,
    **Use its settings** puts them back. In a reference you teach by itself,
