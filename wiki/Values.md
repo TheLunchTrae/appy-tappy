@@ -214,7 +214,9 @@ What a recording gives each check:
   instead. Under **Characters**, select **Record readings**. The
   reference you picked opens with its
   [recording](References.md#record-readings) already running on the value's
-  region. With no reference picked, a new one opens: click the characters on
+  region, unless it has a
+  [draft of changes](Drafts.md#finish-or-delete-a-draft) to finish first.
+  With no reference picked, a new one opens: click the characters on
   the screenshot to pick their color, then select **Start recording**.
   **Save reference** brings you back to the value.
 

@@ -79,9 +79,9 @@ A saved item that has a draft of changes shows **Draft changes**, and
 it as saved instead, finish the draft and select **Delete draft**; the saved
 item stays as it was. For the same reason, a new value can pick a reference
 that has a draft of changes but can't edit it or record readings for it
-there, and when you choose an
-application for a value or a reference, **Finish draft** takes the place of
-**Change how it's found** for an application that has a draft of changes.
+there, and when you choose an application for a value or a reference,
+**Finish draft** takes the place of **Change how it's found** for an
+application that has a draft of changes.
 
 Removing an application deletes its drafts with it: those of its values,
 fixes, and references, and its own draft of changes. Deleting a value deletes
