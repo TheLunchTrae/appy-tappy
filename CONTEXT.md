@@ -19,9 +19,9 @@ parts fit.
   version: a source primitive and its parameters, such as a screen region and
   its check.
 - **Character check.** A setup-app pass over a reference's characters one at
-  a time: each step shows one character with the listed finds and the kept
-  recorded readings whose text has it, and one answer fixes that character
-  in the text of every place that shows its shape.
+  a time: each step shows one character with the boxes, the listed finds,
+  and the kept recorded readings whose text has it, and one answer fixes
+  that character in the text of every place that shows its shape.
 - **Check.** How a screen region binding turns a region's pixels into a value:
   a number read with a reference, a bar's fill, a color match, or a match
   with a saved image.

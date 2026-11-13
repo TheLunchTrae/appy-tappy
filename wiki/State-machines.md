@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Fourteen guards drop such stale messages:
+it was about has gone. Fifteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -41,7 +41,10 @@ it was about has gone. Fourteen guards drop such stale messages:
   is what a [window look](#window-look) found for one. Within one recording,
   the look's gate drops the answer to a look from before **Record more** or
   from before a frame showed the window at another size than the recording
-  is placed at (`Gate::Abandoned`).
+  is placed at (`Gate::Abandoned`). The
+  [character check](#character-check) remembers the readings it left out
+  under their recording's ID, and keeps none again for another recording
+  (`leftOutOf` in `apps/setup/src/lib/useCharacterCheck.ts`).
 - **Search IDs.** Each search for text like a reference's box gets a new
   `id` from the owner's `search_id`. The owner drops the text reader's text
   for a search that was replaced or forgotten, answers nothing for a picture
@@ -54,6 +57,12 @@ it was about has gone. Fourteen guards drop such stale messages:
   there are. An answer for any other key than the request under way is dropped. What two
   colors read is kept under those and the colors, and shows only while they
   are the same.
+- **Box character keys.** The [character check](#character-check) asks
+  which characters each box of the reference shows under a key made of the
+  box's screenshot and region and the characters' color and tolerance
+  (`boxCharactersKey` in `apps/setup/src/lib/useBoxCharacters.ts`). An
+  answer for a key that no box has anymore, such as where a box was before
+  it moved, is dropped (`arrived`).
 - **Pointer IDs.** A region drag keeps the ID of the pointer that started it
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
@@ -348,7 +357,9 @@ The thread can also panic in any state, which ends it.
 - **Capturing.** `watch` waits on `control` until the next `CHECK_AGAIN` or
   until a new size settles, whichever comes first. The capture's frame handler
   runs on another thread and sends `Lost`, `Resizing`, `Failing`,
-  `Panicked`, or `Recovered` back to this one. A `Trace` from the owner goes
+  `Panicked`, or `Recovered` back to this one. A panic in the capture's
+  frame loop outside the handler arrives as `Lost`, as
+  [Frame handler](#frame-handler) describes. A `Trace` from the owner goes
   on to the frame handler over its own channel, and the capture goes on.
   Each `CHECK_AGAIN`, `moved_on` checks that the window still shows and that
   `session_window` still picks it, which it does while the window shows and
@@ -440,7 +451,14 @@ stateDiagram-v2
   the same way.
 - The capture ends, as when the window closes, the graphics device is lost, or
   the frame pool cannot follow the window to a new size, with a
-  `NotConnected` error.
+  `NotConnected` error. A panic in the capture's frame loop outside `handle`
+  ends it the same way: `run_capture` (`crates/sources/src/screen/capture.rs`)
+  runs the Windows capture's frame loop, catches the panic, and hands the
+  handler a `NotConnected` error with the panic's message, so the reader
+  logs it, sends `Unseen`, and captures again after the backoff. Unwound,
+  the panic would end the capture's thread, and the reader would hear of it
+  only once it closed the capture. A panic in `handle` itself never reaches
+  `run_capture`, since `handle` catches its own.
 - After a restart, the first good frame sends `Recovered` to the reader
   thread once it is handled without a panic, so a capture that panics on it
   has not recovered.
@@ -1305,9 +1323,10 @@ stateDiagram-v2
 - **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
   error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
-- **Ended** is a failure whose `ended` flag is set, for the closed-window
-  error Windows reports. Frames after it are dropped, and a screenshot, a new
-  recording, and **Record more** are refused with "Change window to pick it
+- **Ended** is a failure whose `ended` flag is set, for a `NotConnected`
+  error: a closed window, a lost graphics device, or a capture panic. Frames
+  after it are dropped, and a screenshot, a new recording, and **Record
+  more** are refused with "Change window to pick it
   again". Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show.
@@ -1855,7 +1874,11 @@ stateDiagram-v2
 
 A reference being taught learns from `Draft.boxes`
 (`apps/setup/src/lib/boxes.ts`): each box has an ID no other box of the draft
-has, the screenshot it is on, its region, and its text. `boxStep` there is the
+has, the screenshot it is on, its region, and its text. A box added from a
+find whose text nobody typed is also `guessed`: its text is the text
+reader's guess until someone types it, by hand or with an answer of the
+[character check](#character-check), and a retype clears the mark even when
+it types the same text. `boxStep` there is the
 pure `(state, event)` transition over the boxes and the ID of the selected
 box, and `useBoxes` in `apps/setup/src/lib/useBoxes.ts` holds that ID and
 sends each event to the draft's boxes.
@@ -2299,9 +2322,15 @@ stateDiagram-v2
 
 The check of a reference's characters one at a time
 (`apps/setup/src/lib/confirm.ts`, held by `useCharacterCheck.ts`) is closed, or
-a `Guide`: the answers given so far, by shape, the places it left out, and a
-cursor. `turn` is its pure `(state, event)` transition, and it answers with
-the next guide and the edits of the places' texts and ticks.
+a `Guide`: the answers given so far, by shape, the places it left out, the
+places that have joined it, and a cursor. Beside it the hook holds `past`,
+the answers of the checks closed since the reference's editor opened, and
+`leftOut`, the readings the open check took from the draft. `turn` is its
+pure `(state, event)` transition for what the user does, and `join` is the
+one for places that show under an open check. Each answers with the next
+guide and the edits of the places' texts and ticks. `heldStep` in
+`useCharacterCheck.ts` is the transition over what the hook holds: the guide
+or none, `past`, and `leftOut`.
 
 ```mermaid
 stateDiagram-v2
@@ -2319,16 +2348,31 @@ stateDiagram-v2
     Unfitted --> Done: Next
     Done --> Unfitted: Back, while text fits no step
     Done --> Character: Back
+    Character --> Character: a place joins
+    Unfitted --> Unfitted: a place joins
+    Done --> Done: a place joins
     Character --> Closed: Back to the screenshot, Back to review, or Escape
     Unfitted --> Closed: Back to the screenshot, Back to review, or Escape
     Done --> Closed: Done, or Escape
+    Character --> Closed: the reference's editor closes
+    Unfitted --> Closed: the reference's editor closes
+    Done --> Closed: the reference's editor closes
 ```
 
-- The places are every [found text](#found-text) the list holds, ticked or
-  not, and every [recording](#recording) reading (`checkPlaces`). The check
-  asks about the finds and the readings that review keeps. A reading that
+- The places are every [box](#reference-boxes) of the reference, every
+  [found text](#found-text) the list holds, ticked or not, and every
+  [recording](#recording) reading (`checkPlaces`). The check asks about the
+  boxes, the finds, and the readings that review keeps. A reading that
   review leaves out joins no step and never changes its keep; it only gets
-  the answers, so its text does not disagree with the kept ones. Each place
+  the answers, so its text does not disagree with the kept ones. A box has
+  no tick (`ticks`): it gets the answers in its text, gets its whole text
+  from them when it has none, and is never left out, so the tile of a
+  shape that is no character names the boxes that still teach it. A box's
+  characters come from `box_characters`, asked once for each place and
+  characters' color (`useBoxCharacters.ts`); until they arrive the box
+  waits like text still being read, and joins when they do. A box that
+  shows no characters is asked nothing: no text fits it, and it has no tick
+  to leave it out with, so it is never on the `Unfitted` stop. Each place
   carries where its characters are in its picture and a name for each one's
   shape (`recording/character.rs`), which is the same for the same shape in
   a find and in a reading.
@@ -2353,6 +2397,19 @@ stateDiagram-v2
   shape's character, and the rest of its text stays. A place the check asks
   about is ticked or kept once all its shapes have answers, and left out
   when one is no character. A tick the user changes afterward stays.
+- **A place joins once its text is read.** The guide names the places that
+  have joined in `seen`: the ones whose text was read when the check opened,
+  and each one since. A place that first shows under an open check, or
+  whose text the reader sends then, gets every answer that stands for its
+  shapes, as the turn that gave the answer would have written it (`join`,
+  which `useCharacterCheck.ts` runs after each render). Its text takes the
+  answered characters, it is left out and remembered in `left` for a shape
+  that is no character, and it is ticked or kept once all its shapes have
+  answers. A reading that review leaves out gets the text and keeps its
+  keep. A place whose text the user typed keeps that text and is only left
+  out. A place joins once, so a text or a tick the user changes afterward
+  stays. One that is gone, or being read again, leaves `seen` and joins
+  anew.
 - **Text that fits no step.** A place whose text has another number of
   characters than its picture has shapes joins no step. Once every one of
   its shapes has an answer, the answers are its text. One still left is the
@@ -2371,23 +2428,52 @@ stateDiagram-v2
   the button is let go. Each step has its own buttons
   (`CharacterCheck.tsx`), so that click lands on no button and answers for
   nothing.
-- Closing forgets the answers. The texts and ticks they wrote stay with the
-  finds and with review.
+- Closing forgets the answers, so the next check asks from the start. The
+  texts and ticks they wrote stay with the boxes, the finds, and review.
+- **A reading the draft keeps already** takes the check's edit on the draft
+  too, so that saving learns what the check wrote (`editedReading`). Its
+  kept text gets only the characters the edit changed, and the draft keeps
+  it or not as before unless the edit changes its keep, so what review
+  changed without **Keep**, a text or a cleared tick, stays review's. A
+  draft text of another length than review's does not line up with the
+  edit and stays as it is. A reading left out goes from the
+  draft, and `leftOut` remembers the text the draft kept it with;
+  **It is a character**, or its tick on the `Unfitted` stop, puts it back
+  with that text. A reading the draft never kept stays off it. Closing
+  forgets `leftOut` with the answers, and a reading of another recording
+  than the one `leftOut` names is not in it.
+- Closing moves the answers into `past`, which only says what the user has
+  confirmed. The characters nobody has confirmed (`unconfirmed`) are the
+  ones a reference saved now would learn from a text reader's guess, a box
+  that is still `guessed` or a kept reading with the reader's text, for a
+  shape that neither an answer, open or past, nor a text the user typed
+  gives that character. A guessed box that shows no characters counts for
+  none, since no answer could confirm it. While there are any, the editor
+  offers **Check characters** under **Not confirmed yet**, above
+  **Save reference** (`CheckOffer.tsx`). The offer is no state: saving
+  never waits for it. It says "confirmed" because
+  [review](#recording) counts a reading as checked once the user keeps it,
+  which confirms none of its characters.
+- **The reference's editor closes** on **Discard** or a save. That closes
+  an open check and forgets `past` and `leftOut` (`forget`), so no answer
+  reaches the next reference's offer.
 
-The check has no failure state of its own: it makes no request, and every
-turn is an edit the list of finds or review takes. What goes wrong is that
-the places change under an open check, and each case recovers on the next
-render (`settle`) or the next answer:
+The check has no failure state of its own, and every turn is an edit the
+list of boxes, the list of finds, or review takes. Its one request asks
+which characters a box shows; a box whose request fails shows none, so the
+check leaves it to the list of boxes instead of waiting for it. What goes
+wrong is that the places change under an open check, and each case recovers
+on the next render (`settle`) or the next answer:
 
-- **A text disagrees with an answer.** The user types over a text by hand,
-  or the text reader's text arrives after the answer. The text stays as it
-  is. The shape counts as unanswered again, so its step shows the other
-  character the text has and asks once more, and the next answer writes
-  every place that shows the shape.
+- **A text disagrees with an answer.** The user types over a text by hand.
+  The text stays as it is. The shape counts as unanswered again, so its
+  step shows the other character the text has and asks once more, and the
+  next answer writes every place that shows the shape.
 - **A place is still being read.** It has no text, so it joins no step and
   is not on the `Unfitted` stop. `Done` says how many are not checked yet.
-  When its text arrives it joins the steps, and the cursor stays where it
-  is: the user reaches the step with **Back**, or by opening the check
+  When its text arrives it joins: it gets the answers that stand, and its
+  other shapes join the steps. The cursor stays where it is: the user
+  reaches a step that asks again with **Back**, or by opening the check
   again, which starts at the first step that still asks.
 - **The step under the cursor is gone.** An edit by hand leaves no place
   that gives a shape the step's character, or a search or a recording is
@@ -2396,15 +2482,6 @@ render (`settle`) or the next answer:
   none of whose places is left.
 - **No places at all.** The check is `Done` and says there is nothing to
   check.
-
-#### Open problems
-
-- [#327](https://github.com/TheLunchTrae/appy-tappy/issues/327): an answer
-  is written only in the turn that gives it, so a place that arrives later
-  does not get it. A place that appears while the check is open and shows a
-  shape answered **Not a character** is not left out. A reading that review
-  leaves out, whose text arrives after an answer and disagrees with it,
-  joins no step, so the step does not ask again and review flags the clash.
 
 ### Bar detection
 

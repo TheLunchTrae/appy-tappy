@@ -109,7 +109,8 @@ impl ClickSearch {
 /// A click's picture cannot be used.
 #[derive(Debug)]
 pub enum ClickPictureError {
-    /// The file is not a PNG file AppyTappy can read.
+    /// The file is not a PNG file AppyTappy can read, or its picture is
+    /// larger than AppyTappy reads.
     Read(ImageError),
     /// The picture does not suit the click: it is larger than the area it
     /// is looked for in, or the place the click presses lies outside it.
@@ -119,9 +120,7 @@ pub enum ClickPictureError {
 impl fmt::Display for ClickPictureError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Read(_) => {
-                formatter.write_str("the click's picture is not a PNG file it can read")
-            },
+            Self::Read(_) => formatter.write_str("the click's picture cannot be read"),
             Self::Misfit(misfit) => misfit.fmt(formatter),
         }
     }
@@ -253,10 +252,7 @@ mod tests {
         };
         assert!(matches!(error, ClickPictureError::Read(_)));
         assert!(error.source().is_some(), "the decoder's error is kept");
-        assert_eq!(
-            error.to_string(),
-            "the click's picture is not a PNG file it can read"
-        );
+        assert_eq!(error.to_string(), "the click's picture cannot be read");
         assert_eq!(
             ClickPictureError::Misfit(InvalidClick::PressOutside).to_string(),
             InvalidClick::PressOutside.to_string()

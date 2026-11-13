@@ -71,6 +71,7 @@ import type { Choice } from './Picker.tsx';
 import { colorAt } from '../lib/pixels.ts';
 import { RecordPanel, RecordingSpots, ReviewSheet } from './Recording.tsx';
 import { CharacterCheckSheet } from './CharacterCheck.tsx';
+import { CHECK_OFFER_ID, CheckOffer } from './CheckOffer.tsx';
 import { LookPanel } from './LookRecording.tsx';
 import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
 import { type Point, type Size, scaleRect } from '../lib/region.ts';
@@ -425,7 +426,25 @@ export function Capture({
   const covered = coverage(needs, knownCharacters(learnedTexts));
   const finder = useFound(draft, boxes.add, editingRef, learnedTexts, needs);
   const { reviewing } = review;
-  const guided = useCharacterCheck(finder, review, recorder, needs);
+  const guided = useCharacterCheck(finder, review, recorder, needs, {
+    boxes: draft.boxes,
+    ink: draft.ink,
+    tolerance: draft.tolerance,
+    recorded: draft.recorded,
+    full,
+    retype: boxes.retype,
+    keepReading: (index, text) => {
+      setDraft((current) => {
+        const recorded = new Map(current.recorded);
+        if (text === null) {
+          recorded.delete(index);
+        } else {
+          recorded.set(index, text);
+        }
+        return { ...current, recorded };
+      });
+    },
+  });
   // The check, like review, shows in place of the window's picture.
   const checking = guided.guide !== null;
   const sheeted = reviewing || checking;
@@ -823,6 +842,7 @@ export function Capture({
     setPicking(null);
     boxes.select(null);
     finder.dismiss();
+    guided.forget();
     setDraft(fromReference);
   };
 
@@ -1577,6 +1597,7 @@ export function Capture({
             </p>
           ) : null}
           {draftError}
+          {checking ? null : <CheckOffer characters={guided.unconfirmed} onCheck={guided.open} />}
           <div className="actions">
             <button
               type="button"
@@ -1597,6 +1618,7 @@ export function Capture({
               type="button"
               className="btn primary"
               disabled={!canSaveRef}
+              aria-describedby={checking || guided.unconfirmed.length === 0 ? undefined : CHECK_OFFER_ID}
               onClick={() => {
                 background(saveRef());
               }}
