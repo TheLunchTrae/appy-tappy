@@ -78,3 +78,5 @@ jobs:
           name: mutants-${{ strategy.job-index }}
           path: mutants.out/
           retention-days: 14
+          # A re-run of a failed shard replaces its earlier report.
+          overwrite: true

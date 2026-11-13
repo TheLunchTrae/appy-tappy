@@ -3060,6 +3060,12 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
             );
         }
     }
+    // Round-robin gives each sweep shard a share of every crate's mutants, so
+    // the shards take similar time.
+    assert!(
+        full.contains(" ${MUTANTS_SHARD:+--sharding=round-robin}"),
+        "the full mutation task must take its shards round-robin"
+    );
     for contract in [
         "refs/remotes/origin/main^{commit}",
         "refs/heads/main^{commit}",

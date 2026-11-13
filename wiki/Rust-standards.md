@@ -122,19 +122,22 @@ and it is not a merge gate: run it on `main` as a final check before a
 merged changes meet, which the diff lane misses until a later change edits its
 line. Its shards take the mutants round-robin, so each gets a share of every
 crate's mutants and they take similar time, and each shard keeps its
-`mutants.out/` as a run artifact for 14 days, so a surviving mutant's diff and
-log can be read there.
+`mutants.out/` as a run artifact for the workflow's `retention-days`. A shard
+fails when a mutant survives or times out, or when the unmutated baseline
+fails; its `mutants.out/` says which.
 
-A runner tests about 200 mutants an hour, and each shard has a three-hour time
-limit. Keep each shard under about 350 mutants, so the sweep
-takes about two hours, and add shards to the workflow's matrix as the
-workspace grows. `cargo mutants --list --workspace --all-features | wc -l`
-counts the mutants without building anything.
+The shard count rests on an estimate of about 200 mutants an hour for a
+runner, taken from the diff lane, so keep each shard under about 350 mutants,
+which keeps it well inside the job's `timeout-minutes`. Check the shards'
+times after a sweep, and add shards to the workflow's matrix as they near
+that limit or as the workspace grows, rather than raise the limit.
+`cargo mutants --list --workspace --all-features | wc -l` counts the mutants
+without building anything.
 
 The diff lane mutates only changed source lines, so a pull request that only
 removes or weakens tests, or changes only mutation configuration, selects no
-mutants. Run the mutation sweep on its branch to check the whole workspace
-before merging it.
+mutants. Run `rust:mutants` on its branch to check the whole workspace before
+merging it; the owner may run the mutation sweep on that branch instead.
 
 Both lanes run two mutants at once (`--jobs=2`), since each mutant's build waits
 on its linker most of the time. CI sets `MUTANTS_COPY_TARGET=true` for both
