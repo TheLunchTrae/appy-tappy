@@ -563,7 +563,7 @@ stateDiagram-v2
     Empty --> [*]: Stop
     Holding --> [*]: Stop, the frame is given back
     Holding --> [*]: the frame is read, and the handler wants no more frames
-    Empty --> [*]: a frame arrives after the wait is read, and the handler wants no more frames
+    Empty --> [*]: a frame arrives after the wait and is read, and the handler wants no more frames
     Ended --> [*]
 ```
 
