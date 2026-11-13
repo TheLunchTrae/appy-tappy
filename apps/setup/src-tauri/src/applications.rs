@@ -8,7 +8,6 @@
 use appytappy_config::app_file::{
     AntiCheatDef, AppFile, FORMAT, SizeChangesDef, WindowDef, WindowDefError,
 };
-use appytappy_config::names::new_app_id;
 use appytappy_config::store::StoredApp;
 use serde::Deserialize;
 
@@ -30,13 +29,13 @@ pub(crate) struct AppSpec {
     pub(crate) size_changes: SizeChangesDef,
 }
 
-/// The ID and file `spec` makes of the application `existing`, or of a new
+/// The file `spec` makes of the application `existing`, or of a new
 /// application with no values, for the owner to save.
 pub(crate) fn apply(
     stores: &Stores,
     existing: Option<&str>,
     spec: AppSpec,
-) -> Result<(String, AppFile), String> {
+) -> Result<AppFile, String> {
     let name = spec.name.trim();
     if name.is_empty() {
         return Err("Name the application first.".to_owned());
@@ -55,16 +54,14 @@ pub(crate) fn apply(
     })?;
     let loaded = stores.apps.load().map_err(|error| error.to_string())?;
     check_name_free(&loaded, existing, name)?;
-    let (id, mut file) = if let Some(id) = existing {
-        let file = loaded
+    let mut file = if let Some(id) = existing {
+        loaded
             .into_iter()
             .find(|app| app.id == id)
             .ok_or_else(|| "That application is no longer saved.".to_owned())?
-            .file?;
-        (id.to_owned(), file)
+            .file?
     } else {
-        let taken: Vec<&str> = loaded.iter().map(|app| app.id.as_str()).collect();
-        let file = AppFile {
+        AppFile {
             format: FORMAT,
             name: String::new(),
             window: spec.window.clone(),
@@ -74,8 +71,7 @@ pub(crate) fn apply(
             checked: None,
             values: Vec::new(),
             references: Vec::new(),
-        };
-        (new_app_id(&spec.window.executable, &taken), file)
+        }
     };
     name.clone_into(&mut file.name);
     // The build its values were checked against was of the old executable.
@@ -89,7 +85,7 @@ pub(crate) fn apply(
     }
     file.window = spec.window;
     file.size_changes = spec.size_changes;
-    Ok((id, file))
+    Ok(file)
 }
 
 /// Fails when a saved application other than `own` is already called `name`,
@@ -168,14 +164,15 @@ mod tests {
         crate::stores::scratch(&format!("applications-{name}"))
     }
 
-    /// Saves what [`apply`] makes of `spec`, as the owner does.
+    /// Saves what [`apply`] makes of `spec`, as the owner does: over
+    /// `existing`, or as a new application.
     fn save(stores: &Stores, existing: Option<&str>, spec: AppSpec) -> Result<String, String> {
-        let (id, file) = apply(stores, existing, spec)?;
-        stores
-            .apps
-            .save(&id, &file, &[])
-            .map_err(|error| error.to_string())?;
-        Ok(id)
+        let file = apply(stores, existing, spec)?;
+        match existing {
+            Some(id) => stores.apps.save(id, &file, &[]).map(|()| id.to_owned()),
+            None => stores.apps.create(&file, &[]),
+        }
+        .map_err(|error| error.to_string())
     }
 
     fn spec(name: &str, executable: &str) -> AppSpec {

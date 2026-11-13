@@ -1071,7 +1071,8 @@ packs and unpacks generated definitions. A refused export says what to
 change when the pixels are the cause.
 
 `import_app` unpacks the bytes again and saves the application with
-`AppStore::create`. It makes the folder under a new ID from `new_app_id`,
+`AppStore::create`, as saving a new application in the application editor
+does. It makes the folder under a new ID from `new_app_id`,
 never writes into one that is there, and removes it again when the save fails.
 When the ID's name is taken by something the store does not list, a file or on
 Windows a folder that differs only in case, it takes the next ID, and gives up
