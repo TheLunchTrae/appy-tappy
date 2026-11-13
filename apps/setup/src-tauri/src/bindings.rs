@@ -39,7 +39,8 @@ use appytappy_config::action::{
     OpenTarget, SoundFile,
 };
 use appytappy_config::app_file::{
-    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef, is_label_character,
+    AntiCheatDef, AppFile, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef,
+    is_label_character,
 };
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef,
@@ -72,16 +73,17 @@ use crate::debug::trace_file::TraceFile;
 use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows};
 use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
-use crate::drafts::{DraftDef, DraftSummary};
+use crate::drafts::{DraftDef, DraftShot, DraftSummary};
 use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
-    FoundClick, FoundView, ImportSpec, Live, Reading, RecordSpec, ReferenceSaveSpec,
-    ReferenceTrial, SaveSpec, SavedReferenceId, SavedValue, SharedView, TrialSpec,
+    FoundClick, FoundView, ImportSpec, Live, RecordSpec, ReferenceSaveSpec, ReferenceTrial,
+    SaveSpec, SavedReferenceId, SavedValue, SharedView, TrialSpec,
 };
 use crate::pixels::{self, HEADER_BYTES};
+use crate::reading::Reading;
 use crate::recording::RecordingView;
 use crate::recording::character::CharacterView;
 use crate::recording::looks::LookRecordingView;

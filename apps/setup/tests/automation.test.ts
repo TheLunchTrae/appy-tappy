@@ -30,6 +30,7 @@ function value(id: string, name: string, check: CheckDef): ValueDef {
   return {
     id,
     name,
+    origin: { kind: 'byHand' },
     screen: {
       windowSize: { width: 100, height: 50 },
       region: { x: 0, y: 0, width: 10, height: 10 },
@@ -70,7 +71,6 @@ const apps: readonly AppSummary[] = [
       },
       sizeChanges: 'often',
       antiCheat: 'unknown',
-      origin: { kind: 'byHand' },
       values: [progress, iconVisible, status, loaded],
       references: [],
     },
@@ -621,7 +621,6 @@ describe('clicks', () => {
         fallback: 'none' as const,
       },
       antiCheat: 'none' as const,
-      origin: { kind: 'byHand' } as const,
       values: [],
       references: [],
       sizeChanges: 'often' as const,

@@ -39,8 +39,6 @@ export interface CaptureSetup {
   readonly mayMove: boolean;
   readonly editing: Editing | null;
   readonly draft: Draft;
-  /** The screenshots a recording of looks kept, by index, which the strip marks and can remove together. */
-  readonly recordedShots: readonly number[];
 }
 
 /** {@link CaptureSetup} as JSON holds it: no recorded readings, which go with the recording. */

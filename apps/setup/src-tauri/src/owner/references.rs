@@ -2,13 +2,45 @@
 //! application. Saving one learns its samples, as the check that reads with
 //! it would, and deleting one waits until no value reads with it.
 
-use appytappy_config::app_file::{OriginDef, new_reference_id, reference_id};
+use appytappy_config::names::{new_reference_id, reference_id};
 
-use crate::check_spec::{ReferenceRef, SavedReference, Session};
+use serde::{Deserialize, Serialize};
+
+use crate::check_spec::{CharactersSpec, ReferenceRef, SavedReference, Session};
 
 use super::host::Host;
-use super::messages::{ReferenceSaveSpec, SavedReferenceId};
 use super::{Changed, Edit, Owner};
+
+/// A reference to save, as the UI describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReferenceSaveSpec {
+    /// The saved application to add the reference to.
+    pub(crate) app: String,
+    /// The reference's name, such as `Percent font`.
+    pub(crate) reference_name: String,
+    /// The characters it is taught, which name the reference when it is
+    /// saved already.
+    pub(crate) characters: CharactersSpec,
+    /// The characters the user says it needs to know, or empty when the
+    /// user chose none. The save lists each once, in order, refuses more
+    /// than a reference saves, and replaces what the saved reference
+    /// expected.
+    pub(crate) expects: String,
+}
+
+/// Where a reference was saved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SavedReference"))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SavedReferenceId {
+    /// The application's ID.
+    pub(crate) app: String,
+    /// The reference's ID.
+    pub(crate) reference: String,
+}
 
 impl<H: Host> Owner<H> {
     /// Hands `work` the session's screenshots, recording and saved
@@ -16,15 +48,26 @@ impl<H: Host> Owner<H> {
     pub(super) fn with_session<T>(&self, work: impl FnOnce(Session<'_>) -> T) -> T {
         let references = |reference: &ReferenceRef| self.saved_reference(reference);
         work(Session {
-            screenshots: &self.screenshots,
+            screenshots: self.capture.screenshots(),
             recording: self.readings(),
             references: &references,
         })
     }
 
     /// The saved reference `reference` with those of its samples' pictures
-    /// that can be read. Learning it says which one is missing.
+    /// that can be read: the one the owner keeps, or else as its
+    /// application's folder has it. Learning it says which picture is
+    /// missing.
     fn saved_reference(&self, reference: &ReferenceRef) -> Result<SavedReference, String> {
+        match &self.kept_reference {
+            Some((kept, saved)) if kept == reference => Ok(saved.clone()),
+            _ => self.read_reference(reference),
+        }
+    }
+
+    /// Reads the saved reference `reference` from its application's file
+    /// and its samples' pictures from the folder.
+    fn read_reference(&self, reference: &ReferenceRef) -> Result<SavedReference, String> {
         let app = self.stores()?.app(&reference.app)?;
         let saved = app
             .file
@@ -40,6 +83,28 @@ impl<H: Host> Owner<H> {
             reference: saved,
             pictures,
         })
+    }
+
+    /// Keeps the saved reference `reference` as read now, so the asks about
+    /// the characters that add to it, a few for each edit in its editor,
+    /// read its application's file and its pictures once. It stays until
+    /// an application is written, which [`Owner::write_app`] says, or
+    /// another reference is kept. One that cannot be read whole, with every
+    /// sample's picture, is not kept, so each ask reads it again and says
+    /// what is wrong once that changed. `None`, a new reference, keeps what
+    /// is kept.
+    pub(super) fn keep_reference(&mut self, reference: Option<&ReferenceRef>) {
+        let Some(reference) = reference else {
+            return;
+        };
+        if matches!(&self.kept_reference, Some((kept, _)) if kept == reference) {
+            return;
+        }
+        self.kept_reference = self
+            .read_reference(reference)
+            .ok()
+            .filter(|saved| saved.pictures.len() == saved.reference.samples.len())
+            .map(|saved| (reference.clone(), saved));
     }
 
     /// Saves the reference `spec` teaches to its application, and says
@@ -91,11 +156,6 @@ impl<H: Host> Owner<H> {
                         .teach(session, Some(&id), name, &spec.expects)
                 })
                 .map_err(|error| error.to_string())?;
-            // A recording taught it, which the definition says of itself
-            // from then on, unless it says where it was imported from.
-            if !spec.characters.recorded.is_empty() && file.origin == OriginDef::ByHand {
-                file.origin = OriginDef::Recording;
-            }
             match file.references.iter_mut().find(|saved| saved.id == id) {
                 Some(saved) => *saved = taught.reference,
                 None => file.references.push(taught.reference),
@@ -113,13 +173,13 @@ impl<H: Host> Owner<H> {
 
     /// Removes the reference `reference` of the application `app` and its
     /// pictures, unless a value reads with it, in its check or in a fix. A
-    /// reference already gone changed nothing, so no one is told, but
-    /// pictures an earlier delete left behind are removed.
+    /// reference already gone changed nothing, so nothing is saved and no
+    /// one is told.
     pub(crate) fn delete_reference(&mut self, app: &str, reference: &str) -> Result<(), String> {
-        let gone = self.update_app(app, Changed::Values, |_owner, found| {
+        self.update_app(app, Changed::Values, |_owner, found| {
             let file = &mut found.file;
             let Some(saved) = file.reference(reference) else {
-                return Ok(Edit::Keep(Some(file.clone())));
+                return Ok(Edit::Keep(()));
             };
             let users: Vec<&str> = file
                 .values
@@ -137,12 +197,9 @@ impl<H: Host> Owner<H> {
                 ));
             }
             file.references.retain(|saved| saved.id != reference);
-            Ok(Edit::Save(None, Vec::new()))
-        })?;
-        match gone.answer {
-            Some(file) => self.prune(app, &file),
-            None => Ok(()),
-        }
+            Ok(Edit::Save((), Vec::new()))
+        })
+        .map(|saved| saved.answer)
     }
 }
 
@@ -157,11 +214,12 @@ pub(super) fn and_list(names: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
+    use appytappy_config::app_file::{AntiCheatDef, CheckDef, FixDef, SizeDef};
 
-    use crate::owner::messages::SavedValue;
+    use crate::owner::SavedValue;
     use crate::owner::test_support::{
-        FakeHost, add_example_app, frame_image, harness_with, scratch_store, spec, trial,
+        FakeHost, Harness, add_example_app, frame_image, harness_with, scratch_store, spec,
+        teaching, trial,
     };
 
     use super::*;
@@ -379,22 +437,8 @@ mod tests {
         assert_eq!(harness.ask(delete("digits")), Ok(()));
         assert_eq!(harness.reloads(), 1, "and the references");
         assert!(!folder.join("ref-digits-1.png").exists());
-        // A picture an earlier delete left behind goes with the next delete,
-        // even of a reference already gone, while the kept pictures stay.
-        let kept: Vec<_> = std::fs::read_dir(&folder)
-            .expect("lists the pictures")
-            .map(|entry| entry.expect("an entry").file_name())
-            .collect();
-        std::fs::write(folder.join("ref-digits-1.png"), b"left behind").expect("a leftover");
         assert_eq!(harness.ask(delete("digits")), Ok(()), "already gone");
         assert_eq!(harness.reloads(), 0, "nothing changed");
-        assert!(
-            !folder.join("ref-digits-1.png").exists(),
-            "the leftover is gone"
-        );
-        for name in &kept {
-            assert!(folder.join(name).exists(), "{name:?} stays");
-        }
         let apps = harness.ask(Owner::apps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(
@@ -444,6 +488,82 @@ mod tests {
             Err("A reference needs at most 128 characters. Remove some.".to_owned()),
         );
         assert_eq!(save(saved, ""), Ok((None, 3)), "none chosen");
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// What the three asks of one edit in the reference's editor answer
+    /// for characters that add to the saved reference `digits`.
+    fn edit(harness: &mut Harness) -> [Result<(), String>; 3] {
+        let adding = reference("example", "Digits", Some(("example", "digits"))).characters;
+        let trial = teaching(adding.clone());
+        [
+            harness.ask(|owner| owner.set_characters(&trial)),
+            harness
+                .ask(|owner| owner.review_problems(&adding))
+                .map(drop),
+            harness
+                .ask(|owner| owner.found_problems(&adding, &[]))
+                .map(drop),
+        ]
+    }
+
+    #[test]
+    fn a_saved_reference_is_read_once_until_an_application_is_written() {
+        let (stores, root) = scratch_store("references-kept");
+        let picture = stores.apps.folder("example").join("ref-digits-1.png");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let save = |harness: &mut Harness, editing| {
+            harness
+                .ask(|owner| owner.save_reference(&reference("example", "Digits", editing)))
+                .map(drop)
+        };
+        save(&mut harness, None).expect("saves");
+        harness
+            .ask(|owner| owner.save_reference(&reference("example", "Small", None)))
+            .expect("saves a second reference");
+        let png = std::fs::read(&picture).expect("the saved picture");
+        // Each ask says the picture of the saved reference is missing.
+        let missing = |answers: [Result<(), String>; 3]| {
+            let error = Err::<(), _>(
+                "The reference Digits is missing its picture ref-digits-1.png. Remove the values \
+                 that read with it, then delete the reference and make it again."
+                    .to_owned(),
+            );
+            answers == [error.clone(), error.clone(), error]
+        };
+
+        // A reference that cannot be read whole is not kept: each ask reads
+        // it again, so it is learned once its picture is back.
+        std::fs::remove_file(&picture).expect("remove the picture");
+        assert!(missing(edit(&mut harness)));
+        std::fs::write(&picture, &png).expect("put the picture back");
+        assert_eq!(edit(&mut harness), [Ok(()), Ok(()), Ok(())]);
+
+        // Kept, it is not read again: the asks answer without its picture.
+        std::fs::remove_file(&picture).expect("remove the picture");
+        assert_eq!(edit(&mut harness), [Ok(()), Ok(()), Ok(())]);
+
+        // Only the kept reference is answered from memory: another one is
+        // read from the folder, where its picture is gone too.
+        std::fs::remove_file(picture.with_file_name("ref-small-1.png")).expect("remove it");
+        assert!(
+            harness
+                .ask(|owner| {
+                    owner.save_reference(&reference("example", "Small", Some(("example", "small"))))
+                })
+                .is_err_and(|error| error.contains("is missing its picture ref-small-1.png"))
+        );
+
+        // Writing an application forgets it, so the next ask reads what
+        // the folder has now.
+        harness
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .expect("writes the application");
+        assert!(missing(edit(&mut harness)));
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

@@ -46,7 +46,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use appytappy_config::action::{Key, MediaCommand, Modifier, OpenTarget, VolumeLevel};
-use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::process::ProcessId;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
@@ -1243,8 +1243,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use appytappy_config::action::OpenTarget;
-    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::click::{ClickButton, ClickDelivery};
+    use appytappy_config::process::ProcessId;
     use windows::Win32::Foundation::{
         ERROR_ACCESS_DENIED, ERROR_INVALID_WINDOW_HANDLE, ERROR_TIMEOUT, HINSTANCE, HWND, LPARAM,
         LRESULT, POINT, WIN32_ERROR, WPARAM,

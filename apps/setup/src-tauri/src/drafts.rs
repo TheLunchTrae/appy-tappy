@@ -3,7 +3,9 @@
 //!
 //! The setup app keeps each draft in its own folder under the drafts folder:
 //! `draft.json`, and for a value, fix, or reference the screenshots its
-//! capture held, each as `shot-{index}.png` under the index it had there. The
+//! capture held, each under the index it had there: `shot-{index}.png` for
+//! one the user took, `recorded-{index}.png` for one a recording of looks
+//! kept. The
 //! runtime never reads the folder, so a draft never runs, and the
 //! authoring files never hold an unfinished item. The page keeps what each
 //! flow had set up in the draft's `state`, which this side stores as it is.
@@ -67,6 +69,15 @@ pub(crate) struct DraftDef {
     pub(crate) state: serde_json::Value,
 }
 
+/// A screenshot a draft keeps: the index it had in its capture, and whether
+/// a recording of looks kept it there rather than the user taking it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(crate) struct DraftShot {
+    pub(crate) index: usize,
+    pub(crate) recorded: bool,
+}
+
 /// A saved draft, as the lists show it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -96,20 +107,22 @@ fn bad_id() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, "that is not a draft's ID")
 }
 
-/// The name of a draft's screenshot `index`.
-fn shot_name(index: usize) -> String {
-    format!("shot-{index}.png")
+/// The name of the file a draft keeps `shot` in.
+fn shot_name(shot: DraftShot) -> String {
+    let kind = if shot.recorded { "recorded" } else { "shot" };
+    format!("{kind}-{}.png", shot.index)
 }
 
-/// The index of the screenshot a draft keeps as `name`, or `None` for any
-/// other file. Only a name [`shot_name`] gives counts.
-fn shot_index(name: &str) -> Option<usize> {
-    let index: usize = name
-        .strip_prefix("shot-")?
-        .strip_suffix(".png")?
-        .parse()
-        .ok()?;
-    (shot_name(index) == name).then_some(index)
+/// The screenshot a draft keeps as `name`, or `None` for any other file.
+/// Only a name [`shot_name`] gives counts.
+fn draft_shot(name: &str) -> Option<DraftShot> {
+    let (recorded, rest) = match name.strip_prefix("recorded-") {
+        Some(rest) => (true, rest),
+        None => (false, name.strip_prefix("shot-")?),
+    };
+    let index = rest.strip_suffix(".png")?.parse().ok()?;
+    let shot = DraftShot { index, recorded };
+    (shot_name(shot) == name).then_some(shot)
 }
 
 /// The folder of drafts.
@@ -151,7 +164,7 @@ impl DraftStore {
                 Err(error) => (None, Some(error)),
             };
             drafts.push(DraftSummary {
-                screenshots: u32::try_from(shot_indexes(&folder).len()).unwrap_or(u32::MAX),
+                screenshots: u32::try_from(shots(&folder).len()).unwrap_or(u32::MAX),
                 id,
                 draft,
                 problem,
@@ -164,7 +177,7 @@ impl DraftStore {
     }
 
     /// Saves `draft` over the draft `id`, or as a new one, with `screenshots`,
-    /// each a PNG with the index it has in its capture; a draft without
+    /// each a PNG with what its capture says of it; a draft without
     /// screenshots keeps none. Another draft of the same saved automation, application,
     /// or reference goes, so the item has one; a value can have several fix
     /// drafts, so fixes are left alone. Answers the draft's ID.
@@ -182,7 +195,7 @@ impl DraftStore {
         &self,
         id: Option<&str>,
         draft: &DraftDef,
-        screenshots: &[(usize, Vec<u8>)],
+        screenshots: &[(DraftShot, Vec<u8>)],
     ) -> io::Result<String> {
         let existing = self.list()?;
         let id = if let Some(id) = id {
@@ -200,8 +213,8 @@ impl DraftStore {
             .map_or(0, |since| since.as_nanos());
         let staging = self.folder.join(format!("{id}.{stamp}{SAVING}"));
         fs::create_dir_all(&staging)?;
-        for (index, bytes) in screenshots {
-            write_synced(&staging.join(shot_name(*index)), bytes)?;
+        for (shot, bytes) in screenshots {
+            write_synced(&staging.join(shot_name(*shot)), bytes)?;
         }
         let json = serde_json::to_string_pretty(draft).map_err(io::Error::other)?;
         write_synced(&staging.join(DRAFT_FILE), json.as_bytes())?;
@@ -308,17 +321,17 @@ impl DraftStore {
         Ok(named)
     }
 
-    /// The screenshots of the draft `id`, each a PNG with the index it had
-    /// in its capture, lowest index first.
+    /// The screenshots of the draft `id`, each a PNG with what its capture
+    /// said of it, lowest index first.
     ///
     /// # Errors
     ///
     /// Returns the error from reading one.
-    pub(crate) fn screenshots(&self, id: &str) -> io::Result<Vec<(usize, Vec<u8>)>> {
+    pub(crate) fn screenshots(&self, id: &str) -> io::Result<Vec<(DraftShot, Vec<u8>)>> {
         let folder = self.draft_folder(id)?;
-        shot_indexes(&folder)
+        shots(&folder)
             .into_iter()
-            .map(|index| Ok((index, fs::read(folder.join(shot_name(index)))?)))
+            .map(|shot| Ok((shot, fs::read(folder.join(shot_name(shot)))?)))
             .collect()
     }
 
@@ -407,19 +420,19 @@ fn read_draft(folder: &Path) -> Result<DraftDef, String> {
     serde_json::from_str(&text).map_err(|error| format!("Its file is not valid: {error}."))
 }
 
-/// The indexes of the screenshots `folder` holds, lowest first. A capture
-/// leaves the index of a screenshot the user removed empty, so they can have
+/// The screenshots `folder` holds, lowest index first. A capture leaves the
+/// index of a screenshot the user removed empty, so the indexes can have
 /// gaps. A folder that cannot be listed holds none.
-fn shot_indexes(folder: &Path) -> Vec<usize> {
+fn shots(folder: &Path) -> Vec<DraftShot> {
     let Ok(entries) = fs::read_dir(folder) else {
         return Vec::new();
     };
-    let mut indexes: Vec<usize> = entries
+    let mut shots: Vec<DraftShot> = entries
         .filter_map(Result::ok)
-        .filter_map(|entry| entry.file_name().to_str().and_then(shot_index))
+        .filter_map(|entry| entry.file_name().to_str().and_then(draft_shot))
         .collect();
-    indexes.sort_unstable();
-    indexes
+    shots.sort_unstable_by_key(|shot| shot.index);
+    shots
 }
 
 /// A new draft ID that `taken` does not hold, made from the time so the IDs
@@ -451,6 +464,22 @@ mod tests {
         (DraftStore::new(folder.join("drafts")), folder)
     }
 
+    /// Screenshot `index`, which the user took.
+    const fn taken(index: usize) -> DraftShot {
+        DraftShot {
+            index,
+            recorded: false,
+        }
+    }
+
+    /// Screenshot `index`, which a recording of looks kept.
+    const fn recorded(index: usize) -> DraftShot {
+        DraftShot {
+            index,
+            recorded: true,
+        }
+    }
+
     fn draft(kind: DraftKind, changes: Option<&str>) -> DraftDef {
         DraftDef {
             kind,
@@ -472,11 +501,22 @@ mod tests {
             .save(
                 None,
                 &saved,
-                &[(0, vec![1]), (2, vec![2, 2]), (10, vec![3])],
+                &[
+                    (taken(0), vec![1]),
+                    (recorded(2), vec![2, 2]),
+                    (taken(10), vec![3]),
+                ],
             )
             .expect("saves");
         // Only files named as a screenshot is saved count as one.
-        for other in ["shot-01.png", "shot-1.png.bak", "shot-x.png", "notes.png"] {
+        for other in [
+            "shot-01.png",
+            "shot-1.png.bak",
+            "shot-x.png",
+            "recorded-02.png",
+            "recorded-shot-3.png",
+            "notes.png",
+        ] {
             fs::write(store.folder.join(&id).join(other), [7]).expect("writes");
         }
         assert!(is_draft_id(&id), "{id}");
@@ -491,16 +531,23 @@ mod tests {
         );
         assert_eq!(
             store.screenshots(&id).expect("reads"),
-            [(0, vec![1]), (2, vec![2, 2]), (10, vec![3])],
-            "each keeps its index, gaps included, lowest first"
+            [
+                (taken(0), vec![1]),
+                (recorded(2), vec![2, 2]),
+                (taken(10), vec![3])
+            ],
+            "each keeps its index and mark, gaps included, lowest first"
         );
         assert_eq!(store.pictures().expect("lists"), ["click-1.png"]);
 
         // Saving it again with fewer screenshots drops the rest.
         store
-            .save(Some(&id), &saved, &[(0, vec![3])])
+            .save(Some(&id), &saved, &[(taken(0), vec![3])])
             .expect("saves");
-        assert_eq!(store.screenshots(&id).expect("reads"), [(0, vec![3])]);
+        assert_eq!(
+            store.screenshots(&id).expect("reads"),
+            [(taken(0), vec![3])]
+        );
         assert_eq!(store.list().expect("lists").len(), 1, "saved over");
 
         store.delete(&id).expect("deletes");
@@ -554,19 +601,25 @@ mod tests {
             .save(
                 None,
                 &draft(DraftKind::Fix, Some("health")),
-                &[(0, vec![1])],
+                &[(taken(0), vec![1])],
             )
             .expect("saves");
         let large = store
             .save(
                 None,
                 &draft(DraftKind::Fix, Some("health")),
-                &[(0, vec![2])],
+                &[(taken(0), vec![2])],
             )
             .expect("saves");
         assert_eq!(store.list().expect("lists").len(), 2);
-        assert_eq!(store.screenshots(&small).expect("reads"), [(0, vec![1])]);
-        assert_eq!(store.screenshots(&large).expect("reads"), [(0, vec![2])]);
+        assert_eq!(
+            store.screenshots(&small).expect("reads"),
+            [(taken(0), vec![1])]
+        );
+        assert_eq!(
+            store.screenshots(&large).expect("reads"),
+            [(taken(0), vec![2])]
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -574,16 +627,21 @@ mod tests {
     fn a_save_that_stopped_leaves_the_old_draft() {
         let (store, root) = scratch("stopped");
         let saved = draft(DraftKind::Value, None);
-        let id = store.save(None, &saved, &[(0, vec![1])]).expect("saves");
+        let id = store
+            .save(None, &saved, &[(taken(0), vec![1])])
+            .expect("saves");
         // A save that stopped partway leaves its own folder, never the draft's.
         let staging = store.folder.join(format!("{id}.1{SAVING}"));
         fs::create_dir_all(&staging).expect("folder");
         fs::write(staging.join(DRAFT_FILE), "{").expect("writes");
-        fs::write(staging.join(shot_name(0)), [9]).expect("writes");
+        fs::write(staging.join(shot_name(taken(0))), [9]).expect("writes");
         let listed = store.list().expect("lists");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].draft.as_ref(), Some(&saved));
-        assert_eq!(store.screenshots(&id).expect("reads"), [(0, vec![1])]);
+        assert_eq!(
+            store.screenshots(&id).expect("reads"),
+            [(taken(0), vec![1])]
+        );
         assert!(!staging.exists(), "listing clears it away");
 
         // A save that stopped after moving the old draft aside, before the
@@ -595,7 +653,10 @@ mod tests {
         fs::create_dir_all(&stopped).expect("folder");
         let listed = store.list().expect("lists");
         assert_eq!(listed.len(), 1);
-        assert_eq!(store.screenshots(&id).expect("reads"), [(0, vec![1])]);
+        assert_eq!(
+            store.screenshots(&id).expect("reads"),
+            [(taken(0), vec![1])]
+        );
         assert!(!aside.exists());
         assert!(!stopped.exists());
 
@@ -612,17 +673,23 @@ mod tests {
         assert!(aside.exists());
         fs::remove_file(&folder).expect("clears the way");
         store.list().expect("lists");
-        assert_eq!(store.screenshots(&id).expect("reads"), [(0, vec![1])]);
+        assert_eq!(
+            store.screenshots(&id).expect("reads"),
+            [(taken(0), vec![1])]
+        );
         assert!(!stopped.exists());
         assert!(!aside.exists());
 
         // One left behind once the new draft is in place goes.
         fs::create_dir_all(&aside).expect("folder");
         store
-            .save(Some(&id), &saved, &[(0, vec![3])])
+            .save(Some(&id), &saved, &[(taken(0), vec![3])])
             .expect("saves");
         assert!(!aside.exists());
-        assert_eq!(store.screenshots(&id).expect("reads"), [(0, vec![3])]);
+        assert_eq!(
+            store.screenshots(&id).expect("reads"),
+            [(taken(0), vec![3])]
+        );
 
         // One left behind by a save that finished never brings back a draft
         // deleted later, and deleting removes it anyway.
@@ -648,16 +715,19 @@ mod tests {
         assert!(other_save.exists());
         assert_eq!(store.list().expect("lists"), []);
         store
-            .save(Some(&id), &saved, &[(0, vec![3])])
+            .save(Some(&id), &saved, &[(taken(0), vec![3])])
             .expect("saves");
 
         // A stray file with a save's ending, which cannot be removed as a
         // folder, never stops a save.
         fs::write(store.folder.join(format!("{id}.3{SAVING}")), b"stray").expect("writes");
         store
-            .save(Some(&id), &saved, &[(0, vec![4])])
+            .save(Some(&id), &saved, &[(taken(0), vec![4])])
             .expect("saves");
-        assert_eq!(store.screenshots(&id).expect("reads"), [(0, vec![4])]);
+        assert_eq!(
+            store.screenshots(&id).expect("reads"),
+            [(taken(0), vec![4])]
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -670,7 +740,11 @@ mod tests {
         let folder = store.draft_folder(&id).expect("an ID");
         fs::write(folder.join(DRAFT_FILE), "{").expect("breaks it");
         fs::create_dir_all(store.folder.join("half-saved")).expect("folder");
-        fs::write(store.folder.join("half-saved").join(shot_name(0)), [1]).expect("writes");
+        fs::write(
+            store.folder.join("half-saved").join(shot_name(taken(0))),
+            [1],
+        )
+        .expect("writes");
         fs::create_dir_all(store.folder.join("Not An ID")).expect("folder");
         fs::write(store.folder.join("Not An ID").join(DRAFT_FILE), "{}").expect("writes");
         let listed = store.list().expect("lists");
@@ -702,7 +776,7 @@ mod tests {
     fn drafts_of_something_gone_are_deleted_and_the_rest_stay() {
         let (store, root) = scratch("gone");
         let value = store
-            .save(None, &draft(DraftKind::Value, None), &[(0, vec![1])])
+            .save(None, &draft(DraftKind::Value, None), &[(taken(0), vec![1])])
             .expect("saves");
         store
             .save(None, &draft(DraftKind::Fix, Some("health")), &[])

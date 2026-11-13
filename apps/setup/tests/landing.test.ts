@@ -15,6 +15,7 @@ describe('where the focus lands when the automation editor shows again', () => {
     value: {
       id: 'progress',
       name: 'Progress',
+      origin: { kind: 'byHand' } as const,
       screen: {
         windowSize: { width: 100, height: 50 },
         region: { x: 0, y: 0, width: 10, height: 10 },

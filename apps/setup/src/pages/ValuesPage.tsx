@@ -15,6 +15,7 @@ import { buildState, checkedText } from '../lib/build.ts';
 import { Hint } from '../components/Hint.tsx';
 import { MARK_CHECKED_HINT } from '../lib/hints.ts';
 import { hex } from '../lib/pixels.ts';
+import { originText } from '../lib/sharing.ts';
 import { background } from '../lib/repeat.ts';
 import {
   FIX_HINT,
@@ -251,7 +252,10 @@ function AppRows({
           size === null ? null : nowCell(value.screen, file.sizeChanges, size, readingOf(read), read?.problem ?? null);
         return (
           <tr key={value.id}>
-            <td>{value.name}</td>
+            <td>
+              {value.name}
+              {value.origin.kind === 'byHand' ? null : <span className="note origin">{originText(value.origin)}</span>}
+            </td>
             <td>
               {summary.colors.map((color) => (
                 <span key={hex(color)} className="swatch" style={{ background: hex(color) }} />

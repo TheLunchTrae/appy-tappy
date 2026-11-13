@@ -5,13 +5,30 @@
 use appytappy_config::app_file::{CheckDef, FixDef, ScreenDef, SizeDef, ValueDef};
 use appytappy_sources::screen::Region;
 use appytappy_sources::screen::scale::scaled;
+use serde::Deserialize;
 
 use crate::check_spec::{self, CheckSpec, RegionSpec};
 
 use super::host::Host;
-use super::messages::{FixSpec, SavedValue};
-use super::values::read_back;
+use super::values::{SavedValue, read_back};
 use super::{Changed, Edit, Owner};
+
+/// A saved value drawn again at another window size, as the UI describes
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FixSpec {
+    /// The saved application.
+    pub(crate) app: String,
+    /// The value's ID.
+    pub(crate) value: String,
+    /// The check at this size: of the value's kind, with each of its
+    /// states in order, or for a number, the reference to read with.
+    pub(crate) check: CheckSpec,
+    /// The screenshot the region was drawn on, whose size the fix is for.
+    pub(crate) screenshot: usize,
+}
 
 impl<H: Host> Owner<H> {
     /// Where the value `value` of the application `app` starts on a window
@@ -34,10 +51,10 @@ impl<H: Host> Owner<H> {
     pub(crate) fn save_fix(&mut self, spec: &FixSpec) -> Result<SavedValue, String> {
         // Without the stores, nothing else the user could fix matters.
         self.stores()?;
-        if self.screenshots.get(spec.screenshot).is_none() {
+        if self.capture.screenshots().get(spec.screenshot).is_none() {
             return Err("Take a screenshot first.".to_owned());
         }
-        let size = check_spec::drawn_size(&spec.check, &self.screenshots, spec.screenshot)
+        let size = check_spec::drawn_size(&spec.check, self.capture.screenshots(), spec.screenshot)
             .map_err(|error| error.to_string())?;
         self.update_app(&spec.app, Changed::Values, |owner, found| {
             let file = &found.file;
@@ -61,7 +78,7 @@ impl<H: Host> Owner<H> {
             let number = free_picture_number(&value.id, value.screen.images());
             let saved = check_spec::to_saved_fix(
                 &spec.check,
-                &owner.screenshots,
+                owner.capture.screenshots(),
                 &spec.app,
                 &value.id,
                 Some(number),

@@ -17,7 +17,7 @@ impl<H: Host> Owner<H> {
     /// Saves `automation` as a new automation, or over `existing`, and
     /// answers its ID.
     pub(crate) fn save_automation(
-        &mut self,
+        &self,
         existing: Option<&str>,
         automation: AutomationDef,
     ) -> Result<String, String> {
@@ -25,12 +25,12 @@ impl<H: Host> Owner<H> {
     }
 
     /// Turns the automation `id` on or off.
-    pub(crate) fn set_automation_enabled(&mut self, id: &str, enabled: bool) -> Result<(), String> {
+    pub(crate) fn set_automation_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
         self.update_runtime(|stores| automations::set_enabled(stores, id, enabled))
     }
 
     /// Deletes the automation `id`.
-    pub(crate) fn delete_automation(&mut self, id: &str) -> Result<(), String> {
+    pub(crate) fn delete_automation(&self, id: &str) -> Result<(), String> {
         self.update_runtime(|stores| automations::delete(stores, id))
     }
 

@@ -14,12 +14,12 @@ use appytappy_sources::screen::{FrameHandler, Image, Size};
 use crate::check_spec::{ColorSpec, RegionSpec};
 use crate::stores::Stores;
 
-use super::messages::{FixSpec, ReferenceSaveSpec};
 use super::test_support::{
     Harness, STATE, WINDOW, add_example_app, characters_in, frame_image, harness_with,
     scratch_store, spec,
 };
 use super::{ClickPictureView, FoundClick, Owner};
+use super::{FixSpec, ReferenceSaveSpec};
 
 /// The window at twice the size of [`WINDOW`].
 const LARGER: Size = Size {

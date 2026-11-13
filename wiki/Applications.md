@@ -55,8 +55,9 @@ don't have to draw them again.
 
 An import always adds an application. It never replaces one you have, even
 one for the same program. Nothing uses the imported values until you make an
-[automation](Automations.md) with them. The application's row says which file
-it was imported from.
+[automation](Automations.md) with them. The Values and References pages say
+under each imported value and reference which file it was imported from,
+as [How a value was made](Values.md#how-a-value-was-made) describes.
 
 The file never sets the anti-cheat for you, because a file from someone else
 could say **None** for an application that has anti-cheat. The menu starts on

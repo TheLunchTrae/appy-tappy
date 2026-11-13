@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Sixteen guards drop such stale messages:
+it was about has gone. Thirteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -32,26 +32,35 @@ it was about has gone. Sixteen guards drop such stale messages:
   carries the number of the session's newest reader and that reader has not
   ended (`Model::read_by`): what a reader that the session replaced still
   sent, and what the capture of a reader that panicked still read.
-- **Generations.** The setup app's owner thread adds 1 to `generation` each
-  time it starts or stops a capture. A frame or a failure from an older
-  generation is dropped.
-- **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
-  from one counter, so text that the text reader sends back for a recording
-  that was discarded, or replaced by one of either kind, is dropped, and so
-  is what a [window look](#window-look) found for one. Within one recording,
-  the look's gate drops the answer to a look from before **Record more** or
-  from before a frame showed the window at another size than the recording
-  is placed at (`Gate::Abandoned`). The
-  [character check](#character-check) remembers the readings it left out
-  under their recording's ID, and keeps none again for another recording
-  (`leftOutOf` in `apps/setup/src/lib/useCharacterCheck.ts`).
-- **Search IDs.** Each search for text like a reference's box gets a new
-  `id` from the owner's `search_id`. The owner drops the text reader's text
-  for a search that was replaced or forgotten, answers nothing for a picture
-  asked of one, and rereads nothing for one
-  (`apps/setup/src-tauri/src/owner/found.rs`).
-- **Overlay numbers.** Each overlay capture gets its own number from
-  `Overlays::next`, and a reading from an older capture is dropped.
+- **Tickets.** The setup app's owner thread hands each capture, each
+  recording, of readings or of looks, and each search for text like a
+  reference's box a new `Ticket` from one counter, `Tickets`
+  (`apps/setup/src-tauri/src/ticket.rs`). Every message a capture's handler,
+  the text reader, or a [window look](#window-look) sends the owner is a
+  `Message::Sent` that carries the ticket of the work it is for, and
+  `Owner::is_current` drops it unless the work its event is about holds
+  that ticket still: the picked window's capture for a frame or a failure,
+  the watch's running capture for what a watch read, the recording of
+  readings for text or a look, the search for its text, and the named
+  application's overlay capture for an overlay's reading. So what a stopped
+  or replaced capture still sends is dropped, and so is text for a recording
+  or a search that was discarded or replaced. A ticket's number names its
+  work to the UI: a stop that carries the number of another capture than
+  the picked window's is dropped (`Owner::stop_capture`), the owner answers
+  nothing for a picture asked of another search than the one it holds and
+  rereads nothing for one (`apps/setup/src-tauri/src/owner/found.rs`), and
+  an ask about another watch than the one it holds is refused. A reading's
+  picture is asked for with its recording's number: the owner answers
+  nothing for a recording that was discarded or replaced (`recorded_pixels`
+  in `apps/setup/src-tauri/src/owner/recording.rs`), and the page drops a
+  picture that arrives for another recording than the newest it asked for
+  (`withCrop` in `apps/setup/src/lib/review.ts`). Within one recording, the look's
+  gate drops the answer to a look from before **Record more** or from before
+  a frame showed the window at another size than the recording is placed at
+  (`Gate::Abandoned`). The [character check](#character-check) remembers
+  the readings it left out under their recording's number, and keeps none
+  again for another recording (`leftOutOf` in
+  `apps/setup/src/lib/useCharacterCheck.ts`).
 - **Detection keys.** The capture screen keys a bar detection by its region,
   the screenshot the region was drawn on, and the indexes of the screenshots
   there are. An answer for any other key than the request under way is dropped. What two
@@ -1351,11 +1360,21 @@ is made and saved; a failure shows in it and **Save file** tries again.
 ### Capture slot
 
 The setup app's owner thread (`apps/setup/src-tauri/src/owner.rs`) has one
-capture slot, `session`, shared by the value preview and the automation
-editor's watch. Starting one stops the other. Its other state is `generation`,
-`latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`
-(what the capture records, if anything: readings or looks), `found` (the
-search of [Found text](#found-text), if any), and `watched`.
+capture slot, `capture`, shared by the value preview and the automation
+editor's watch. It is a `Capture` (`owner/capture.rs`), which names who has
+the slot and holds everything that belongs to them, so starting one stops
+the other and drops what it kept:
+
+- `Idle`: nothing captures.
+- `Picked`: the window the user picked, with its running capture, `latest`
+  (the newest frame), `failure`, `screenshots`, `check`, `recording` (what
+  the capture records, if anything: readings or looks), and `found` (the
+  search of [Found text](#found-text), if any).
+- `Watching`: the saved value the automation editor watches, with its
+  capture, a `WatchCapture`: `Running`, or `Lost` with why it stopped.
+
+In the diagram, Previewing, Failed, and Ended are `Picked`, and Watching and
+WatchFailed are `Watching` with a capture that is `Running` and `Lost`.
 
 ```mermaid
 stateDiagram-v2
@@ -1377,22 +1396,29 @@ stateDiagram-v2
     Watching --> Previewing: a window is picked
     Watching --> Watching: the window settles at another size, which starts the capture again at the value's region there
     Watching --> WatchFailed: the watch reports an error
+    Watching --> WatchFailed: the capture cannot start again at the value's region there
     WatchFailed --> Closed: stop
     WatchFailed --> Watching: the editor watches again
     WatchFailed --> Previewing: a window is picked
 ```
 
-- **Stop** closes the capture, adds 1 to `generation`, and clears every field
-  above, so no frame, screenshot, recorded reading, or find outlives the
-  capture. Saving a draft copies the screenshots to the draft's folder
-  first; a flow that finishes that draft puts them back into `screenshots`
-  after its window is picked (`restore_draft_screenshots`), each under the
-  index it had, and changes no other field.
+- **Stop** closes the capture and leaves the slot `Idle`, so no frame,
+  screenshot, recorded reading, or find outlives the capture, and the
+  [ticket](#how-to-read-this-page) of the closed capture drops what it
+  still sends. Saving a draft copies the screenshots to the draft's folder
+  first, with which of them a recording of looks kept; a flow that finishes
+  that draft puts them back into `screenshots` after its window is picked
+  (`restore_draft_screenshots`), each under the index it had and with that
+  mark, and changes no other field. With no window picked, it is refused.
   A screen that previews a window says that it holds the capture
   (`useCapture` in `apps/setup/src/lib/capture.ts`): a value or reference
   flow, and a click's target screen. The capture stops when that screen
   goes, on **Change window**, and when a click's target screen looks for
-  its window again. While one holds it, the pages' lists are read only
+  its window again. The screen stops the capture it started, by the number
+  its pick answered (`ownCapture`), and the owner drops the stop when
+  another capture took that one's place (`Owner::stop_capture`): a stop
+  sent as a screen goes can arrive after the next screen's pick or the
+  automation editor's watch started. While one holds it, the pages' lists are read only
   after a save.
 - The automation editor's watch (`liveWatchStep` in
   `apps/setup/src/lib/liveWatch.ts`) holds the owner's watch number, the
@@ -1412,7 +1438,8 @@ stateDiagram-v2
   more** are refused with "Change window to pick it
   again". Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
-  to show.
+  to show. Nothing starts the capture again, at any window size: the
+  editor watches the value again.
 - **Watching** keeps `reads`, the window size its capture reads the value at
   and where the value reads there, and each poll asks `FrameMeaning::of`
   what the newest frame means, as the runtime's frame handler does. A frame at that
@@ -1424,10 +1451,12 @@ stateDiagram-v2
   the watch places the value there with `SavedValue::at`, once. When the
   value reads there, `reads` is that size, and when its region there differs
   from the one copied, the capture starts again under the same watch number,
-  so the editor's poll goes on. A size at which the value does not read
-  keeps the capture and `reads`, and is kept as `unread` until the value is
-  placed at another size: the poll answers why while frames show that size,
-  and reads again with the first frame that shows the capture's size.
+  so the editor's poll goes on. When the capture cannot start there, the
+  watch shows why, like any other lost watch. A size at which the value does
+  not read keeps the capture and `reads`, and is kept as `unread` until the
+  value is placed at another size: the poll answers why while frames show
+  that size, and reads again with the first frame that shows the capture's
+  size.
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
@@ -1455,7 +1484,11 @@ Settling at a size where the value reads places it there and forgets
 `unread`. Each new trial places its value at the newest frame's size at
 once, so an edit that the page tries again on a size change reads there
 without waiting for the size to settle.
-Its state is `state`, a `CheckState`; `read`, the reading or the problem shown;
+Its state is `state`, a `CheckState`; `reads`, the reading or the problem
+shown, which is kept outside the capture screen's own state (`liveReads` in
+`apps/setup/src/lib/liveCheck.ts`) so that a new reading renders only the
+parts that show it, and a read that answers what shows already renders
+nothing;
 `preview`, what saving an edit would do; `tried`, the number of the newest
 trial; and `inForce`, the number of the trial the owner reads with, or none.
 Below, a check stands for any of the three.
@@ -1478,8 +1511,11 @@ stateDiagram-v2
 - **Idle.** The draft lacks something, and the box says what. Nothing is
   shown as read.
 - **Setting** (`pending`). The check waits 250 ms for the draft to hold
-  still, then goes to the owner. Each change of the check, and each time the
-  same edit is tried again, as when the window's size changes,
+  still, then goes to the owner. A check is the same check while what it
+  sends is the same (`key` of `trialOf` in `useLiveCheck.ts`), so a change
+  of the draft that sends nothing new, such as an empty box added or moved
+  in the reference editor, changes no check. Each change of the check, and
+  each time the same edit is tried again, as when the window's size changes,
   takes the next number, starts the wait again, and leaves no number in
   force, and the owner's answer for a check the draft has left is ignored.
   The box says it is trying the check. The last reading is kept, to show
@@ -1582,7 +1618,7 @@ the tint goes, and the line under the switch says so beside the error.
 
 ### Recording
 
-The owner's `recording` field is `None` or one `Recorder`
+The picked window's `recording` field is `None` or one `Recorder`
 (`apps/setup/src-tauri/src/recording.rs`): a recording of readings or
 [a recording of looks](#recording-looks). The type holds one of them, so the
 two never run together, and starting one replaces the other. Both hold a
@@ -1592,7 +1628,9 @@ by itself.
 
 A recording of readings keeps a reading for each shape a region shows, for
 the user to review. Its `Sightings` hold `full`, which says why it takes no
-more once a frame did not fit.
+more once a frame did not fit. A reading's picture is answered only for its
+own recording's ticket, one of the
+[stale-message guards](#how-to-read-this-page).
 
 ```mermaid
 stateDiagram-v2
@@ -2274,7 +2312,7 @@ stateDiagram-v2
 - **Abandoned** is a look that is out and whose answer no longer counts. It
   skips every frame like **Out**, and when the answer comes the next frame
   goes out at once.
-- The answer (`Message::Looked`) carries the recording's ID and when its
+- The answer (`Event::Looked`) carries the recording's ticket and when its
   frame arrived. The owner drops one for a recording that was discarded or
   replaced. The recording counts and keeps the runs it holds, and sends each
   new reading to the [text reader](#text-reader).
@@ -2310,7 +2348,7 @@ stateDiagram-v2
 The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
 loads its model on the first line it gets, then reads each recorded reading and
 each find of a search, and sends the text back with the recording's or the
-search's ID and the line's index (`ocr::Source`). It reads a find again when
+search's ticket and the line's index (`ocr::Source`). It reads a find again when
 the user asks for a [reread](#found-text), as a new job of the same search.
 It skips a queued job of a recording or search older than the newest of its
 kind. The owner drops text
@@ -2340,7 +2378,7 @@ Each find's text is a machine of its own:
 stateDiagram-v2
     [*] --> Pending: the find's ink goes to the text reader
     [*] --> Failed: the find has no ink, or the text reader has stopped
-    Pending --> Read: the text reader answers for the search's ID
+    Pending --> Read: the text reader answers for the search's ticket
     Pending --> Failed: the text reader answers that it could not read it
     Read --> Pending: Reread names the find
     Failed --> Pending: Reread names the find
@@ -2348,7 +2386,7 @@ stateDiagram-v2
 ```
 
 - Each find starts `Pending` and turns `Read` or `Failed` when the text
-  reader answers for the search's ID. The UI polls only while one is pending.
+  reader answers for the search's ticket. The UI polls only while one is pending.
   Reads queued for a forgotten search still run; the owner drops their text,
   and a newer search's jobs make the reader skip the rest.
 - **Reread** (`reread_found`) names the search by its ID and the finds by
@@ -2369,7 +2407,7 @@ stateDiagram-v2
   reference needs, a lookalike digit counted as its digit (`fitsNeeds`), or
   while it is being read or the user typed it. Answers to a search the user
   moved on from are ignored by the UI's turn and, for pictures, by the
-  search's ID. A reread also starts a new turn, so the search's state as it
+  search's number. A reread also starts a new turn, so the search's state as it
   was read before the reread does not put the finds back and end the wait for
   their text.
 - A ticked find is flagged without asking the owner when it has no text, or
@@ -2445,8 +2483,13 @@ stateDiagram-v2
 - The places are every [box](#reference-boxes) of the reference, every
   [found text](#found-text) the list holds, ticked or not, and every
   [recording](#recording) reading (`checkPlaces`). The check asks about the
-  boxes, the finds, and the readings that review keeps. A reading that
-  review leaves out joins no step and never changes its keep; it only gets
+  boxes, the finds, the readings that review keeps, and the readings a
+  save would learn next (`savedReadings`): while review is open, the ones
+  its **Keep** would put on the draft, and otherwise the ones the draft
+  keeps, which review may have left out since without **Keep**. Such a
+  reading counts as kept though review's tick for it is clear, so the
+  check leaves it out of the draft like any kept place. Any other reading
+  that review leaves out joins no step and never changes its keep; it gets
   the answers, so its text does not disagree with the kept ones. A box has
   no tick (`ticks`): it gets the answers in its text, gets its whole text
   from them when it has none, and is never left out, so the tile of a
@@ -2488,11 +2531,11 @@ stateDiagram-v2
   which `useCharacterCheck.ts` runs after each render). Its text takes the
   answered characters, it is left out and remembered in `left` for a shape
   that is no character, and it is ticked or kept once all its shapes have
-  answers. A reading that review leaves out gets the text and keeps its
-  keep. A place whose text the user typed keeps that text and is only left
-  out. A place joins once, so a text or a tick the user changes afterward
-  stays. One that is gone, or being read again, leaves `seen` and joins
-  anew.
+  answers. A reading that nothing would learn, since review leaves it out
+  and the draft does not keep it, gets the text and keeps its keep. A place
+  whose text the user typed keeps that text and is only left out. A place
+  joins once, so a text or a tick the user changes afterward stays. One
+  that is gone, or being read again, leaves `seen` and joins anew.
 - **Text that fits no step.** A place whose text has another number of
   characters than its picture has shapes joins no step. Once every one of
   its shapes has an answer, the answers are its text. One still left is the
@@ -2517,18 +2560,23 @@ stateDiagram-v2
   too, so that saving learns what the check wrote (`editedReading`). Its
   kept text gets only the characters the edit changed, and the draft keeps
   it or not as before unless the edit changes its keep, so what review
-  changed without **Keep**, a text or a cleared tick, stays review's. A
-  draft text of another length than review's does not line up with the
-  edit and stays as it is. A reading left out goes from the
-  draft, and `leftOut` remembers the text the draft kept it with;
-  **It is a character**, or its tick on the `Unfitted` stop, puts it back
-  with that text. A reading the draft never kept stays off it. Closing
+  changed without **Keep**, a text or a cleared tick, stays review's:
+  review's tick follows the edit only when the edit changes the keep
+  (`reviewTick`), so an answer that rewrites the text of a reading the
+  draft keeps does not tick it in review again. A draft text of another
+  length than review's does not line up with the edit and stays as it is.
+  A reading left out goes from the draft, whether or not review has it
+  ticked, and `leftOut` remembers the text the draft kept it with and
+  review's tick; **It is a character**, or its tick on the `Unfitted` stop,
+  puts it back with that text and that tick. A reading the draft never
+  kept stays off it. Closing
   forgets `leftOut` with the answers, and a reading of another recording
   than the one `leftOut` names is not in it.
 - Closing moves the answers into `past`, which only says what the user has
   confirmed. The characters nobody has confirmed (`unconfirmed`) are the
-  ones a reference saved now would learn from a text reader's guess, a box
-  that is still `guessed` or a kept reading with the reader's text, for a
+  ones a reference saved next would learn from a text reader's guess, a box
+  that is still `guessed` or one of the same `savedReadings` with the
+  reader's text, for a
   shape that neither an answer, open or past, nor a text the user typed
   gives that character. A guessed box that shows no characters counts for
   none, since no answer could confirm it. While there are any, the editor
@@ -2649,6 +2697,14 @@ state pictures are drawn again, once for each settled size. When none does,
 the capture goes on and each value shows why it is not read there, such as
 that its region is too small, as `NotRead`.
 
+A save that works for one application closes that application's entry in
+both sets (`Overlays::reopen`, from `Owner::tell`), so its next poll opens
+it from the saved file again. The other applications' entries and captures
+go on as they were. An overlay window that closes drops its entry and the
+size of its card (`Overlays::window_closed`), and closing the app or
+leaving the Values page closes every entry of the set
+(`Overlays::close_all`).
+
 `overlay::window::sync` opens a window for each overlay that is on and closes
 each that is not. The owner thread runs it through its host: when the main
 window mounts, and from `Owner::write_app` after each overlay change and after
@@ -2683,17 +2739,34 @@ they tell who reads what it changed, as its `Changed` kind says:
 A save that failed changed nothing anyone reads, so it tells neither, and an
 overlay that was reading goes on reading. A delete tells them once it has
 written the application's file, and removing an application tells them even
-when the removal fails partway. After each save of an application's file,
-whether it worked or failed, the setup app removes the pictures in its folder
-that the file as saved does not name, of those AppyTappy named. So a save that
-fails after it wrote some pictures takes them back, and pictures that a save
-left when the program ended in the middle of it go with the application's
-next save. That removal is best effort: one that fails does not fail the
-save, and the next save tries again. Deleting a reference that is already
-gone saves nothing and tells no one, but still removes the pictures an
-earlier delete left behind. An edit that leaves a value as it was saved
+when the removal fails partway. Each save of an application's file that
+starts writing, whether it works or fails, ends with `AppStore::save`
+removing the pictures in the application's folder that the file on disk does
+not name, of those AppyTappy named. When a failed save leaves no file the
+store can read, it removes nothing. So a save that fails after it wrote some
+pictures takes them back, and pictures that a save left when the program
+ended in the middle of it go with the application's next save. A save that
+the store refuses before it writes anything, such as one with a bad picture
+name, removes nothing. The removal is best effort: one that fails does not
+fail the save, and the next save tries again. Deleting a reference that is
+already gone saves nothing and tells no one; pictures an earlier delete left
+behind go with the next save. An edit that leaves a value as it was saved
 writes nothing and tells no one. Moving a panel writes the application's
 file without telling anyone.
+
+The owner keeps one saved reference in memory, `kept_reference`: the one the
+reference editor's characters add to, with its samples' pictures, as
+`Owner::keep_reference` read it when the editor first asked about those
+characters (`apps/setup/src-tauri/src/owner/references.rs`). It has two
+states. **Empty** reads the application's file and the pictures for each
+ask. **Kept** answers every ask about that reference from memory, a few for
+each edit in the editor. A reference is kept only when every sample's
+picture could be read, so one that is missing a picture is read again on
+each ask and learned once the picture is back. `Owner::write_app` empties it
+before any saved application is written or removed, whether that works or
+fails, and keeping another reference replaces it. An import writes a new
+application, which no kept reference is part of. A file changed outside the setup app
+while a reference is kept is not seen until then.
 
 A click's picture is written to the `clicks` folder when its target is set
 up, before its automation is saved. Each save of the automations removes the

@@ -5,9 +5,9 @@ use std::io;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{BuildDef, SizeChangesDef, WindowDef};
 use appytappy_config::click::{ClickButton, ClickDelivery, Spot};
+use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::screen::place::Target;
 use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};
@@ -16,12 +16,14 @@ use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 use crate::applications::AppSpec;
 use crate::check_spec::{CharactersSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayWindow;
-use crate::recording::{Scope, look, ocr};
+use crate::recording::{Scope, Text, look, ocr};
 use crate::stores::{self, Stores};
+use crate::ticket::Ticket;
 
 use super::host::{ClickNow, ClickedWindow, Host};
-use super::messages::{Message, RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
+use super::messages::{Event, Message};
 use super::{Owner, PREVIEW_INTERVAL};
+use super::{RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
 
 /// A host with one window whose captures the test drives by hand: each
 /// started capture's handler goes to the test over a channel, and so
@@ -326,6 +328,24 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
     }
 }
 
+/// The text reader's message that reading `index` of the recording numbered
+/// `recording` reads `text`.
+pub(super) fn recognized(recording: u64, index: usize, text: Text) -> Message<FakeHost> {
+    Message::Sent {
+        ticket: Ticket::numbered(recording),
+        event: Event::Recognized { index, text },
+    }
+}
+
+/// The text reader's message that find `index` of the search numbered
+/// `search` reads `text`.
+pub(super) fn found_text(search: u64, index: usize, text: Text) -> Message<FakeHost> {
+    Message::Sent {
+        ticket: Ticket::numbered(search),
+        event: Event::FoundText { index, text },
+    }
+}
+
 /// A 4 by 2 frame: its left half red and its right half gray.
 pub(super) fn frame_image() -> Image {
     let red = [0, 0, 255, 0];
@@ -367,13 +387,19 @@ impl Harness {
 
     /// Picks window 7 and returns the capture's handler.
     pub(super) fn pick(&mut self) -> FrameHandler {
-        self.ask(|owner| owner.pick(7)).expect("capture starts");
+        self.pick_numbered().1
+    }
+
+    /// Picks window 7 and returns the capture's number, as the page gets
+    /// it, with the capture's handler.
+    pub(super) fn pick_numbered(&mut self) -> (u64, FrameHandler) {
+        let capture = self.ask(|owner| owner.pick(7)).expect("capture starts");
         let started = self.handlers.try_recv().expect("capture started");
         assert_eq!(
             (started.window, started.crop, started.interval),
             (7, Crop::Whole, PREVIEW_INTERVAL)
         );
-        started.handler
+        (capture, started.handler)
     }
 
     /// Runs `handler` on `frame`, a whole window's frame, and applies
@@ -543,3 +569,17 @@ pub(super) const WINDOW: Size = Size {
     width: 4,
     height: 2,
 };
+
+/// Saves `Other App`, on the same window as `Example App`, as the
+/// application `example-2`, with the bar `Progress bar` of its own.
+pub(super) fn add_other_bar(harness: &mut Harness) {
+    let mut other = example_app(SizeChangesDef::Often);
+    "Other App".clone_into(&mut other.name);
+    assert_eq!(
+        harness.ask(|owner| owner.save_app(None, other)),
+        Ok("example-2".to_owned())
+    );
+    harness
+        .ask(|owner| owner.save(&spec("example-2", "Progress bar", BAR)))
+        .expect("saves");
+}

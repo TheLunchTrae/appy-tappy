@@ -260,7 +260,9 @@ as anywhere in Windows.
 
 A find whose characters you all answered for is ticked, and you can clear
 the tick afterward. A reading that review leaves out is not asked about and
-stays left out, and its text gets your answers too.
+stays left out, and its text gets your answers too. A reading you kept and
+then left out in review without keeping again still teaches the reference,
+so the check asks about it until you keep the readings again.
 
 A box has no tick. It gets your answers in its text, and a box with no text
 gets its text once your answers cover every character it shows. A box that
@@ -557,6 +559,18 @@ It has limits, and review is where you deal with them:
   the same color, or a line of more than 24 characters, is skipped.
 
 **Record more** goes on looking where the recording looked before.
+
+## How a reference was made
+
+The References page says under a reference's name how it was made, unless
+you made it by hand with boxes on screenshots you took:
+
+- **Made with a recording.** A [recorded reading](#record-readings), or a
+  box on a screenshot that a
+  [recording of looks](Values.md#record-screenshots) kept, taught it.
+- **Imported from** a file, with the file's name. The reference came with an
+  application you [imported](Applications.md#share-an-application). It goes
+  on saying so when you teach it more.
 
 ## Delete a reference
 

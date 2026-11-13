@@ -34,6 +34,7 @@ function reference(texts: readonly string[], expects?: string): ReferenceDef {
   return {
     id: 'percent',
     name: 'Percent font',
+    origin: { kind: 'byHand' } as const,
     ink: { red: 255, green: 255, blue: 255 },
     tolerance: 40,
     samples: texts.map((text, index) => ({ image: `ref-percent-${index}.png`, text })),

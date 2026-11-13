@@ -327,6 +327,7 @@ describe('the reference editor', () => {
   const saved = {
     id: 'percent',
     name: 'Percent',
+    origin: { kind: 'byHand' } as const,
     ink: red,
     tolerance: 25,
     samples: [{ image: 'ref-percent-1.png', text: '87%' }],
@@ -499,6 +500,7 @@ test('charactersOnceTaught keeps the choice that was picked, for the reference a
   const percent = {
     id: 'percent',
     name: 'Percent',
+    origin: { kind: 'byHand' } as const,
     ink: red,
     tolerance: 40,
     samples: [{ image: 'p.png', text: '10%' }],
@@ -530,6 +532,7 @@ test('withReference keeps the choice of characters that was picked, for the new 
   const reference = (id: string, text: string) => ({
     id,
     name: id,
+    origin: { kind: 'byHand' } as const,
     ink: red,
     tolerance: 40,
     samples: [{ image: `ref-${id}-1.png`, text }],

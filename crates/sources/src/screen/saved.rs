@@ -725,7 +725,8 @@ impl Error for SavedError {
 mod tests {
     use std::collections::BTreeMap;
 
-    use appytappy_config::app_file::{ColorDef, SampleDef, StateDef, sample_name};
+    use appytappy_config::app_file::{ColorDef, OriginDef, SampleDef, StateDef};
+    use appytappy_config::names::sample_name;
     use appytappy_config::signal::{Number, Value};
 
     use super::*;
@@ -970,6 +971,7 @@ mod tests {
         ReferenceDef {
             id: "counter".to_owned(),
             name: "Counter".to_owned(),
+            origin: OriginDef::ByHand,
             ink: RED,
             tolerance: 10,
             samples: vec![SampleDef {
@@ -1053,6 +1055,7 @@ mod tests {
         let reference = ReferenceDef {
             id: "percent".to_owned(),
             name: "Percent".to_owned(),
+            origin: OriginDef::ByHand,
             ink: ColorDef {
                 red: 255,
                 green: 255,

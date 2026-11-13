@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { type AntiCheatDef, LIMITS, type SharedView } from '../src/lib/bindings.ts';
+import { type AntiCheatDef, LIMITS, type OriginDef, type SharedView } from '../src/lib/bindings.ts';
 import {
   type ImportEvent,
   type ImportState,
@@ -10,6 +10,7 @@ import {
   importBusy,
   nextImport,
   originText,
+  originsText,
   sizeProblem,
 } from '../src/lib/sharing.ts';
 
@@ -28,7 +29,6 @@ function view(antiCheat: AntiCheatDef): SharedView {
       },
       sizeChanges: 'often',
       antiCheat,
-      origin: { kind: 'byHand' },
       values: [],
       references: [],
     },
@@ -143,6 +143,26 @@ describe('originText', () => {
     expect(originText({ kind: 'recording' })).toBe('Made with a recording');
     expect(originText({ kind: 'imported', file: 'friend.zip' })).toBe('Imported from friend.zip');
     expect(originText({ kind: 'imported', file: '' })).toBe('Imported from a file');
+  });
+});
+
+describe('originsText', () => {
+  const byHand: OriginDef = { kind: 'byHand' };
+  const recording: OriginDef = { kind: 'recording' };
+  const imported: OriginDef = { kind: 'imported', file: '' };
+
+  test('says the one way everything was made', () => {
+    expect(originsText([])).toBe('Nothing made yet');
+    expect(originsText([byHand, byHand, byHand])).toBe('Made by hand');
+    expect(originsText([recording])).toBe('Made with a recording');
+    expect(originsText([imported, { kind: 'imported', file: 'a.zip' }])).toBe('Imported from a file');
+  });
+
+  test('counts each way when they differ', () => {
+    expect(originsText([byHand, recording, byHand, imported])).toBe(
+      '2 made by hand, 1 made with a recording, 1 imported from a file',
+    );
+    expect(originsText([recording, imported, imported])).toBe('1 made with a recording, 2 imported from a file');
   });
 });
 

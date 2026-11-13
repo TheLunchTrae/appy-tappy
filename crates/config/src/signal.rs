@@ -6,7 +6,7 @@ use std::fmt;
 use std::sync::Arc;
 
 /// The longest signal name, in bytes.
-const MAX_NAME_LEN: usize = 64;
+pub(crate) const MAX_SIGNAL_NAME_LEN: usize = 64;
 
 /// The name of a signal, such as `progress`.
 ///
@@ -29,7 +29,7 @@ impl SignalName {
         let rest_allowed = characters.all(|character| {
             character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
         });
-        if starts_with_letter && rest_allowed && name.len() <= MAX_NAME_LEN {
+        if starts_with_letter && rest_allowed && name.len() <= MAX_SIGNAL_NAME_LEN {
             Ok(Self(name.into()))
         } else {
             Err(InvalidSignalName(name.into()))
@@ -52,7 +52,7 @@ impl fmt::Display for InvalidSignalName {
         write!(
             formatter,
             "signal name {:?} must start with a lowercase letter, use only lowercase letters, \
-             digits, and underscores, and be at most {MAX_NAME_LEN} bytes",
+             digits, and underscores, and be at most {MAX_SIGNAL_NAME_LEN} bytes",
             self.0
         )
     }
@@ -102,15 +102,15 @@ impl StateName {
     /// Returns [`InvalidStateName`] naming the rule `name` breaks.
     pub fn new(name: &str) -> Result<Self, InvalidStateName> {
         let problem = if name.trim().is_empty() {
-            Some("is empty")
+            Some(StateNameProblem::Empty)
         } else if name.trim() != name {
-            Some("starts or ends with a space")
+            Some(StateNameProblem::Spaced)
         } else if name.chars().any(char::is_control) {
-            Some("has a control character")
+            Some(StateNameProblem::Control)
         } else if name.chars().count() > MAX_STATE_NAME_LEN {
-            Some("is longer than 32 characters")
+            Some(StateNameProblem::Long)
         } else if name.eq_ignore_ascii_case(NO_STATE) {
-            Some("is \"none\", which stands for no state")
+            Some(StateNameProblem::Reserved)
         } else {
             None
         };
@@ -162,12 +162,33 @@ impl fmt::Display for StateName {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvalidStateName {
     name: Box<str>,
-    problem: &'static str,
+    problem: StateNameProblem,
+}
+
+/// The rule a state name breaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StateNameProblem {
+    Empty,
+    Spaced,
+    Control,
+    Long,
+    Reserved,
 }
 
 impl fmt::Display for InvalidStateName {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "state name {:?} {}", self.name, self.problem)
+        write!(formatter, "state name {:?} ", self.name)?;
+        match self.problem {
+            StateNameProblem::Empty => formatter.write_str("is empty"),
+            StateNameProblem::Spaced => formatter.write_str("starts or ends with a space"),
+            StateNameProblem::Control => formatter.write_str("has a control character"),
+            StateNameProblem::Long => {
+                write!(formatter, "is longer than {MAX_STATE_NAME_LEN} characters")
+            },
+            StateNameProblem::Reserved => {
+                write!(formatter, "is {NO_STATE:?}, which stands for no state")
+            },
+        }
     }
 }
 
@@ -190,8 +211,8 @@ mod tests {
 
     #[test]
     fn signal_names_follow_the_naming_rules() {
-        let longest = "a".repeat(MAX_NAME_LEN);
-        let too_long = "a".repeat(MAX_NAME_LEN.checked_add(1).expect("small"));
+        let longest = "a".repeat(MAX_SIGNAL_NAME_LEN);
+        let too_long = "a".repeat(MAX_SIGNAL_NAME_LEN.checked_add(1).expect("small"));
         for valid in ["progress", "a", "step2", "x_", longest.as_str()] {
             assert_eq!(
                 SignalName::new(valid).map(|name| name.to_string()),
@@ -235,7 +256,10 @@ mod tests {
             (" Paused", "starts or ends"),
             ("Paused ", "starts or ends"),
             ("Pau\tsed", "control"),
-            (too_long.as_str(), "longer than 32"),
+            (
+                too_long.as_str(),
+                &format!("longer than {MAX_STATE_NAME_LEN} characters"),
+            ),
             ("none", "stands for no state"),
             ("NONE", "stands for no state"),
         ] {

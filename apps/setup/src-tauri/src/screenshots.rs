@@ -1,84 +1,125 @@
 //! The session's screenshots: whole frames of the picked window, kept in
 //! memory from when each is taken or recorded until it is removed or the
 //! capture ends. Only a draft writes them to disk, in its own folder
-//! ([`crate::drafts`]).
+//! ([`crate::drafts`]), which keeps which of them a recording of looks kept,
+//! so a value or reference set up on one says that a recording made it,
+//! whether it is finished now or from the draft.
+
+use std::collections::BTreeSet;
 
 use appytappy_sources::screen::Image;
+
+use crate::drafts::DraftShot;
 
 /// Where a check the UI describes finds the screenshots it names by index.
 pub(crate) trait Shots {
     /// Screenshot `index`, or `None` when there never was one or it was
     /// removed.
     fn get(&self, index: usize) -> Option<&Image>;
+
+    /// Whether a recording of looks kept screenshot `index`, and the user
+    /// did not take it.
+    fn is_recorded(&self, index: usize) -> bool;
 }
 
 /// The session's screenshots, each named by the index it got when it was
 /// kept. Removing one releases its pixels and leaves its index empty, so
 /// the others keep theirs and what the UI set up on them stays right.
 #[derive(Debug)]
-pub(crate) struct Screenshots(Vec<Option<Image>>);
+pub(crate) struct Screenshots {
+    /// Every index given out so far, in order.
+    slots: Vec<Option<Image>>,
+    /// The indexes a recording of looks kept.
+    recorded: BTreeSet<usize>,
+}
 
 impl Screenshots {
     /// No screenshots.
     pub(crate) const fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            slots: Vec::new(),
+            recorded: BTreeSet::new(),
+        }
     }
 
-    /// Keeps `image` and answers its index.
+    /// Keeps `image`, which the user took, and answers its index.
     pub(crate) fn push(&mut self, image: Image) -> usize {
-        self.0.push(Some(image));
-        self.0.len().saturating_sub(1)
+        self.slots.push(Some(image));
+        self.slots.len().saturating_sub(1)
+    }
+
+    /// Keeps `image`, which a recording of looks kept, and answers its
+    /// index.
+    pub(crate) fn push_recorded(&mut self, image: Image) -> usize {
+        let index = self.push(image);
+        self.recorded.insert(index);
+        index
     }
 
     /// Screenshot `index`, or `None` when there never was one or it was
     /// removed.
     pub(crate) fn get(&self, index: usize) -> Option<&Image> {
-        self.0.get(index).and_then(Option::as_ref)
+        self.slots.get(index).and_then(Option::as_ref)
     }
 
     /// Releases screenshot `index`, if there is one.
     pub(crate) fn remove(&mut self, index: usize) {
-        if let Some(slot) = self.0.get_mut(index) {
+        if let Some(slot) = self.slots.get_mut(index) {
             *slot = None;
         }
     }
 
     /// The screenshots a draft kept, each under the index it had when the
-    /// draft was saved; the indexes between them are empty, as after a
-    /// removal.
-    pub(crate) fn restored(kept: Vec<(usize, Image)>) -> Self {
-        let mut slots = Vec::new();
-        for (index, image) in kept {
-            if slots.len() <= index {
-                slots.resize_with(index.saturating_add(1), || None);
+    /// draft was saved and marked recorded if it was then; the indexes
+    /// between them are empty, as after a removal.
+    pub(crate) fn restored(kept: Vec<(DraftShot, Image)>) -> Self {
+        let mut restored = Self::new();
+        for (shot, image) in kept {
+            if restored.slots.len() <= shot.index {
+                restored
+                    .slots
+                    .resize_with(shot.index.saturating_add(1), || None);
             }
-            if let Some(slot) = slots.get_mut(index) {
+            if let Some(slot) = restored.slots.get_mut(shot.index) {
                 *slot = Some(image);
             }
+            if shot.recorded {
+                restored.recorded.insert(shot.index);
+            }
         }
-        Self(slots)
-    }
-
-    /// Releases every screenshot; the next one kept is index 0 again.
-    pub(crate) fn clear(&mut self) {
-        self.0.clear();
+        restored
     }
 
     /// Every index given out so far, in order: the screenshot kept under
     /// it, or `None` for one that was removed.
     pub(crate) fn slots(&self) -> &[Option<Image>] {
-        &self.0
+        &self.slots
+    }
+
+    /// The screenshots still kept, each with what a draft keeps of it.
+    pub(crate) fn kept(&self) -> impl Iterator<Item = (DraftShot, &Image)> {
+        self.slots.iter().enumerate().filter_map(|(index, slot)| {
+            let shot = DraftShot {
+                index,
+                recorded: self.recorded.contains(&index),
+            };
+            slot.as_ref().map(|image| (shot, image))
+        })
     }
 
     /// The screenshots still kept, in the order they were kept.
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Image> {
-        self.0.iter().flatten()
+        self.slots.iter().flatten()
     }
 }
 
 impl Shots for Screenshots {
     fn get(&self, index: usize) -> Option<&Image> {
         Self::get(self, index)
+    }
+
+    fn is_recorded(&self, index: usize) -> bool {
+        self.recorded.contains(&index)
     }
 }
 
@@ -120,19 +161,41 @@ mod tests {
             3,
             "a removed index is not reused"
         );
-        screenshots.clear();
-        assert_eq!(screenshots.get(0), None);
-        assert_eq!(screenshots.push(pixel(5)), 0);
     }
 
     #[test]
-    fn restored_screenshots_keep_their_indexes() {
-        let mut screenshots = Screenshots::restored(vec![(2, pixel(3)), (0, pixel(1))]);
+    fn only_a_recorded_screenshot_counts_as_recorded() {
+        let mut screenshots = Screenshots::new();
+        assert_eq!(screenshots.push(pixel(1)), 0);
+        assert_eq!(screenshots.push_recorded(pixel(2)), 1);
+        assert_eq!(screenshots.get(1), Some(&pixel(2)));
+        assert!(!screenshots.is_recorded(0));
+        assert!(screenshots.is_recorded(1));
+        assert!(!screenshots.is_recorded(2), "there is no such screenshot");
+    }
+
+    #[test]
+    fn restored_screenshots_keep_their_indexes_and_marks() {
+        let shot = |index, recorded| DraftShot { index, recorded };
+        let mut screenshots =
+            Screenshots::restored(vec![(shot(2, true), pixel(3)), (shot(0, false), pixel(1))]);
         assert_eq!(screenshots.get(0), Some(&pixel(1)));
         assert_eq!(screenshots.get(1), None);
         assert_eq!(screenshots.get(2), Some(&pixel(3)));
+        assert!(!screenshots.is_recorded(0));
+        assert!(screenshots.is_recorded(2), "a recording kept it");
         assert_eq!(screenshots.push(pixel(4)), 3, "the next takes a new index");
-        let packed = Screenshots::restored(vec![(0, pixel(1)), (1, pixel(2))]);
+        assert_eq!(
+            screenshots.kept().collect::<Vec<_>>(),
+            [
+                (shot(0, false), &pixel(1)),
+                (shot(2, true), &pixel(3)),
+                (shot(3, false), &pixel(4)),
+            ],
+            "a draft keeps each with its mark, and skips the empty index"
+        );
+        let packed =
+            Screenshots::restored(vec![(shot(0, false), pixel(1)), (shot(1, false), pixel(2))]);
         assert_eq!(packed.slots(), [Some(pixel(1)), Some(pixel(2))]);
         assert_eq!(Screenshots::restored(Vec::new()).slots(), []);
     }

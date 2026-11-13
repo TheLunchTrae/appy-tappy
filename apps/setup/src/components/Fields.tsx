@@ -1,11 +1,13 @@
 // The inspector's fields that values and references share.
 
-import { LIMITS, type Reading } from '../lib/bindings.ts';
+import { LIMITS } from '../lib/bindings.ts';
 import { readingText } from '../lib/automation.ts';
 import type { CheckState } from '../lib/check.ts';
 import { REGION_HINT, TOLERANCE_HINT } from '../lib/hints.ts';
+import type { LiveReads } from '../lib/liveCheck.ts';
 import { type Color, hex } from '../lib/pixels.ts';
 import type { Rect } from '../lib/region.ts';
+import { useLiveRead } from '../lib/useLiveCheck.ts';
 import { Hint } from './Hint.tsx';
 import type { ReactNode } from 'react';
 
@@ -157,14 +159,13 @@ export function ToleranceField({
 export function ReadingBox({
   built,
   state,
-  reading,
-  problem,
+  reads,
 }: {
   readonly built: string | null;
   readonly state: CheckState;
-  readonly reading: Reading | null;
-  readonly problem: string | null;
+  readonly reads: LiveReads;
 }) {
+  const { reading, problem } = useLiveRead(reads);
   if (built !== null) {
     return <p className="reading note">{built}</p>;
   }

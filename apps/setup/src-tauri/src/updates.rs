@@ -19,6 +19,7 @@ use tokio::sync::oneshot;
 
 use crate::commands::{Bridge, ask};
 use crate::owner::{Message, Owner, Run};
+use crate::words::sentence;
 
 /// The plugin's name, which is also its section in the configuration.
 const UPDATER: &str = "updater";
@@ -120,11 +121,7 @@ fn agreed(downloaded: &str, asked: &str) -> Result<(), String> {
 
 /// The message for a failed check, download or install.
 fn failed(error: &tauri_plugin_updater::Error) -> String {
-    let error = error.to_string();
-    format!(
-        "AppyTappy Setup could not update: {}.",
-        error.trim_end_matches('.')
-    )
+    sentence(&format!("AppyTappy Setup could not update: {error}"))
 }
 
 /// The newer release, if any. A build without the updater never has one.

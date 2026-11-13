@@ -13,9 +13,10 @@ use appytappy_sources::screen::place::Target;
 use appytappy_sources::screen::{Image, Region};
 use serde::{Deserialize, Serialize};
 
-use crate::check_spec::{RegionSpec, sentence};
+use crate::check_spec::RegionSpec;
 use crate::pixels;
 use crate::selection::{self, SelectionSpec};
+use crate::words::sentence;
 
 use super::Owner;
 use super::host::{ClickNow, ClickedWindow, Host};
@@ -174,7 +175,8 @@ impl<H: Host> Owner<H> {
         selection: Option<&SelectionSpec>,
     ) -> Result<ClickPictureView, String> {
         let image = self
-            .screenshots
+            .capture
+            .screenshots()
             .get(screenshot)
             .ok_or_else(|| "That screenshot is gone. Take another.".to_owned())?;
         let outside = || {
@@ -221,13 +223,7 @@ impl<H: Host> Owner<H> {
     /// lands nowhere: a spot outside the window, a window of another size
     /// than the picture was taken at, or a picture that is not found.
     pub(crate) fn find_click(&self, at: &ClickAtDef) -> Result<FoundClick, String> {
-        if let Some(failure) = &self.failure {
-            return Err(sentence(&failure.error));
-        }
-        let frame = self
-            .latest
-            .as_ref()
-            .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())?;
+        let frame = self.newest_frame(|failure| sentence(&failure.error))?;
         let size = frame.size();
         match at.to_at().map_err(|error| sentence(&error.to_string()))? {
             ClickAt::Spot(spot) => spot

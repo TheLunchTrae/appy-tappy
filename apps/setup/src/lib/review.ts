@@ -1,5 +1,6 @@
 import type { RecordedLabel, RecordedReading, RecordedShape, RecordingView } from './bindings.ts';
 import { fitsNeeds, mayBeNeeded } from './found.ts';
+import type { Picture } from './pixels.ts';
 import { andList, knownCharacters, labelCharacters } from './reference.ts';
 import { sameSize, sizeText } from './sizes.ts';
 // Reviewing a recording: which readings the user keeps, what each shows, and what each adds.
@@ -463,6 +464,19 @@ export function editAll(
 }
 
 /**
+ * What the recording part says of a stopped recording's `count` readings, of which the reference keeps `kept`, or
+ * while review is open would keep `keeping`. The reference keeps readings and learns them when it is saved, so the
+ * line counts what is kept and does not call it learned; the value, where there is one, saves none of them.
+ */
+export function keptNote(count: number, kept: number, keeping: number | null): string {
+  const readings = count === 1 ? '1 reading' : `${count} readings`;
+  if (keeping !== null) {
+    return `${keeping} of ${readings} will be kept. The reference learns only the readings you keep.`;
+  }
+  return kept === 0 ? `${readings} recorded, none kept yet.` : `${kept} of ${readings} kept.`;
+}
+
+/**
  * Why Keep waits, or null when it can keep `kept`: a flagged reading is kept, or the readings were not checked yet
  * for what review shows now.
  */
@@ -475,4 +489,26 @@ export function keepBlocked(
     return 'Fix or leave out the flagged readings to keep them.';
   }
   return checked ? null : 'Checking the readings…';
+}
+
+/** Each recorded reading's pixels, by its index, for the recording `id`. */
+export interface Crops {
+  readonly id: number;
+  readonly pictures: ReadonlyMap<number, Picture>;
+}
+
+/** No recording's pixels. */
+export const NO_CROPS: Crops = { id: -1, pictures: new Map() };
+
+/**
+ * `crops` with `picture`, the pixels of reading `index` of recording `of`, where `newest` is the recording the
+ * pixels are asked for now. An answer for an older recording is dropped: it is asked for once, so letting it in
+ * would put the older recording's pictures in place of the newest's, which are never asked for again.
+ */
+export function withCrop(crops: Crops, newest: number, of: number, index: number, picture: Picture): Crops {
+  if (of !== newest) {
+    return crops;
+  }
+  const pictures = crops.id === of ? new Map(crops.pictures) : new Map<number, Picture>();
+  return { id: of, pictures: pictures.set(index, picture) };
 }

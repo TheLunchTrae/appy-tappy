@@ -7,7 +7,7 @@ use std::io;
 use std::path::Path;
 
 use appytappy_config::action::{MediaCommand, OpenTarget, VolumeLevel};
-use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::process::ProcessId;
 
 use crate::Input;
 

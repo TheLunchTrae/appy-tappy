@@ -371,11 +371,12 @@ mod tests {
     use appytappy_config::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
         OriginDef, ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
-        StateDef, ValueDef, WindowDef, sample_name,
+        StateDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
         ActionDef, AutomationDef, ComparisonDef, FORMAT, MediaCommandDef, TargetDef, WhenDef,
     };
+    use appytappy_config::names::sample_name;
     use appytappy_config::window_match::Pattern;
     use appytappy_sources::screen::{Image, Size};
 
@@ -394,6 +395,7 @@ mod tests {
         ValueDef {
             id: id.to_owned(),
             name: format!("The {id}"),
+            origin: OriginDef::ByHand,
             screen: ScreenDef {
                 window_size: SizeDef {
                     width: 800,
@@ -431,7 +433,6 @@ mod tests {
             anti_cheat: AntiCheatDef::None,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             values,
             references: Vec::new(),
         }
@@ -825,6 +826,7 @@ mod tests {
         example.references.push(ReferenceDef {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
+            origin: OriginDef::ByHand,
             ink: RED,
             tolerance: 10,
             samples: vec![SampleDef {

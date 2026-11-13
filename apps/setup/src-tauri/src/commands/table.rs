@@ -23,9 +23,11 @@ macro_rules! with_commands {
     ($then:ident) => {
         $then! {
             commands::list_windows() -> WindowList;
-            commands::pick_window(window: U64AsNumber) -> ();
-            /// Stops capturing and forgets the session's screenshots and check.
-            commands::stop_capture() -> ();
+            /// Starts capturing `window` for the preview, and answers the capture's number.
+            commands::pick_window(window: U64AsNumber) -> U64AsNumber;
+            /// Stops capture `capture` and forgets the session's screenshots and check, unless another capture took
+            /// its place.
+            commands::stop_capture(capture: U64AsNumber) -> ();
             /// The newest frame at most `maxWidth` wide, or null before one arrives.
             commands::preview(max_width: u32) -> Pixels;
             /// Keeps the newest frame as a screenshot and returns its index.
@@ -72,8 +74,9 @@ macro_rules! with_commands {
             commands::start_look_recording(region: RegionSpec, tolerance: u8, screenshot: usize) -> ();
             /// The recording of looks and the screenshots it kept so far, or null without one.
             commands::look_recording_state() -> Option<LookRecordingView>;
-            /// A recorded reading at most `maxWidth` wide, or null for an unknown index.
-            commands::recorded_reading(index: usize, max_width: u32) -> Pixels;
+            /// A reading of recording `recording` at most `maxWidth` wide, or null for an unknown index or a replaced
+            /// recording.
+            commands::recorded_reading(recording: U64AsNumber, index: usize, max_width: u32) -> Pixels;
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
             /// can.
             commands::review_problems(spec: CharactersSpec) -> Vec<Option<String>>;
@@ -137,6 +140,9 @@ macro_rules! with_commands {
             /// another one than the picked window.
             commands::click_now(click: ClickSpec) -> ClickSent;
             commands::list_apps() -> Vec<AppSummary>;
+            /// The file of the saved application `application`, read without the other applications or the open
+            /// windows, or null when it is no longer saved. Rejects with why when its file cannot be read.
+            commands::app_file(application: String) -> Option<AppFile>;
             /// The saved applications and the open windows, with the windows each application's match takes, from
             /// one listing of the desktop, so the three agree. Rejects when the windows cannot be listed.
             commands::list_app_windows() -> AppWindows;
@@ -198,8 +204,9 @@ macro_rules! with_commands {
             /// capture's screenshots with it. Another draft of the same saved item goes, so each has one at most.
             commands::save_draft(id: Option<String>, draft: DraftDef, screenshots: bool) -> String;
             /// Makes the screenshots of the draft `id` the capture's, in place of any it took, so each has the index it
-            /// had when the draft was saved; returns those indexes, lowest first.
-            commands::restore_draft_screenshots(id: String) -> Vec<usize>;
+            /// had when the draft was saved and the mark of a recording of looks if it had one; returns each, lowest
+            /// index first.
+            commands::restore_draft_screenshots(id: String) -> Vec<DraftShot>;
             /// Deletes the draft `id` with its screenshots. One already gone is fine.
             commands::delete_draft(id: String) -> ();
             /// Saves `automation` over the automation `existing`, or as a new one; returns its ID.

@@ -124,7 +124,7 @@ impl<S: System + ScreenPixels> Session<S> {
 mod tests {
     use std::io;
 
-    use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::process::ProcessId;
     use appytappy_sources::screen::Rgb;
     use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 

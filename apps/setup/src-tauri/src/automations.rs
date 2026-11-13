@@ -2,7 +2,8 @@
 //!
 //! Automations live in their own file, apart from the applications' files,
 //! and name a value by its application's ID and the value's ID. Saving one
-//! makes the same check the runtime makes, [`Runnable::new`], so it
+//! makes the same check the runtime makes,
+//! [`Runnable::new`](appytappy_sources::automation::Runnable::new), so it
 //! never names a value that is not there or compares a value with the wrong
 //! kind of target. A value that later goes away shows as a problem on the
 //! automation that used it, and so does an automation that breaks a rule on
@@ -11,21 +12,22 @@
 //! not read it, so a hand edit that breaks or repeats it stops nothing, and
 //! [`unique_ids`] gives each automation one the page can go by.
 
-use std::collections::BTreeSet;
-use std::fs;
+mod problem;
+mod uses;
 
 use appytappy_config::action::KeyChord;
-use appytappy_config::app_file::{AppFile, ValueDef, ValueKind};
-use appytappy_config::automation_file::{
-    ActionDef, AutomationDef, AutomationsFile, TargetDef, new_automation_id,
-};
+use appytappy_config::automation_file::{ActionDef, AutomationDef, AutomationsFile};
+use appytappy_config::names::new_automation_id;
 use appytappy_config::signal::SignalName;
-use appytappy_config::store::StoredApp;
-use appytappy_sources::automation::{AppReaders, Problem, Runnable};
-use appytappy_sources::screen::click::ClickPictureError;
+use appytappy_sources::automation::AppReaders;
 use serde::Serialize;
 
 use crate::stores::Stores;
+use crate::words::sentence;
+
+pub(crate) use self::problem::watched_values;
+use self::problem::{apps, problem};
+pub(crate) use self::uses::{check_app_unused, check_still_suits, check_unused};
 
 /// A saved automation, as the Automations page lists it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -37,19 +39,6 @@ pub(crate) struct AutomationSummary {
     /// Why the runtime cannot run it as saved, such as a value that was
     /// removed since.
     pub(crate) problem: Option<String>,
-}
-
-/// `problem` as a sentence: a capital letter first and a full stop last.
-fn sentence(problem: &str) -> String {
-    let mut characters = problem.chars();
-    let mut text: String = characters
-        .next()
-        .map(|first| first.to_uppercase().chain(characters).collect())
-        .unwrap_or_default();
-    if !text.ends_with('.') {
-        text.push('.');
-    }
-    text
 }
 
 /// Loads the automations, saying what went wrong for the user. Each one
@@ -83,91 +72,6 @@ fn unique_ids(file: &mut AutomationsFile) {
         }
         kept.push(automation.id.clone());
     }
-}
-
-/// Loads the applications, saying what went wrong for the user.
-fn apps(stores: &Stores) -> Result<Vec<StoredApp>, String> {
-    stores.apps.load().map_err(|error| error.to_string())
-}
-
-/// What stops `automation` from running with the applications in `apps`,
-/// if anything, as a sentence: the runtime's own answer, [`Runnable::new`],
-/// which also builds the check of the value it watches and reads each
-/// click's picture, so a value or a picture a hand edit broke shows here
-/// too. An application it watches or clicks in whose file does not read is
-/// named first, with why, since this app read the file and `Runnable::new`
-/// takes only the applications whose files read.
-fn problem<'apps>(
-    automation: &AutomationDef,
-    apps: &'apps [StoredApp],
-    stores: &Stores,
-    readers: &mut AppReaders<'apps>,
-) -> Option<String> {
-    let unreadable = |id: &str| {
-        apps.iter()
-            .find(|app| app.id == id)
-            .and_then(|app| app.file.as_ref().err())
-    };
-    let watched = &automation.when.app;
-    if let Some(error) = unreadable(watched) {
-        return Some(format!(
-            "Its application's app.json, in the {watched} folder, cannot be read: {error}."
-        ));
-    }
-    for action in &automation.actions {
-        if let ActionDef::Click { app, .. } = action
-            && let Some(error) = unreadable(app)
-        {
-            return Some(format!(
-                "The app.json of the application it clicks in, in the {app} folder, cannot be \
-                 read: {error}."
-            ));
-        }
-    }
-    let readable: Vec<(&str, &AppFile)> = apps
-        .iter()
-        .filter_map(|app| app.file.as_ref().ok().map(|file| (app.id.as_str(), file)))
-        .collect();
-    let problem = Runnable::new(
-        automation,
-        &readable,
-        readers,
-        |app, name| fs::read(stores.apps.folder(app).join(name)),
-        |name| stores.automations.picture(name),
-    )
-    .err()?;
-    let set_up_again = "Set up its target again.";
-    Some(match problem {
-        Problem::Rule(reason) => sentence(&reason),
-        Problem::UnreadPicture { action, .. }
-        | Problem::Picture {
-            action,
-            error: ClickPictureError::Read(_),
-            ..
-        } => format!("The picture action {action} clicks on is gone. {set_up_again}"),
-        Problem::Picture {
-            action,
-            error: ClickPictureError::Misfit(misfit),
-            ..
-        } => format!("Action {action}'s target cannot be used: {misfit}. {set_up_again}"),
-        Problem::Value { value, error, .. } => format!("{value} cannot be read: {error}."),
-    })
-}
-
-/// The IDs of the values of the application `app` that the runtime reads:
-/// those its enabled automations watch, of the automations that can run, as
-/// [`problem`] decides with the runtime's own answer.
-pub(crate) fn watched_values(stores: &Stores, app: &str) -> Result<BTreeSet<String>, String> {
-    let file = load(stores)?;
-    let apps = apps(stores)?;
-    let mut readers = AppReaders::new();
-    Ok(file
-        .automations
-        .iter()
-        .filter(|automation| automation.enabled && automation.when.app == app)
-        .filter(|automation| problem(automation, &apps, stores, &mut readers).is_none())
-        .map(|automation| automation.when.value.clone())
-        .collect())
 }
 
 /// Every automation, with what stops each one from running.
@@ -330,116 +234,9 @@ pub(crate) fn delete(stores: &Stores, id: &str) -> Result<(), String> {
     write(stores, &file)
 }
 
-/// Fails, naming the automations that watch the value `value` of the
-/// application `app`, unless none does. `name` is the value's name.
-pub(crate) fn check_unused(
-    stores: &Stores,
-    app: &str,
-    value: &str,
-    name: &str,
-) -> Result<(), String> {
-    let file = load(stores)?;
-    unused(file.watching(app, value), name)
-}
-
-/// Fails, naming the automations that watch the value `saved` of the
-/// application `app` and whose condition suits it but would not suit it as
-/// `edited`: one that compares it with another kind of target than the edit
-/// makes it read, or with a state the edit renames or removes. An automation
-/// whose condition does not suit `saved` either is already listed with its
-/// problem, and the edit is not what breaks it.
-pub(crate) fn check_still_suits(
-    stores: &Stores,
-    app: &str,
-    saved: &ValueDef,
-    edited: &ValueDef,
-) -> Result<(), String> {
-    let file = load(stores)?;
-    let (was, now) = (saved.screen.check.reads(), edited.screen.check.reads());
-    // What each broken automation uses that the edit takes away, with the
-    // automations that use the same thing together.
-    let mut broken: Vec<(String, Vec<&AutomationDef>)> = Vec::new();
-    for automation in file.watching(app, &saved.id) {
-        let target = &automation.when.target;
-        if target.suits(saved).is_err() || target.suits(edited).is_ok() {
-            continue;
-        }
-        let what = match target {
-            TargetDef::State(state) if was == now => format!(
-                "the state {state:?} of {}, which this change renames or removes",
-                saved.name
-            ),
-            TargetDef::Number(_) | TargetDef::Flag(_) | TargetDef::State(_) => format!(
-                "{} as {}, and this change makes it read {}",
-                saved.name,
-                kind_text(was),
-                kind_text(now)
-            ),
-        };
-        match broken.iter_mut().find(|(used, _)| *used == what) {
-            Some((_, users)) => users.push(automation),
-            None => broken.push((what, vec![automation])),
-        }
-    }
-    let problems: Vec<String> = broken
-        .into_iter()
-        .filter_map(|(what, users)| unused(users.into_iter(), &what).err())
-        .collect();
-    if problems.is_empty() {
-        Ok(())
-    } else {
-        Err(problems.join(" "))
-    }
-}
-
-/// What a value of `kind` reads, in a sentence.
-const fn kind_text(kind: ValueKind) -> &'static str {
-    match kind {
-        ValueKind::Number => "a number",
-        ValueKind::Flag => "yes or no",
-        ValueKind::State => "a state",
-    }
-}
-
-/// Fails, naming the automations that watch any value of the application
-/// `app` or click in it, unless none does. `name` is the application's name.
-pub(crate) fn check_app_unused(stores: &Stores, app: &str, name: &str) -> Result<(), String> {
-    let file = load(stores)?;
-    unused(
-        file.automations
-            .iter()
-            .filter(|automation| automation.when.app == app),
-        &format!("a value of {name}"),
-    )?;
-    unused(
-        file.automations.iter().filter(|automation| {
-            automation.actions.iter().any(
-                |action| matches!(action, ActionDef::Click { app: target, .. } if target == app),
-            )
-        }),
-        &format!("{name} as the application it clicks in"),
-    )
-}
-
-/// Fails, naming `users`, unless there are none. `what` is what they use.
-fn unused<'file>(
-    users: impl Iterator<Item = &'file AutomationDef>,
-    what: &str,
-) -> Result<(), String> {
-    let users: Vec<&str> = users.map(|automation| automation.name.as_str()).collect();
-    let named = match users.as_slice() {
-        [] => return Ok(()),
-        [only] => format!("{only} uses"),
-        [first @ .., last] => format!("{} and {last} use", first.join(", ")),
-    };
-    Err(format!(
-        "{named} {what}. Change or delete {} first.",
-        if users.len() == 1 { "it" } else { "them" }
-    ))
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -471,6 +268,7 @@ mod tests {
         let value = |id: &str, name: &str, check| ValueDef {
             id: id.to_owned(),
             name: name.to_owned(),
+            origin: OriginDef::ByHand,
             screen: ScreenDef {
                 window_size: SizeDef {
                     width: 100,
@@ -500,7 +298,6 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             references: Vec::new(),
             values: vec![
                 value(
@@ -555,13 +352,6 @@ mod tests {
             .into_iter()
             .map(|summary| summary.automation.id)
             .collect()
-    }
-
-    #[test]
-    fn problems_read_as_sentences() {
-        assert_eq!(sentence("add an action"), "Add an action.");
-        assert_eq!(sentence("Done."), "Done.");
-        assert_eq!(sentence(""), ".");
     }
 
     #[test]

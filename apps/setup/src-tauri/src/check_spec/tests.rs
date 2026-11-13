@@ -4,10 +4,12 @@
 use std::error::Error as _;
 use std::io;
 
+use crate::ticket::Ticket;
+
 use appytappy_config::app_file::{
     CheckDefError, MAX_STATES, ReferenceDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
-    sample_name,
 };
+use appytappy_config::names::sample_name;
 use appytappy_config::signal::Number;
 use appytappy_sources::screen::check::ImageMatch;
 use appytappy_sources::screen::saved;
@@ -92,6 +94,7 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
         reference: ReferenceDef {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
+            origin: OriginDef::ByHand,
             ink: RED.into(),
             tolerance: 0,
             samples: vec![SampleDef {
@@ -113,6 +116,10 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
 
 /// A test's screenshots are an array, each named by its place in it.
 impl<const N: usize> Shots for [Image; N] {
+    fn is_recorded(&self, _index: usize) -> bool {
+        false
+    }
+
     fn get(&self, index: usize) -> Option<&Image> {
         self.as_slice().get(index)
     }
@@ -193,12 +200,6 @@ fn one(screenshot: usize) -> Vec<Label> {
         region: None,
         text: "1".to_owned(),
     }]
-}
-
-#[test]
-fn a_problem_reads_as_a_sentence_of_its_own() {
-    assert_eq!(sentence("a character was given"), "A character was given.");
-    assert_eq!(sentence(""), "");
 }
 
 #[test]
@@ -558,7 +559,7 @@ fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 2, 2).expect("not empty");
     let mut recording = Recording::new(
-        1,
+        Ticket::numbered(1),
         region,
         (RED.into(), 0),
         (small.size(), Follows::Drawn),
@@ -698,6 +699,7 @@ fn a_new_reference_names_one_picture_per_label() {
         ReferenceDef {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
+            origin: OriginDef::ByHand,
             ink: RED.into(),
             tolerance: 0,
             // The one label teaches the one sample, whatever it expects.
@@ -843,7 +845,7 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 4, 2).expect("not empty");
     let mut recording = Recording::new(
-        1,
+        Ticket::numbered(1),
         region,
         (RED.into(), 0),
         (screenshot().size(), Follows::Drawn),
@@ -899,7 +901,7 @@ fn recorded_problems_judge_each_reading_after_the_saved_samples() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 2, 2).expect("not empty");
     let mut recording = Recording::new(
-        1,
+        Ticket::numbered(1),
         region,
         (RED.into(), 0),
         (screenshot().size(), Follows::Drawn),

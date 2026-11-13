@@ -91,7 +91,7 @@ pub(crate) fn command(id: NonZeroU16) -> Option<Command> {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::process::ProcessId;
 
     use super::*;
     use crate::lifecycle::Change;

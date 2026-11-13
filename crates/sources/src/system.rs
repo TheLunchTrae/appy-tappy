@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
+use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::{WindowFacts, WindowMatch};
 
 use crate::screen::{Rgb, Size};

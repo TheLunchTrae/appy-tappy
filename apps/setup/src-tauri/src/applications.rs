@@ -6,9 +6,10 @@
 //! values; the Values page adds them to an application saved here.
 
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, FORMAT, OriginDef, SizeChangesDef, WindowDef, WindowDefError,
+    AntiCheatDef, AppFile, FORMAT, SizeChangesDef, WindowDef, WindowDefError,
 };
-use appytappy_config::store::{StoredApp, new_app_id};
+use appytappy_config::names::new_app_id;
+use appytappy_config::store::StoredApp;
 use serde::Deserialize;
 
 use crate::automations;
@@ -71,7 +72,6 @@ pub(crate) fn apply(
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             values: Vec::new(),
             references: Vec::new(),
         };
