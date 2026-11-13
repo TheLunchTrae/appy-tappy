@@ -339,7 +339,7 @@ impl<H: Host> Owner<H> {
         if changed.overlays() {
             // The overlay reads its values again from their saved files,
             // after keeping where the user just put its panel.
-            self.save_panels(Places::All);
+            self.save_panels(Places::Of(app));
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a capture that ended with an error stopped already, and the next poll starts another"

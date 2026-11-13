@@ -86,7 +86,7 @@ impl<H: Host> Owner<H> {
     /// since stays open.
     pub(crate) fn close_overlay(&mut self, app: &str, mode: OverlayModeDef) {
         if self.overlays.mode(app) == Some(mode) {
-            self.save_panels(Places::All);
+            self.save_panels(Places::Of(app));
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "the overlay's window closed, so nothing shows the capture's error"
@@ -126,7 +126,7 @@ impl<H: Host> Owner<H> {
     /// Saves where the user put each panel that `places` names. A place
     /// that cannot be saved is lost, and the panel opens where it last was
     /// saved.
-    pub(super) fn save_panels(&mut self, places: Places) {
+    pub(super) fn save_panels(&mut self, places: Places<'_>) {
         for (app, panel) in self.overlays.placed_panels(places) {
             #[expect(
                 clippy::let_underscore_must_use,
@@ -166,7 +166,7 @@ mod tests {
     use appytappy_config::app_file::AntiCheatDef;
 
     use crate::owner::test_support::{
-        BAR, FakeHost, Harness, WINDOW, frame_image, spec, with_saved_bar,
+        BAR, FakeHost, Harness, WINDOW, add_other_bar, frame_image, spec, with_saved_bar,
     };
 
     use super::*;
@@ -722,6 +722,66 @@ mod tests {
         assert!(harness.owner.handle(placed(50)).is_continue());
         harness.owner.shut_down().expect("closes");
         assert_eq!(saved(&mut harness), Some(panel(30)));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn an_overlay_that_reads_its_file_again_keeps_only_its_own_panels_place() {
+        let (mut harness, root) = with_saved_bar("overlay-own-panel");
+        add_other_bar(&mut harness);
+        let panel_mode = OverlayModeDef::PictureInPicture;
+        let panel = PanelDef {
+            x: 10,
+            y: 20,
+            width: 260,
+            height: 200,
+        };
+        let saved = |harness: &mut Harness, app: &str| {
+            harness
+                .ask(|owner| owner.stores()?.app(app))
+                .expect("saved")
+                .file
+                .overlay
+                .and_then(|overlay| overlay.panel)
+        };
+        for app in ["example", "example-2"] {
+            harness
+                .ask(|owner| owner.set_overlay(app, true, panel_mode))
+                .expect("saves");
+            harness
+                .ask(|owner| owner.overlay_state(app))
+                .expect("shows");
+            harness.ask(|owner| owner.panel_placed(app, panel));
+        }
+
+        // A change to one application's values keeps its panel's place, and
+        // the other's waits to settle.
+        harness
+            .ask(|owner| owner.save(&spec("example", "Another bar", BAR)))
+            .expect("saves");
+        assert_eq!(saved(&mut harness, "example"), Some(panel));
+        assert_eq!(saved(&mut harness, "example-2"), None);
+        // So does one application's panel window closing.
+        harness
+            .ask(|owner| owner.overlay_state("example"))
+            .expect("shows");
+        harness.ask(|owner| owner.panel_placed("example", PanelDef { x: 30, ..panel }));
+        harness.ask(|owner| owner.close_overlay("example", panel_mode));
+        assert_eq!(
+            saved(&mut harness, "example"),
+            Some(PanelDef { x: 30, ..panel })
+        );
+        assert_eq!(saved(&mut harness, "example-2"), None);
+        for _ in 0..SETTLE_POLLS {
+            harness
+                .ask(|owner| owner.overlay_state("example-2"))
+                .expect("shows");
+        }
+        assert_eq!(
+            saved(&mut harness, "example-2"),
+            Some(panel),
+            "once it settles"
+        );
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
