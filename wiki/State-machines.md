@@ -1530,7 +1530,10 @@ stateDiagram-v2
   read at answer a reading with no new trial.
 - **Failed** (`error`). The owner refused the check, such as a label its
   reference cannot learn, and the box says why. The owner keeps the check it
-  had, and nothing is read until the check changes.
+  had, and nothing is read until the check changes. A change of the draft
+  that sends the same check does not try it again: the owner judges what the
+  check sends, the saved files, and the session's screenshots and
+  recording, and such a change leaves them all as they were.
 - A read notes the number in force when it is asked, and its answer is taken
   only while that number is still in force. So an answer under an older
   check is dropped, reading or problem, and so is one asked between a change
@@ -2762,7 +2765,10 @@ states. **Empty** reads the application's file and the pictures for each
 ask. **Kept** answers every ask about that reference from memory, a few for
 each edit in the editor. A reference is kept only when every sample's
 picture could be read, so one that is missing a picture is read again on
-each ask and learned once the picture is back. `Owner::write_app` empties it
+each ask and learned once the picture is back. It keeps the pictures, not a
+reader learned from them: the color and tolerance being taught decide what
+the samples teach, and each ask learns them again, which costs well under a
+millisecond for each sample. `Owner::write_app` empties it
 before any saved application is written or removed, whether that works or
 fails, and keeping another reference replaces it. An import writes a new
 application, which no kept reference is part of. A file changed outside the setup app

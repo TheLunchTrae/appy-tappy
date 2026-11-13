@@ -4,6 +4,7 @@
 
 use appytappy_config::app_file::{CheckDef, FixDef, ScreenDef, SizeDef, ValueDef};
 use appytappy_sources::screen::Region;
+use appytappy_sources::screen::saved::Readers;
 use appytappy_sources::screen::scale::scaled;
 use serde::Deserialize;
 
@@ -112,7 +113,12 @@ impl<H: Host> Owner<H> {
                 Some(replaced) => *replaced = fix,
                 None => screen.fixes.push(fix),
             }
-            read_back(&screen, found, &saved.pictures)?;
+            read_back(
+                &screen,
+                found,
+                Readers::new(&found.file.references),
+                &saved.pictures,
+            )?;
             let id = value.id.clone();
             if let Some(value) = found.file.values.get_mut(position) {
                 value.screen = screen;

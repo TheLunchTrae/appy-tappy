@@ -267,6 +267,24 @@ impl<'app> Readers<'app> {
             None => Ok(built.insert(reader(reference, picture)?)),
         }
     }
+
+    /// These readers, with `learned` as the reader of the reference `id`,
+    /// which must be what [`reader`] learns from that reference's pictures.
+    /// A value that reads with it then learns nothing again, and its
+    /// pictures are never asked for. An `id` the application has no
+    /// reference for changes nothing.
+    #[must_use]
+    pub fn learned(mut self, id: &str, learned: DigitReader) -> Self {
+        if let Some((_, built)) = self
+            .references
+            .iter()
+            .zip(&mut self.built)
+            .find(|(known, _)| known.id == id)
+        {
+            *built = Some(learned);
+        }
+        self
+    }
 }
 
 /// Rebuilds the value `screen` describes, with its application's `readers`,
@@ -1361,6 +1379,35 @@ mod tests {
         };
         assert_eq!(built, ["0", "O", "O0"].map(alone));
         assert_ne!(built[0], built[1]);
+    }
+
+    #[test]
+    fn a_reader_learned_already_is_read_with_and_its_pictures_are_not_asked_for() {
+        let references = [counter("O0")];
+        let files = pictures(&[(&sample_name("counter", 1), &rings(&[10, 11]))]);
+        let learned = reader(&references[0], from(&files)).expect("learns");
+        let number = screen(CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: false,
+            characters: None,
+        });
+        let from_pictures =
+            build(&number, &mut Readers::new(&references), OFTEN, from(&files)).expect("builds");
+        let mut readers = Readers::new(&references).learned("counter", learned);
+        let built = build(&number, &mut readers, OFTEN, from(&BTreeMap::new()))
+            .expect("read with the reader handed in, with no picture");
+        assert_eq!(built, from_pictures);
+        // A reader for no reference the application has is not kept.
+        let mut unknown =
+            Readers::new(&references).learned("other", DigitReader::new(RED.into(), 10));
+        assert!(matches!(
+            build(&number, &mut unknown, OFTEN, from(&BTreeMap::new())),
+            Err(SavedError::Missing { .. })
+        ));
+        assert!(matches!(
+            unknown.reader("other", from(&files)),
+            Err(SavedError::NoReference { .. })
+        ));
     }
 
     #[test]
