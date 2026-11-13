@@ -11,3 +11,9 @@ exclude_globs = [
     "apps/setup/src-tauri/src/main.rs",
     "apps/setup/src-tauri/src/commands.rs",
 ]
+
+# A mutant's test run can take far longer than the baseline's, because
+# `cargo test --workspace` stops only at the first failing test binary and
+# the crate a mutant breaks may test last; two mutants also share a runner.
+# The auto-set floor of 20 s timed such caught mutants out in CI.
+minimum_test_timeout = 120

@@ -135,7 +135,10 @@ cargo-mutants runs for each mutant, which is quick when `target/` is already
 current. The standards gate starts the lane only after the other Cargo tasks
 finish, so the copy never catches a build half written. Both lanes also run
 every workspace package's tests against each mutant (`--test-workspace=true`),
-because a mutant in one crate can be caught by another crate's tests. Whether
+because a mutant in one crate can be caught by another crate's tests. A
+mutant's run can take several times the baseline's, since `cargo test` stops
+only at the first failing test binary, so `.cargo/mutants.toml` sets a
+minimum test timeout of 120 seconds. Whether
 testing only the mutated package catches the same mutants is still to be
 measured.
 
