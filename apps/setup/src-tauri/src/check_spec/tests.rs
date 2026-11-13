@@ -416,39 +416,103 @@ fn a_number_reads_with_its_saved_reference() {
     assert_eq!(error.to_string(), "That reference is not saved.");
 }
 
+/// Rings in red, 16 pixels tall and each as wide as `widths` says, a blank
+/// column apart.
+fn rings(widths: &[usize]) -> Image {
+    let line = |fill: &str| {
+        let rings: Vec<String> = widths
+            .iter()
+            .map(|width| format!("#{}#", fill.repeat(width.saturating_sub(2))))
+            .collect();
+        rings.join(".")
+    };
+    let (edge, middle) = (line("#"), line("."));
+    let mut rows = vec![middle.as_str(); 16];
+    rows[0] = &edge;
+    rows[15] = &edge;
+    let bgra = rows
+        .concat()
+        .chars()
+        .flat_map(|cell| {
+            if cell == '#' {
+                [0, 0, 255, 0]
+            } else {
+                [40, 40, 40, 0]
+            }
+        })
+        .collect();
+    let size = Size {
+        width: u32::try_from(edge.len()).expect("small"),
+        height: 16,
+    };
+    Image::new(size, bgra).expect("matching length")
+}
+
+/// The saved reference `digits` as a font's: a letter and the digit that
+/// looks like it, a column wider, so each shape matches both and the
+/// letter's own glyph is closer.
+fn lookalikes(reference: &ReferenceRef) -> Result<SavedReference, String> {
+    let mut saved = digits(reference)?;
+    saved.reference.samples[0].text = "O0".to_owned();
+    saved.pictures = vec![rings(&[10, 11])];
+    Ok(saved)
+}
+
 #[test]
 fn a_number_reads_and_saves_the_characters_it_is_told_to() {
-    let reading = |characters: &str| CheckSpec::Number {
+    let reading = |characters: Option<&str>| CheckSpec::Number {
         region: left(),
         reference: digits_ref(),
         whole: false,
-        characters: Some(characters.to_owned()),
+        characters: characters.map(str::to_owned),
     };
-    let built = build(&reading("1%"), session(&[], None)).expect("it knows the 1");
-    let red_square = screenshot().crop(built.region).expect("inside");
+    let font = Session {
+        references: &lookalikes,
+        ..session(&[], None)
+    };
+    let read = |characters| {
+        build(&reading(characters), font)
+            .expect("it knows one")
+            .check
+            .read(&rings(&[10]))
+    };
+    // The letter's shape reads as the letter, which is no number, until
+    // the value reads only digits.
+    assert!(read(None).is_err());
     assert_eq!(
-        built.check.read(&red_square),
-        Ok(Value::Number(Number::new(1.0).expect("finite")))
+        read(Some("0123456789")),
+        Ok(Value::Number(Number::new(0.0).expect("finite")))
     );
     assert_eq!(
-        to_saved(&reading("1%"), session(&[], None), "app", "progress").map(|saved| saved.check),
+        to_saved(&reading(Some("0123456789")), font, "app", "progress").map(|saved| saved.check),
         Ok(CheckDef::Number {
             reference: "digits".to_owned(),
             whole: false,
-            characters: Some("1%".to_owned()),
+            characters: Some("0123456789".to_owned()),
         })
     );
     // Nothing is saved that would read nothing.
-    for none in ["2", ""] {
+    for none in ["2%", ""] {
+        let error = to_saved(&reading(Some(none)), font, "app", "progress")
+            .expect_err("it knows none of them");
         assert_eq!(
-            to_saved(&reading(none), session(&[], None), "app", "progress"),
-            Err(SpecError::NoCharacters),
-            "{none:?}"
+            error,
+            SpecError::NoCharacters {
+                reference: "Digits".to_owned(),
+                characters: none.to_owned(),
+            }
         );
     }
     assert_eq!(
-        SpecError::NoCharacters.to_string(),
-        "The reference knows none of the characters this value reads. Choose characters it knows."
+        build(&reading(Some("2%")), font)
+            .expect_err("it knows none of them")
+            .to_string(),
+        "Digits knows none of the characters this value reads, \"2%\". Teach it one of them, \
+         or change which characters the value reads."
+    );
+    assert_eq!(
+        SpecError::Check(CheckDefError::NoCharacters).to_string(),
+        "Choose at least one character for the value to read."
     );
 }
 

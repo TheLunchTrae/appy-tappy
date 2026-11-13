@@ -106,7 +106,7 @@ export function useReview(
   const reviewSpecRef = useRef(toReview);
   reviewSpecRef.current = toReview;
   // Asks which kept readings the check cannot learn, such as one whose shape
-  // a labeled screenshot or an earlier reading gave to another character.
+  // a box or an earlier reading gave to another character.
   useEffect(() => {
     const toReview = reviewSpecRef.current;
     if (!reviewing || toReview === null) {

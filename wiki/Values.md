@@ -24,37 +24,57 @@ back to the automation with the value picked.
    window the way it does when it runs your automations, and names it. Select
    **Capture this window**. [When the window isn't found](#when-the-window-isnt-found)
    says what to do when it has no window to capture.
-2. **Take screenshots.** Select **Take screenshot**, or press the screenshot
-   shortcut, `F9` at first. The shortcut works while the other application
-   has the keyboard, so you can carry on in it until it shows what you want
-   and press `F9` then. To use other keys, select **Change shortcut** and
-   press them, or change it in [Settings](Settings.md). F1 to F24, Print Screen,
-   and Pause work alone. A letter, a digit, Space, an arrow, Insert, Delete,
-   Home, End, Page Up, or Page Down needs Ctrl, Alt, Shift, or Win with it, so
-   it keeps working everywhere else. Other keys can't be the shortcut. Once
-   the region is drawn, AppyTappy can also take the screenshots for you while
-   you use the application: [record them](#record-screenshots).
-3. **Where to read.** Type a **Value name**, such as `Progress`, and choose
-   the **Check**, one of the four [checks](#checks) below. On a screenshot,
-   drag to draw a box around what to read, as
-   [Draw the region](#draw-the-region) describes. The **X**, **Y**,
-   **Width**, and **Height** fields set it to the exact pixel, counted in the
-   window's own pixels from its top-left corner. Turn on
-   **This content may move** if the value shows in different places inside
-   the window, as [Content that moves](#content-that-moves) describes.
-   **Stays at** says which side of the window the region keeps to as the
-   window changes size, as [Window size](#window-size) describes; it follows
-   the region, so you can leave it alone. Then select
-   **Next: how to read it**.
-4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
-   box under it then shows what AppyTappy reads on the live window, a few
-   times a second. If the check cannot work, such as a bar whose filled and
-   empty colors are the same, it says why there, and so it does when it
-   can't read the live window, such as a number with a character its
-   reference hasn't learned.
-5. **Save.** Select **Save value**. **Back** returns to the first step. To
-   finish it later, select **Save as draft** on either step
+2. **Where to read.** Type a **Value name**, such as `Progress`, and choose
+   the **Check**, one of the four [checks](#checks) below. Then show
+   AppyTappy where the value is, in one of two ways:
+   - **Drag over the live window.** While the window shows what to read, drag
+     a box around it. The drag takes the screenshot as it starts, the
+     picture holds still while you drag, and the region goes on that
+     screenshot.
+   - **Take a screenshot and draw on it.** Select **Take screenshot**, or
+     press the screenshot shortcut, `F9` at first, then drag a box on the
+     screenshot, as [Draw the region](#draw-the-region) describes. The
+     shortcut works while the other application has the keyboard, so you can
+     carry on in it until it shows what you want and press `F9` then.
+
+   The value's place goes on one screenshot, the only one the strip shows in
+   this step. Another screenshot takes its place: the region moves onto it
+   when the window has the same size, and at another size you draw the
+   region again. The **X**, **Y**, **Width**, and **Height** fields set the
+   region to the exact pixel, counted in the window's own pixels from its
+   top-left corner. Turn on **This content may move** if the value shows in
+   different places inside the window, as
+   [Content that moves](#content-that-moves) describes. **Stays at** says
+   which side of the window the region keeps to as the window changes size,
+   as [Window size](#window-size) describes; it follows the region, so you
+   can leave it alone. Then select **Next: characters** for a **Number**, or
+   **Next: how to read it** for the other checks.
+
+3. **Characters,** for a **Number**. Pick the reference the number reads
+   with, make one with **New reference from this region**, or teach one with
+   **Record readings**, as [Checks](#checks) describes. Then select
+   **Next: check and save**.
+4. **Check and save,** for a **Number**, or **How to read it** for the other
+   checks, which set up the check here, as [Checks](#checks) describes, and
+   take more screenshots where the check needs them, such as one for each
+   look of a **State**. AppyTappy can also take those for you while you use
+   the application: [record them](#record-screenshots). The box in this
+   step shows what AppyTappy reads on the live window, a few times a second.
+   If the check cannot work, such as a bar whose filled and empty colors are
+   the same, it says why there, and so it does when it can't read the live
+   window, such as a number with a character its reference hasn't learned.
+5. **Save.** Select **Save value**. **Back** returns to the step before. To
+   finish it later, select **Save as draft** on any step
    ([Drafts](Drafts.md)).
+
+The steps show above the fields, each with its number, and a tick once it has
+what it sets. Select a step to go to it.
+
+To use other keys for the screenshot shortcut, select **Change shortcut** and
+press them, or change it in [Settings](Settings.md). F1 to F24, Print Screen,
+and Pause work alone. A letter, a digit, Space, an arrow, Insert, Delete,
+Home, End, Page Up, or Page Down needs Ctrl, Alt, Shift, or Win with it, so
+it keeps working everywhere else. Other keys can't be the shortcut.
 
 AppyTappy keeps the screenshots until you remove them, select
 **Change window**, or leave the new value, and saves only the part inside the
@@ -98,8 +118,11 @@ draw is what your automations see.
 
 ## Draw the region
 
-The region is the box that a value reads, a reference learns from, or a click
-looks for. You draw it on a screenshot, not on the live window.
+The region is the box that a value reads or a click looks for. You draw it on
+a screenshot. A new value's region can also be dragged over the live window,
+which takes the screenshot as the drag starts, as
+[Make a value](#make-a-value) describes. A reference's
+[boxes](References.md#boxes) are drawn, moved, and resized the same way.
 
 - **Draw.** Drag from one corner of the thing to the opposite corner. The
   drag can start in the empty space around the screenshot, such as above its
@@ -141,9 +164,9 @@ partly full, a light while it is on. Catching them by hand while you use the
 other application is hard, so AppyTappy can watch the value's region and take
 them itself.
 
-1. **Draw the region** on a screenshot, as in **Where to read**.
+1. **Draw the region,** as in **Where to read**.
 2. **Start recording.** Select **Start recording** under
-   **Record screenshots**, in either step. The region turns red while it
+   **Record screenshots**, in the step that sets up the check. The region turns red while it
    records, and the bar shows how long it has recorded.
 3. **Use the application.** Each time the region shows a look that no
    screenshot shows yet, AppyTappy keeps a screenshot of the whole window. A
@@ -185,7 +208,7 @@ What a recording gives each check:
   16, so a small light in a large region may not give a new screenshot when
   it turns on.
 - **Number.** A number learns characters, not looks, so it records readings
-  instead. Under **How to read it**, select **Record readings**. The
+  instead. Under **Characters**, select **Record readings**. The
   reference you picked opens with its
   [recording](References.md#record-readings) already running on the value's
   region. With no reference picked, a new one opens: click the characters on
@@ -291,10 +314,16 @@ chooses them:
 - **Digits and symbols** reads the digits and each character the reference
   knows that is neither a digit nor a letter, such as `%`, `.`, `,`, `:`,
   `/`, `-`, and `+`. It shows while the reference knows such a character. A
-  symbol the reference learns later is not added: choose
-  **Digits and symbols** again to read it.
-- **Choose…** shows each character the reference knows with a box. Turn on
-  the ones the value shows, at least one.
+  symbol the reference learns later is not added: the value then shows
+  **Choose…** with the characters it reads turned on, and choosing
+  **Digits and symbols** again adds the new symbol.
+- **Choose…** shows each character the reference knows with a box, with the
+  ones the value reads so far turned on. Turn on the ones the value shows, at
+  least one.
+
+Picking another reference keeps **All it knows** and **Digits**, takes
+**Digits and symbols** from the new reference's symbols, and keeps of a
+**Choose…** set the characters the new reference knows.
 
 Under the list, the value shows the characters it reads. The choice belongs
 to the value. The reference keeps every character it knows, so another value
@@ -302,12 +331,16 @@ can read more of the same reference, and the References page still lists them
 all.
 
 The value reads as if its reference knew nothing else. A character it does
-not read counts as one the reference has not learned, so the value reads
-nothing while its region shows one before or inside the number. Choose
-**Digits** for a region that shows only a number, and add what else it shows,
-such as the `L`, `v`, and `.` of `Lv.5`. Text after the number, such as the
-`HP` in `37 HP`, needs no characters. To read `87.5%`, the value reads the
-`.` as well as the digits, with **Whole number only** on too.
+not read counts as one the reference has not learned, and the value reads
+nothing while its region shows one before the number, inside it, or right
+after it. So **Digits** reads a region that shows only digits, such as `87`.
+It cannot read `87%`, `1,234`, or `37 HP`: the value has to read the
+character that follows the digits to know that the number ended. Add what
+the region shows: the `%` of `87%`, the `,` of `1,234`, the `L`, `v`, and
+`.` of `Lv.5`. Only text after such a character needs none, such as the `HP`
+in `37% HP` once the value reads the `%`. To read `87.5%`, the value reads
+the digits, the `.`, and the `%`; with **Whole number only** on, the number
+ends at the `.`, so the digits and the `.` are enough.
 
 A [fix](#fix-a-value-at-one-size) that reads with its own reference reads the
 same characters of that reference.
@@ -616,9 +649,11 @@ headed **Fix** and saves with **Save fix**.
    **This content may move** opens on for a value drawn as a reading area.
    A **Color** or **State** check cannot have a reading area, so changing
    the check to one of them turns it off.
-3. **How to read it.** Change the reference, **Whole number only**, the
-   colors, the states' names, or the **Tolerance**. The box under them shows
-   what the value would read on the live window once saved.
+3. **How to read it.** Change the colors, the states' names, or the
+   **Tolerance**. A **Number** has two steps here, as a new one does:
+   **Characters** changes the reference and **Whole number only**, and
+   **Check and save** follows. The box in the last step shows what the value
+   would read on the live window once saved.
 4. Select **Save changes**. **Discard**, or leaving the editor, keeps the
    value as it was saved. Leaving asks first only once you changed
    something. An edit can't be saved as a [draft](Drafts.md): it changes a
@@ -641,7 +676,7 @@ of these:
 - Select **Discard**, then **Fix at this size** on the Values page, to
   change how the value reads at the window's size now only.
 
-The box under **How to read it** shows what the edited value reads at the
+The box in the last step shows what the edited value reads at the
 window's size now: scaled, at its fix, or
 **Not read at 2560 × 1440, the window's size now**, as
 [Window size](#window-size) describes.

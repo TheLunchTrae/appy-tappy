@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Twelve guards drop such stale messages:
+it was about has gone. Fourteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -38,6 +38,11 @@ it was about has gone. Twelve guards drop such stale messages:
 - **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
   from one counter, so text that the text reader sends back for a recording
   that was discarded, or replaced by one of either kind, is dropped.
+- **Search IDs.** Each search for text like a reference's box gets a new
+  `id` from the owner's `search_id`. The owner drops the text reader's text
+  for a search that was replaced or forgotten, answers nothing for a picture
+  asked of one, and rereads nothing for one
+  (`apps/setup/src-tauri/src/owner/found.rs`).
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
 - **Detection keys.** The capture screen keys a bar detection by its region,
@@ -49,6 +54,9 @@ it was about has gone. Twelve guards drop such stale messages:
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
   once the drag is over.
+- **Press numbers.** A drag over the live window numbers each press, which
+  starts taking a screenshot (`apps/setup/src/lib/liveDraw.ts`). A screenshot
+  that arrives with another press's number is dropped.
 - **Check numbers.** The capture screen gives each check or saved value's
   edit it tries on the live window a number, which is in force from when the
   owner took it until the draft changes or it is tried again. An answer to a
@@ -1451,19 +1459,22 @@ stateDiagram-v2
   readings when the reference editor closes.
 - A value saves the window size of the screenshot its region was drawn on
   (`drawnOn` in the UI). A number value reads with one of the application's
-  references, and saving a reference teaches it from its labeled screenshots
-  and the recording. A save or a try whose labeled screenshots, recording, or
-  compared screenshot has another window size is refused, and the error names
+  references, and saving a reference teaches it from its boxes and the
+  recording. A save or a try with a box's screenshot, a recording, or a
+  compared screenshot of another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
 
 ### Region drag
 
 The region surface (`apps/setup/src/components/RegionSurface.tsx`) draws,
 moves, and resizes the region on a screenshot, on the capture screen and on the
-click target screen. Its drag is a pure machine, `step` in
+click target screen. In the reference editor the region is the selected box,
+and the surface outlines the screenshot's other boxes beside it. Its drag is a pure machine, `step` in
 `apps/setup/src/lib/drag.ts`. The surface turns pointer events into the
 machine's events and carries out the effects it answers with: capture the
 pointer, free it, hand over a region, or hand over the snap tool's rough box.
+A region is handed over with how the drag made it, `made`: `drawn` anew, or
+`adjusted` by a move or a resize.
 Every point is in the screenshot's own pixels, so the zoom and the size of the
 window never reach the machine.
 
@@ -1487,6 +1498,11 @@ stateDiagram-v2
 - **Idle.** Only a press of the main button with the box or the snap tool
   starts a drag, and it captures the pointer. A click that picks a color or
   selects with the click tool never enters the machine.
+- **Other boxes.** A press with the box tool on another box, away from the
+  region and its corners, selects that box before the machine hears of the
+  press, and the surface gives the machine that box as the region. The press
+  therefore starts **Moving** that box, and a press away from every box
+  starts **Drawing**.
 - **Slop.** In every state, nothing changes until the pointer has traveled 3
   pixels of the view from the press. A click therefore draws, moves, and
   resizes nothing, so it leaves a region typed to the exact pixel as it is.
@@ -1509,8 +1525,13 @@ stateDiagram-v2
   on the screenshot the pointer is, and the drag follows as for a move.
 - **Release** carries where the pointer was let go, which the last move may
   not have reached. The drag follows to there, ends, frees the pointer, and
-  hands over what it made: the region, or the rough box. A drag that drew no
-  box, or left the region where it was, hands over nothing.
+  hands over what it made: the region, or the rough box. **Drawing** hands
+  its region over as `drawn`, and **Moving** and **Resizing** as `adjusted`.
+  The reference editor changes the selected box for an adjusted region and
+  adds a box, which it selects, for a drawn one (`useBoxes` in
+  `apps/setup/src/lib/useBoxes.ts`); every other surface takes either as the
+  region. A drag that drew no box, or left the region where it was, hands
+  over nothing.
 - **A move with the main button up** ends the drag the same way, but with the
   box as it last was. No release event follows a button that comes up while
   another is held, and where it came up is not known.
@@ -1533,6 +1554,133 @@ The zoom of the view (`apps/setup/src/components/ZoomView.tsx`) is one number
 kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
 the live view shows or a screenshot of another size does. It changes only the
 size the screenshot shows at, so a drag goes on through a zoom or a scroll.
+
+### Live draw
+
+While a value has no place yet, the capture screen's first step lays a region
+surface over the live window, so the user can drag where the value shows
+without taking a screenshot first. The press takes the screenshot the region
+goes on. `liveDraw` in `apps/setup/src/lib/liveDraw.ts` is the pure
+`(state, event)` transition, and `useLiveDraw` there holds the state, numbers
+the presses, and takes the screenshot.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Pressed: press, which starts taking a screenshot
+    Pressed --> Pressed: the drag draws a box
+    Pressed --> Pressed: release, while the screenshot is still being taken
+    Pressed --> Pressed: the screenshot arrives or fails, before the release
+    Pressed --> Idle: the release and the screenshot have both come, which places the region
+```
+
+- **Idle.** The live window plays. A press of the main button on the surface
+  moves to **Pressed** with a new press number and asks for a screenshot,
+  which is listed but not shown, so the live view stays under the drag.
+- **Pressed.** The live view holds still (`frozen`). The state keeps the box
+  the [region drag](#region-drag) hands over, in the pixels of the live
+  frame, whether the pointer was let go, and the screenshot: being taken,
+  arrived, or failed. A box that arrives after the release is ignored. A
+  second press changes nothing.
+- **Placed.** Once the pointer is let go and the screenshot has arrived or
+  failed, in either order, the machine returns to **Idle** and emits what the
+  press placed: the screenshot and the box. The capture screen then shows the
+  screenshot and puts the box on it, scaled from the live frame's size to
+  the screenshot's (`scaleRect`).
+- **A click, or a drag that drew no box,** places the screenshot with no box.
+  The screenshot shows, and the user draws on it.
+- **Failures.** A screenshot that cannot be taken arrives as none. The
+  machine still returns to **Idle** on the release, nothing is placed, and
+  the screenshots' own error says why. A drag the region surface interrupts
+  hands over no box. The surface reports the pointer as let go when it is
+  released, when the browser cancels it, and when the surface loses its
+  capture. If none of those reaches the surface, the press stays under way
+  with the live view held, and the next release on the surface ends it.
+- **Stale guard.** A screenshot carries the number of the press that took
+  it. One that arrives for another press than the one under way is dropped,
+  and so is one that arrives once its press already has a screenshot.
+
+The surface shows only while the first step sets a new value's place, the
+live view shows, the value has no region, no recording runs, no review is
+open, and no color is being picked (`drawsLive` in
+`apps/setup/src/components/Capture.tsx`).
+
+### Value steps
+
+The capture screen sets a value up in steps, one field `step` of
+`CaptureSetup` (`apps/setup/src/lib/captureDraft.ts`): `where`, `how`, and
+`check`. `stepTabs` in `apps/setup/src/components/capture/Stepper.tsx` names
+them.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Where
+    Where --> How: Next, or the step's tab
+    How --> Check: Next, or the step's tab, for a number
+    How --> Where: Back, or the step's tab
+    Check --> How: Back, or the step's tab
+    Check --> Where: the step's tab
+```
+
+- **Where** (**Where to read**) names the value, picks its check, and sets
+  its place on one screenshot, by a [live draw](#live-draw) or on a
+  screenshot the user takes. The strip lists only that screenshot. A new
+  screenshot becomes the one the place is on: the region moves onto it when
+  it has the size the region is drawn at, and is cleared when it has
+  another (`onPicture` in `apps/setup/src/lib/check.ts`). This step records
+  nothing.
+- **How** is **Characters** for a number that is not a fix: it picks the
+  reference, opens the reference editor, or records readings. For every
+  other value it is **How to read it**: the check's fields, the reading on
+  the live window, and the save.
+- **Check** (**Check and save**) exists for a number that is not a fix: the
+  reading on the live window and the save. A value of another kind whose
+  `step` is `check`, such as after its check changed, shows **How**
+  (`shownStep`).
+- A tab is ticked once its step has what it sets: a name and a region for
+  **Where**, and a reference for **Characters**. No step blocks the next;
+  the save button waits until the whole value can be saved.
+- While the reference editor is open, the tabs show **Characters** as the
+  current step and are disabled until the reference is saved or discarded.
+- A draft keeps `step`, so finishing a draft opens on the step it was saved
+  on.
+
+### Reference boxes
+
+A reference being taught learns from `Draft.boxes`
+(`apps/setup/src/lib/boxes.ts`): each box has an ID no other box of the draft
+has, the screenshot it is on, its region, and its text. `useBoxes` in
+`apps/setup/src/lib/useBoxes.ts` keeps the ID of the selected box beside
+them.
+
+```mermaid
+stateDiagram-v2
+    [*] --> NoneSelected
+    NoneSelected --> Selected: draw a box, press a box, or select one in the list
+    Selected --> Selected: select another box, or move, resize, or retype this one
+    Selected --> NoneSelected: delete the selected box
+    Selected --> NoneSelected: the reference editor opens or closes
+```
+
+- **Selected.** The stage draws the selected box as the region surface's
+  region while the screenshot shown is the one the box is on, and the other
+  boxes there as outlines. Selecting a box in the list shows its screenshot.
+  **Find more like it** samples the selected box, and the matching pixels
+  preview counts the pixels in it.
+- **A selected box on another screenshot** than the one shown stays
+  selected, but the stage has no region: a drag there draws a new box.
+- **A deleted box's ID** selects nothing (`boxOf`), so a selection that
+  outlives its box reads as **NoneSelected**.
+- A box with no text teaches nothing (`boxLabels`). Added
+  [found text](#found-text) becomes boxes with text.
+- The reference reads, and records, at the value's region when it is taught
+  for a value, or else at its first box (`readingOf` in
+  `apps/setup/src/lib/check.ts`). Every box must be on a screenshot of that
+  one's size; on a screenshot of another size the stage refuses a new box
+  and says which size they go on (`boxBlocked`). While the editor is open,
+  the stage shows the boxes and not the value's region.
+- Opening and closing the reference editor drops the boxes (`toReference`,
+  `fromReference`); a draft of a reference keeps them.
 
 ### Recording looks
 
@@ -1766,45 +1914,86 @@ refuses an edit that names a reading area for a Color or a State check.
 The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
 loads its model on the first line it gets, then reads each recorded reading and
 each find of a search, and sends the text back with the recording's or the
-search's ID and the line's index (`ocr::Source`). It skips a queued job of a
-recording or search older than the newest of its kind. The owner drops text
+search's ID and the line's index (`ocr::Source`). It reads a find again when
+the user asks for a [reread](#found-text), as a new job of the same search.
+It skips a queued job of a recording or search older than the newest of its
+kind. The owner drops text
 for a recording or search that is gone. If the thread has stopped, the owner
 marks the reading or find as failed and asks the user to type it.
 
 ### Found text
 
-A search for text like a reference's first sample
+A search for text like the selected box of a reference
 (`apps/setup/src-tauri/src/owner/found.rs`) is `None` or a `Found` with its ID,
 the screenshot it searched, and each find's region, pixels, and text.
 
 ```mermaid
 stateDiagram-v2
     [*] --> None
-    None --> Found: Find more like it finds ink in the region
+    None --> Found: Find more like it finds ink in the box
     Found --> Found: Find more like it again replaces it, with a new ID
-    Found --> None: Find more like it fails, such as for a region with no ink
+    Found --> Found: Reread sends finds to the text reader again
+    Found --> None: Find more like it fails, such as for a box with no ink
     Found --> None: Add or Not these
     Found --> None: Change window, a window is picked, the editor closes, or the flow closes
+```
+
+Each find's text is a machine of its own:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: the find's ink goes to the text reader
+    [*] --> Failed: the find has no ink, or the text reader has stopped
+    Pending --> Read: the text reader answers for the search's ID
+    Pending --> Failed: the text reader answers that it could not read it
+    Read --> Pending: Reread names the find
+    Failed --> Pending: Reread names the find
+    Read --> Failed: Reread names the find, and it shows no ink in the color now
 ```
 
 - Each find starts `Pending` and turns `Read` or `Failed` when the text
   reader answers for the search's ID. The UI polls only while one is pending.
   Reads queued for a forgotten search still run; the owner drops their text,
   and a newer search's jobs make the reader skip the rest.
-- The UI keeps each find's box, its text, and whether the user typed it
-  (`useFound`) until a new search or a dismissal. Answers to a search the user
+- **Reread** (`reread_found`) names the search by its ID and the finds by
+  index. The owner cuts each named find's ink again from the pixels it kept,
+  with the characters' color and tolerance the draft has now, and sends it
+  to the text reader, so the find is `Pending` again. A find with no ink in
+  that color is `Failed`, and so is every find once the reader has stopped.
+  A find that is still `Pending` is left waiting, so one read at a time is
+  out for a find, and the reader's next answer for it is for its newest
+  read. A reread that names a search that was replaced or forgotten reads
+  nothing and answers nothing. The reader reads the same ink as the same
+  text, so a reread changes a find's text only after the color or the
+  tolerance changed.
+- The UI keeps each find's tick, its text, and whether the user typed it
+  (`useFound`) until a new search or a dismissal; a reread keeps them. A find
+  starts unticked. It is listed when its text may show only characters the
+  reference needs, a lookalike digit counted as its digit (`fitsNeeds`), or
+  while it is being read or the user typed it. Answers to a search the user
   moved on from are ignored by the UI's turn and, for pictures, by the
-  search's ID. A kept find is flagged without asking the owner when it has no
-  text, or when the reader's guess has a letter while the reference has
-  learned none (`foundRows`), and otherwise when the reference cannot learn it after the
-  draft's own labels (`found_problems`). **Add** waits until no kept find is
+  search's ID. A reread also starts a new turn, so the search's state as it
+  was read before the reread does not put the finds back and end the wait for
+  their text.
+- A ticked find is flagged without asking the owner when it has no text, or
+  when the reader's guess has a letter while the reference has learned none
+  (`foundRows`), and otherwise when the reference cannot learn it after the
+  draft's own boxes (`found_problems`). **Add** waits until no ticked find is
   pending or flagged and the owner has answered for the current text.
-- **Add** appends the kept finds to the draft's `found` labels, each with its
-  own region, and forgets the search. A later search of the same screenshot
-  is given the added regions, and the finder leaves out runs that meet them
-  before it caps the list, so it offers the rest. **Remove found text** drops
-  the draft's found labels, and so does opening or closing the reference
-  editor, with its other labels (`toReference`, `fromReference`).
+- **Deselect flagged** unticks every flagged find (`withoutFlagged`), which
+  leaves **Add** the rest. It shows while a ticked find is flagged.
+- The UI offers **Reread** for the listed finds the reader could not read
+  and the flagged ones whose text is the reader's guess (`rereadable`). Text
+  the user typed is never read again.
+- **Add** appends the ticked finds to the draft's boxes
+  ([Reference boxes](#reference-boxes)), each with its own region and text,
+  and forgets the search. A later search of the same screenshot is given the
+  regions of the boxes there, and the finder leaves out runs that meet them
+  before it caps the list, so it offers the rest.
+- **Failures.** A search that fails forgets the search before it and says
+  why. A reread that fails leaves the finds as they were and says why above
+  the list. A failed check of which finds the reference can learn flags
+  none, since the save learns the text again.
 
 ### Bar detection
 

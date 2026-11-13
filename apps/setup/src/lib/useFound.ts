@@ -3,7 +3,7 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FoundView, ReferenceRef } from './bindings.ts';
-import { errorText, findLike, forgetFound, foundPicture, foundProblems, foundState } from './api.ts';
+import { errorText, findLike, forgetFound, foundPicture, foundProblems, foundState, rereadFound } from './api.ts';
 import { type Box, boxesOn, withBoxes } from './boxes.ts';
 import { type Draft, taughtSpec } from './check.ts';
 import {
@@ -16,7 +16,9 @@ import {
   foundRows,
   keepAll,
   keptFound,
+  rereadable,
   rowFlags,
+  withoutFlagged,
 } from './found.ts';
 import type { Picture } from './pixels.ts';
 import { background, useRepeat } from './repeat.ts';
@@ -28,19 +30,8 @@ const CHECK_DELAY_MS = 200;
 /** The widest a find is asked for: text is small, and the panel shows it a little larger. */
 const CROP_WIDTH = 320;
 
-/**
- * The search for text like a box of the reference `draft` teaches, which adds to `reference`, if any: its finds with
- * the user's edits, their pictures, and which ones the reference cannot learn. `learned` is every text the reference
- * learns from already, and `needs` the characters it needs, which the finds listed may only show. Leaving the
- * component that uses it forgets the search.
- */
-export function useFound(
-  draft: Draft,
-  setDraft: Dispatch<SetStateAction<Draft>>,
-  reference: ReferenceRef | null,
-  learned: readonly string[],
-  needs: readonly string[],
-): {
+/** The search for more text like a box, as {@link useFound} runs it. */
+export interface Finder {
   readonly view: FoundView | null;
   /** The finds, with the user's edits. */
   readonly rows: readonly FoundRow[];
@@ -57,16 +48,37 @@ export function useFound(
   readonly edit: (index: number, entry: FoundEntry) => void;
   /** Ticks every listed find, or with `keep` false leaves every one out. */
   readonly keepAll: (keep: boolean) => void;
+  /** Leaves out every ticked find that is flagged. */
+  readonly leaveOutFlagged: () => void;
+  /**
+   * Has the text reader read again, with the characters' color as the draft has it now, the finds it could not read
+   * and the flagged ones whose text is its guess. Ticks and typed text stay.
+   */
+  readonly reread: () => Promise<void>;
   /** Adds the kept finds to the draft and forgets the search. */
   readonly add: () => void;
   /** Forgets the search without adding any of it. */
   readonly dismiss: () => void;
-} {
+}
+
+/**
+ * The search for text like a box of the reference `draft` teaches, which adds to `reference`, if any: its finds with
+ * the user's edits, their pictures, and which ones the reference cannot learn. `learned` is every text the reference
+ * learns from already, and `needs` the characters it needs, which the finds listed may only show. Leaving the
+ * component that uses it forgets the search.
+ */
+export function useFound(
+  draft: Draft,
+  setDraft: Dispatch<SetStateAction<Draft>>,
+  reference: ReferenceRef | null,
+  learned: readonly string[],
+  needs: readonly string[],
+): Finder {
   const [view, setView] = useState<FoundView | null>(null);
   const [edits, setEdits] = useState<ReadonlyMap<number, FoundEntry>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
-  // Bumped by each search and dismissal, so an answer sent before one is ignored.
+  // Bumped by each search, reread and dismissal, so an answer sent before one is ignored.
   const turn = useRef(0);
   const [crops, setCrops] = useState<{ readonly id: number; readonly pictures: ReadonlyMap<number, Picture> }>({
     id: -1,
@@ -220,6 +232,29 @@ export function useFound(
     },
     keepAll: (keep) => {
       setEdits((current) => new Map([...current, ...keepAll(rows, keep)]));
+    },
+    leaveOutFlagged: () => {
+      setEdits((current) => new Map([...current, ...withoutFlagged(rows, flags)]));
+    },
+    reread: async () => {
+      const again = rereadable(rows, flags);
+      if (view === null || draft.ink === null || again.length === 0) {
+        return;
+      }
+      // The search's state read before this would show the finds as they were, and end the wait for their text.
+      turn.current += 1;
+      const sent = turn.current;
+      try {
+        const result = await rereadFound(view.id, again, draft.ink, draft.tolerance);
+        if (sent === turn.current && result !== null) {
+          setView(result);
+          setError(null);
+        }
+      } catch (error: unknown) {
+        if (sent === turn.current) {
+          setError(errorText(error));
+        }
+      }
     },
     add: () => {
       if (view === null) {

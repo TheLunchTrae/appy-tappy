@@ -60,7 +60,8 @@ export function readChoice(characters: readonly string[] | null, known: readonly
 /**
  * The set a value reads once `choice` is picked, or null for every character its reference knows. Digits is all ten,
  * learned or not, so a digit the reference learns later is read too. Digits and symbols adds the symbols the
- * reference knows now. Choose starts from `current`, what the value reads so far, to change one by one.
+ * reference knows now. Choose starts from the characters of `current`, what the value reads so far, that the
+ * reference knows, to change one by one.
  */
 export function withReadChoice(
   choice: ReadChoice,
@@ -75,8 +76,21 @@ export function withReadChoice(
     case 'digitsAndSymbols':
       return digitsAndSymbols(known);
     case 'choose':
-      return current ?? known;
+      return current === null ? known : known.filter((character) => current.includes(character));
   }
+}
+
+/**
+ * What a value that read `characters` of a reference that knows `from` reads once it reads with one that knows `to`
+ * instead, so its choice stays the one that was picked: all of it and the digits as they are, the digits and the new
+ * reference's symbols, or of a chosen set the characters the new reference knows.
+ */
+export function forReference(
+  characters: readonly string[] | null,
+  from: readonly string[],
+  to: readonly string[],
+): readonly string[] | null {
+  return withReadChoice(readChoice(characters, from), to, characters);
 }
 
 /** `characters` with `character` when `on`, or without it. */
