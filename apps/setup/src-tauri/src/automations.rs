@@ -13,6 +13,8 @@
 //! [`unique_ids`] gives each automation one the page can go by.
 
 mod problem;
+#[cfg(test)]
+mod test_support;
 mod uses;
 
 use appytappy_config::action::KeyChord;
@@ -236,115 +238,14 @@ pub(crate) fn delete(stores: &Stores, id: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
-    use appytappy_config::app_file::{
-        AntiCheatDef, AppFile, CheckDef, ColorDef, FORMAT, OriginDef, RegionDef, ScreenDef,
-        SizeChangesDef, SizeDef, ValueDef, WindowDef,
-    };
-    use appytappy_config::automation_file::{
-        ActionDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, ComparisonDef,
-        FORMAT as AUTOMATIONS_FORMAT, MediaCommandDef, PointDef, TargetDef, WhenDef,
-    };
-    use appytappy_config::click::InvalidClick;
-    use appytappy_config::window_match::WindowFacts;
-    use appytappy_sources::screen::{Image, Size};
+    use appytappy_config::automation_file::FORMAT as AUTOMATIONS_FORMAT;
 
+    use super::test_support::{automations_file, clicking, draft, png, stores};
     use super::*;
     use crate::drafts::{DraftDef, DraftKind};
-    use crate::stores;
-
-    /// Fresh stores for one test, holding the application `example` with a
-    /// yes-or-no value `icon_visible` and a number value `health`.
-    fn stores(name: &str) -> (Stores, PathBuf) {
-        let (stores, folder) = stores::scratch(&format!("automations-{name}"));
-        let white = ColorDef {
-            red: 255,
-            green: 255,
-            blue: 255,
-        };
-        let value = |id: &str, name: &str, check| ValueDef {
-            id: id.to_owned(),
-            name: name.to_owned(),
-            origin: OriginDef::ByHand,
-            screen: ScreenDef {
-                window_size: SizeDef {
-                    width: 100,
-                    height: 50,
-                },
-                region: RegionDef {
-                    x: 0,
-                    y: 0,
-                    width: 10,
-                    height: 10,
-                },
-                check,
-                pin: None,
-                reading_area: false,
-                fixes: Vec::new(),
-            },
-        };
-        let app = AppFile {
-            format: FORMAT,
-            name: "Example App".to_owned(),
-            window: WindowDef::exact(WindowFacts {
-                title: "Example App",
-                class: "ExampleWindow",
-                executable: "Example.exe",
-            }),
-            size_changes: SizeChangesDef::Often,
-            anti_cheat: AntiCheatDef::Unknown,
-            overlay: None,
-            checked: None,
-            references: Vec::new(),
-            values: vec![
-                value(
-                    "icon_visible",
-                    "Icon visible",
-                    CheckDef::Color {
-                        color: white,
-                        tolerance: 10,
-                    },
-                ),
-                value(
-                    "health",
-                    "Health",
-                    CheckDef::BarFill {
-                        filled: white,
-                        empty: ColorDef {
-                            red: 0,
-                            green: 0,
-                            blue: 0,
-                        },
-                    },
-                ),
-            ],
-        };
-        stores.apps.save("example", &app, &[]).expect("saves");
-        (stores, folder)
-    }
-
-    fn draft(name: &str) -> AutomationDef {
-        AutomationDef {
-            id: String::new(),
-            name: name.to_owned(),
-            enabled: true,
-            when: WhenDef {
-                app: "example".to_owned(),
-                value: "icon_visible".to_owned(),
-                is: ComparisonDef::Equals,
-                target: TargetDef::Flag(true),
-            },
-            actions: vec![ActionDef::Media {
-                command: MediaCommandDef::Pause,
-                app: Some("Player.exe".to_owned()),
-            }],
-            undo: true,
-            cooldown_ms: 0,
-        }
-    }
 
     fn ids(stores: &Stores) -> Vec<String> {
         list(stores)
@@ -423,87 +324,6 @@ mod tests {
     }
 
     #[test]
-    fn listing_explains_automations_whose_value_went_away() {
-        let (stores, folder) = stores("problems");
-        save(&stores, None, draft("Pause music")).expect("saves");
-        let mut app = stores.apps.load().expect("loads")[0]
-            .file
-            .clone()
-            .expect("good");
-        // A hand edit that leaves the file readable but the value not, as
-        // the runtime reads it, shows on the automation that watches it.
-        let mut broken = app.clone();
-        for value in &mut broken.values {
-            value.screen.region.width = 0;
-        }
-        stores.apps.save("example", &broken, &[]).expect("saves");
-        assert!(
-            list(&stores).expect("lists")[0]
-                .problem
-                .as_deref()
-                .is_some_and(|problem| problem.starts_with("Icon visible cannot be read: ")),
-            "{:?}",
-            list(&stores)
-        );
-        app.values.retain(|value| value.id != "icon_visible");
-        stores.apps.save("example", &app, &[]).expect("saves");
-        assert_eq!(
-            list(&stores).expect("lists")[0].problem.as_deref(),
-            Some("Example App no longer has the value it watches.")
-        );
-        set_enabled(&stores, "pause_music", false).expect("turns off");
-        assert_eq!(
-            set_enabled(&stores, "pause_music", true),
-            Err(
-                "Pause music cannot run until it is fixed. Example App no longer has the value \
-                 it watches."
-                    .to_owned()
-            )
-        );
-        assert!(!list(&stores).expect("lists")[0].automation.enabled);
-        fs::write(stores.apps.folder("example").join("app.json"), b"{").expect("breaks");
-        let error = stores.apps.load().expect("loads")[0]
-            .file
-            .clone()
-            .expect_err("broken");
-        assert_eq!(
-            list(&stores).expect("lists")[0].problem,
-            Some(format!(
-                "Its application's app.json, in the example folder, cannot be read: {error}."
-            ))
-        );
-        fs::remove_dir_all(folder).expect("clean up");
-    }
-
-    #[test]
-    fn only_automations_that_can_run_watch_their_values() {
-        let (stores, folder) = stores("watched");
-        let none = BTreeSet::new();
-        assert_eq!(watched_values(&stores, "example"), Ok(none.clone()));
-        save(&stores, None, draft("Pause music")).expect("saves");
-        let watched = watched_values(&stores, "example").expect("reads");
-        assert_eq!(watched, BTreeSet::from(["icon_visible".to_owned()]));
-        assert_eq!(watched_values(&stores, "other"), Ok(none.clone()));
-        // A value the runtime cannot build stops the automation, so the
-        // runtime reads nothing for it.
-        let app = stores.apps.load().expect("loads")[0]
-            .file
-            .clone()
-            .expect("good");
-        let mut broken = app.clone();
-        for value in &mut broken.values {
-            value.screen.region.width = 0;
-        }
-        stores.apps.save("example", &broken, &[]).expect("saves");
-        assert_eq!(watched_values(&stores, "example"), Ok(none.clone()));
-        stores.apps.save("example", &app, &[]).expect("saves");
-        assert_eq!(watched_values(&stores, "example"), Ok(watched));
-        set_enabled(&stores, "pause_music", false).expect("turns off");
-        assert_eq!(watched_values(&stores, "example"), Ok(none));
-        fs::remove_dir_all(folder).expect("clean up");
-    }
-
-    #[test]
     fn a_broken_automation_is_listed_and_can_be_deleted() {
         let (stores, folder) = stores("broken");
         save(&stores, None, draft("Pause music")).expect("saves");
@@ -529,11 +349,6 @@ mod tests {
         delete(&stores, "broken").expect("removes");
         assert_eq!(ids(&stores), ["pause_music"]);
         fs::remove_dir_all(folder).expect("clean up");
-    }
-
-    /// The automations' file of the stores in `folder`.
-    fn automations_file(folder: &Path) -> PathBuf {
-        folder.join("AppyTappy").join("automations.json")
     }
 
     /// Writes `automations` as the whole file, as a hand edit could.
@@ -662,82 +477,6 @@ mod tests {
     }
 
     #[test]
-    fn a_value_in_use_names_its_automations() {
-        let (stores, folder) = stores("in-use");
-        let unused =
-            |stores: &Stores| check_unused(stores, "example", "icon_visible", "Icon visible");
-        assert_eq!(unused(&stores), Ok(()));
-        save(&stores, None, draft("Pause music")).expect("saves");
-        assert_eq!(
-            unused(&stores),
-            Err("Pause music uses Icon visible. Change or delete it first.".to_owned())
-        );
-        save(&stores, None, draft("Lower volume")).expect("saves");
-        save(&stores, None, draft("Skip ahead")).expect("saves");
-        assert_eq!(
-            unused(&stores),
-            Err(
-                "Pause music, Lower volume and Skip ahead use Icon visible. Change or delete them \
-                 first."
-                    .to_owned()
-            )
-        );
-        assert_eq!(check_unused(&stores, "example", "health", "Health"), Ok(()));
-        fs::write(automations_file(&folder), b"{").expect("breaks");
-        assert!(
-            unused(&stores)
-                .is_err_and(|error| error.starts_with("AppyTappy cannot read your automations"))
-        );
-        assert!(list(&stores).is_err());
-        assert!(save(&stores, None, draft("New")).is_err());
-        fs::remove_dir_all(folder).expect("clean up");
-    }
-
-    /// A draft that clicks on the click picture `image` in `example`, whose
-    /// anti-cheat is set to none so it can click.
-    fn clicking(stores: &Stores, name: &str, image: &str) -> AutomationDef {
-        let mut app = stores.app("example").expect("saved").file;
-        app.anti_cheat = AntiCheatDef::None;
-        stores.apps.save("example", &app, &[]).expect("saves");
-        let mut clicking = draft(name);
-        clicking.undo = false;
-        clicking.actions = vec![ActionDef::Click {
-            app: "example".to_owned(),
-            button: ClickButtonDef::Left,
-            delivery: ClickDeliveryDef::Cursor,
-            return_focus: true,
-            at: ClickAtDef::Picture {
-                image: image.to_owned(),
-                window_size: SizeDef {
-                    width: 100,
-                    height: 50,
-                },
-                search: RegionDef {
-                    x: 0,
-                    y: 0,
-                    width: 20,
-                    height: 20,
-                },
-                press: PointDef { x: 1, y: 1 },
-                tolerance: 20,
-            },
-        }];
-        clicking
-    }
-
-    /// A 4 by 4 picture's PNG bytes, every pixel `shade`.
-    fn png(shade: u8) -> Vec<u8> {
-        let size = Size {
-            width: 4,
-            height: 4,
-        };
-        Image::new(size, [shade, shade, shade, 255].repeat(16))
-            .expect("fits")
-            .encode_png()
-            .expect("encodes")
-    }
-
-    #[test]
     fn clicks_keep_their_pictures_and_the_rest_go() {
         let (stores, folder) = stores("click-pictures");
         assert_eq!(
@@ -840,122 +579,6 @@ mod tests {
         assert!(forget_unsaved_pictures(&stores).is_err());
         save(&stores, None, clicking(&stores, "Another", &kept)).expect("saves");
         assert!(stores.automations.picture(&waiting).is_ok());
-        fs::remove_dir_all(folder).expect("clean up");
-    }
-
-    #[test]
-    fn a_click_s_picture_fits_its_area_and_holds_its_press() {
-        let (stores, folder) = stores("click-fit");
-        let picture = stores.automations.add_picture(&png(5)).expect("adds");
-        let unreadable = stores.automations.add_picture(b"not a png").expect("adds");
-        assert_eq!(
-            save(&stores, None, clicking(&stores, "Unreadable", &unreadable)),
-            Err("The picture action 1 clicks on is gone. Set up its target again.".to_owned())
-        );
-        let mut small = clicking(&stores, "Small", &picture);
-        let mut off = clicking(&stores, "Off", &picture);
-        if let [
-            ActionDef::Click {
-                at: ClickAtDef::Picture { search, .. },
-                ..
-            },
-        ] = small.actions.as_mut_slice()
-        {
-            search.width = 3;
-        }
-        if let [
-            ActionDef::Click {
-                at: ClickAtDef::Picture { press, .. },
-                ..
-            },
-        ] = off.actions.as_mut_slice()
-        {
-            press.x = 4;
-        }
-        assert_eq!(
-            save(&stores, None, small),
-            Err(format!(
-                "Action 1's target cannot be used: {}. Set up its target again.",
-                InvalidClick::LargePicture
-            ))
-        );
-        assert_eq!(
-            save(&stores, None, off),
-            Err(format!(
-                "Action 1's target cannot be used: {}. Set up its target again.",
-                InvalidClick::PressOutside
-            ))
-        );
-        // A picture removed outside the app shows on the list, and the
-        // automation cannot be turned back on, as the runtime would refuse it.
-        let mut kept = clicking(&stores, "Kept", &picture);
-        kept.enabled = false;
-        let id = save(&stores, None, kept).expect("saves");
-        fs::remove_file(stores.automations.pictures().join(&picture)).expect("removes");
-        let gone = "The picture action 1 clicks on is gone. Set up its target again.".to_owned();
-        let listed = list(&stores).expect("lists");
-        assert_eq!(
-            listed.first().and_then(|summary| summary.problem.clone()),
-            Some(gone.clone())
-        );
-        assert_eq!(
-            set_enabled(&stores, &id, true),
-            Err(format!("Kept cannot run until it is fixed. {gone}"))
-        );
-        fs::remove_dir_all(folder).expect("clean up");
-    }
-
-    #[test]
-    fn an_application_clicked_in_whose_file_does_not_read_says_why() {
-        let (stores, folder) = stores("clicked-in-broken");
-        let picture = stores.automations.add_picture(&png(4)).expect("adds");
-        let mut clicks = clicking(&stores, "Click", &picture);
-        if let [ActionDef::Click { app, .. }] = clicks.actions.as_mut_slice() {
-            "target".clone_into(app);
-        }
-        let target = stores.app("example").expect("saved").file;
-        stores.apps.save("target", &target, &[]).expect("saves");
-        let mut file = load(&stores).expect("loads");
-        file.automations = vec![clicks];
-        stores.automations.save(&file).expect("saves");
-        assert_eq!(list(&stores).expect("lists")[0].problem, None);
-        fs::write(stores.apps.folder("target").join("app.json"), b"{").expect("breaks");
-        let error = stores
-            .apps
-            .load()
-            .expect("loads")
-            .into_iter()
-            .find(|app| app.id == "target")
-            .expect("listed")
-            .file
-            .expect_err("broken");
-        assert_eq!(
-            list(&stores).expect("lists")[0].problem,
-            Some(format!(
-                "The app.json of the application it clicks in, in the target folder, cannot be \
-                 read: {error}."
-            ))
-        );
-        fs::remove_dir_all(folder).expect("clean up");
-    }
-
-    #[test]
-    fn an_application_clicked_in_names_its_automations() {
-        let (stores, folder) = stores("clicked-in");
-        let picture = stores.automations.add_picture(&png(4)).expect("adds");
-        let mut clicks = clicking(&stores, "Click", &picture);
-        clicks.when.app = "other".to_owned();
-        let mut file = load(&stores).expect("loads");
-        file.automations.push(clicks);
-        stores.automations.save(&file).expect("saves");
-        assert_eq!(
-            check_app_unused(&stores, "example", "Example App"),
-            Err(
-                "Click uses Example App as the application it clicks in. Change or delete it \
-                 first."
-                    .to_owned()
-            )
-        );
         fs::remove_dir_all(folder).expect("clean up");
     }
 }
