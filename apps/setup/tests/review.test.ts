@@ -1,15 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { RecordedReading } from '../src/lib/bindings.ts';
+import * as review from '../src/lib/review.ts';
 import {
   addedShapes,
   additions,
   checkedReadings,
   clock,
-  decide,
   disagreements,
   editAll,
-  entries,
   flaggedReadings,
   keepBlocked,
   keptAdditions,
@@ -19,10 +18,40 @@ import {
   seen,
   sighted,
   startEntry,
-  tileNote,
-  untaught,
+  unrelated,
   untaughtNote,
 } from '../src/lib/review.ts';
+
+// Most tests are of a reference that does not say which characters it needs, with nothing decided and no clash.
+const NO_NEEDS: readonly string[] = [];
+type Entries = ReadonlyMap<number, review.ReviewEntry>;
+const decide = (
+  decided: Entries,
+  readings: readonly RecordedReading[],
+  edits: Entries,
+  kept: ReadonlyMap<number, string>,
+  needs = NO_NEEDS,
+) => review.decide(decided, readings, edits, kept, needs);
+const entries = (
+  readings: readonly RecordedReading[],
+  edits: Entries,
+  kept: ReadonlyMap<number, string>,
+  decided: Entries = new Map(),
+  needs = NO_NEEDS,
+) => review.entries(readings, edits, kept, decided, needs);
+const untaught = (
+  readings: readonly RecordedReading[],
+  all: readonly review.ReviewEntry[],
+  adds: readonly (readonly number[])[],
+  needs = NO_NEEDS,
+) => review.untaught(readings, all, adds, needs);
+const tileNote = (
+  reading: RecordedReading,
+  entry: review.ReviewEntry,
+  problem: string | undefined,
+  clash?: string,
+  needs = NO_NEEDS,
+) => review.tileNote(reading, entry, problem, clash, needs);
 
 /** A shape for each character, the same for the same character, as when the reader read every reading right. */
 const shapesOf = (text: string): number[] => Array.from(text.trim(), (character) => character.codePointAt(0) ?? 0);
@@ -281,6 +310,42 @@ describe('review entries', () => {
       { reading: 0, text: '1' },
       { reading: 3, text: '4' },
     ]);
+  });
+});
+
+describe("text that is not the reference's", () => {
+  const digits = Array.from('0123456789');
+  const readings = [read('12'), read('MENU'), read('PLAY 1'), read('SOS')];
+
+  test('has no needed character and is not a needed text read as its lookalikes', () => {
+    expect(unrelated('MENU', digits)).toBe(true);
+    // Letters that are digits' lookalikes among others do not make a word the reference's.
+    expect(['Score', 'Time', 'Lives', 'Lv'].map((text) => unrelated(text, digits))).toEqual([true, true, true, true]);
+    expect(unrelated('PLAY 1', digits)).toBe(false);
+    // Every character may be a digit misread: 505, 1205.
+    expect(unrelated('SOS', digits)).toBe(false);
+    expect(unrelated('12O5', digits)).toBe(false);
+    expect(unrelated('', digits)).toBe(false);
+    expect(unrelated('MENU', [])).toBe(false);
+  });
+
+  test('starts left out, says so, and is not offered as something to teach', () => {
+    const all = entries(readings, new Map(), new Map(), new Map(), digits);
+    expect(all.map((entry) => entry.keep)).toEqual([true, false, true, true]);
+    expect(entries(readings, new Map(), new Map()).map((entry) => entry.keep)).toEqual([true, true, true, true]);
+    const menu = all[1] ?? { keep: true, text: '' };
+    expect(tileNote(read('MENU'), menu, undefined, undefined, digits)).toBe(
+      'Shows none of the characters the reference needs, so it is left out unless you keep it.',
+    );
+    expect(tileNote(read('MENU'), { ...menu, keep: true }, undefined, undefined, digits)).toBeNull();
+    const adds = keptAdditions(readings, all);
+    expect(untaught(readings, all, adds, digits)).toEqual({ characters: [], readings: [] });
+    expect(untaught(readings, all, adds).readings).toEqual([1]);
+  });
+
+  test('stays kept when it was kept before', () => {
+    const all = entries(readings, new Map(), new Map([[1, 'MENU']]), new Map(), digits);
+    expect(all[1]).toEqual({ keep: true, text: 'MENU' });
   });
 });
 

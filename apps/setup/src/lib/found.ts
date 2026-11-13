@@ -59,18 +59,17 @@ const LOOKALIKES: Readonly<Record<string, string>> = {
   q: '9',
 };
 
+/** Whether `character` may be one of `needs`: one of them, or a lookalike of a digit among them. */
+export function mayBeNeeded(character: string, needs: readonly string[]): boolean {
+  const digit = LOOKALIKES[character];
+  return needs.includes(character) || (digit !== undefined && needs.includes(digit));
+}
+
 /** Whether `text` may show only characters among `needs`, a character or its lookalike digit; any does when it is empty. */
 export function fitsNeeds(text: string, needs: readonly string[]): boolean {
-  if (needs.length === 0) {
-    return true;
-  }
-  for (const character of text.replaceAll(/\s/gu, '')) {
-    const digit = LOOKALIKES[character];
-    if (!needs.includes(character) && (digit === undefined || !needs.includes(digit))) {
-      return false;
-    }
-  }
-  return true;
+  return (
+    needs.length === 0 || Array.from(text.replaceAll(/\s/gu, '')).every((character) => mayBeNeeded(character, needs))
+  );
 }
 
 /** The first letter in `text`, or null. */

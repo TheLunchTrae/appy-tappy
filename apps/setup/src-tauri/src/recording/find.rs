@@ -20,6 +20,10 @@ use super::ink::{Ink, Line};
 /// The most finds one search returns; the rest are counted.
 pub(crate) const MAX_FOUND: usize = 12;
 
+/// The most runs of text one look over a whole window takes, nearest the
+/// recording's region first.
+pub(crate) const MAX_LINES: usize = 32;
+
 /// How far a run's height may be from the sample's and still be the same
 /// size, in percent of the sample's.
 pub(crate) const SIZE_PERCENT: u32 = 15;
@@ -327,6 +331,79 @@ pub(crate) fn ink_line(image: &Image, reader: &DigitReader) -> Option<Line> {
     Ink::of(image, reader).line()
 }
 
+/// The height of the characters among `blobs` that `region` shows: that of
+/// the tallest blob centered in it, so a taller one the region's edge
+/// catches does not count, or else `line`, the region's line of ink.
+fn sample_of(blobs: &[Bounds], region: Region, line: u32) -> u32 {
+    blobs
+        .iter()
+        .filter(|blob| blob.centered_in(region))
+        .map(|blob| blob.height())
+        .max()
+        .unwrap_or(line)
+}
+
+/// `run` with a margin of a quarter of `sample` around its ink, kept
+/// inside the mask; `None` when that leaves no region.
+fn with_margin(run: Bounds, sample: u32, mask: &Mask) -> Option<Region> {
+    let margin = sample.checked_div(4).unwrap_or(0).max(1);
+    let left = run.left.saturating_sub(margin);
+    let top = run.top.saturating_sub(margin);
+    let right = run.right.saturating_add(margin).min(mask.width);
+    let bottom = run.bottom.saturating_add(margin).min(mask.height);
+    Region::new(
+        left,
+        top,
+        right.saturating_sub(left),
+        bottom.saturating_sub(top),
+    )
+}
+
+/// How tall the characters are that `region` of `image` shows, in the ink
+/// `reader` tells from background: the size [`lines`] looks for. `None`
+/// when `region` holds no ink or lies outside `image`.
+pub(crate) fn sample_height(image: &Image, region: Region, reader: &DigitReader) -> Option<u32> {
+    if !region.fits(image.size()) {
+        return None;
+    }
+    let mask = Mask::of(image, reader);
+    let line = mask.line_height(region)?;
+    Some(sample_of(&mask.blobs(line.saturating_mul(2)), region, line))
+}
+
+/// How far the middle of `run` is from the middle of `near`, squared, in
+/// doubled pixels so that neither middle is rounded.
+fn distance(run: Bounds, near: Region) -> u64 {
+    let across = u64::from(run.left).saturating_add(u64::from(run.right));
+    let down = u64::from(run.top).saturating_add(u64::from(run.bottom));
+    let x = across.abs_diff(u64::from(near.x()).saturating_add(u64::from(near.right())));
+    let y = down.abs_diff(u64::from(near.y()).saturating_add(u64::from(near.bottom())));
+    x.saturating_mul(x).saturating_add(y.saturating_mul(y))
+}
+
+/// Where `image` shows text with characters `sample` tall, within
+/// [`SIZE_PERCENT`], in the ink `reader` tells from background: each run
+/// with a margin around its ink, the run nearest the middle of `near`
+/// first, and of runs as near the higher one, then the one further left. A
+/// recording of the whole window reads these, so it takes the text beside
+/// the sample too, wherever the window shows it. It takes the
+/// [`MAX_LINES`] nearest, so a window full of text in the characters'
+/// color does not crowd out the text around the region.
+pub(crate) fn lines(image: &Image, sample: u32, near: Region, reader: &DigitReader) -> Vec<Region> {
+    let mask = Mask::of(image, reader);
+    let mut found: Vec<Bounds> = runs(mask.blobs(sample.saturating_mul(2)), sample, sample)
+        .into_iter()
+        .filter(|run| same_size(run.tallest, sample))
+        .map(|run| run.bounds)
+        .collect();
+    found.sort_by_key(|&run| (distance(run, near), run.top, run.left));
+    found
+        .into_iter()
+        .filter_map(|run| with_margin(run, sample, &mask))
+        .take(MAX_LINES)
+        .collect()
+}
+
 /// The text on `image` like the sample in `region`: in the ink `reader`
 /// tells from background and with characters as tall as the sample's,
 /// leaving out text that meets any of `skip`, such as finds added already.
@@ -343,14 +420,7 @@ pub(crate) fn like(
     let mask = Mask::of(image, reader);
     let line = mask.line_height(region)?;
     let blobs = mask.blobs(line.saturating_mul(2));
-    // Measured as each run is, by its tallest character, among those centered
-    // in the region, so a taller one the region's edge catches does not count.
-    let sample = blobs
-        .iter()
-        .filter(|blob| blob.centered_in(region))
-        .map(|blob| blob.height())
-        .max()
-        .unwrap_or(line);
+    let sample = sample_of(&blobs, region, line);
     let mut finds = Vec::new();
     let mut other_sizes = 0_usize;
     for run in runs(blobs, sample, sample) {
@@ -366,21 +436,11 @@ pub(crate) fn like(
     }
     finds.sort_by_key(|run| (run.top, run.left));
     let more = finds.len().saturating_sub(MAX_FOUND);
-    let margin = sample.checked_div(4).unwrap_or(0).max(1);
     let finds = finds
         .into_iter()
         .take(MAX_FOUND)
         .filter_map(|run| {
-            let left = run.left.saturating_sub(margin);
-            let top = run.top.saturating_sub(margin);
-            let right = run.right.saturating_add(margin).min(mask.width);
-            let bottom = run.bottom.saturating_add(margin).min(mask.height);
-            let region = Region::new(
-                left,
-                top,
-                right.saturating_sub(left),
-                bottom.saturating_sub(top),
-            )?;
+            let region = with_margin(run, sample, &mask)?;
             let line = image.crop(region).and_then(|crop| ink_line(&crop, reader));
             Some(Find { region, line })
         })
@@ -452,6 +512,51 @@ mod tests {
         assert_eq!(find.region, region(28, 18, 11, 12));
         let line = find.line.as_ref().expect("the find has ink");
         assert!(line.pixels.contains(&0), "the line carries the ink");
+    }
+
+    #[test]
+    fn the_lines_of_a_window_are_every_run_of_the_sample_s_size_the_sample_s_too() {
+        // The sample, text of its size elsewhere, and text of another size.
+        let boxes = [pair(2, 2, 8), pair(30, 20, 8), pair(30, 2, 14)].concat();
+        let image = screenshot(60, 40, &boxes);
+        let place = region(0, 0, 12, 12);
+        let sample = sample_height(&image, place, &reader());
+        assert_eq!(sample, Some(8));
+        assert_eq!(
+            lines(&image, 8, place, &reader()),
+            [region(0, 0, 11, 12), region(28, 18, 11, 12)],
+            "each with a margin, kept inside the picture"
+        );
+        assert_eq!(
+            sample_height(&image, region(0, 30, 10, 10), &reader()),
+            None
+        );
+        assert_eq!(
+            sample_height(&image, region(55, 0, 10, 10), &reader()),
+            None
+        );
+    }
+
+    #[test]
+    fn the_lines_nearest_a_place_come_first_and_the_furthest_are_left_out() {
+        // The text beside the place comes before the text above it on the
+        // picture, which top to bottom would put first.
+        let boxes = [pair(30, 2, 8), pair(30, 22, 8)].concat();
+        let image = screenshot(60, 40, &boxes);
+        assert_eq!(
+            lines(&image, 8, region(2, 22, 8, 8), &reader()),
+            [region(28, 20, 11, 12), region(28, 0, 11, 12)]
+        );
+        // A column of 35 runs, 12 pixels apart: three more than one look
+        // takes.
+        let column: Vec<_> = (0..35_u32)
+            .flat_map(|row| pair(2, row.saturating_mul(12).saturating_add(2), 8))
+            .collect();
+        let tall = screenshot(20, 424, &column);
+        let taken = lines(&tall, 8, region(0, 0, 12, 12), &reader());
+        assert_eq!(taken.len(), MAX_LINES);
+        let lowest = taken.iter().map(|line| line.y()).max();
+        assert_eq!(lowest, Some(372), "the three lowest are left out");
     }
 
     #[test]

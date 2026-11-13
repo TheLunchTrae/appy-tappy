@@ -37,7 +37,7 @@ use appytappy_sources::HostSystem;
 
 use crate::commands::Bridge;
 use crate::owner::{Desktop, Message, Owner};
-use crate::recording::ocr;
+use crate::recording::{look, ocr};
 use crate::stores::Stores;
 
 /// Tauri's handler for every command in the table.
@@ -69,6 +69,16 @@ fn main() -> ExitCode {
     else {
         return ExitCode::FAILURE;
     };
+    // A recording of the whole window has each frame looked over on a
+    // thread of its own, which ends once the owner drops its sender.
+    let (look_jobs, look_inbox) = mpsc::channel();
+    let look_messages = sender.clone();
+    let Ok(look_thread) = thread::Builder::new()
+        .name("window look".to_owned())
+        .spawn(move || look::run(&look_inbox, &look_messages, look::look))
+    else {
+        return ExitCode::FAILURE;
+    };
     let built = tauri::Builder::default()
         // A second copy that starts hands over to this one and exits, before
         // it opens a window. The plugin asks to be registered first.
@@ -91,7 +101,7 @@ fn main() -> ExitCode {
         system,
         app: app.handle().clone(),
     };
-    let owner = Owner::new(host, stores, process::id(), sender.clone(), jobs);
+    let owner = Owner::new(host, stores, process::id(), sender.clone(), jobs, look_jobs);
     let Ok(owner_thread) = thread::Builder::new()
         .name("owner".to_owned())
         .spawn(move || owner::run(owner, &messages))
@@ -105,7 +115,8 @@ fn main() -> ExitCode {
     let stopped = sender.send(Message::Shutdown).is_ok()
         && owner_thread.join().is_ok_and(|closed| closed.is_ok());
     let read = reader_thread.join().is_ok();
-    if code == 0 && stopped && read {
+    let looked = look_thread.join().is_ok();
+    if code == 0 && stopped && read && looked {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE

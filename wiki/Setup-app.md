@@ -418,6 +418,31 @@ character is one shape.
   hold is not bounded by a number: a kept reading holds its crop at four
   bytes a pixel, so it grows with the region the user draws, 72 KB a reading
   for a region 300 by 60 pixels and 8 MB for a whole 1920 by 1080 window.
+- **The whole window.** A recording that looks over the whole window
+  (`Scope::Window`, **Look in** in the UI) collects from every run of text
+  like its region's, as [Finding more like it](#finding-more-like-it) finds
+  them (`find::lines`): in the characters' color and within 15% of the
+  height the region's characters had on its screenshot, which starting the
+  recording measures once (`find::sample_height`) and refuses when the
+  region shows no ink there. Each run is cropped with its margin and goes
+  through the same counting and keeping as a place's crop, so the bounds
+  above hold, and a kept reading is the run's own crop. A run the reader
+  cannot split, such as one of more than 24 characters, is skipped. The
+  example's color and size are all that tie a run to the reference's font;
+  nothing compares shapes with the example, since a recording starts before
+  any shape has a character. Review starts a reading left out when its text
+  is not the reference's (`unrelated` in `lib/review.ts`): it has none of
+  the expected characters, and it is not all lookalikes of expected digits
+  either, as `SOS` is of `505`. `untaught` then offers only expected
+  characters. A look reads every pixel of the frame, so it runs on a thread
+  of its own (`recording/look.rs`) and commands do not wait for it. The
+  owner sends it one frame at a time, at most once every `SCAN_EVERY`,
+  500 ms, and skips the frames between without counting them
+  ([Window look](State-machines.md#window-look)). A look takes the 32 runs
+  nearest the region (`MAX_LINES`), nearest first, so a window full of text
+  in the characters' color does not use up the recording's 256 shapes
+  before the value's. The view carries where the last look found text
+  (`spots`), which the page outlines on the live window.
 - **Sizes.** A frame of another window size is skipped because a recording
   has a region and no [pin](Screen-regions.md#window-sizes): only a value
   says which side of the window its region keeps its distance from, and a

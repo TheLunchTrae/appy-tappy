@@ -4,12 +4,16 @@
 
 use std::time::Instant;
 
+use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::{Image, Region, Size};
+use appytappy_sources::system::Rgb;
 
 use crate::check_spec::{self, CharactersSpec, RegionSpec};
 use crate::owner::messages::RecordSpec;
 use crate::pixels;
-use crate::recording::{Recorder, Recording, RecordingView, Text, ocr};
+use crate::recording::{
+    NewReading, Recorder, Recording, RecordingView, Scope, Text, find, look, ocr,
+};
 
 use super::Owner;
 use super::host::Host;
@@ -28,19 +32,49 @@ impl<H: Host> Owner<H> {
             },
             None => return,
         };
-        let Some(new) = recording.offer(frame, received) else {
+        // A recording of the whole window keeps nothing from the frame
+        // here: it sends the frame to be looked over when a look is due.
+        if let Some(job) = recording.look(frame, received)
+            && self.looks.send(job).is_err()
+        {
+            recording.stop_looking(Instant::now());
+        }
+        let new = recording.offer(frame, received);
+        self.read_new(new);
+    }
+
+    /// Takes the answer to a look for recording `recording`, of the frame
+    /// that arrived at `at`: sends each new reading it `seen` to the text
+    /// reader. An answer for a recording that was discarded or replaced is
+    /// dropped.
+    pub(super) fn looked(&mut self, recording: u64, at: Instant, seen: Option<Vec<look::Seen>>) {
+        let Some(current) = self
+            .readings_mut()
+            .filter(|current| current.id == recording)
+        else {
             return;
         };
-        let job = ocr::Job {
-            source: ocr::Source::Recording(recording.id),
-            index: new.index,
-            line: new.line,
+        let new = current.looked(at, seen, Instant::now());
+        self.read_new(new);
+    }
+
+    /// Sends each of the recording's `new` readings to the text reader.
+    fn read_new(&mut self, new: impl IntoIterator<Item = NewReading>) {
+        let Some(Recorder::Readings(recording)) = &mut self.recording else {
+            return;
         };
-        if self.ocr.send(job).is_err() {
-            recording.read(
-                new.index,
-                Text::Failed("The text reader stopped. Type what this shows.".to_owned()),
-            );
+        for new in new {
+            let job = ocr::Job {
+                source: ocr::Source::Recording(recording.id),
+                index: new.index,
+                line: new.line,
+            };
+            if self.ocr.send(job).is_err() {
+                recording.read(
+                    new.index,
+                    Text::Failed("The text reader stopped. Type what this shows.".to_owned()),
+                );
+            }
         }
     }
 
@@ -91,26 +125,28 @@ impl<H: Host> Owner<H> {
         check_spec::drawn(&self.screenshots, region, screenshot).map_err(|error| error.to_string())
     }
 
-    /// Records the region of the picked window that `spec` names, keeping
-    /// each reading it shows in the characters' color. With
-    /// `more`, goes on with the stopped recording, which must be of the same
-    /// region, ink, and window size; otherwise starts a new one in place of
-    /// any recording.
+    /// Records what `spec` names of the picked window, keeping each reading
+    /// it shows in the characters' color: in the region alone, or wherever
+    /// the window shows text like the region's. With `more`, goes on with
+    /// the stopped recording, which must be of the same region, ink, window
+    /// size, and scope; otherwise starts a new one in place of any
+    /// recording.
     pub(crate) fn start_recording(&mut self, spec: RecordSpec, more: bool) -> Result<(), String> {
         let (region, window_size) = self.recordable(spec.region, spec.screenshot)?;
-        let settings = (spec.ink.into(), spec.tolerance);
+        let settings: (Rgb, u8) = (spec.ink.into(), spec.tolerance);
         let now = Instant::now();
         match &mut self.recording {
             Some(Recorder::Readings(recording))
-                if more && recording.records(region, settings, window_size) =>
+                if more && recording.records(region, settings, window_size, spec.scope) =>
             {
-                recording.life.resume(now);
+                recording.resume(now);
             },
             Some(Recorder::Readings(recording)) if more => {
                 return Err(format!(
                     "Recording more needs the settings it was recorded with: the same place, \
-                     the characters' color, a tolerance of {}, and a screenshot of the same \
-                     window size. Use its settings, or discard the recording to start a new one.",
+                     the characters' color, a tolerance of {}, a screenshot of the same window \
+                     size, and the same choice of where to look. Use its settings, or discard \
+                     the recording to start a new one.",
                     recording.view(now).settings.tolerance
                 ));
             },
@@ -122,24 +158,47 @@ impl<H: Host> Owner<H> {
                 );
             },
             _ => {
+                // The whole window is searched for text as tall as the
+                // region's on its screenshot, so that is measured first.
+                let sample = match spec.scope {
+                    Scope::Place => None,
+                    Scope::Window => Some(self.sample_height(region, spec.screenshot, settings)?),
+                };
                 let id = self.next_recording_id();
-                self.recording = Some(Recorder::Readings(Recording::new(
-                    id,
-                    region,
-                    settings,
-                    window_size,
-                    now,
-                )));
+                let recording = Recording::new(id, region, settings, window_size, now);
+                self.recording = Some(Recorder::Readings(match sample {
+                    Some(sample) => recording.across_window(sample),
+                    None => recording,
+                }));
             },
         }
         Ok(())
+    }
+
+    /// How tall the characters are that `region` of screenshot `screenshot`
+    /// shows in the characters' color, or what to do when it shows none.
+    fn sample_height(
+        &self,
+        region: Region,
+        screenshot: usize,
+        (ink, tolerance): (Rgb, u8),
+    ) -> Result<u32, String> {
+        self.screenshots
+            .get(screenshot)
+            .and_then(|image| find::sample_height(image, region, &DigitReader::new(ink, tolerance)))
+            .ok_or_else(|| {
+                "That place shows no characters in that color, so there is nothing to look for in \
+                 the rest of the window. Draw it around some characters and pick their color \
+                 first."
+                    .to_owned()
+            })
     }
 
     /// Stops the recording, of readings or of looks, which keeps what it
     /// recorded.
     pub(crate) fn stop_recording(&mut self) {
         if let Some(recording) = &mut self.recording {
-            recording.life_mut().stop(Instant::now());
+            recording.stop(Instant::now());
         }
     }
 
@@ -418,6 +477,119 @@ mod tests {
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
+    /// Records the whole window for text like columns `x` and on of the 4
+    /// by 2 screenshot 0, red as ink.
+    fn start_window_recording(
+        x: u32,
+        more: bool,
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
+        let region: RegionSpec = serde_json::from_str(&format!(
+            r#"{{"x":{x},"y":0,"width":{},"height":2}}"#,
+            4_u32.saturating_sub(x)
+        ))
+        .expect("valid JSON");
+        let ink: ColorSpec =
+            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+        move |owner: &mut Owner<FakeHost>| {
+            owner.start_recording(
+                RecordSpec {
+                    scope: Scope::Window,
+                    ..characters_in(region, ink)
+                },
+                more,
+            )
+        }
+    }
+
+    #[test]
+    fn a_whole_window_is_recorded_for_text_as_tall_as_the_region_s_on_its_screenshot() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // Columns 2 and 3 of the screenshot are gray.
+        assert_eq!(
+            harness.ask(start_window_recording(2, false)),
+            Err(
+                "That place shows no characters in that color, so there is nothing to look for in \
+                 the rest of the window. Draw it around some characters and pick their color \
+                 first."
+                    .to_owned()
+            )
+        );
+        assert_eq!(harness.recording(), None, "nothing started");
+        harness
+            .ask(start_window_recording(0, false))
+            .expect("records");
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        // More frames arrive while the look is out; the owner holds none.
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        assert_eq!(harness.jobs.try_iter().count(), 0, "nothing is read yet");
+        let looks: Vec<look::Job> = harness.looks.try_iter().collect();
+        assert_eq!(looks.len(), 1, "one frame goes to be looked over");
+        let job = &looks[0];
+        // A look for a recording that was discarded or replaced is dropped.
+        let stale = Message::Looked {
+            recording: job.recording.wrapping_sub(1),
+            at: job.at,
+            seen: Some(look::look(job)),
+        };
+        assert!(harness.owner.handle(stale).is_continue());
+        assert_eq!(harness.recording().expect("a recording").spots, []);
+        assert_eq!(harness.jobs.try_iter().count(), 0);
+        let answer = Message::Looked {
+            recording: job.recording,
+            at: job.at,
+            seen: Some(look::look(job)),
+        };
+        assert!(harness.owner.handle(answer).is_continue());
+        assert_eq!(harness.jobs.try_iter().count(), 1, "read as text");
+        let view = harness.recording().expect("a recording");
+        assert_eq!(view.settings.scope, Scope::Window);
+        assert_eq!(view.spots.len(), 1, "where it found the text");
+        harness.ask(Owner::stop_recording);
+        assert!(
+            harness
+                .ask(start_recording(255, true))
+                .expect_err("the place alone is another recording")
+                .contains("the same choice of where to look")
+        );
+        harness
+            .ask(start_window_recording(0, true))
+            .expect("goes on over the whole window");
+    }
+
+    #[test]
+    fn a_whole_window_recording_stops_with_a_reason_when_the_look_thread_is_gone() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        harness
+            .ask(start_window_recording(0, false))
+            .expect("records");
+        // The look thread ended, so nothing takes the frames.
+        drop(std::mem::replace(&mut harness.looks, mpsc::channel().1));
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        let view = harness.recording().expect("a recording");
+        assert!(!view.recording);
+        assert_eq!(
+            view.problem.as_deref(),
+            Some(
+                "Recording stopped: the window could not be looked over. Record more to try \
+                 again."
+            )
+        );
+        // Record more sends a frame again, and stops the same way.
+        harness
+            .ask(start_window_recording(0, true))
+            .expect("goes on");
+        assert!(harness.recording().expect("a recording").recording);
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        assert!(!harness.recording().expect("a recording").recording);
+    }
+
     #[test]
     fn recording_goes_on_after_a_stop_and_starts_over_for_other_ink() {
         let mut harness = harness(false);
@@ -446,8 +618,9 @@ mod tests {
             harness.ask(start_recording(200, true)),
             Err(
                 "Recording more needs the settings it was recorded with: the same place, the \
-                 characters' color, a tolerance of 0, and a screenshot of the same window size. \
-                 Use its settings, or discard the recording to start a new one."
+                 characters' color, a tolerance of 0, a screenshot of the same window size, and \
+                 the same choice of where to look. Use its settings, or discard the recording \
+                 to start a new one."
                     .to_owned()
             ),
             "recording more never replaces the recording"

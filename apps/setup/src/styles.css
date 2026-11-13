@@ -2124,6 +2124,19 @@ div.match-answer {
   background: var(--warn);
 }
 
+/* Where a recording of the whole window found text the last time it looked, over the live window. */
+.record-spots {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.record-spots .spot {
+  position: absolute;
+  border: 2px solid var(--live);
+  border-radius: 3px;
+}
+
 /* A hidden view or strip stays out of the layout, whatever its display. */
 .viewer[hidden],
 .strip[hidden] {

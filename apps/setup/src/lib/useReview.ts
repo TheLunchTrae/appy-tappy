@@ -31,14 +31,16 @@ function focusRecordPanel(): void {
 }
 
 /**
- * Review of `recording`'s readings for the reference `draft` teaches, which adds to `reference`, if any: the user's
- * edits, and which kept readings the check cannot learn. Keep puts the kept readings on the draft.
+ * Review of `recording`'s readings for the reference `draft` teaches, which adds to `reference`, if any, and needs
+ * the characters `needs`: the user's edits, and which kept readings the check cannot learn. Keep puts the kept
+ * readings on the draft.
  */
 export function useReview(
   recording: RecordingView | null,
   draft: Draft,
   setDraft: Dispatch<SetStateAction<Draft>>,
   reference: ReferenceRef | null,
+  needs: readonly string[],
 ): {
   readonly reviewing: boolean;
   /** Opens or closes review, leaving focus where it is. */
@@ -87,18 +89,18 @@ export function useReview(
 
   useEffect(() => {
     if (reviewing) {
-      setDecided((current) => decide(current, recording?.readings ?? [], edits, draft.recorded));
+      setDecided((current) => decide(current, recording?.readings ?? [], edits, draft.recorded, needs));
     }
-  }, [reviewing, recording, edits, draft.recorded]);
+  }, [reviewing, recording, edits, draft.recorded, needs]);
   const all = useMemo(
-    () => entries(recording?.readings ?? [], edits, draft.recorded, decided),
-    [recording, edits, draft.recorded, decided],
+    () => entries(recording?.readings ?? [], edits, draft.recorded, decided, needs),
+    [recording, edits, draft.recorded, decided, needs],
   );
   const keeping = useMemo(() => keptLabels(all), [all]);
   const userChecked = useMemo(() => checkedReadings(all, edits, draft.recorded), [all, edits, draft.recorded]);
   const adds = useMemo(() => keptAdditions(recording?.readings ?? [], all), [recording, all]);
   const clashes = useMemo(() => disagreements(recording?.readings ?? [], all), [recording, all]);
-  const left = useMemo(() => untaught(recording?.readings ?? [], all, adds), [recording, all, adds]);
+  const left = useMemo(() => untaught(recording?.readings ?? [], all, adds, needs), [recording, all, adds, needs]);
   const toReview = useMemo(() => reviewSpec(draft, keeping, reference), [draft, keeping, reference]);
   const reviewKey = toReview === null ? '' : JSON.stringify(toReview);
   // The effect below runs when the spec's contents change, not on each new

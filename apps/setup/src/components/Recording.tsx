@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react';
 
-import type { RecordedReading, RecordingView } from '../lib/bindings.ts';
+import type { RecordedReading, RecordingScope, RecordingView } from '../lib/bindings.ts';
+import { RECORD_SCOPE_HINT } from '../lib/hints.ts';
+import type { Size } from '../lib/region.ts';
+import { Hint } from './Hint.tsx';
 import { PictureCanvas } from './canvas.tsx';
 import { CharacterChips, MissingChips } from './CharacterChips.tsx';
 import type { Discovery } from '../lib/discovery.ts';
@@ -20,6 +23,41 @@ import {
 /** How many of the newest readings the panel lists while recording. */
 const LISTED = 6;
 
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/** What a recording of the whole window says of the `count` places the window shows text like its own in now. */
+function spotsNote(count: number): string {
+  return count === 0
+    ? 'The window shows no text like it right now.'
+    : `Text like it shows in ${plural(count, 'place', 'places')} right now, outlined on the window.`;
+}
+
+/**
+ * Outlines over the live window where a recording of the whole window found text like its region's the last time it
+ * looked, scaled from the window's `size` to `shown`.
+ */
+export function RecordingSpots({ view, shown }: { readonly view: RecordingView; readonly shown: Size }) {
+  const { width, height } = view.settings.windowSize;
+  if (view.spots.length === 0 || width === 0 || height === 0) {
+    return null;
+  }
+  const x = shown.width / width;
+  const y = shown.height / height;
+  return (
+    <div className="record-spots" aria-hidden="true">
+      {view.spots.map((spot) => (
+        <span
+          key={`${spot.x},${spot.y},${spot.width},${spot.height}`}
+          className="spot"
+          style={{ left: spot.x * x, top: spot.y * y, width: spot.width * x, height: spot.height * y }}
+        />
+      ))}
+    </div>
+  );
+}
+
 /** A recorded reading's pixels, or an empty box until they arrive. */
 function Crop({ picture, label }: { readonly picture: Picture | undefined; readonly label: string }) {
   return (
@@ -38,10 +76,6 @@ function guess(reading: RecordedReading): { readonly text: string; readonly pend
         ? { text: 'No text found', pending: true }
         : { text: reading.text.text, pending: false };
   }
-}
-
-function plural(count: number, one: string, many: string): string {
-  return `${count} ${count === 1 ? one : many}`;
 }
 
 /**
@@ -125,6 +159,9 @@ interface PanelProps {
   readonly keeping: number;
   /** Why recording cannot start yet, or null when it can. */
   readonly blocked: string | null;
+  /** Where a new recording looks for characters. */
+  readonly scope: RecordingScope;
+  readonly onScope: (scope: RecordingScope) => void;
   readonly appName: string;
   readonly crops: ReadonlyMap<number, Picture>;
   readonly error: string | null;
@@ -167,9 +204,31 @@ export function RecordPanel(props: PanelProps) {
           Record readings
         </h3>
         <p className="note">
-          Record the region while you use {appName}. Each character it shows is kept once and read as text, so you only
-          check it.
+          Record while you use {appName}. Each character that shows is kept once and read as text, so you only check it.
         </p>
+        <div className="field">
+          <span className="name">
+            <span id="record-scope">Look in</span>
+            <Hint topic="Look in" id="hint-record-scope">
+              {RECORD_SCOPE_HINT}
+            </Hint>
+          </span>
+          <div className="seg" role="group" aria-labelledby="record-scope" aria-describedby="hint-record-scope">
+            {(['place', 'window'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={props.scope === option}
+                onClick={() => {
+                  props.onScope(option);
+                }}
+              >
+                {option === 'place' ? 'This place' : 'The whole window'}
+                <small>{option === 'place' ? 'Only the text here' : 'Any text like it'}</small>
+              </button>
+            ))}
+          </div>
+        </div>
         {warn}
         <div className="row">
           <button type="button" className="btn" disabled={blocked !== null} onClick={props.onStart}>
@@ -189,12 +248,15 @@ export function RecordPanel(props: PanelProps) {
     return (
       <section className="record on" aria-labelledby="record-title">
         <h3 id="record-title" tabIndex={-1}>
-          Recording
+          {view.settings.scope === 'window' ? 'Recording the whole window' : 'Recording'}
         </h3>
         <p aria-live="polite">
           {plural(view.shapes.length, 'different shape', 'different shapes')} so far, in{' '}
           {plural(count, 'kept reading', 'kept readings')}.
         </p>
+        {view.settings.scope === 'window' && view.problem === null ? (
+          <p className="note">{spotsNote(view.spots.length)}</p>
+        ) : null}
         {warn}
         <Discovered found={found} needs={needs} ink={view.settings.ink} />
         {count === 0 ? null : (
@@ -321,8 +383,8 @@ interface SheetProps {
   readonly view: RecordingView;
   /** The characters the recording found, by what review keeps now. */
   readonly found: Discovery;
-  /** Whether the reference says which characters it needs. */
-  readonly needs: boolean;
+  /** The characters the reference says it needs; none when it does not say. */
+  readonly needs: readonly string[];
   /** For each reading, the places in it of the shapes no other kept reading teaches. */
   readonly adds: readonly (readonly number[])[];
   readonly entries: readonly ReviewEntry[];
@@ -360,7 +422,9 @@ export function ReviewSheet(props: SheetProps) {
             Check each reading&apos;s text and fix any the reader got wrong. Kept readings teach the number check its
             characters, as the boxes you draw do. A reading is kept for the characters no other kept reading shows.
           </p>
-          {view.readings.length === 0 ? null : <Discovered found={found} needs={needs} ink={view.settings.ink} />}
+          {view.readings.length === 0 ? null : (
+            <Discovered found={found} needs={needs.length > 0} ink={view.settings.ink} />
+          )}
           {/* Keep is described by why it waits, or else by what keeping now would leave untaught. */}
           <p
             id={blocked === null && untaught.readings.length > 0 ? undefined : 'keep-blocked'}
@@ -432,7 +496,7 @@ export function ReviewSheet(props: SheetProps) {
             const when = clock(reading.firstMs);
             const problem = problems.get(index);
             const clash = clashes.get(index);
-            const note = tileNote(reading, entry, problem, clash);
+            const note = tileNote(reading, entry, problem, clash, needs);
             const flagged = (problem !== undefined && entry.keep) || clash !== undefined;
             const noteId = `reading-${index}-note`;
             return (

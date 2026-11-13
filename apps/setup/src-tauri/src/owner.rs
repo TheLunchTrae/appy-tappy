@@ -52,7 +52,7 @@ use crate::debug::log::SetupLog;
 use crate::debug::trace_file::TraceTail;
 use crate::debug::trace_view::TraceView;
 use crate::overlay::{Overlays, Purpose};
-use crate::recording::{Recorder, ocr};
+use crate::recording::{Recorder, look, ocr};
 use crate::screenshots::Screenshots;
 use crate::stores::{SavedApp, Stores};
 use crate::updates::Downloaded;
@@ -114,6 +114,8 @@ pub(crate) struct Owner<H: Host> {
     search_id: u64,
     /// Sends new readings to the text reader's thread.
     ocr: Sender<ocr::Job>,
+    /// Where whole-window recordings send the frames to look over.
+    looks: Sender<look::Job>,
     /// The saved value the automation editor watches.
     watched: Option<Watched>,
     /// The overlays that show, each with a capture of its own.
@@ -143,6 +145,7 @@ impl<H: Host> Owner<H> {
         own_process: u32,
         messages: Sender<Message<H>>,
         ocr: Sender<ocr::Job>,
+        looks: Sender<look::Job>,
     ) -> Self {
         Self {
             host,
@@ -160,6 +163,7 @@ impl<H: Host> Owner<H> {
             found: None,
             search_id: 0,
             ocr,
+            looks,
             watched: None,
             overlays: Overlays::new(Purpose::Overlay),
             live: Overlays::new(Purpose::ValuesPage),
@@ -200,6 +204,11 @@ impl<H: Host> Owner<H> {
                     current.read(index, text);
                 }
             },
+            Message::Looked {
+                recording,
+                at,
+                seen,
+            } => self.looked(recording, at, seen),
             Message::FoundText {
                 search,
                 index,

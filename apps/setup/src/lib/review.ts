@@ -1,4 +1,5 @@
 import type { RecordedLabel, RecordedReading, RecordedShape } from './bindings.ts';
+import { fitsNeeds, mayBeNeeded } from './found.ts';
 import { andList, knownCharacters, labelCharacters } from './reference.ts';
 // Reviewing a recording: which readings the user keeps, what each shows, and what each adds.
 //
@@ -10,6 +11,10 @@ import { andList, knownCharacters, labelCharacters } from './reference.ts';
 // A start is decided once, so Keep never changes under the user. Texts that give one shape two characters are
 // compared across every reading, kept or not, and neither is left out for the other. And a shape that only readings
 // left out could teach is named above the readings, with the readings to keep for it.
+//
+// A recording of the whole window also keeps text that is not the reference's, such as a menu's label in the same
+// color and size. A reading whose text shows none of the characters the reference needs starts left out too, and
+// says so. The user can still keep it.
 
 /** The user's choice for one reading in review. */
 export interface ReviewEntry {
@@ -47,6 +52,23 @@ export function sighted(shape: RecordedShape): string {
 export function named(reading: RecordedReading, text: string): readonly string[] | null {
   const characters = labelCharacters(text);
   return characters.length > 0 && characters.length === reading.shapes.length ? characters : null;
+}
+
+/**
+ * Whether `text` is not the reference's, such as a menu's label: it has none of the characters among `needs`, the
+ * ones the reference needs, and it is not a needed text misread either, every character of it a letter the text
+ * reader often reads in place of a needed digit. So `SOS` may be `505` to a reference that needs digits, and
+ * `Score`, whose `c`, `r`, and `e` are no digit's lookalike, is not its text. Never without text, or when the
+ * reference does not say what it needs.
+ */
+export function unrelated(text: string, needs: readonly string[]): boolean {
+  const characters = labelCharacters(text);
+  return (
+    needs.length > 0 &&
+    characters.length > 0 &&
+    !characters.some((character) => needs.includes(character)) &&
+    !fitsNeeds(text, needs)
+  );
 }
 
 /** Whether review keeps `reading` with a text that names its shapes, so that it teaches them. */
@@ -188,15 +210,17 @@ export function startEntry(reading: RecordedReading, kept: string | undefined): 
  * its text arrives.
  *
  * A reading starts left out when the readings beside it teach all its shapes: the ones the user edited and the ones
- * decided before stay as they are, and the ones decided together are gone through in order. It starts kept all the
- * same when it was kept before, or when its text and another's give one shape two characters, since leaving it out
- * would hide which of the two is wrong; such a reading stays among the ones the others are measured against.
+ * decided before stay as they are, and the ones decided together are gone through in order. It also starts left out
+ * when its text is {@link unrelated} to `needs`, the characters the reference needs. It starts kept all the same when
+ * it was kept before, or when its text and another's give one shape two characters, since leaving it out would hide
+ * which of the two is wrong; such a reading stays among the ones the others are measured against.
  */
 export function decide(
   decided: ReadonlyMap<number, ReviewEntry>,
   readings: readonly RecordedReading[],
   edits: ReadonlyMap<number, ReviewEntry>,
   kept: ReadonlyMap<number, string>,
+  needs: readonly string[],
 ): ReadonlyMap<number, ReviewEntry> {
   const starts = readings.map((reading, index) => startEntry(reading, kept.get(index)));
   const beside = starts.map((start, index) => edits.get(index) ?? decided.get(index) ?? start);
@@ -212,7 +236,8 @@ export function decide(
     if (start === undefined || decided.has(index) || reading.text.kind === 'pending') {
       return;
     }
-    const idle = !kept.has(index) && !clashing.has(index) && adds[index]?.length === 0;
+    const idle =
+      !kept.has(index) && !clashing.has(index) && (adds[index]?.length === 0 || unrelated(start.text, needs));
     next.set(index, idle ? { ...start, keep: false } : start);
   });
   return next.size === decided.size ? decided : next;
@@ -226,9 +251,10 @@ export function entries(
   readings: readonly RecordedReading[],
   edits: ReadonlyMap<number, ReviewEntry>,
   kept: ReadonlyMap<number, string>,
-  decided: ReadonlyMap<number, ReviewEntry> = new Map(),
+  decided: ReadonlyMap<number, ReviewEntry>,
+  needs: readonly string[],
 ): readonly ReviewEntry[] {
-  const starts = decide(decided, readings, edits, kept);
+  const starts = decide(decided, readings, edits, kept, needs);
   return readings.map(
     (reading, index) => edits.get(index) ?? starts.get(index) ?? startEntry(reading, kept.get(index)),
   );
@@ -244,12 +270,15 @@ export interface Untaught {
 
 /**
  * The characters that no reading `all` keeps teaches, though a reading it leaves out has a text that would, and those
- * readings. `adds` is what each reading adds to the kept ones, from {@link keptAdditions} for the same `all`.
+ * readings. `adds` is what each reading adds to the kept ones, from {@link keptAdditions} for the same `all`. When
+ * the reference says which characters it `needs`, only those count, so text that is not the reference's is not
+ * offered.
  */
 export function untaught(
   readings: readonly RecordedReading[],
   all: readonly ReviewEntry[],
   adds: readonly (readonly number[])[],
+  needs: readonly string[],
 ): Untaught {
   const characters: string[] = [];
   const offered: number[] = [];
@@ -257,7 +286,10 @@ export function untaught(
   readings.forEach((reading, index) => {
     const entry = all[index];
     const names = entry === undefined || entry.keep ? null : named(reading, entry.text);
-    const fresh = (adds[index] ?? []).filter((place) => !covered.has(reading.shapes[place] ?? -1));
+    const fresh = (adds[index] ?? []).filter(
+      (place) =>
+        !covered.has(reading.shapes[place] ?? -1) && (needs.length === 0 || mayBeNeeded(names?.[place] ?? '', needs)),
+    );
     if (names === null || fresh.length === 0) {
       return;
     }
@@ -317,19 +349,24 @@ export function keptLabels(all: readonly ReviewEntry[]): readonly RecordedLabel[
 
 /**
  * What a reading's tile says under it, if anything: why the check cannot learn it, that its text and another's
- * `clash` over a shape, or what the reader made of it.
+ * `clash` over a shape, that it is left out as text {@link unrelated} to the characters the reference `needs`, or
+ * what the reader made of it.
  */
 export function tileNote(
   reading: RecordedReading,
   entry: ReviewEntry,
   problem: string | undefined,
-  clash?: string,
+  clash: string | undefined,
+  needs: readonly string[],
 ): string | null {
   if (problem !== undefined && entry.keep) {
     return problem;
   }
   if (clash !== undefined) {
     return clash;
+  }
+  if (!entry.keep && unrelated(entry.text, needs)) {
+    return 'Shows none of the characters the reference needs, so it is left out unless you keep it.';
   }
   if (entry.keep && entry.text.trim() === '') {
     return 'Type what it shows, or leave it out.';

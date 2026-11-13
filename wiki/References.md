@@ -250,8 +250,10 @@ cannot be typed, take a screenshot that shows the character without the
 stray shape and draw a box around it instead.
 
 1. **Start recording.** Draw a box around the characters and pick the
-   **Characters' color** first. Then select **Start recording** under
-   **Record readings**. The region turns red while it records.
+   **Characters' color** first. Under **Record readings**, choose where to
+   **Look in**: **This place**, or **The whole window**, which
+   [Record the whole window](#record-the-whole-window) describes. Then
+   select **Start recording**. The region turns red while it records.
 2. **Use the application.** Go on in it until the region has shown the
    characters you need. AppyTappy reads each kept reading's text for you, and
    **Recording** says what that gives so far:
@@ -366,6 +368,45 @@ number. One the value's region is drawn on, or that a box is on, stays: draw
 the region on another screenshot or delete its boxes first. A screenshot
 whose found text is listed stays until you add the finds or select
 **Not these**.
+
+### Record the whole window
+
+A counter in one place shows its characters slowly, and the same font is
+often elsewhere in the window too: a stats panel, a second counter, a score
+on a results screen. With **Look in** set to **The whole window**, a
+recording collects characters from all of it. The place the reference
+reads, its first box or the value's region, is the example: AppyTappy looks
+for text in the **Characters' color** and as tall as the text that place
+shows on its screenshot, anywhere in the window, and reads each piece like
+the place itself. While it records, the window shows an
+outline around each piece it found the last time it looked, and **Recording
+the whole window** says in how many places that was.
+
+It has limits, and review is where you deal with them:
+
+- **It can pick up other text.** A menu's label or a name in the same color
+  and size is kept too. When you
+  [chose what the reference needs](#choose-what-it-needs), a reading whose
+  text shows none of those characters starts with **Keep** cleared and says
+  so; set its **Keep** if you want it after all. A reading that mixes both,
+  such as `Lv 5`, starts kept, since its `5` may be the only one. So does
+  one that may be a number misread, such as `SOS` for `505`, when every
+  character of it is a letter often read in place of a digit.
+- **It takes the text nearest the place first.** Each time it looks, it
+  takes up to 32 pieces of text, starting with the ones nearest the place
+  the reference reads. A recording is full after 256 different shapes; if a
+  window with much other text fills it, record **This place** instead.
+- **It looks twice a second at most.** Looking over a whole window takes
+  longer than one place, and on a large window one look can take longer
+  than half a second, so text that shows only briefly can be missed.
+  **This place** looks about 30 times a second.
+- **It finds one size.** Text much larger or smaller than the example's is
+  not collected. What the reference learns still reads at other
+  sizes.
+- **It reads text by itself on a line.** Text that touches other things in
+  the same color, or a line of more than 24 characters, is skipped.
+
+**Record more** goes on looking where the recording looked before.
 
 ## Delete a reference
 
