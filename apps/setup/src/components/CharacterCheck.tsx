@@ -152,6 +152,10 @@ function Retype({
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
           commit();
+        } else if (event.key === 'Escape' && typed !== null) {
+          // Takes back what was typed, and is marked as taken so it does not also close the check.
+          event.preventDefault();
+          setTyped(null);
         }
       }}
     />
@@ -411,10 +415,6 @@ export function CharacterCheckSheet(props: Props) {
   const sheet = useRef<HTMLDivElement>(null);
   // Each step replaces the buttons of the last, so focus moves to the new step's heading.
   const stop = cursor.at === 'character' ? `character ${cursor.character}` : cursor.at;
-  // The stop a press of the pointer began on. Pressing a button takes focus from a field, which commits what was
-  // typed there and can move the check to its next stop before the button is let go. A click that began on another
-  // stop is dropped, so it never answers for a step the user did not see when they pressed.
-  const pressedOn = useRef<string | null>(null);
   useEffect(() => {
     sheet.current?.querySelector<HTMLElement>('[data-check-head]')?.focus();
   }, [stop]);
@@ -434,23 +434,11 @@ export function CharacterCheckSheet(props: Props) {
   const unread = beingRead(places);
   const skipped = all.filter((each) => each.shapes.some((use) => !use.answered)).map((each) => each.character);
   return (
-    <div
-      ref={sheet}
-      className="check-sheet"
-      onPointerDownCapture={() => {
-        pressedOn.current = stop;
-      }}
-      onClickCapture={(event) => {
-        const began = pressedOn.current;
-        pressedOn.current = null;
-        if (began !== null && began !== stop) {
-          event.stopPropagation();
-          event.preventDefault();
-        }
-      }}
-    >
+    <div ref={sheet} className="check-sheet">
       {step !== undefined ? (
-        // Keyed by its character, so the next step's buttons are never the last step's, reused.
+        // Keyed by its character, so the next step's buttons are never the last step's, reused. Pressing a button
+        // takes focus from a field, which commits what was typed there and can move the check on before the button
+        // is let go; the click then finds no button it was pressed on, and answers for nothing.
         <CharacterStep key={step.character} {...props} step={step} />
       ) : cursor.at === 'unfitted' ? (
         <UnfittedStep {...props} />

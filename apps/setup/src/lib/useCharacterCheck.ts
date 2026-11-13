@@ -60,6 +60,25 @@ export function checkPlaces(
   return [...finds, ...readings];
 }
 
+/**
+ * What an Escape key press closes on the capture screen: the character check when it is open, since it covers
+ * review, or else review, which then closes without keeping while its edits stay for the next review. Nothing for
+ * another key, or for an Escape that something with focus already took as its own and marked with preventDefault,
+ * such as a question's answer, a hint, or a shortcut being chosen.
+ */
+export function escapeCloses(
+  event: Pick<KeyboardEvent, 'key' | 'defaultPrevented'>,
+  open: { readonly checking: boolean; readonly reviewing: boolean },
+): 'check' | 'review' | null {
+  if (event.key !== 'Escape' || event.defaultPrevented) {
+    return null;
+  }
+  if (open.checking) {
+    return 'check';
+  }
+  return open.reviewing ? 'review' : null;
+}
+
 /** The check of the characters `finder`'s finds and `review`'s kept readings show, as the capture screen runs it. */
 export interface CharacterCheck {
   /** The places it goes over, whether or not it is open. */
@@ -107,25 +126,27 @@ export function useCharacterCheck(
     }
   };
 
-  // Escape closes the check. It is taken as the window hears it, before review's own Escape, and marked as handled
-  // with preventDefault, so review does not also close underneath the check. It still reaches every other listener,
-  // such as a hint's.
-  const open = held !== null;
+  // Escape closes the check, or review when the check is not open over it. One listener decides for both, so the
+  // two never both close. It hears the key last, as it reaches the window, after whatever has focus took its own.
+  const checking = held !== null;
+  const { reviewing, close: closeReview } = review;
   useEffect(() => {
-    if (!open) {
+    if (!checking && !reviewing) {
       return undefined;
     }
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && !event.defaultPrevented) {
-        event.preventDefault();
+      const closes = escapeCloses(event, { checking, reviewing });
+      if (closes === 'check') {
         setHeld(null);
+      } else if (closes === 'review') {
+        closeReview();
       }
     };
-    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keydown', onKey);
     return () => {
-      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  });
 
   return {
     places,

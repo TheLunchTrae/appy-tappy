@@ -14,7 +14,7 @@ import {
   unfitted,
 } from '../src/lib/confirm.ts';
 import { disagreements, entries } from '../src/lib/review.ts';
-import { checkPlaces } from '../src/lib/useCharacterCheck.ts';
+import { checkPlaces, escapeCloses } from '../src/lib/useCharacterCheck.ts';
 
 /** A place that shows `shapes`, one name each, two pixels wide each, with `text` as the reader or the user has it. */
 function place(source: Place['source'], index: number, shapes: string, text: string, keep = true): Place {
@@ -393,5 +393,23 @@ describe('the places a check goes over', () => {
     ]);
     expect(places[0]).toMatchObject({ characters, width: 9 });
     expect(places[3]).toMatchObject({ characters, width: 5 });
+  });
+});
+
+describe('escapeCloses', () => {
+  const escape = { key: 'Escape', defaultPrevented: false };
+
+  test('Escape closes the check alone while it is open over review, and review once it is not', () => {
+    expect(escapeCloses(escape, { checking: true, reviewing: true })).toBe('check');
+    expect(escapeCloses(escape, { checking: true, reviewing: false })).toBe('check');
+    expect(escapeCloses(escape, { checking: false, reviewing: true })).toBe('review');
+    expect(escapeCloses(escape, { checking: false, reviewing: false })).toBeNull();
+  });
+
+  test('an Escape that something with focus took closes neither, and no other key does', () => {
+    const open = { checking: true, reviewing: true };
+    expect(escapeCloses({ key: 'Escape', defaultPrevented: true }, open)).toBeNull();
+    expect(escapeCloses({ key: 'Enter', defaultPrevented: false }, open)).toBeNull();
+    expect(escapeCloses({ key: 'Escape', defaultPrevented: true }, { checking: false, reviewing: true })).toBeNull();
   });
 });

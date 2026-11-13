@@ -26,6 +26,8 @@ export function Hint({ topic, id, children }: Props) {
     }
     const escape = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
+        // Marked as taken, so the key does not also close what the hint is in, such as review.
+        event.preventDefault();
         setDismissed(true);
       }
     };

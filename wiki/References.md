@@ -212,6 +212,7 @@ together.
 2. **Fix one that is something else.** Type the right character in
    **It is** under its tile and press Enter. Every place that shows it gets
    that character, and the tile moves to that character's step.
+   Escape in the field takes back what you typed.
    **Not a character** is for something that is no text, such as part of an
    icon: every place that shows it is left out. The tile stays in its step,
    and **It is a character** takes that back.

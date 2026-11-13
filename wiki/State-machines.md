@@ -2218,13 +2218,16 @@ stateDiagram-v2
   leaves, so a text that fits by now stays while the user types it. **Next**
   takes each listed text that fits as the answer for its shapes that had
   none, and goes to `Done`.
-- Escape closes the check and is marked as handled, so review underneath
-  does not close with it (`useCharacterCheck.ts`, `useReview.ts`).
+- Escape closes the check, or review when the check is not open over it:
+  one listener on the window decides for both (`escapeCloses` in
+  `useCharacterCheck.ts`), so review never closes underneath the check. It
+  hears the key after whatever has focus, and skips one that a question, a
+  hint, or a shortcut being chosen took and marked with `preventDefault`.
 - A character typed under a shape commits when the field loses focus, which
   pressing a button causes, and can move the check to its next stop before
-  the button is let go. Each step has its own buttons, and a click whose
-  press began on another stop is dropped (`CharacterCheck.tsx`), so a click
-  never answers for a step the user did not see.
+  the button is let go. Each step has its own buttons
+  (`CharacterCheck.tsx`), so that click lands on no button and answers for
+  nothing.
 - Closing forgets the answers. The texts and ticks they wrote stay with the
   finds and with review.
 
