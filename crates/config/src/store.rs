@@ -216,7 +216,9 @@ impl AppStore {
         }
         Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            format!("the applications folder has too many files named like {executable}"),
+            format!(
+                "the {NEW_FOLDER_TRIES} names it tries for the folder of {executable} are taken"
+            ),
         ))
     }
 
@@ -875,7 +877,7 @@ mod tests {
         let gave_up = crowded.create(&good, &[]).expect_err("every try is taken");
         assert_eq!(
             gave_up.to_string(),
-            "the applications folder has too many files named like Example.exe"
+            "the 16 names it tries for the folder of Example.exe are taken"
         );
         fs::remove_file(more.join("example-2")).expect("frees one");
         assert_eq!(crowded.create(&good, &[]).expect("creates"), "example-2");

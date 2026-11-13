@@ -85,12 +85,14 @@ impl<H: Host> Owner<H> {
         applications::check_name_free(&saved, None, name)?;
         name.clone_into(&mut file.name);
         file.anti_cheat = spec.anti_cheat;
-        file.origin = OriginDef::Imported { file: from };
+        file.origin = OriginDef::Imported { file: from.clone() };
         let id = self
             .stores()?
             .apps
             .create(&file, &pictures)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                format!("AppyTappy cannot import {from}: it could not be saved ({error}).")
+            })?;
         self.tell(Changed::Values);
         Ok(id)
     }
@@ -267,6 +269,19 @@ mod tests {
             harness.ask(import(b"text", "Other", AntiCheatDef::Unknown)),
             Err(
                 "AppyTappy cannot import friend's.zip: it is not a zip file AppyTappy can read."
+                    .to_owned()
+            )
+        );
+        // Things the store does not list take every name a new folder tries.
+        let apps = exported.folder.parent().expect("the applications folder");
+        for number in 3..=18 {
+            std::fs::write(apps.join(format!("example-{number}")), "").expect("writes");
+        }
+        assert_eq!(
+            harness.ask(import(&bytes, "Other", AntiCheatDef::Unknown)),
+            Err(
+                "AppyTappy cannot import friend's.zip: it could not be saved (the 16 names it \
+                 tries for the folder of Example.exe are taken)."
                     .to_owned()
             )
         );
