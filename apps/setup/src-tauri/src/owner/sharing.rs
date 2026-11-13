@@ -110,9 +110,6 @@ fn cannot_export(name: &str, error: &ShareError) -> String {
         ShareError::TooManyPixels => {
             " Draw smaller regions or fewer states or fixes, then export it again."
         },
-        ShareError::DecodesTooMuch => {
-            " Teach its references with smaller pictures, then export it again."
-        },
         _ => "",
     };
     format!("AppyTappy cannot export {name}: {error}.{change}")
@@ -380,12 +377,6 @@ mod tests {
             cannot_export("Example App", &ShareError::TooManyPixels),
             "AppyTappy cannot export Example App: its pictures together hold more pixels than \
              one 7680x4320 picture. Draw smaller regions or fewer states or fixes, then export it again."
-        );
-        assert_eq!(
-            cannot_export("Example App", &ShareError::DecodesTooMuch),
-            "AppyTappy cannot export Example App: its values read their references' pictures \
-             so many times that reading them would decode more pixels than four 7680x4320 \
-             pictures. Teach its references with smaller pictures, then export it again."
         );
         assert_eq!(
             cannot_export("Example App", &ShareError::NoAppFile),

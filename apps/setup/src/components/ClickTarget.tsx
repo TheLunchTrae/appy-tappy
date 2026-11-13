@@ -1,16 +1,6 @@
-import { type PointerEvent, type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { type PointerEvent, useEffect, useReducer, useRef, useState } from 'react';
 
-import {
-  addClickPicture,
-  clickNow,
-  clickPicture,
-  errorText,
-  findClick,
-  pickWindow,
-  readWindow,
-  select,
-  stopCapture,
-} from '../lib/api.ts';
+import { addClickPicture, clickNow, errorText, findClick, readWindow, select } from '../lib/api.ts';
 import {
   type AppSummary,
   type ClickAtDef,
@@ -39,23 +29,16 @@ import {
   spotAt,
 } from '../lib/click.ts';
 import { IDLE, tryStep } from '../lib/clickTry.ts';
-import type { Picture } from '../lib/pixels.ts';
 import { type Point, type Rect, type Size, contains, pixelAt, toPicture } from '../lib/region.ts';
+import { useCapture } from '../lib/capture.ts';
 import { background } from '../lib/repeat.ts';
+import { useNewest } from '../lib/request.ts';
 import { DEFAULT_COLOR_MATCH, type SelectTool } from '../lib/selection.ts';
-import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
-import { useScreenshots } from '../lib/useScreenshots.ts';
-import { LiveCanvas, PictureCanvas } from './canvas.tsx';
+import { ScreenshotStage, useScreenshotStage } from './capture/ScreenshotStage.tsx';
 import { SelectFields } from './CheckFields.tsx';
+import { ClickPictureThumb } from './ClickPictureThumb.tsx';
 import { Hint } from './Hint.tsx';
 import { Marquee, RegionSurface } from './RegionSurface.tsx';
-import { ZoomView } from './ZoomView.tsx';
-
-/** The widest live frame asked for, which keeps a large window's preview cheap. */
-const LIVE_MAX_WIDTH = 1600;
-
-/** The widest a click picture's thumbnail is asked for. */
-const THUMB_WIDTH = 220;
 
 /** A click's target as the automation editor keeps it. */
 interface ClickTargetValue {
@@ -63,31 +46,6 @@ interface ClickTargetValue {
   readonly button: ClickButtonDef;
   readonly delivery: ClickDeliveryDef;
   readonly at: ClickAtDef;
-}
-
-/** A click picture shown small, such as beside a click in the automation editor. */
-export function ClickPictureThumb({ image, label }: { readonly image: string; readonly label: string }) {
-  const [picture, setPicture] = useState<Picture | null>(null);
-  useEffect(() => {
-    let current = true;
-    background(
-      clickPicture(image, THUMB_WIDTH)
-        .then((loaded) => {
-          if (current) {
-            setPicture(loaded);
-          }
-        })
-        .catch(() => {
-          // The summary beside it still says what the click does.
-        }),
-    );
-    return () => {
-      current = false;
-    };
-  }, [image]);
-  return (
-    <span className="click-thumb">{picture === null ? null : <PictureCanvas picture={picture} label={label} />}</span>
-  );
 }
 
 /** Where a click looks: the same spot every time, or wherever its picture is. */
@@ -160,8 +118,8 @@ interface StageProps {
   /** The ID of the application whose value the automation watches, or null before it watches one. */
   readonly watched: string | null;
   readonly tolerance: number;
-  /** The application field, disabled while a picture is kept or looked for. */
-  readonly appField: (busy: boolean) => ReactNode;
+  /** Picks the application the click happens in, which opens the screen again on it. */
+  readonly onApp: (app: string) => void;
   /** Opens the screen again on the application, to find its window anew. */
   readonly onLookAgain: () => void;
   readonly onButton: (button: ClickButtonDef) => void;
@@ -182,7 +140,7 @@ function TargetStage({
   returnFocus,
   watched,
   tolerance,
-  appField,
+  onApp,
   onLookAgain,
   onButton,
   onDelivery,
@@ -197,6 +155,7 @@ function TargetStage({
   const [step, setStep] = useState<PictureStep>('picture');
   const [tool, setTool] = useState<SelectTool>('box');
   const [colorMatch, setColorMatch] = useState(DEFAULT_COLOR_MATCH);
+  const selecting = useNewest();
   // What Find it now and Click it now are doing or answered. Each try has a number, so a late answer is dropped.
   const [tried, tryNext] = useReducer(tryStep, IDLE);
   const attempts = useRef(0);
@@ -204,14 +163,11 @@ function TargetStage({
   const [error, setError] = useState<string | null>(null);
   // The picture kept for a drawn region, so finding and using it keep it once.
   const kept = useRef<{ readonly key: string; readonly at: ClickAtDef } | null>(null);
-  // Whether the screen still shows this stage, so a target finished after it closed is not used.
-  const mounted = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  // The stage's one pick of its window. What finishes after the stage closed, a pick or a target, is not used.
+  const picks = useNewest();
+  // The stage holds the capture until it goes: when the screen closes, or another stage opens, which may find no
+  // window to pick in its place. Its screenshots go with it.
+  const { pick } = useCapture();
 
   // What trying the target answered shows below the buttons, which may be past the end of a short window.
   const answer = useRef<HTMLDivElement>(null);
@@ -221,10 +177,11 @@ function TargetStage({
     }
   }, [tried]);
 
-  const screenshots = useScreenshots();
-  const { shots, full, selected, setSelected, position } = screenshots;
-  const shortcut = useScreenshotShortcut(screenshots.take);
+  const stage = useScreenshotStage();
+  const { liveError, shownPicture } = stage;
+  const { shots, full, selected, setSelected } = stage.screenshots;
 
+  const choices = clickApps(apps);
   const file = apps.find((candidate) => candidate.id === app)?.file ?? null;
   // The application's file as the lists last read it, which the window is picked by.
   const latestFile = useRef(file);
@@ -234,9 +191,7 @@ function TargetStage({
 
   // Picks the window the runtime clicks in, which it finds by the application's rules without the fallback.
   useEffect(() => {
-    let current = true;
-    // A function, because the check after an await must see a cleanup made meanwhile.
-    const isCurrent = (): boolean => current;
+    const isOpen = picks.begin();
     const file = latestFile.current;
     if (file === null) {
       setWindow({ kind: 'missing', message: 'Pick an application to click in.' });
@@ -248,7 +203,7 @@ function TargetStage({
         try {
           const read = await readWindow({ ...file.window, fallback: 'none' });
           if (read === null) {
-            if (isCurrent()) {
+            if (isOpen()) {
               setWindow({
                 kind: 'missing',
                 message: `No open window matches ${file.name}'s window rules. Open it, then look again.`,
@@ -257,46 +212,29 @@ function TargetStage({
             return;
           }
           // A screen closed meanwhile has stopped capture, which a pick now would start again.
-          if (!isCurrent()) {
+          if (!isOpen()) {
             return;
           }
-          await pickWindow(read);
-          if (isCurrent()) {
+          await pick(read);
+          if (isOpen()) {
             setWindow({ kind: 'picked', handle: read });
           }
         } catch (caught: unknown) {
-          if (isCurrent()) {
+          if (isOpen()) {
             setWindow({ kind: 'missing', message: errorText(caught) });
           }
         }
       })(),
     );
-    return () => {
-      current = false;
-      // The stage's capture ends with it, whether the screen closes, so the editor's live reading can watch again,
-      // or another stage opens, which may find no window to pick in its place. Its screenshots go with it.
-      background(stopCapture());
-    };
+    return undefined;
     // The window rules are read when the stage opens, and looking again opens a new one, not each time the lists
     // are read again.
-  }, []);
+  }, [picks, pick]);
 
-  const [liveSize, setLiveSize] = useState<Size | null>(null);
-  const [liveError, setLiveError] = useState<string | null>(null);
-  const onFrame = useCallback((width: number, height: number): void => {
-    setLiveError(null);
-    setLiveSize((current) => (current?.width === width && current.height === height ? current : { width, height }));
-  }, []);
-  const onLiveError = useCallback((caught: unknown): void => {
-    setLiveError(errorText(caught));
-  }, []);
-
-  const shownPicture = selected === null ? null : (full.get(selected) ?? null);
   // The window's own size: a screenshot's, since the live view may be scaled down.
   const newest = shots.at(-1);
   const native = shownPicture ?? (newest === undefined ? null : (full.get(newest.index) ?? null));
   const nativeSize: Size | null = native === null ? null : { width: native.width, height: native.height };
-  const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
 
   const drawnHere = drawn?.screenshot === selected ? drawn : null;
   const pictureSize = shownPicture === null ? null : { width: shownPicture.width, height: shownPicture.height };
@@ -318,15 +256,23 @@ function TargetStage({
     setDrawn({ screenshot: selected, region, selection, press: middle(region) });
   };
 
+  // A selection asked for on one screenshot marks nothing once another shows.
+  useEffect(() => selecting.drop, [selected, selecting]);
+
   const selectWith = (steps: SelectionSpec['steps']): void => {
     if (selected === null || sending) {
       return;
     }
     const on = selected;
     const selection: SelectionSpec = { tolerance: colorMatch, steps };
+    // A selection that a newer one overtook marks nothing.
+    const current = selecting.begin();
     background(
       select(on, selection)
         .then((view_) => {
+          if (!current()) {
+            return;
+          }
           if (view_ === null) {
             setError('Nothing was selected there. Try a bigger box or a higher color match.');
             return;
@@ -335,7 +281,9 @@ function TargetStage({
           setStep('press');
         })
         .catch((caught: unknown) => {
-          setError(errorText(caught));
+          if (current()) {
+            setError(errorText(caught));
+          }
         }),
     );
   };
@@ -369,24 +317,30 @@ function TargetStage({
     }
   };
 
-  /** The target's place as set up now, keeping a newly drawn picture first; null with nothing set up. */
-  const target = async (): Promise<ClickAtDef | null> => {
+  /**
+   * The target's place as set up now, keeping a newly drawn picture first, or why there is none. A failed command
+   * rejects with its message, as every command does.
+   */
+  const target = async (): Promise<ClickAtDef | { readonly problem: string }> => {
+    const unset = {
+      problem: mode === 'spot' ? 'Click where the click should land first.' : 'Draw the picture to click on first.',
+    };
     if (mode === 'spot') {
-      return spot;
+      return spot ?? unset;
     }
     if (drawn === null) {
-      return initial?.kind === 'picture' ? { ...initial, tolerance } : null;
+      return initial?.kind === 'picture' ? { ...initial, tolerance } : unset;
     }
     const picture = full.get(drawn.screenshot);
     if (picture === undefined) {
-      return null;
+      return unset;
     }
     const size = { width: picture.width, height: picture.height };
     const search = searchArea(drawn.region, size);
     if (search === null) {
-      throw new Error(
-        `The picture is too big to look for. Draw it smaller: at most ${LIMITS.maxSearchPixels.toLocaleString()} pixels.`,
-      );
+      return {
+        problem: `The picture is too big to look for. Draw it smaller: at most ${LIMITS.maxSearchPixels.toLocaleString()} pixels.`,
+      };
     }
     const { region, selection } = drawn;
     const key = JSON.stringify([drawn.screenshot, region, selection]);
@@ -407,22 +361,20 @@ function TargetStage({
   };
 
   /** Runs `task` on the target as set up now, and hands `problem` why when there is no target to run it on. */
-  const run = (task: (at: ClickAtDef) => Promise<void>, problem: (message: string) => void = setError): void => {
+  const run = (task: (at: ClickAtDef) => Promise<void> | void, problem: (message: string) => void = setError): void => {
     setBusy(true);
     setError(null);
     background(
       (async (): Promise<void> => {
         try {
           const at = await target();
-          if (at === null) {
-            problem(
-              mode === 'spot' ? 'Click where the click should land first.' : 'Draw the picture to click on first.',
-            );
+          if ('problem' in at) {
+            problem(at.problem);
             return;
           }
           await task(at);
         } catch (caught: unknown) {
-          problem(caught instanceof Error ? caught.message : errorText(caught));
+          problem(errorText(caught));
         } finally {
           setBusy(false);
         }
@@ -454,11 +406,11 @@ function TargetStage({
   };
 
   const use = (): void => {
-    run(async (at) => {
-      if (mounted.current) {
+    const isOpen = picks.join();
+    run((at) => {
+      if (isOpen()) {
         onUse({ app, button, delivery, at });
       }
-      await Promise.resolve();
     });
   };
 
@@ -506,183 +458,139 @@ function TargetStage({
 
   return (
     <main className="capture">
-      <section className="stage" aria-label="Click target">
-        <div className="bar">
-          <span className="crumb">
-            Automations / {automation} / <b>Click target</b>
-          </span>
-          <span className="pill">
-            <span className="dot live" />
-            Live · {appName}
-          </span>
-          {native === null ? null : (
-            <span className="pill">
-              {native.width} × {native.height}
-            </span>
-          )}
-          <div className="end">
-            {window.kind === 'missing' || (window.kind === 'picked' && liveError !== null) || elsewhere ? (
-              <button
-                type="button"
-                className="btn"
-                disabled={busy}
-                title="Finds the application's window again. Screenshots taken so far are cleared."
-                onClick={onLookAgain}
-              >
-                Look again
-              </button>
-            ) : null}
+      <ScreenshotStage
+        stage={stage}
+        label="Click target"
+        bar={{
+          path: ['Automations', automation],
+          current: 'Click target',
+          status: { kind: 'live', appName },
+          size: native,
+        }}
+        actions={
+          window.kind === 'missing' || (window.kind === 'picked' && liveError !== null) || elsewhere ? (
             <button
               type="button"
-              className="btn small"
-              aria-pressed={shortcut.choosing}
-              onClick={shortcut.toggle}
-              onBlur={shortcut.cancel}
-              onKeyDown={shortcut.onKeyDown}
+              className="btn"
+              disabled={busy}
+              title="Finds the application's window again. Screenshots taken so far are cleared."
+              onClick={onLookAgain}
             >
-              Change shortcut
+              Look again
             </button>
-            <button
-              type="button"
-              className="btn primary"
-              disabled={window.kind !== 'picked'}
-              onClick={() => {
-                background(screenshots.take());
-              }}
-            >
-              Take screenshot<span className="kbd">{shortcut.label}</span>
-            </button>
-          </div>
-        </div>
-        <p className="note" role="status">
-          {shortcut.choosing ? 'Press the new shortcut, or Esc to keep this one.' : null}
-        </p>
-        {shortcut.error === null ? null : <p className="warn">{shortcut.error}</p>}
-        {screenshots.error === null ? null : <p className="warn">{screenshots.error}</p>}
-        <ZoomView
-          picture={layoutSize}
-          zoomable={shownPicture !== null}
-          hint={
-            selected === null && liveError !== null
-              ? liveError
-              : hintText(window, mode, step, selected, shortcut.label, tool)
-          }
-        >
-          {({ space, shown }) => {
-            const scale = nativeSize === null || nativeSize.width === 0 ? 0 : shown.width / nativeSize.width;
-            const marker = (point: Point) => ({ left: (point.x + 0.5) * scale, top: (point.y + 0.5) * scale });
-            return (
-              <>
-                {window.kind !== 'picked' ? null : selected === null ? (
-                  <LiveCanvas
-                    maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
-                    onFrame={onFrame}
-                    onError={onLiveError}
-                  />
-                ) : shownPicture === null ? null : (
-                  <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
-                )}
-                {mode === 'picture' && area !== null ? (
-                  <div
-                    className="search-area"
-                    style={{
-                      left: area.x * scale,
-                      top: area.y * scale,
-                      width: area.width * scale,
-                      height: area.height * scale,
-                    }}
-                  >
-                    <span className="tag">
-                      Search area · {area.width} × {area.height}
-                    </span>
-                  </div>
-                ) : null}
-                {mode === 'picture' && shownPicture !== null && !pointing ? (
-                  <RegionSurface
-                    size={shownPicture}
-                    shown={shown}
-                    screenshot={selected}
-                    region={drawnHere?.region ?? null}
-                    label="Picture"
-                    editable={!sending}
-                    picking={false}
-                    tool={tool}
-                    onRegion={(region) => {
-                      setRegion(region, null);
-                    }}
-                    onPick={() => {
-                      // Clicks pick no colors.
-                    }}
-                    onSnap={(rough) => {
-                      selectWith([{ kind: 'snap', region: rough, combine: 'replace' }]);
-                    }}
-                    onSelectAt={(point) => {
-                      selectWith([{ kind: 'click', x: point.x, y: point.y, combine: 'replace' }]);
-                    }}
-                  />
-                ) : null}
-                {pointing ? (
-                  <div className="surface clicking" onPointerDown={onPoint}>
-                    {mode === 'picture' && drawnHere !== null && pictureSize !== null ? (
-                      <Marquee rect={drawnHere.region} picture={pictureSize} scale={scale} label="Picture" />
-                    ) : null}
-                  </div>
-                ) : null}
-                {mode === 'picture' && drawnHere !== null ? (
-                  <span
-                    className="click-spot"
-                    style={marker({
-                      x: drawnHere.region.x + drawnHere.press.x,
-                      y: drawnHere.region.y + drawnHere.press.y,
-                    })}
-                    aria-hidden="true"
-                  />
-                ) : null}
-                {mode === 'spot' && spotHere !== null ? (
-                  <span className="click-spot" style={marker(spotHere)} aria-hidden="true" />
-                ) : null}
-                {selected === null && landed !== null && nativeSize !== null ? (
-                  <span className="click-spot found" style={marker(landed)} aria-hidden="true" />
-                ) : null}
-              </>
-            );
-          }}
-        </ZoomView>
-        <div className="strip">
-          <button
-            type="button"
-            className="thumb"
-            aria-pressed={selected === null}
-            onClick={() => {
-              setSelected(null);
+          ) : null
+        }
+        watching={window.kind === 'picked'}
+        hint={(shortcut) =>
+          selected === null && liveError !== null ? liveError : hintText(window, mode, step, selected, shortcut, tool)
+        }
+        strip={{ note: 'Screenshots last until you change the application.' }}
+      >
+        {({ shown }) => {
+          const scale = nativeSize === null || nativeSize.width === 0 ? 0 : shown.width / nativeSize.width;
+          const marker = (point: Point) => ({ left: (point.x + 0.5) * scale, top: (point.y + 0.5) * scale });
+          return (
+            <>
+              {mode === 'picture' && area !== null ? (
+                <div
+                  className="search-area"
+                  style={{
+                    left: area.x * scale,
+                    top: area.y * scale,
+                    width: area.width * scale,
+                    height: area.height * scale,
+                  }}
+                >
+                  <span className="tag">
+                    Search area · {area.width} × {area.height}
+                  </span>
+                </div>
+              ) : null}
+              {mode === 'picture' && shownPicture !== null && !pointing ? (
+                <RegionSurface
+                  size={shownPicture}
+                  shown={shown}
+                  screenshot={selected}
+                  region={drawnHere?.region ?? null}
+                  label="Picture"
+                  editable={!sending}
+                  tool={tool}
+                  onRegion={(region) => {
+                    // A box drawn by hand is newer than a selection still asked for, whose answer would replace it.
+                    selecting.drop();
+                    setRegion(region, null);
+                  }}
+                  onSnap={(rough) => {
+                    selectWith([{ kind: 'snap', region: rough, combine: 'replace' }]);
+                  }}
+                  onSelectAt={(point) => {
+                    selectWith([{ kind: 'click', x: point.x, y: point.y, combine: 'replace' }]);
+                  }}
+                />
+              ) : null}
+              {pointing ? (
+                <div className="surface clicking" onPointerDown={onPoint}>
+                  {mode === 'picture' && drawnHere !== null && pictureSize !== null ? (
+                    <Marquee rect={drawnHere.region} picture={pictureSize} scale={scale} label="Picture" />
+                  ) : null}
+                </div>
+              ) : null}
+              {mode === 'picture' && drawnHere !== null ? (
+                <span
+                  className="click-spot"
+                  style={marker({
+                    x: drawnHere.region.x + drawnHere.press.x,
+                    y: drawnHere.region.y + drawnHere.press.y,
+                  })}
+                  aria-hidden="true"
+                />
+              ) : null}
+              {mode === 'spot' && spotHere !== null ? (
+                <span className="click-spot" style={marker(spotHere)} aria-hidden="true" />
+              ) : null}
+              {selected === null && landed !== null && nativeSize !== null ? (
+                <span className="click-spot found" style={marker(landed)} aria-hidden="true" />
+              ) : null}
+            </>
+          );
+        }}
+      </ScreenshotStage>
+      <aside className="inspector" aria-label="Click target">
+        <div className="field">
+          <span className="name">
+            <label htmlFor="click-app">Application</label>
+            <Hint topic="Application" id="hint-click-app">
+              The saved application the click happens in. AppyTappy finds its window with its window rules on the
+              Applications page, and clicks only in a window that matches them.
+            </Hint>
+          </span>
+          <select
+            id="click-app"
+            className="input"
+            aria-describedby="hint-click-app"
+            value={app}
+            // The application stays while a picture is kept or looked for.
+            disabled={busy}
+            onChange={(event) => {
+              onApp(event.target.value);
             }}
           >
-            <span className="shot">
-              <span className="dot live" />
-            </span>
-            Live
-          </button>
-          {shots.map((shot, index) => (
-            <button
-              key={shot.index}
-              type="button"
-              className="thumb"
-              aria-pressed={selected === shot.index}
-              onClick={() => {
-                setSelected(shot.index);
-              }}
-            >
-              <span className="shot">
-                {shot.thumb === null ? null : <PictureCanvas picture={shot.thumb} label="" />}
-              </span>
-              {index + 1} · {shot.time}
-            </button>
-          ))}
-          <span className="note">Screenshots last until you change the application.</span>
+            {app === '' ? (
+              <option value="" disabled>
+                Pick an application
+              </option>
+            ) : choices.some((choice) => choice.id === app) ? null : (
+              <option value={app} disabled>
+                {app} (no longer saved)
+              </option>
+            )}
+            {choices.map((choice) => (
+              <option key={choice.id} value={choice.id}>
+                {choice.name}
+              </option>
+            ))}
+          </select>
         </div>
-      </section>
-      <aside className="inspector" aria-label="Click target">
-        {appField(busy)}
         <div className="field">
           <span className="name">
             <span id="click-where">Where to click</span>
@@ -996,42 +904,7 @@ export function ClickTarget({ apps, automation, watched, initial, onCancel, onUs
       onLookAgain={() => {
         setRound((count) => count + 1);
       }}
-      appField={(busy) => (
-        <div className="field">
-          <span className="name">
-            <label htmlFor="click-app">Application</label>
-            <Hint topic="Application" id="hint-click-app">
-              The saved application the click happens in. AppyTappy finds its window with its window rules on the
-              Applications page, and clicks only in a window that matches them.
-            </Hint>
-          </span>
-          <select
-            id="click-app"
-            className="input"
-            aria-describedby="hint-click-app"
-            value={app}
-            disabled={busy}
-            onChange={(event) => {
-              setApp(event.target.value);
-            }}
-          >
-            {app === '' ? (
-              <option value="" disabled>
-                Pick an application
-              </option>
-            ) : chosen === null ? (
-              <option value={app} disabled>
-                {app} (no longer saved)
-              </option>
-            ) : null}
-            {choices.map((choice) => (
-              <option key={choice.id} value={choice.id}>
-                {choice.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      onApp={setApp}
     />
   );
 }

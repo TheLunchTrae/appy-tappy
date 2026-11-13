@@ -17,7 +17,7 @@ pub(crate) use upload::Upload;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, SizeDef, WindowDef};
+use appytappy_config::app_file::{AntiCheatDef, AppFile, OverlayModeDef, SizeDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, ClickAtDef, WhenDef};
 use appytappy_config::settings_file::SettingsFile;
 use tauri::ipc::Response;
@@ -114,9 +114,10 @@ pub(crate) async fn list_windows(app: AppHandle) -> Result<WindowList, String> {
     try_ask(&app, "list_windows", |owner| owner.window_list()).await
 }
 
-/// Starts capturing `window` for the preview.
+/// Starts capturing `window` for the preview, and answers the capture's
+/// number.
 #[tauri::command]
-pub(crate) async fn pick_window(app: AppHandle, window: u64) -> Result<(), String> {
+pub(crate) async fn pick_window(app: AppHandle, window: u64) -> Result<u64, String> {
     try_ask(&app, "pick_window", move |owner| owner.pick(window)).await
 }
 
@@ -128,10 +129,14 @@ pub(crate) async fn preview(app: AppHandle, max_width: u32) -> Result<Response, 
         .map(pixels)
 }
 
-/// Stops capturing and forgets the session's screenshots and check.
+/// Stops capture `capture` and forgets the session's screenshots and
+/// check, unless another capture took its place.
 #[tauri::command]
-pub(crate) async fn stop_capture(app: AppHandle) -> Result<(), String> {
-    ask(&app, "stop_capture", Owner::stop).await
+pub(crate) async fn stop_capture(app: AppHandle, capture: u64) -> Result<(), String> {
+    ask(&app, "stop_capture", move |owner| {
+        owner.stop_capture(capture);
+    })
+    .await
 }
 
 /// Keeps the newest frame as a screenshot and returns its index.
@@ -399,6 +404,19 @@ pub(crate) async fn click_now(app: AppHandle, click: ClickSpec) -> Result<ClickS
 #[tauri::command]
 pub(crate) async fn list_apps(app: AppHandle) -> Result<Vec<AppSummary>, String> {
     try_ask(&app, "list_apps", Owner::apps).await
+}
+
+/// The file of the saved application `application`, read alone; `None`
+/// when it is no longer saved.
+#[tauri::command]
+pub(crate) async fn app_file(
+    app: AppHandle,
+    application: String,
+) -> Result<Option<AppFile>, String> {
+    try_ask(&app, "app_file", move |owner| {
+        owner.stores()?.file(&application)
+    })
+    .await
 }
 
 /// The saved applications and the open windows, with the windows each
@@ -783,16 +801,17 @@ pub(crate) async fn look_recording_state(
     .await
 }
 
-/// A recorded reading, at most `max_width` wide; no bytes for an unknown
-/// index.
+/// A reading of recording `recording`, at most `max_width` wide; no bytes
+/// for an unknown index or a recording that was replaced.
 #[tauri::command]
 pub(crate) async fn recorded_reading(
     app: AppHandle,
+    recording: u64,
     index: usize,
     max_width: u32,
 ) -> Result<Response, String> {
     ask(&app, "recorded_reading", move |owner| {
-        owner.recorded_pixels(index, max_width)
+        owner.recorded_pixels(recording, index, max_width)
     })
     .await
     .map(pixels)

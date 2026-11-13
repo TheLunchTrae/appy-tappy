@@ -21,26 +21,14 @@ import { type Rect, type Size, sameRect } from './region.ts';
 import { sameSize, sizeText } from './sizes.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
 
-/** The kinds of check, in the order the capture screen offers them. */
-export const CHECK_KINDS = ['number', 'barFill', 'color', 'state'] as const;
+/** The kinds of check, as the saved files name them. */
+export type CheckKind = CheckDef['kind'];
 
-export type CheckKind = (typeof CHECK_KINDS)[number];
+/** A saved check of one kind. */
+type SavedCheck<Kind extends CheckKind> = Extract<CheckDef, { readonly kind: Kind }>;
 
-/** What each kind is called on screen. */
-export const KIND_NAMES: Readonly<Record<CheckKind, string>> = {
-  number: 'Number',
-  barFill: 'Bar fill',
-  color: 'Color',
-  state: 'State',
-};
-
-/** The tolerance each kind starts with; a number's is its new reference's. */
-export const DEFAULT_TOLERANCE: Readonly<Record<CheckKind, number>> = {
-  number: 40,
-  barFill: 0,
-  color: 24,
-  state: 16,
-};
+/** The kind of value a check reads, which decides the comparisons an automation offers for it. */
+export type ValueKind = 'number' | 'flag' | 'state';
 
 /** One look of a state check, as the user sets it up. */
 export interface DraftState {
@@ -86,12 +74,15 @@ export interface Draft {
   readonly characters: readonly string[] | null;
 }
 
+/** The tolerance a new reference's characters start with, and so a number check's. */
+const NEW_REFERENCE_TOLERANCE = 40;
+
 export const EMPTY_DRAFT: Draft = {
   kind: 'number',
   region: null,
   drawnOn: null,
   pin: AUTOMATIC,
-  tolerance: DEFAULT_TOLERANCE.number,
+  tolerance: NEW_REFERENCE_TOLERANCE,
   ink: null,
   boxes: [],
   recorded: new Map(),
@@ -283,16 +274,13 @@ export function taughtSpec(draft: Draft, reference: ReferenceRef | null): Charac
 
 /** The characters `draft` teaches the reference `reference`, or a new one when null; or what it still needs. */
 export function buildCharacters(draft: Draft, reference: ReferenceRef | null): Built<CharactersSpec> {
-  const reading = readingOf(draft);
-  if (reading.region === null || reading.drawnOn === null) {
-    return missing('Draw a box around the characters on a screenshot.');
-  }
-  if (draft.ink === null) {
-    return missing("Pick the characters' color.");
-  }
-  const spec = reviewSpec(draft, recordedOf(draft), reference);
+  const spec = taughtSpec(draft, reference);
   if (spec === null) {
-    return missing("Pick the characters' color.");
+    return missing(
+      readingOf(draft).region === null
+        ? 'Draw a box around the characters on a screenshot.'
+        : "Pick the characters' color.",
+    );
   }
   if (reference === null && spec.labels.length === 0 && spec.recorded.length === 0) {
     return missing('Type what a box shows, or record the characters.');
@@ -300,14 +288,39 @@ export function buildCharacters(draft: Draft, reference: ReferenceRef | null): B
   return { ok: true, spec };
 }
 
-/** The check `draft` describes for the saved application `app`, or the next thing it needs. */
-export function buildSpec(draft: Draft, app: string): Built {
-  const { region, tolerance } = draft;
-  if (region === null) {
-    return missing('Draw a region on a screenshot.');
-  }
-  switch (draft.kind) {
-    case 'number': {
+/** A saved check in a few words, and the colors it reads with. */
+interface CheckSummary {
+  readonly name: string;
+  readonly colors: readonly Color[];
+}
+
+/** Everything the setup app knows of one kind of check. A new kind is one more entry of {@link CHECKS}. */
+interface CheckEntry<Kind extends CheckKind> {
+  /** What the kind is called on screen. */
+  readonly label: string;
+  /** The tolerance the kind starts with. */
+  readonly tolerance: number;
+  /** The kind of value it reads. */
+  readonly reads: ValueKind;
+  /** The check `draft` describes at `region` for the saved application `app`, or the next thing it needs. */
+  readonly build: (draft: Draft, region: Rect, app: string) => Built;
+  /** A saved check of the kind in a few words, with its application's `references`. */
+  readonly summary: (check: SavedCheck<Kind>, references: readonly ReferenceDef[]) => CheckSummary;
+  /** What a fix's draft keeps of the saved check it draws again: what reads the same at every size. */
+  readonly kept: (check: SavedCheck<Kind>) => Partial<Draft>;
+}
+
+/**
+ * Each kind of check, in the order the capture screen offers them. The keys are the saved files' kinds, so a kind
+ * the Rust side adds does not compile until it has an entry here. What a kind's region does about content that
+ * moves is in `moving.ts`, and its fields are the capture screen's.
+ */
+export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
+  number: {
+    label: 'Number',
+    tolerance: NEW_REFERENCE_TOLERANCE,
+    reads: 'number',
+    build: (draft, region, app) => {
       if (draft.reference === null) {
         return missing('Pick a reference to read the number with, or make one from this region.');
       }
@@ -316,8 +329,30 @@ export function buildSpec(draft: Draft, app: string): Built {
       }
       const spec = { kind: 'number', region, reference: { app, id: draft.reference }, whole: draft.whole } as const;
       return { ok: true, spec: draft.characters === null ? spec : { ...spec, characters: draft.characters.join('') } };
-    }
-    case 'barFill': {
+    },
+    summary: (check, references) => {
+      const reference = references.find((saved) => saved.id === check.reference);
+      if (reference === undefined) {
+        return { name: 'Number, its reference is missing', colors: [] };
+      }
+      return {
+        name:
+          `Number, read with ${reference.name}${check.whole ? ', whole only' : ''}` +
+          (check.characters === undefined ? '' : `, reading ${knownCharacters([check.characters]).join('')}`),
+        colors: [reference.ink],
+      };
+    },
+    kept: (check) => ({
+      reference: check.reference,
+      whole: check.whole,
+      characters: savedCharacters(check.characters),
+    }),
+  },
+  barFill: {
+    label: 'Bar fill',
+    tolerance: 0,
+    reads: 'number',
+    build: (draft, region) => {
       if (draft.filled === null) {
         return missing("Pick the bar's filled color.");
       }
@@ -325,14 +360,28 @@ export function buildSpec(draft: Draft, app: string): Built {
         return missing("Pick the bar's empty color.");
       }
       return { ok: true, spec: { kind: 'barFill', region, filled: draft.filled, empty: draft.empty } };
-    }
-    case 'color': {
+    },
+    summary: (check) => ({ name: 'Bar fill', colors: [check.filled, check.empty] }),
+    kept: (check) => ({ filled: check.filled, empty: check.empty }),
+  },
+  color: {
+    label: 'Color',
+    tolerance: 24,
+    reads: 'flag',
+    build: (draft, region) => {
       if (draft.color === null) {
         return missing('Pick the color to look for.');
       }
-      return { ok: true, spec: { kind: 'color', region, color: draft.color, tolerance } };
-    }
-    case 'state': {
+      return { ok: true, spec: { kind: 'color', region, color: draft.color, tolerance: draft.tolerance } };
+    },
+    summary: (check) => ({ name: 'Color', colors: [check.color] }),
+    kept: (check) => ({ color: check.color, tolerance: check.tolerance }),
+  },
+  state: {
+    label: 'State',
+    tolerance: 16,
+    reads: 'state',
+    build: (draft, region) => {
       if (draft.states.length === 0) {
         return missing('Add a state from a screenshot that shows it.');
       }
@@ -348,9 +397,52 @@ export function buildSpec(draft: Draft, app: string): Built {
           ? { ...spec, selection: { tolerance: draft.colorMatch, steps: state.steps } }
           : spec;
       });
-      return { ok: true, spec: { kind: 'state', region, drawnOn: draft.drawnOn, states, tolerance } };
-    }
+      const { drawnOn, tolerance } = draft;
+      return { ok: true, spec: { kind: 'state', region, drawnOn, states, tolerance } };
+    },
+    summary: (check) => ({ name: `State: ${check.states.map((state) => state.name).join(', ')}`, colors: [] }),
+    kept: (check) => ({ tolerance: check.tolerance, stateNames: check.states.map((state) => state.name) }),
+  },
+};
+
+/**
+ * The kinds of check, in the order the capture screen offers them, which is the table's. Every key is a kind; the
+ * filter is there only to give the keys their type, which `Object.keys` leaves as `string`.
+ */
+export const CHECK_KINDS: readonly CheckKind[] = Object.keys(CHECKS).filter(
+  (kind): kind is CheckKind => kind in CHECKS,
+);
+
+/**
+ * Hands the saved `check` to `use` with its kind's entry: the one place a saved check meets its entry, since the
+ * compiler cannot tell which entry a check of any kind indexes.
+ */
+function described<Result>(
+  check: CheckDef,
+  use: <Kind extends CheckKind>(entry: CheckEntry<Kind>, check: SavedCheck<Kind>) => Result,
+): Result {
+  switch (check.kind) {
+    case 'number':
+      return use(CHECKS.number, check);
+    case 'barFill':
+      return use(CHECKS.barFill, check);
+    case 'color':
+      return use(CHECKS.color, check);
+    case 'state':
+      return use(CHECKS.state, check);
   }
+}
+
+/** A saved check, in a few words, with its application's `references`. */
+export function checkSummary(check: CheckDef, references: readonly ReferenceDef[]): CheckSummary {
+  return described(check, (entry, saved) => entry.summary(saved, references));
+}
+
+/** The check `draft` describes for the saved application `app`, or the next thing it needs. */
+export function buildSpec(draft: Draft, app: string): Built {
+  return draft.region === null
+    ? missing('Draw a region on a screenshot.')
+    : CHECKS[draft.kind].build(draft, draft.region, app);
 }
 
 /** The position of the state taken from `screenshot` in `draft`, or -1 when none is. */
@@ -421,7 +513,7 @@ export function toReference(draft: Draft, existing: ReferenceDef | null): Draft 
   return {
     ...draft,
     ink: existing?.ink ?? null,
-    tolerance: existing?.tolerance ?? DEFAULT_TOLERANCE.number,
+    tolerance: existing?.tolerance ?? NEW_REFERENCE_TOLERANCE,
     boxes: [],
     recorded: new Map(),
   };
@@ -438,22 +530,12 @@ export function fromReference(draft: Draft): Draft {
  * region starts empty.
  */
 export function fixDraft(check: CheckDef): Draft {
-  const start = { ...EMPTY_DRAFT, kind: check.kind, tolerance: DEFAULT_TOLERANCE[check.kind] };
-  switch (check.kind) {
-    case 'number':
-      return {
-        ...start,
-        reference: check.reference,
-        whole: check.whole,
-        characters: savedCharacters(check.characters),
-      };
-    case 'barFill':
-      return { ...start, filled: check.filled, empty: check.empty };
-    case 'color':
-      return { ...start, color: check.color, tolerance: check.tolerance };
-    case 'state':
-      return { ...start, tolerance: check.tolerance, stateNames: check.states.map((state) => state.name) };
-  }
+  return described(check, (entry, saved) => ({
+    ...EMPTY_DRAFT,
+    kind: saved.kind,
+    tolerance: entry.tolerance,
+    ...entry.kept(saved),
+  }));
 }
 
 /**
@@ -519,7 +601,7 @@ export function charactersOnceTaught(
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */
 export function withKind(draft: Draft, kind: CheckKind): Draft {
-  return { ...draft, kind, tolerance: DEFAULT_TOLERANCE[kind] };
+  return { ...draft, kind, tolerance: CHECKS[kind].tolerance };
 }
 
 /**

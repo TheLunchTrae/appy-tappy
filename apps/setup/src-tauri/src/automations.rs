@@ -18,6 +18,7 @@ use appytappy_config::action::KeyChord;
 use appytappy_config::automation_file::{ActionDef, AutomationDef, AutomationsFile};
 use appytappy_config::names::new_automation_id;
 use appytappy_config::signal::SignalName;
+use appytappy_sources::automation::AppReaders;
 use serde::Serialize;
 
 use crate::stores::Stores;
@@ -76,12 +77,14 @@ fn unique_ids(file: &mut AutomationsFile) {
 pub(crate) fn list(stores: &Stores) -> Result<Vec<AutomationSummary>, String> {
     let file = load(stores)?;
     let apps = apps(stores)?;
+    // One listing reads each reference once, for all its automations.
+    let mut readers = AppReaders::new();
     Ok(file
         .automations
         .iter()
         .map(|automation| AutomationSummary {
             automation: automation.clone(),
-            problem: problem(automation, &apps, stores),
+            problem: problem(automation, &apps, stores, &mut readers),
         })
         .collect())
 }
@@ -118,7 +121,7 @@ pub(crate) fn save(
             ActionDef::Click { .. } => {},
         }
     }
-    if let Some(problem) = problem(&draft, &apps(stores)?, stores) {
+    if let Some(problem) = problem(&draft, &apps(stores)?, stores, &mut AppReaders::new()) {
         return Err(problem);
     }
     let mut file = load(stores)?;
@@ -209,7 +212,10 @@ pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<()
     )]
     {
         let automation = &file.automations[position];
-        if enabled && let Some(problem) = problem(automation, &apps(stores)?, stores) {
+        if enabled
+            && let Some(problem) =
+                problem(automation, &apps(stores)?, stores, &mut AppReaders::new())
+        {
             return Err(format!(
                 "{} cannot run until it is fixed. {problem}",
                 automation.name

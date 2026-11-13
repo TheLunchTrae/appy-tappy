@@ -3,6 +3,7 @@
 //! quits.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::io;
 use std::mem;
 use std::sync::Arc;
@@ -13,13 +14,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use appytappy_actions::Watched;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::paths::Locations;
-use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile, TraceCategory};
+use appytappy_config::settings_file::{ReadInterval, SettingsFile, TraceCategory};
 use appytappy_config::store::{AppStore, AutomationStore, EnabledStore, SettingsStore};
 use appytappy_platform::{
     Log, RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, TrayMenu, WindowWatch,
 };
 use appytappy_sources::HostSystem;
-use appytappy_sources::schedule::ReadInterval;
 use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
@@ -28,7 +28,7 @@ use crate::trace::switch::Switch;
 use crate::trace::writer::TraceReport;
 use crate::trace::{Detail, Record, Trace, What};
 use crate::workers::act::ActionReport;
-use crate::workers::reader::{self, Reader, Reading};
+use crate::workers::reader::{self, CHECK_AGAIN, Reader, Reading};
 use crate::workers::{act, join, spawn, tell_end};
 use crate::{lifecycle, note, plan, tray};
 
@@ -544,89 +544,13 @@ fn show(tray: Option<&Tray>, model: &Model, shown: &mut TrayMenu) {
 /// The operating system's media and audio controls, made on the action
 /// thread. They name each audio session's app from `system`'s process
 /// list, which detection uses too, taken fresh for each volume action.
-#[cfg(windows)]
-#[mutants::skip] // Makes the real controls, checked by hand on Windows.
-fn controls(system: &Arc<HostSystem>) -> io::Result<appytappy_actions::win::WindowsControls> {
+fn controls(system: &Arc<HostSystem>) -> io::Result<appytappy_actions::HostControls> {
     let system = Arc::clone(system);
-    appytappy_actions::win::WindowsControls::new(Box::new(move || {
+    appytappy_actions::HostControls::new(Box::new(move || {
         system
             .processes()
             .map(appytappy_sources::system::executables)
     }))
-}
-
-/// Off Windows there are no controls, so no action can run.
-#[cfg(not(windows))]
-fn controls(_system: &Arc<HostSystem>) -> io::Result<NoControls> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "actions run only on Windows",
-    ))
-}
-
-/// Controls that cannot exist, for systems other than Windows.
-#[cfg(not(windows))]
-#[derive(Debug)]
-struct NoControls(std::convert::Infallible);
-
-#[cfg(not(windows))]
-impl appytappy_actions::Controls for NoControls {
-    type Media = ();
-    type Volume = ();
-    type Input = appytappy_actions::Unsupported;
-
-    #[mutants::skip]
-    fn input(&mut self) -> &mut appytappy_actions::Unsupported {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn current_media(&mut self) -> io::Result<Option<appytappy_actions::MediaSession<()>>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn media_sessions(&mut self) -> io::Result<Vec<appytappy_actions::MediaSession<()>>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn media_command(
-        &mut self,
-        (): &(),
-        _command: appytappy_config::action::MediaCommand,
-    ) -> io::Result<bool> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn system_volume(&mut self) -> io::Result<Option<appytappy_actions::Volume<()>>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn app_volumes(&mut self) -> io::Result<Vec<(String, appytappy_actions::Volume<()>)>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn set_volume(
-        &mut self,
-        (): &(),
-        _level: appytappy_config::action::VolumeLevel,
-    ) -> io::Result<bool> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn open(&mut self, _target: &appytappy_config::action::OpenTarget) -> io::Result<()> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn play_sound(&mut self, _file: &std::path::Path) -> io::Result<bool> {
-        match self.0 {}
-    }
 }
 
 /// Waits for the next event, or, when an automation is `due`, until then at
@@ -839,12 +763,11 @@ fn read_saved(
     let mut orders = Vec::new();
     if read.settings {
         match read_settings(&stores.settings) {
-            Ok(settings) => {
+            Ok((settings, interval)) => {
                 if settings.remember_enabled && !reloads.had_settings && !reloads.picked {
                     orders = remembered(&stores.enabled, model, log);
                 }
                 reloads.had_settings = true;
-                let interval = read_interval(settings.read_interval);
                 if interval != model.interval() {
                     note(log, &interval_line(interval));
                 }
@@ -863,7 +786,7 @@ fn read_saved(
         match load(stores, log) {
             Ok(plan) => {
                 reloads.had = Had::Plan;
-                watchlist = Some(plan.watchlist());
+                watchlist = Some(Watchlist::new(plan.windows()));
                 orders.extend(model.replan(plan.apps));
             },
             Err(error) => {
@@ -954,22 +877,19 @@ fn failed(
     retry
 }
 
-/// Reads the settings.
+/// Reads the settings and the read interval they ask for.
 ///
 /// # Errors
 ///
 /// Returns why the settings cannot be read, as a line for the log.
-fn read_settings(store: &SettingsStore) -> Result<SettingsFile, String> {
-    store
-        .load()
-        .map_err(|error| format!("the settings cannot be read: {error}"))
-}
-
-/// The read interval `saved` asks for. A saved file is checked, so its
-/// fastest read is never slower than its slowest; were it, the default
-/// stands in.
-fn read_interval(saved: ReadIntervalDef) -> ReadInterval {
-    ReadInterval::new(saved.fastest(), saved.slowest()).unwrap_or_default()
+fn read_settings(store: &SettingsStore) -> Result<(SettingsFile, ReadInterval), String> {
+    let unreadable = |error: &dyn fmt::Display| format!("the settings cannot be read: {error}");
+    let settings = store.load().map_err(|error| unreadable(&error))?;
+    let interval = settings
+        .read_interval
+        .checked()
+        .map_err(|error| unreadable(&error))?;
+    Ok((settings, interval))
 }
 
 /// The log line for a new read interval.
@@ -1016,7 +936,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                 crew.tracing.name(session, &plan);
                 let (job, trace) = crew.reader_job(session, reader, plan, watched, interval);
                 let system = Arc::clone(&crew.system);
-                let started = Reader::start(system, job, trace, crew.events.clone());
+                let started = Reader::start(CHECK_AGAIN, system, job, trace, crew.events.clone());
                 crew.read(session, reader, started, &name, log);
             },
             Order::StopReading(id, name) => {
@@ -1291,17 +1211,6 @@ mod tests {
     use super::*;
     use crate::model;
     use appytappy_platform::LOG_LIMIT;
-
-    #[cfg(not(windows))]
-    #[test]
-    fn off_windows_actions_cannot_run() {
-        assert_eq!(
-            controls(&Arc::new(HostSystem::default()))
-                .expect_err("unsupported")
-                .kind(),
-            io::ErrorKind::Unsupported
-        );
-    }
 
     #[test]
     fn events_update_the_model_and_the_log_until_quit() {
@@ -2162,7 +2071,7 @@ mod tests {
             process: ProcessId::new(7),
             executable: "Example.exe".to_owned(),
         };
-        let interval = ReadInterval::default();
+        let interval = ReadInterval::DEFAULT;
         let (job, started) = crew.reader_job(
             SessionId(3),
             ReaderNumber(1),

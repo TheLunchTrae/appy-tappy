@@ -10,7 +10,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use super::{Image, Layout, Region, Size};
+use super::{Image, Layout, NO_MORE_FRAMES, Region, Size};
 use crate::system::{Bounds, Unsupported};
 
 /// What a capture copies out of each frame.
@@ -127,8 +127,8 @@ impl Frame<'_> {
 /// when the window closed, and no frame follows it.
 ///
 /// It returns how long to wait before handling another, such as the wait a
-/// [`crate::schedule::ReadSchedule`] gives, and runs on the capture's own
-/// thread. A panic in it unwinds that thread, so the capture stops and
+/// [`crate::schedule::ReadSchedule`] gives, or [`NO_MORE_FRAMES`], and runs
+/// on the capture's own thread. A panic in it unwinds that thread, so the capture stops and
 /// tells nobody until it is closed: a handler whose owner must hear of a
 /// panic catches its own. A panic elsewhere in the capture's frame loop
 /// reaches the handler as the capture's end, as [`run_capture`] says.
@@ -219,10 +219,6 @@ pub trait CaptureSession {
     fn close(self) -> io::Result<()>;
 }
 
-/// How long [`grab`]'s capture waits after its frame: longer than any grab
-/// takes, so the system is asked for no more frames before it closes.
-const AFTER_GRAB: Duration = Duration::from_secs(3600);
-
 /// Copies `region` of one frame of `window`, with the window's size.
 ///
 /// `window` is a handle from [`crate::system::System::windows`], and the
@@ -251,7 +247,7 @@ pub fn grab<C: Capture>(
             reason = "a frame after the first, or after the grab stopped waiting, is not wanted"
         )]
         let _ = sender.try_send(copied);
-        AFTER_GRAB
+        NO_MORE_FRAMES
     });
     let session = capture.start(
         window,
@@ -309,6 +305,8 @@ mod tests {
     #[derive(Debug, PartialEq)]
     enum Asked {
         Start(u64, Crop),
+        /// The handler took a frame and asked for this wait.
+        Wait(Duration),
         Close,
     }
 
@@ -349,7 +347,7 @@ mod tests {
                 height: 480,
             };
             for frame in &self.frames {
-                handler(match frame {
+                let wait = handler(match frame {
                     Ok(image) => Ok(Frame {
                         window_size,
                         image,
@@ -358,6 +356,9 @@ mod tests {
                     }),
                     Err(kind) => Err(io::Error::from(*kind)),
                 });
+                self.asked
+                    .send(Asked::Wait(wait))
+                    .map_err(io::Error::other)?;
             }
             Ok(FakeSession(self.asked.clone()))
         }
@@ -403,8 +404,11 @@ mod tests {
             asked.try_iter().collect::<Vec<_>>(),
             [
                 Asked::Start(7, Crop::Layout(Layout::one(region))),
+                Asked::Wait(NO_MORE_FRAMES),
+                Asked::Wait(NO_MORE_FRAMES),
                 Asked::Close
-            ]
+            ],
+            "it wants no frame after its first"
         );
     }
 
@@ -646,11 +650,6 @@ mod tests {
         let reasons =
             [fixed, formatted, other].map(|payload| panic_reason(payload.as_ref()).to_owned());
         assert_eq!(reasons, ["fixed", "formatted 1", "an unknown reason"]);
-    }
-
-    #[test]
-    fn a_grab_s_capture_waits_long_after_its_frame() {
-        assert!(AFTER_GRAB >= Duration::from_secs(60));
     }
 
     #[test]

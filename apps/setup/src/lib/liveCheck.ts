@@ -24,13 +24,68 @@ export type ReadAnswer =
   | { readonly ok: false; readonly problem: string };
 
 /**
+ * Whether `shown` already shows what `next` would. It compares every field of a `Reading`, its kind and its value:
+ * a field added to a reading is compared here too, or a read that differs only in it would never show.
+ */
+function sameRead(shown: LiveRead, next: LiveRead): boolean {
+  if (shown.problem !== next.problem) {
+    return false;
+  }
+  const [was, now] = [shown.reading, next.reading];
+  return was === null || now === null ? was === now : was.kind === now.kind && was.value === now.value;
+}
+
+/**
  * What the screen shows once a read answers: the answer, when the check that was in force as the read was `asked` is
  * the one in force `now`, and otherwise `shown` as it was. An answer asked while no check was in force is dropped
- * too, since the Rust side read it with the check before.
+ * too, since the Rust side read it with the check before. An answer that says what `shown` says already is `shown`
+ * itself: the window is read several times a second, and what reads the same shows the same without a new render.
  */
 export function afterRead(shown: LiveRead, asked: InForce, now: InForce, answer: ReadAnswer): LiveRead {
   if (asked === null || asked !== now) {
     return shown;
   }
-  return answer.ok ? { reading: answer.reading, problem: null } : { reading: null, problem: answer.problem };
+  const next: LiveRead = answer.ok
+    ? { reading: answer.reading, problem: null }
+    : { reading: null, problem: answer.problem };
+  return sameRead(shown, next) ? shown : next;
+}
+
+/** Nothing read: no frame arrived yet, and nothing is wrong. */
+export const NOTHING_READ: LiveRead = { reading: null, problem: null };
+
+/**
+ * What the live window reads now, kept outside the capture screen's own state, so a new reading renders only the
+ * small parts that show it and not the whole screen, with a recording's review under it.
+ */
+export interface LiveReads {
+  readonly shown: () => LiveRead;
+  /** Hears each time what shows changes, until the function it returns is called. */
+  readonly subscribe: (listener: () => void) => () => void;
+  /** Changes what shows; a change that answers what shows already tells no one. */
+  readonly change: (change: (shown: LiveRead) => LiveRead) => void;
+}
+
+export function liveReads(): LiveReads {
+  let shown = NOTHING_READ;
+  const listeners = new Set<() => void>();
+  return {
+    shown: () => shown,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    change: (change) => {
+      const next = change(shown);
+      if (next === shown) {
+        return;
+      }
+      shown = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+  };
 }

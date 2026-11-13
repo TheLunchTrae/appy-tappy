@@ -25,8 +25,8 @@ import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
+import { CaptureFlow } from './pages/CaptureFlow.tsx';
 import { DebugPage } from './pages/DebugPage.tsx';
-import { NewValue } from './pages/NewValue.tsx';
 import {
   type Ended,
   type Flow,
@@ -46,8 +46,8 @@ import {
   waiting,
 } from './lib/flow.ts';
 import { supersedes } from './lib/reads.ts';
+import { useCaptureHeld } from './lib/capture.ts';
 import { background, useRepeat } from './lib/repeat.ts';
-import { ReferenceFlow } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
@@ -219,8 +219,10 @@ export function App() {
       background(forgetUnsavedClickPictures());
     };
   }, [automating]);
-  // A flow that makes a value or a reference captures a window, so the lists wait until it ends.
-  useRepeat(refresh, REFRESH_MS, flow?.kind !== 'value' && flow?.kind !== 'reference');
+  // A screen that holds the capture previews a window, so the lists wait until it lets go. Each save reads them at
+  // once all the same.
+  const capturing = useCaptureHeld();
+  useRepeat(refresh, REFRESH_MS, !capturing);
 
   const counts: Readonly<Record<Page, number | null>> = {
     values: apps === null ? null : apps.reduce((total, app) => total + (app.file?.values.length ?? 0), 0),
@@ -358,12 +360,12 @@ export function App() {
   const path = flow === null ? [] : trail(flow);
 
   const content = (() => {
-    if (flow?.kind === 'value') {
+    if (flow?.kind === 'value' || flow?.kind === 'reference') {
       return (
-        <NewValue
-          changing={flow.changing}
-          app={flow.app}
-          draft={flow.resumed}
+        <CaptureFlow
+          // A flow of the other kind starts over rather than take this one's place.
+          key={flow.kind}
+          flow={flow}
           trail={path}
           continued={continued}
           onCancel={() => {
@@ -396,29 +398,6 @@ export function App() {
           onDrafted={() => {
             end(flow, 'drafted');
           }}
-          onHeld={setReported}
-          onDraft={reportDraft}
-        />
-      );
-    }
-    if (flow?.kind === 'reference') {
-      return (
-        <ReferenceFlow
-          existing={flow.existing}
-          app={flow.app}
-          draft={flow.resumed}
-          trail={path}
-          continued={continued}
-          onCancel={() => {
-            end(flow, 'canceled');
-          }}
-          onSaved={(made) => {
-            end(flow, made);
-          }}
-          onDrafted={() => {
-            end(flow, 'drafted');
-          }}
-          {...pickerFor(flow)}
           onHeld={setReported}
           onDraft={reportDraft}
         />

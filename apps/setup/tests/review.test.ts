@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import type { RecordedReading } from '../src/lib/bindings.ts';
 import * as review from '../src/lib/review.ts';
 import {
+  NO_CROPS,
   addedShapes,
   additions,
   checkedReadings,
@@ -13,6 +14,7 @@ import {
   keepBlocked,
   keptAdditions,
   keptLabels,
+  keptNote,
   named,
   reviewOrder,
   seen,
@@ -20,6 +22,7 @@ import {
   startEntry,
   unrelated,
   untaughtNote,
+  withCrop,
 } from '../src/lib/review.ts';
 
 /** Where a reading's characters are in its picture, which review does not look at. */
@@ -464,4 +467,29 @@ describe('reviewing the kept readings', () => {
       [2, false],
     ]);
   });
+});
+
+test('the recording part counts kept readings, and says the reference learns them', () => {
+  // Nothing is learned before the reference is saved, and the References page has no value.
+  expect(keptNote(12, 0, null)).toBe('12 readings recorded, none kept yet.');
+  expect(keptNote(1, 0, null)).toBe('1 reading recorded, none kept yet.');
+  expect(keptNote(12, 3, null)).toBe('3 of 12 readings kept.');
+  expect(keptNote(1, 1, null)).toBe('1 of 1 reading kept.');
+  expect(keptNote(12, 3, 5)).toBe('5 of 12 readings will be kept. The reference learns only the readings you keep.');
+});
+
+test("a late picture of a replaced recording leaves the newest recording's pictures alone", () => {
+  const picture = (width: number) => ({ width, height: 1, data: new Uint8ClampedArray(width * 4) });
+  const first = withCrop(NO_CROPS, 2, 2, 0, picture(3));
+  expect(first).toEqual({ id: 2, pictures: new Map([[0, picture(3)]]) });
+  // Recording 1 was discarded and recording 2 started at once; the answer for recording 1 arrives last.
+  expect(withCrop(first, 2, 1, 0, picture(9))).toBe(first);
+  // The newest recording's own pictures add up, and its first picture replaces an older recording's.
+  expect(withCrop(first, 2, 2, 1, picture(4)).pictures).toEqual(
+    new Map([
+      [0, picture(3)],
+      [1, picture(4)],
+    ]),
+  );
+  expect(withCrop(first, 3, 3, 0, picture(5))).toEqual({ id: 3, pictures: new Map([[0, picture(5)]]) });
 });

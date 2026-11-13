@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 
 import type { AppSummary, WindowChoice } from '../lib/bindings.ts';
-import { errorText, pickWindow } from '../lib/api.ts';
+import { errorText } from '../lib/api.ts';
 import { pickerLanding, useLanding } from '../lib/landing.ts';
 import { captureWindow, isRunning, known, offersMatchEdit, pickerStep, stepStatus } from '../lib/picker.ts';
 import { background } from '../lib/repeat.ts';
@@ -34,6 +34,8 @@ interface Props {
   /** The window of the last choice, picked again when several fit. */
   readonly startWindow: number | null;
   readonly onCancel: () => void;
+  /** Starts the capture of a window, for the screen that holds it. */
+  readonly onCapture: (window: number) => Promise<void>;
   /** Takes the picked window; the picker shows why when it fails. */
   readonly onPick: (choice: Choice) => Promise<void>;
   /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
@@ -53,6 +55,7 @@ export function Picker({
   startApp,
   startWindow,
   onCancel,
+  onCapture,
   onPick,
   onAddApplication,
   onEditApplication,
@@ -83,7 +86,7 @@ export function Picker({
     }
     setStart('starting');
     try {
-      await pickWindow(target.handle);
+      await onCapture(target.handle);
       await onPick({ window: target, app: step.app.id, name: step.app.name });
       setStart('idle');
     } catch (error: unknown) {
