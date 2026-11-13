@@ -32,9 +32,10 @@ export function referenceSave(save: ReferenceSave): { readonly can: boolean; rea
 }
 
 /**
- * Why the value's capture changes no saved reference `chosen`, or null when it may: one of the `drafted`, the
- * references that have a draft of changes, is changed by finishing its draft, which would undo what was changed
- * apart from it. It holds for every way into the reference's editor from a value: Edit, and Record readings.
+ * Why the value's capture may not change the saved reference `chosen`, or null when it may. `drafted` holds the IDs
+ * of the references that have a draft of changes. Such a reference changes only by finishing its draft, since
+ * finishing the draft would undo a change made apart from it. This holds for every way into the reference's editor
+ * from a value: Edit, and Record readings.
  */
 export function draftHolds(
   chosen: { readonly id: string; readonly name: string },
