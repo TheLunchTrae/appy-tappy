@@ -17,13 +17,13 @@ pub mod mask;
 pub mod place;
 pub mod saved;
 pub mod scale;
-pub mod select;
 pub mod settle;
 pub mod workings;
 
 mod capture;
 mod image;
 mod layout;
+mod masked;
 mod placed;
 mod resample;
 
@@ -31,6 +31,8 @@ pub use capture::{
     Capture, CaptureSession, Crop, Frame, FrameHandler, NoSession, content, content_on_screen,
     grab, in_frame, run_capture,
 };
-pub use image::{FrameBuffer, Image, ImageError, LARGEST_PICTURE, OutsideWindow, Region, Size};
+pub use image::{
+    EmptyRegion, FrameBuffer, Image, ImageError, LARGEST_PICTURE, OutsideWindow, Region, Rgb, Size,
+};
 pub use layout::{Layout, Placement};
 pub use placed::{FrameMeaning, Placed};

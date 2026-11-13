@@ -23,8 +23,7 @@ use appytappy_sources::screen::check::{BarFill, ColorMatch, ImageMatch};
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::find::PictureSearch;
 use appytappy_sources::screen::mask::Mask;
-use appytappy_sources::screen::{Image, Region};
-use appytappy_sources::system::Rgb;
+use appytappy_sources::screen::{Image, Region, Rgb};
 
 /// Samples per operation; odd, so the median is one sample.
 const SAMPLES: usize = 101;

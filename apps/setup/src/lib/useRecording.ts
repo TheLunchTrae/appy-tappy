@@ -6,6 +6,7 @@ import type { ExampleSpec, PinDef, RecordingSettings, RecordingView } from './bi
 import { discardRecording, errorText, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
 import type { Picture } from './pixels.ts';
 import { background, useRepeat } from './repeat.ts';
+import { useNewest } from './request.ts';
 
 /** How long the recording's state waits between reads, while it records or text is still being read. */
 const RECORDING_PAUSE_MS = 250;
@@ -62,8 +63,8 @@ export function useRecording(): {
   // discard, or reading the recording's state.
   const [commandError, setCommandError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
-  // Bumped by each start, stop, or discard, so a poll sent before one is ignored.
-  const turn = useRef(0);
+  // Each start, stop, and discard begins a turn, so a poll sent before one is ignored.
+  const turn = useNewest();
   // Each recorded reading's pixels, for the recording they belong to.
   const [crops, setCrops] = useState<Crops>(NO_CROPS);
 
@@ -75,17 +76,17 @@ export function useRecording(): {
   );
 
   const poll = useCallback(async (): Promise<void> => {
-    const sent = turn.current;
+    const current = turn.join();
     try {
       const state = await recordingState();
-      if (sent === turn.current) {
+      if (current()) {
         setView(state);
         setPollError(null);
       }
     } catch (error: unknown) {
       setPollError(errorText(error));
     }
-  }, []);
+  }, [turn]);
   const live = view !== null && (view.recording || view.readings.some((reading) => reading.text.kind === 'pending'));
   useRepeat(poll, RECORDING_PAUSE_MS, live);
 
@@ -122,7 +123,7 @@ export function useRecording(): {
   // The owner refuses to go on with other settings rather than start over,
   // so kept readings and review edits are never dropped without a discard.
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
-    turn.current += 1;
+    turn.drop();
     try {
       const { app, pin, region, ink, tolerance, drawnOn, scope, examples } = settings;
       await startRecording({ app, region, screenshot: drawnOn, pin, ink, tolerance, scope, examples }, more);
@@ -139,7 +140,7 @@ export function useRecording(): {
   };
 
   const stop = async (): Promise<boolean> => {
-    turn.current += 1;
+    turn.drop();
     try {
       await stopRecording();
       setView(await recordingState());
@@ -152,7 +153,7 @@ export function useRecording(): {
   };
 
   const discard = async (): Promise<boolean> => {
-    turn.current += 1;
+    turn.drop();
     try {
       await discardRecording();
       setView(null);

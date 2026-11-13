@@ -101,13 +101,13 @@ impl ReadClock {
 /// The shortest wait a capture asks the system to match. Below it, the
 /// capture keeps its throttle, so a value that changes on every other read
 /// does not change the capture's setting on every read.
-pub const SHORTEST_PACED_WAIT: Duration = Duration::from_millis(64);
+const SHORTEST_PACED_WAIT: Duration = Duration::from_millis(64);
 
 /// The least time between frames a capture asks the system for.
 ///
 /// After a read that asked to wait `wait`, it is the wait itself, cut to
 /// [`LONGEST_WAIT`] and never below `throttle`, or just `throttle` for a wait
-/// under [`SHORTEST_PACED_WAIT`].
+/// too short for a capture to ask the system to match.
 #[must_use]
 pub fn frame_interval(wait: Duration, throttle: Duration) -> Duration {
     if wait < SHORTEST_PACED_WAIT {

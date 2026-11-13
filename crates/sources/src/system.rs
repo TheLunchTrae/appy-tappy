@@ -11,7 +11,7 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::window_match::{WindowFacts, WindowMatch};
 
-use crate::screen::Size;
+use crate::screen::{Rgb, Size};
 
 /// A running process, as a system-wide snapshot reports it without opening
 /// the process.
@@ -79,17 +79,6 @@ impl Bounds {
     }
 }
 
-/// A pixel's color.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rgb {
-    /// Red.
-    pub red: u8,
-    /// Green.
-    pub green: u8,
-    /// Blue.
-    pub blue: u8,
-}
-
 /// The operating system services that read processes, windows, and the
 /// screen.
 pub trait System {
@@ -136,14 +125,19 @@ pub trait System {
     }
 
     /// The build of `process`'s executable, read from the file without
-    /// opening the process: see [`crate::build`].
+    /// opening the process: its file version, its size, and when it was
+    /// written.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error, such as for a process that
     /// exited or a file it cannot read.
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef>;
+}
 
+/// Reading the screen itself, which only the MCP server does. It is apart
+/// from [`System`] so that nothing else carries it.
+pub trait ScreenPixels {
     /// Reads one pixel of the screen.
     ///
     /// # Errors
@@ -180,7 +174,9 @@ impl System for Unsupported {
     fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
         unsupported()
     }
+}
 
+impl ScreenPixels for Unsupported {
     fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
         unsupported()
     }
@@ -564,9 +560,6 @@ mod tests {
                 }))
             }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
-                unsupported()
-            }
-            fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
                 unsupported()
             }
         }

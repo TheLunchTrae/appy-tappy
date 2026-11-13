@@ -677,11 +677,6 @@ blue: number, }>;
 export type ColorSpec = DeepReadonly<{ red: number, green: number, blue: number, }>;
 
 /**
- * A color as the UI describes one.
- */
-export type ColorView = DeepReadonly<{ red: number, green: number, blue: number, }>;
-
-/**
  * How a step's pick combines with the selection before it.
  */
 export type Combine = DeepReadonly<"replace" | "add" | "remove">;
@@ -1506,11 +1501,11 @@ export type RecordingSettings = DeepReadonly<{
 /**
  * The region of the window.
  */
-region: RegionView,
+region: RegionDef,
 /**
  * The characters' color.
  */
-ink: ColorView,
+ink: ColorDef,
 /**
  * How far a pixel may be from the characters' color and still be ink.
  */
@@ -1518,7 +1513,7 @@ tolerance: number,
 /**
  * The window's size when the region was drawn.
  */
-windowSize: SizeView,
+windowSize: SizeDef,
 /**
  * Where it looks for characters.
  */
@@ -1557,7 +1552,7 @@ settings: RecordingSettings,
  * or the one frames settled at since. The region and the sizes of
  * text are scaled from the one to the other where they differ.
  */
-at: SizeView,
+at: SizeDef,
 /**
  * How tall the characters are that a recording of the whole window
  * looks for, smallest first, in pixels of the window the region was
@@ -1570,7 +1565,7 @@ sizes: Array<number>,
  * the last time it looked, on a window of the size it is placed at,
  * while it records; empty otherwise.
  */
-spots: Array<RegionView>,
+spots: Array<RegionDef>,
 /**
  * The readings it kept, in the order they first showed.
  */
@@ -1715,11 +1710,6 @@ height: number, }>;
  * A rectangle of the window, in pixels from its top-left corner.
  */
 export type RegionSpec = DeepReadonly<{ x: number, y: number, width: number, height: number, }>;
-
-/**
- * A region as the UI describes one.
- */
-export type RegionView = DeepReadonly<{ x: number, y: number, width: number, height: number, }>;
 
 /**
  * Which rows the rows table shows.
@@ -1887,7 +1877,7 @@ export type SelectionView = DeepReadonly<{
 /**
  * The box around the selected pixels.
  */
-region: RegionSpec,
+region: RegionDef,
 /**
  * The runs of selected pixels in the box, each as the index of its
  * first pixel and of the pixel after its last, row by row from the top.
@@ -1991,11 +1981,6 @@ width: number,
  * The height.
  */
 height: number, }>;
-
-/**
- * A window's size as the UI describes one.
- */
-export type SizeView = DeepReadonly<{ width: number, height: number, }>;
 
 /**
  * A middle and a slow time, in nanoseconds.

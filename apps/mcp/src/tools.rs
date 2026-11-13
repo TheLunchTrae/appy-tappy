@@ -12,7 +12,7 @@ mod definitions;
 mod format;
 
 use appytappy_config::anti_cheat::known_anti_cheat;
-use appytappy_sources::system::System;
+use appytappy_sources::system::{ScreenPixels, System};
 use serde_json::{Value, json};
 
 use self::args::{ProcessListArgs, ScreenSampleArgs, WindowListArgs, parse};
@@ -28,11 +28,11 @@ pub(crate) type Outcome<T = Value> = Result<T, String>;
 
 /// The tools, over the system they read.
 #[derive(Debug)]
-pub(crate) struct Session<S: System> {
+pub(crate) struct Session<S: System + ScreenPixels> {
     system: S,
 }
 
-impl<S: System> Session<S> {
+impl<S: System + ScreenPixels> Session<S> {
     pub(crate) fn new(system: S) -> Self {
         Self { system }
     }
@@ -125,7 +125,8 @@ mod tests {
     use std::io;
 
     use appytappy_config::anti_cheat::ProcessId;
-    use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
+    use appytappy_sources::screen::Rgb;
+    use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
     use super::*;
 
@@ -169,7 +170,9 @@ mod tests {
         ) -> io::Result<appytappy_config::app_file::BuildDef> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
+    }
 
+    impl ScreenPixels for FakeSystem {
         fn screen_pixel(&self, x: i32, y: i32) -> io::Result<Rgb> {
             Ok(Rgb {
                 red: u8::try_from(x).unwrap(),

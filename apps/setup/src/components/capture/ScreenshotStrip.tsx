@@ -9,25 +9,19 @@ interface Props {
   /** The screenshot's number as the strip shows it. */
   readonly position: (index: number) => number;
   readonly hidden: boolean;
-  /** Why the screenshot shown cannot be removed, or null when it can. */
-  readonly unremovable: string | null;
-  /** Whether the strip holds the one screenshot the value's place is set on. */
-  readonly onePicture: boolean;
+  /**
+   * The way to remove the screenshot shown, and why it cannot be removed now, or null when it can; null on a screen
+   * whose screenshots stay.
+   */
+  readonly removal: { readonly unremovable: string | null; readonly onRemove: (index: number) => void } | null;
+  /** How long the screenshots last, and what else the screen says of them. */
+  readonly note: string;
   readonly onSelect: (index: number | null) => void;
-  readonly onRemove: (index: number) => void;
 }
 
 /** The live window and the screenshots, to pick what the stage shows, and the way to remove the one shown. */
-export function ScreenshotStrip({
-  shots,
-  selected,
-  position,
-  hidden,
-  unremovable,
-  onePicture,
-  onSelect,
-  onRemove,
-}: Props) {
+export function ScreenshotStrip({ shots, selected, position, hidden, removal, note, onSelect }: Props) {
+  const unremovable = removal?.unremovable ?? null;
   return (
     <div className="strip" hidden={hidden}>
       <button
@@ -60,7 +54,7 @@ export function ScreenshotStrip({
           </span>
         </button>
       ))}
-      {selected === null ? null : (
+      {selected === null || removal === null ? null : (
         <button
           type="button"
           className="btn small"
@@ -69,7 +63,7 @@ export function ScreenshotStrip({
           onClick={() => {
             // A refused removal keeps the focus, so its reason is heard.
             if (unremovable === null) {
-              onRemove(selected);
+              removal.onRemove(selected);
             }
           }}
         >
@@ -78,8 +72,7 @@ export function ScreenshotStrip({
       )}
       <span className="note">
         {unremovable === null ? null : <span id="remove-blocked">{unremovable} </span>}
-        Screenshots last until you remove them or change the window.
-        {onePicture ? ' The value needs one screenshot; take another to draw on a newer one.' : ''}
+        {note}
       </span>
     </div>
   );
