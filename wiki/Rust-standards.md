@@ -140,8 +140,11 @@ testing only the mutated package catches the same mutants is still to be
 measured.
 
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
-`mutants.out/` and validate its JSON, so stale evidence cannot pass. A report in
-which every mutant is unviable fails. A surviving mutant is a review finding.
+`mutants.out/` and validate its JSON, so stale evidence cannot pass. Every
+report needs a baseline that built and passed in the same build directory. A
+full report in which every mutant is unviable fails; a diff report may hold
+only unviable mutants, as a shard of a small change can, since its baseline
+already shows the build works. A surviving mutant is a review finding.
 
 Both lanes hold `target/standards-mutants.lock` through the run and its
 verification, so a second run fails instead of replacing the report. If a
