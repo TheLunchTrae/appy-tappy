@@ -15,33 +15,43 @@ import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
   type Built,
   type Draft,
+  boxBlocked,
   buildCharacters,
   buildSpec,
-  CHECK_KINDS,
   EMPTY_DRAFT,
   fixDraft,
   fromReference,
-  KIND_NAMES,
-  newestOfSize,
   findBlocked as findBlockedBy,
+  onPicture,
+  readingOf,
   recordBlocked,
+  recordedPlace,
   regionScreenshot,
   settingsDiffer,
   toReference,
   withFixRegion,
-  withKind,
+  withRecordedInk,
   withState,
 } from '../lib/check.ts';
+import { boxNumber, boxOf } from '../lib/boxes.ts';
+import { type Placed, liveSizeAfter, useLiveDraw } from '../lib/liveDraw.ts';
+import { BoxList, boxTextId } from './BoxList.tsx';
+import { DraftButtons } from './capture/DraftButtons.tsx';
+import { ReadWith } from './capture/ReadWith.tsx';
+import { ScreenshotStrip } from './capture/ScreenshotStrip.tsx';
+import { ReviewActions, StageBar, WindowActions } from './capture/StageBar.tsx';
+import { Stepper, nextFromWhere, stepTabs } from './capture/Stepper.tsx';
+import { WhereFields } from './capture/WhereFields.tsx';
 import { discovery } from '../lib/discovery.ts';
 import { agreedFixes, editStart, keepsStates, placedOn, saveable } from '../lib/edit.ts';
 import { TOO_MANY, coverage, startingExpected, tooMany } from '../lib/expected.ts';
 import { knownCharacters, readers } from '../lib/reference.ts';
 import { BarDetect, BarReadings } from './BarFields.tsx';
-import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
+import { type ColorTarget, ColorFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
 import { ReadingDetailsBox } from './ReadingDetails.tsx';
 import { FoundMarks, FoundPanel } from './Found.tsx';
-import { Question, useQuestion } from './Question.tsx';
+import { listed } from '../lib/found.ts';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
 import type { Choice } from './Picker.tsx';
@@ -49,24 +59,20 @@ import { colorAt } from '../lib/pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { LookPanel } from './LookRecording.tsx';
 import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
-import { clock } from '../lib/review.ts';
-import type { Point, Size } from '../lib/region.ts';
+import { type Point, type Size, scaleRect } from '../lib/region.ts';
 import { CaptureOutlineNote, CaptureOutlines, useCaptureOutline } from './CaptureOutlines.tsx';
 import { RegionSurface } from './RegionSurface.tsx';
 import { ZoomView } from './ZoomView.tsx';
-import { PinPicker } from './PinPicker.tsx';
-import { DeleteDraft } from './Drafts.tsx';
 import { PinGuides } from './PinGuides.tsx';
-import { MovingContentField } from './MovingContentField.tsx';
 import { Hint } from './Hint.tsx';
-import { MatchOverlay, MatchPreviewField, SelectedPixelsField } from './MatchPreview.tsx';
-import { AREA_DRAW_HINT, fixNote, isReadingArea, movingContent, regionLabel } from '../lib/moving.ts';
+import { MatchOverlay, MatchPreviewField } from './MatchPreview.tsx';
+import { fixNote, isReadingArea, movingContent, regionLabel } from '../lib/moving.ts';
+import { type Drawing, stageHint } from '../lib/stageHint.ts';
 import { pinChoiceAfterRegion, pinOfView, pinView } from '../lib/pin.ts';
-import { FIX_HINT, READ_WITH_HINT, sameSize, sizeText } from '../lib/sizes.ts';
+import { FIX_HINT, sameSize, sizeText } from '../lib/sizes.ts';
 import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
-import { EditIntro, EditOutcome, SavedStates } from './ValueEdit.tsx';
-import { CHECK_HINT, DRAFT_HINT } from '../lib/hints.ts';
+import { EditOutcome, SavedStates } from './ValueEdit.tsx';
 import {
   type CaptureKept,
   type CaptureSetup,
@@ -75,6 +81,7 @@ import {
   captureMissing,
   refreshedEditing,
   restoreSetup,
+  shownOnStep,
   storeSetup,
 } from '../lib/captureDraft.ts';
 import { type ReportDraft, type Resumed, draftsOf, isKept, keep, useDraft } from '../lib/drafts.ts';
@@ -83,6 +90,7 @@ import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useBarSetup } from '../lib/useBarSetup.ts';
+import { useBoxes } from '../lib/useBoxes.ts';
 import { useFound } from '../lib/useFound.ts';
 import { trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
@@ -90,51 +98,15 @@ import { useMatchPreview, useSelectedPreview } from '../lib/useMatchPreview.ts';
 import { useRecording } from '../lib/useRecording.ts';
 import { useReview } from '../lib/useReview.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
-import { useScreenshots } from '../lib/useScreenshots.ts';
+import { type Taken, useScreenshots } from '../lib/useScreenshots.ts';
 import { useStateSelections } from '../lib/useStateSelections.ts';
 import { useValueEdit } from '../lib/useValueEdit.ts';
 
 /** The widest live frame asked for, which keeps a large window's preview cheap. */
 const LIVE_MAX_WIDTH = 1600;
 
-function viewHint(
-  recording: 'readings' | 'looks' | null,
-  selected: number | null,
-  shotCount: number,
-  picking: boolean,
-  liveError: string | null,
-  shortcut: string,
-  tool: SelectTool,
-  area: boolean,
-  otherSize: boolean,
-): string {
-  if (selected === null && liveError !== null) {
-    return liveError;
-  }
-  if (recording !== null && selected === null) {
-    return recording === 'readings'
-      ? 'Recording. Use the application; a reading is kept for each new shape.'
-      : 'Recording. Use the application; a screenshot is kept of each different look.';
-  }
-  if (selected === null) {
-    return shotCount === 0
-      ? `Take a screenshot (${shortcut}) when the window shows what to read.`
-      : 'Select a screenshot to draw on it.';
-  }
-  if (picking) {
-    return 'Click the color to pick it.';
-  }
-  if (otherSize) {
-    return 'The region shows on screenshots of the size the value was drawn at.';
-  }
-  if (tool === 'snap') {
-    return 'Drag a rough box around the thing to snap to it.';
-  }
-  if (tool === 'click') {
-    return 'Click the thing to select it.';
-  }
-  return area ? AREA_DRAW_HINT : 'Drag to draw a region. Drag inside it to move it, or drag a corner to resize it.';
-}
+/** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
+const NO_NEEDS: readonly string[] = [];
 
 /**
  * What the capture screen makes: a value; a reference, new or saved, on the References page; a fix, a saved value
@@ -185,7 +157,6 @@ function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restor
           existing: mode.existing,
           name: mode.existing?.name ?? '',
           expects: startingExpected(mode.existing, null),
-          valueRegion: { region: null, drawnOn: null },
         }
       : null;
   if (mode.kind === 'edit') {
@@ -289,8 +260,11 @@ export function Capture({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const screenshots = useScreenshots(opening.shots);
+  // What the shortcut takes a screenshot with, which depends on the step, as the latest render left it.
+  const takeShotRef = useRef<() => Promise<unknown>>(screenshots.take);
   const { shots, full, selected, setSelected, position } = screenshots;
-  const shortcut = useScreenshotShortcut(screenshots.take);
+  const shortcut = useScreenshotShortcut(async () => takeShotRef.current());
+  const boxes = useBoxes(draft, setDraft, selected);
   const recorder = useRecording();
   const recording = recorder.view;
   const looks = useLookRecording(screenshots.adopt);
@@ -340,8 +314,6 @@ export function Capture({
       live = false;
     };
   }, [appId]);
-  const [leavingWindow, setLeavingWindow] = useState(false);
-  const leaveQuestion = useQuestion<HTMLButtonElement>(leavingWindow);
 
   // The saved reference the editor adds to, or null for a new one or while no editor is open.
   const existingId = editing?.existing?.id ?? null;
@@ -387,34 +359,17 @@ export function Capture({
   const losesRecording = recording !== null || draft.recorded.size > 0 || looks.view?.recording === true;
   const draftButton =
     mode.kind === 'edit' ? null : (
-      <>
-        {resumed === null ? null : (
-          <DeleteDraft
-            changes={mode.kind === 'fix' || (mode.kind === 'reference' && mode.existing !== null)}
-            disabled={busy}
-            onDelete={drafting.discard}
-          />
-        )}
-        <span className="with-hint">
-          <button
-            type="button"
-            className="btn"
-            disabled={holds !== 'unsaved'}
-            aria-describedby="hint-draft"
-            onClick={() => {
-              background(drafting.saveAndClose());
-            }}
-          >
-            Save as draft
-          </button>
-          <Hint topic="Save as draft" id="hint-draft">
-            {DRAFT_HINT}
-            {losesRecording
-              ? ' A draft keeps the screenshots, those a recording kept too, but not a recording that runs or the readings kept from one.'
-              : ''}
-          </Hint>
-        </span>
-      </>
+      <DraftButtons
+        resumed={resumed !== null}
+        changes={mode.kind === 'fix' || (mode.kind === 'reference' && mode.existing !== null)}
+        busy={busy}
+        unsaved={holds === 'unsaved'}
+        losesRecording={losesRecording}
+        onDelete={drafting.discard}
+        onSave={() => {
+          background(drafting.saveAndClose());
+        }}
+      />
     );
   const draftError =
     drafting.error === null ? null : (
@@ -431,26 +386,33 @@ export function Capture({
     step === 'how' && editing === null && fixing === null,
   );
   const review = useReview(recording, draft, setDraft, editingRef);
-  // Every text the reference being edited learns from already, which tells a find's letters apart from a misread.
+  // What the reference being edited learns from: its saved pictures, its boxes with text, and its kept readings.
   const savedSamples = editing?.existing?.samples;
-  const learnedTexts = useMemo(
-    () => [
-      ...(savedSamples ?? []).map((sample) => sample.text),
-      ...[...draft.labels.values()].filter((text) => text.trim() !== ''),
-      ...draft.recorded.values(),
-      ...draft.found.map((label) => label.text),
-    ],
-    [savedSamples, draft.labels, draft.recorded, draft.found],
+  const taught = useMemo(
+    () => ({
+      saved: (savedSamples ?? []).map((sample) => sample.text),
+      labeled: draft.boxes.map((box) => box.text).filter((text) => text.trim() !== ''),
+      recorded: [...draft.recorded.values()],
+    }),
+    [savedSamples, draft.boxes, draft.recorded],
   );
-  const finder = useFound(draft, setDraft, editingRef, learnedTexts);
+  // Every text it learns from already, which tells a find's letters apart from a misread.
+  const learnedTexts = useMemo(() => [...taught.saved, ...taught.labeled, ...taught.recorded], [taught]);
+  // The characters it needs, and how the ones it learns from compare with them.
+  const needs = editing?.expects ?? NO_NEEDS;
+  const covered = coverage(needs, knownCharacters(learnedTexts));
+  const finder = useFound(draft, boxes.add, editingRef, learnedTexts, needs);
   const { reviewing } = review;
   const recordError = recorder.commandError ?? review.error ?? recorder.pollError;
 
   const [liveSize, setLiveSize] = useState<Size | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
+  // Whether the live view holds still for a press, as of the last event; set once the live draw below exists.
+  const liveFrozen = useRef<() => boolean>(() => false);
   const onFrame = useCallback((width: number, height: number): void => {
     setLiveError(null);
-    setLiveSize((current) => (current?.width === width && current.height === height ? current : { width, height }));
+    const frozen = liveFrozen.current();
+    setLiveSize((current) => liveSizeAfter(current, { width, height }, frozen));
   }, []);
   const onLiveError = useCallback((error: unknown): void => {
     setLiveError(errorText(error));
@@ -513,6 +475,53 @@ export function Capture({
     }
   };
 
+  // While the value's place is set, it is set on one picture: a new screenshot is that picture, and the region moves
+  // onto it when the screenshot has the size the region is drawn at.
+  const regionSize = drawnSize ?? edited?.screen.windowSize ?? null;
+  const setsPlace = step === 'where' && editing === null;
+  const onValuePicture = (shot: Taken | null): void => {
+    if (shot === null) {
+      return;
+    }
+    // Until both sizes are known, such as before the screenshot's pixels arrive, the region stays where it is.
+    const fits = regionSize === null || shot.size === null ? null : sameSize(regionSize, shot.size);
+    setDraft((current) => onPicture(current, shot.index, fits));
+  };
+  const takeShot = async (): Promise<void> => {
+    const shot = await take();
+    if (setsPlace) {
+      onValuePicture(shot);
+    }
+  };
+  // A drag over the live window takes the screenshot as it starts, and the region drawn goes on it.
+  const holdTake = useCallback(async () => take('hold'), [take]);
+  useEffect(() => {
+    takeShotRef.current = takeShot;
+  });
+  const live = useLiveDraw(holdTake, ({ shot, box }: Placed) => {
+    if (shot === null) {
+      return;
+    }
+    setSelected(shot.index);
+    const size = shot.size;
+    const region = box === null || size === null ? null : scaleRect(box.rect, box.at, size);
+    if (region === null || size === null) {
+      onValuePicture(shot);
+      return;
+    }
+    setDraft((current) => ({
+      ...current,
+      region,
+      drawnOn: shot.index,
+      pin: pinChoiceAfterRegion(current.pin, current.region, region, size),
+    }));
+  });
+  useEffect(() => {
+    liveFrozen.current = live.isFrozen;
+  }, [live.isFrozen]);
+  // The screenshot a press over the live view took shows in place of the frame held still, once its pixels arrive.
+  const heldPicture = live.shown.shot === null ? null : (full.get(live.shown.shot.index) ?? null);
+
   // An edit's region keeps to the size the value was drawn at while no screenshot of that size holds it.
   const staysAt = pinView(draft.pin, draft.region, drawnSize ?? edited?.screen.windowSize ?? null);
   const pin = pinOfView(staysAt);
@@ -545,9 +554,12 @@ export function Capture({
       : null;
   // The preview is for the color fields the inspector shows now.
   const colorFields = step === 'how' && fixing === null && (draft.kind === 'barFill' || draft.kind === 'color');
+  // While a reference is taught, the region its pixels are counted in is the selected box on the screenshot shown.
+  const chosenOnShown = editing === null ? null : boxes.onShown;
+  const previewDraft = editing === null ? draft : { ...draft, region: chosenOnShown?.region ?? null };
   const preview = useMatchPreview(
     editing !== null ? 'ink' : colorFields ? draft.kind : null,
-    draft,
+    previewDraft,
     selected,
     shownPicture,
     // An edited value's region is in the pixels of the size it was drawn at, and shows on no other.
@@ -555,7 +567,7 @@ export function Capture({
       ? null
       : `Select a screenshot at ${sizeText(edited.screen.windowSize)} to see the matching pixels of its region.`,
   );
-  const previewField = <MatchPreviewField preview={preview} region={draft.region} />;
+  const previewField = <MatchPreviewField preview={preview} region={previewDraft.region} />;
   // An edited value's region sits on a screenshot of the size it was drawn at, and a bar is looked for on those.
   const detectBlocked =
     edited !== null && draft.drawnOn === null
@@ -613,23 +625,34 @@ export function Capture({
   };
 
   const recordingBlocked = editing === null ? null : recordBlocked(draft);
-  const findBlocked = findBlockedBy(draft, drawnSize, shownPicture);
+  // The selected box, which Find more like it samples.
+  const chosen = boxes.selected;
+  const findBlocked = findBlockedBy(draft, chosen);
+  // Where the reference being taught reads, and the size of the screenshot that is on, which its boxes keep to.
+  const reading = readingOf(draft);
+  const readingPicture = reading.drawnOn === null ? undefined : full.get(reading.drawnOn);
+  const readingSize =
+    readingPicture === undefined ? null : { width: readingPicture.width, height: readingPicture.height };
+  const boxBlock = editing === null ? null : boxBlocked(readingSize, shownPicture);
 
   // Starts a new recording of `from`'s region, or with `more` goes on with the stopped one.
   const record = async (
     more: boolean,
-    from: Pick<Draft, 'region' | 'ink' | 'tolerance' | 'drawnOn'> = draft,
+    from: Pick<Draft, 'region' | 'ink' | 'tolerance' | 'drawnOn'> = { ...draft, ...reading },
   ): Promise<void> => {
     const { region, ink, tolerance, drawnOn } = from;
     if (region === null || ink === null || drawnOn === null) {
       return;
     }
+    // A reference taught by itself reads at its first box, which the recording is of.
+    const readAt = draft.region === null ? (draft.boxes[0]?.id ?? null) : null;
     await recorder.start({ region, ink, tolerance, drawnOn }, more, () => {
       review.show(false);
       setSelected(null);
       setPicking(null);
       if (!more) {
         review.forget();
+        boxes.recorded(readAt);
       }
     });
   };
@@ -651,23 +674,21 @@ export function Capture({
   // Record more can offer to take them back.
   const settings = recording?.settings;
   const settingsChanged =
-    recording !== null && !recording.recording && settings !== undefined && settingsDiffer(draft, settings, drawnSize);
+    recording !== null &&
+    !recording.recording &&
+    settings !== undefined &&
+    settingsDiffer(draft, settings, readingSize);
   const useSettings = (): void => {
     if (settings === undefined) {
       return;
     }
-    // The region goes back on a screenshot of the size it was recorded at.
-    const sameSize =
-      drawnSize?.width === settings.windowSize.width && drawnSize.height === settings.windowSize.height
-        ? draft.drawnOn
-        : newestOfSize([...full], settings.windowSize);
-    setDraft((current) => ({
-      ...current,
-      region: settings.region,
-      drawnOn: sameSize ?? current.drawnOn,
-      ink: settings.ink,
-      tolerance: settings.tolerance,
-    }));
+    // A reference taught by itself reads at a box, so that box goes back where the recording read; the value's
+    // region is the value's, and stays.
+    const place = recordedPlace(draft, settings, boxOf(draft.boxes, boxes.recordedId)?.screenshot ?? null, [...full]);
+    if (place !== null) {
+      boxes.restore(place, settings.region);
+    }
+    setDraft((current) => withRecordedInk(current, settings));
     recorder.clearCommandError();
     // The pressed button gives way to Record more, so focus moves to it.
     requestAnimationFrame(() => {
@@ -702,13 +723,9 @@ export function Capture({
   // records readings, and the owner records one thing at a time, so a
   // recording of looks goes first.
   const openEditor = async (existing: ReferenceDef | null, like: ReferenceDef | null): Promise<void> => {
-    setEditing({
-      existing,
-      name: existing?.name ?? '',
-      expects: startingExpected(existing, like),
-      valueRegion: { region: draft.region, drawnOn: draft.drawnOn },
-    });
+    setEditing({ existing, name: existing?.name ?? '', expects: startingExpected(existing, like) });
     setDraft((current) => toReference(current, existing));
+    boxes.select(null);
     setPicking(null);
     setSaveError(null);
     await looks.discard();
@@ -735,17 +752,16 @@ export function Capture({
     await record(false, { region, drawnOn, ink: existing.ink, tolerance: existing.tolerance });
   };
 
-  // Leaves the reference editor for the value, forgetting its labels and
-  // recording and putting the value's region back.
+  // Leaves the reference editor for the value, forgetting its boxes and recording.
   const closeEditor = (): void => {
     if (recording !== null) {
       background(discard());
     }
-    const valueRegion = editing?.valueRegion ?? { region: null, drawnOn: null };
     setEditing(null);
     setPicking(null);
+    boxes.select(null);
     finder.dismiss();
-    setDraft((current) => fromReference(current, valueRegion));
+    setDraft(fromReference);
   };
 
   const saveRef = async (): Promise<void> => {
@@ -777,15 +793,14 @@ export function Capture({
   };
 
   // Why the screenshot shown cannot be removed, or null when it can or the live view shows.
-  const valueRegion = editing?.valueRegion ?? null;
   const unremovable =
     selected === null
       ? null
       : finder.view?.screenshot === selected
         ? 'Text found on this screenshot is listed. Add it or select Not these to remove the screenshot.'
-        : removeBlocked(draft, valueRegion, selected, looks.view?.recording === true);
+        : removeBlocked(draft, selected, looks.view?.recording === true);
   // The screenshot an open search lists text of stays until the list closes.
-  const removable = removableRecorded(shots, draft, valueRegion).filter((index) => index !== finder.view?.screenshot);
+  const removable = removableRecorded(shots, draft).filter((index) => index !== finder.view?.screenshot);
   // A bar's and a color's fix read with the colors of the first drawing, so they need no more screenshots.
   const offersLooks = draft.kind === 'state' || (fixing === null && draft.kind !== 'number');
   const lookPanel =
@@ -842,165 +857,131 @@ export function Capture({
   const fixedCheck = fixing?.screen.check;
   const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
   const editedName = editing === null || editing.name.trim() === '' ? 'New reference' : editing.name.trim();
-  // What the reference being edited learns from, and how the characters in it compare with the ones it needs.
-  const taught = {
-    saved: editing?.existing?.samples.map((sample) => sample.text) ?? [],
-    labeled: [...draft.labels.values()].filter((text) => text.trim() !== ''),
-    recorded: [...draft.recorded.values()],
-    found: draft.found.map((label) => label.text),
-  };
-  const covered = coverage(
-    editing?.expects ?? [],
-    knownCharacters([...taught.saved, ...taught.labeled, ...taught.recorded, ...taught.found]),
-  );
   // What the recording found, against what the reference needs and knows without it.
-  const needs = editing?.expects ?? [];
   const found = discovery(
     needs,
-    knownCharacters([...taught.saved, ...taught.labeled, ...taught.found]),
+    knownCharacters([...taught.saved, ...taught.labeled]),
     recording?.readings ?? [],
     review.entries,
     review.checked,
     recording?.shapes.length ?? 0,
   );
 
+  // A number's characters and its check are steps of their own; other kinds read and save in their second step.
+  const threeSteps = draft.kind === 'number' && fixing === null;
+  const shownStep: Step = !threeSteps && step === 'check' ? 'how' : step;
+  // The value's place is drawn over the live window while it has none, and the press takes the screenshot.
+  const drawsLive =
+    shownStep === 'where' &&
+    editing === null &&
+    selected === null &&
+    draft.region === null &&
+    liveSize !== null &&
+    recordingNow === null &&
+    !reviewing &&
+    picking === null;
+  const drawing: Drawing = drawsLive ? 'live' : editing !== null ? 'boxes' : 'region';
+  // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
+  const placeShot = draft.drawnOn ?? selected;
+  const stripShots = setsPlace ? shots.filter((shot) => shot.index === placeShot) : shots;
+  // Where to read lists one screenshot, so entering it shows that one.
+  const goTo = (next: Step): void => {
+    setStep(next);
+    setSelected(shownOnStep(next, draft.drawnOn, selected));
+  };
+  // While a reference is taught, the steps show where the value is, and wait until the reference is saved or discarded.
+  const stepper = (
+    <Stepper
+      tabs={stepTabs(threeSteps)}
+      current={editing === null ? shownStep : 'how'}
+      done={(tab) => (tab === 'where' ? whereDone : tab === 'how' ? threeSteps && draft.reference !== null : false)}
+      locked={editing !== null}
+      onStep={goTo}
+    />
+  );
+  // A number reads with a reference, which its second step picks, teaches, or records readings for.
+  const referencePicker = (
+    <ReferencePicker
+      appName={choice.name}
+      file={file}
+      selected={draft.reference}
+      hasRegion={draft.region !== null}
+      whole={draft.whole}
+      onSelect={(reference) => {
+        setDraft((current) => ({ ...current, reference }));
+      }}
+      onEdit={(id) => {
+        background(openEditor(file?.references.find((reference) => reference.id === id) ?? null, null));
+      }}
+      drafted={drafted}
+      onNew={() => {
+        background(openEditor(null, null));
+      }}
+      onRecord={() => {
+        background(recordReadings());
+      }}
+      onWhole={(whole) => {
+        setDraft((current) => ({ ...current, whole }));
+      }}
+    />
+  );
+  const nextFromFirst = (
+    <button
+      type="button"
+      className="btn primary"
+      onClick={() => {
+        goTo('how');
+      }}
+    >
+      {nextFromWhere(threeSteps)}
+    </button>
+  );
+
   return (
     <main className="capture">
       <section className="stage" aria-label="Capture">
-        <div className="bar">
-          <span className="crumb">
-            {trail.join(' / ')}
-            {mode.kind !== 'reference' && editing !== null ? ` / ${flowName}` : ''} /{' '}
-            {reviewing ? (
-              <>
-                {editedName} / <b>Review recording</b>
-              </>
-            ) : (
-              <b>{editing === null ? flowName : editedName}</b>
-            )}
-          </span>
-          {recordingNow !== null ? (
-            <span className="pill recording">
-              <span className="dot" />
-              Recording {clock(recordingNow.elapsedMs)}
-            </span>
-          ) : reviewing && recording !== null ? (
-            <span className="pill">
-              {recording.readings.length === 1 ? '1 reading' : `${recording.readings.length} readings`} from{' '}
-              {clock(recording.elapsedMs)}
-            </span>
-          ) : (
-            <span className="pill">
-              <span className="dot live" />
-              Live · {choice.name}
-            </span>
-          )}
-          {native === undefined || reviewing ? null : (
-            <span className="pill">
-              {native.width} × {native.height}
-            </span>
-          )}
+        <StageBar
+          path={[
+            ...trail,
+            ...(mode.kind !== 'reference' && editing !== null ? [flowName] : []),
+            ...(reviewing ? [editedName] : []),
+          ]}
+          current={reviewing ? 'Review recording' : editing === null ? flowName : editedName}
+          status={
+            recordingNow !== null
+              ? { kind: 'recording', elapsedMs: recordingNow.elapsedMs }
+              : reviewing && recording !== null
+                ? { kind: 'reviewing', recording }
+                : { kind: 'live', appName: choice.name }
+          }
+          size={reviewing ? null : (native ?? null)}
+        >
           {reviewing ? (
-            <div className="end">
-              <button type="button" className="btn" onClick={review.close}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  background(discard());
-                }}
-              >
-                Discard recording
-              </button>
-              {settingsChanged ? (
-                <button type="button" className="btn" onClick={useSettings}>
-                  Use its settings
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn"
-                  data-record-more
-                  disabled={recordingBlocked !== null}
-                  onClick={() => {
-                    background(record(true));
-                  }}
-                >
-                  Record more
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn primary"
-                disabled={review.keepBlocked !== null}
-                aria-describedby={
-                  review.keepBlocked === null && review.untaught.readings.length === 0 ? undefined : 'keep-blocked'
-                }
-                onClick={review.keep}
-              >
-                {review.keeping.length === 1 ? 'Keep 1 reading' : `Keep ${review.keeping.length} readings`}
-              </button>
-            </div>
+            <ReviewActions
+              review={review}
+              settingsChanged={settingsChanged}
+              recordBlocked={recordingBlocked}
+              onDiscard={() => {
+                background(discard());
+              }}
+              onUseSettings={useSettings}
+              onRecordMore={() => {
+                background(record(true));
+              }}
+            />
           ) : (
-            <div className="end">
-              {leavingWindow ? (
-                <Question
-                  refs={leaveQuestion.refs}
-                  label="Change window?"
-                  keepLabel="Keep this window"
-                  actLabel="Change window"
-                  busy={busy}
-                  onKeep={() => {
-                    setLeavingWindow(false);
-                  }}
-                  onAct={onChangeWindow}
-                >
-                  {holds === 'unsaved'
-                    ? 'Change window? The screenshots, everything set up on them, and any recording are lost.'
-                    : 'Change window? This starts over on the new window. The draft stays as it is unless you save it again.'}
-                </Question>
-              ) : (
-                <button
-                  ref={leaveQuestion.control}
-                  type="button"
-                  className="btn"
-                  disabled={busy}
-                  onClick={() => {
-                    // Finishing a draft starts on its screenshots, which the new window leaves behind.
-                    if (holds === 'unsaved' || resumed !== null) {
-                      setLeavingWindow(true);
-                    } else {
-                      onChangeWindow();
-                    }
-                  }}
-                >
-                  Change window
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn small"
-                aria-pressed={shortcut.choosing}
-                onClick={shortcut.toggle}
-                onBlur={shortcut.cancel}
-                onKeyDown={shortcut.onKeyDown}
-              >
-                Change shortcut
-              </button>
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => {
-                  background(screenshots.take());
-                }}
-              >
-                Take screenshot<span className="kbd">{shortcut.label}</span>
-              </button>
-            </div>
+            <WindowActions
+              busy={busy}
+              // Finishing a draft starts on its screenshots, which the new window leaves behind.
+              loses={holds === 'unsaved' ? 'unsaved' : resumed === null ? 'nothing' : 'draft'}
+              shortcut={shortcut}
+              onChangeWindow={onChangeWindow}
+              onTake={() => {
+                background(takeShot());
+              }}
+            />
           )}
-        </div>
+        </StageBar>
         <p className="note" role="status">
           {shortcut.choosing ? 'Press the new shortcut, or Esc to keep this one.' : null}
         </p>
@@ -1030,23 +1011,28 @@ export function Capture({
           picture={layoutSize}
           zoomable={shownPicture !== null}
           hidden={reviewing}
-          hint={viewHint(
-            recordingNow === null ? null : recordingNow === recording ? 'readings' : 'looks',
+          hint={stageHint({
+            recording: recordingNow === null ? null : recordingNow === recording ? 'readings' : 'looks',
             selected,
-            shots.length,
-            picking !== null,
+            shotCount: shots.length,
+            picking: picking !== null,
             liveError,
-            shortcut.label,
-            selecting,
+            shortcut: shortcut.label,
+            tool: selecting,
             area,
-            otherSize !== null,
-          )}
+            otherSize: otherSize !== null,
+            drawing,
+            boxBlock,
+          })}
         >
           {({ space, shown }) => (
             <>
-              {reviewing ? null : selected === null ? (
+              {reviewing ? null : selected === null && heldPicture !== null ? (
+                <PictureCanvas picture={heldPicture} label="The screenshot the region goes on" />
+              ) : selected === null ? (
                 <LiveCanvas
                   maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
+                  paused={live.shown.frozen}
                   onFrame={onFrame}
                   onError={onLiveError}
                 />
@@ -1059,7 +1045,60 @@ export function Capture({
               {native === undefined || outline === null ? null : (
                 <CaptureOutlines outline={outline} size={native} shown={shown} />
               )}
-              {native === undefined ? null : (
+              {drawsLive ? (
+                <RegionSurface
+                  size={liveSize}
+                  shown={shown}
+                  screenshot={null}
+                  // The box drawn stays outlined from when the pointer is let go until its screenshot arrives.
+                  region={live.shown.box?.rect ?? null}
+                  area={area}
+                  label={regionLabel(valueName, moving)}
+                  editable={live.shown.box === null}
+                  picking={false}
+                  onPointer={(phase) => {
+                    if (phase === 'down') {
+                      live.press();
+                    } else {
+                      live.release();
+                    }
+                  }}
+                  onRegion={(rect) => {
+                    live.drew({ rect, at: liveSize });
+                  }}
+                  onPick={pick}
+                />
+              ) : editing !== null ? (
+                shownPicture === null ? null : (
+                  <RegionSurface
+                    size={shownPicture}
+                    shown={shown}
+                    screenshot={selected}
+                    region={chosenOnShown?.region ?? null}
+                    label={chosenOnShown === null ? '' : `Box ${boxNumber(draft.boxes, chosenOnShown.id)}`}
+                    editable={boxBlock === null || picking !== null}
+                    picking={picking !== null}
+                    others={boxes.others}
+                    onSelectOther={boxes.select}
+                    describedBy="hint-boxes"
+                    onDelete={() => {
+                      if (chosenOnShown !== null) {
+                        boxes.remove(chosenOnShown.id);
+                      }
+                    }}
+                    onRegion={(region, made) => {
+                      const drawn = boxes.draw(region, made);
+                      if (drawn !== null) {
+                        // What the new box shows is typed next, so focus goes to its field in the list.
+                        requestAnimationFrame(() => {
+                          document.getElementById(boxTextId(drawn))?.focus();
+                        });
+                      }
+                    }}
+                    onPick={pick}
+                  />
+                )
+              ) : native === undefined ? null : (
                 <RegionSurface
                   size={native}
                   shown={shown}
@@ -1067,7 +1106,7 @@ export function Capture({
                   region={otherSize === null ? draft.region : null}
                   recording={recordingNow !== null && selected === null}
                   area={area}
-                  label={editing !== null ? editedName : regionLabel(valueName, moving)}
+                  label={regionLabel(valueName, moving)}
                   editable={shownPicture !== null && (otherSize === null || picking !== null)}
                   picking={picking !== null}
                   tool={selecting}
@@ -1077,11 +1116,7 @@ export function Capture({
                       ...current,
                       region,
                       drawnOn: selected,
-                      // The reference editor draws for its own characters, which leaves the value's side alone.
-                      pin:
-                        editing === null
-                          ? pinChoiceAfterRegion(current.pin, current.region, region, native)
-                          : current.pin,
+                      pin: pinChoiceAfterRegion(current.pin, current.region, region, native),
                     }));
                   }}
                   onPick={pick}
@@ -1097,99 +1132,35 @@ export function Capture({
               editing === null ||
               finder.view === null ||
               selected !== finder.view.screenshot ? null : (
-                <FoundMarks rows={finder.rows} flags={finder.flags} native={native} shown={shown} />
+                <FoundMarks rows={listed(finder.rows)} flags={finder.flags} native={native} shown={shown} />
               )}
               {guides === null ? null : <PinGuides shown={shown} {...guides} />}
             </>
           )}
         </ZoomView>
-        <div className="strip" hidden={reviewing}>
-          <button
-            type="button"
-            className="thumb"
-            aria-pressed={selected === null}
-            onClick={() => {
-              setSelected(null);
+        <ScreenshotStrip
+          shots={stripShots}
+          selected={selected}
+          position={position}
+          hidden={reviewing}
+          unremovable={unremovable}
+          onePicture={setsPlace}
+          onSelect={(index) => {
+            setSelected(index);
+            if (index === null) {
               setPicking(null);
-            }}
-          >
-            <span className="shot">
-              <span className="dot live" />
-            </span>
-            Live
-          </button>
-          {shots.map((shot) => (
-            <button
-              key={shot.index}
-              type="button"
-              className="thumb"
-              aria-pressed={selected === shot.index}
-              onClick={() => {
-                setSelected(shot.index);
-              }}
-            >
-              <span className="shot">
-                {shot.thumb === null ? null : <PictureCanvas picture={shot.thumb} label="" />}
-              </span>
-              <span className="when">
-                {shot.recorded ? <span className="dot" role="img" aria-label="Recorded" /> : null}
-                {position(shot.index)} · {shot.time}
-              </span>
-            </button>
-          ))}
-          {selected === null ? null : (
-            <button
-              type="button"
-              className="btn small"
-              aria-disabled={unremovable !== null}
-              aria-describedby={unremovable === null ? undefined : 'remove-blocked'}
-              onClick={() => {
-                // A refused removal keeps the focus, so its reason is heard.
-                if (unremovable === null) {
-                  background(screenshots.remove([selected]));
-                }
-              }}
-            >
-              Remove screenshot {position(selected)}
-            </button>
-          )}
-          <span className="note">
-            {unremovable === null ? null : <span id="remove-blocked">{unremovable} </span>}
-            Screenshots last until you remove them or change the window.
-            {editing === null ? '' : ' A reference learns from each screenshot you label.'}
-          </span>
-        </div>
+            }
+          }}
+          onRemove={(index) => {
+            background(screenshots.remove([index]));
+          }}
+        />
         {outline === null || reviewing ? null : <CaptureOutlineNote outline={outline} />}
       </section>
       {editing === null ? (
         <aside className="inspector" aria-label="Value">
-          <div className="stepper" role="group" aria-label="Steps">
-            <button
-              type="button"
-              className="step-tab"
-              aria-current={step === 'where' ? 'step' : undefined}
-              onClick={() => {
-                setStep('where');
-              }}
-            >
-              <span className={whereDone && step !== 'where' ? 'num done' : 'num'}>
-                {whereDone && step !== 'where' ? '✓' : '1'}
-              </span>
-              Where to read
-            </button>
-            <button
-              type="button"
-              className="step-tab"
-              aria-current={step === 'how' ? 'step' : undefined}
-              onClick={() => {
-                setStep('how');
-              }}
-            >
-              <span className="num">2</span>
-              How to read it
-            </button>
-          </div>
-          {step === 'where' && fixing !== null ? (
+          {stepper}
+          {shownStep === 'where' && fixing !== null ? (
             <>
               <div className="group-title">
                 <span>
@@ -1205,7 +1176,6 @@ export function Capture({
                   setDraft((current) => ({ ...current, region, drawnOn: current.drawnOn ?? shownOn }));
                 }}
               />
-              {lookPanel}
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}
               {draftError}
@@ -1214,85 +1184,32 @@ export function Capture({
                   Discard
                 </button>
                 {draftButton}
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => {
-                    setStep('how');
-                  }}
-                >
-                  Next: how to read it
-                </button>
+                {nextFromFirst}
               </div>
             </>
-          ) : step === 'where' ? (
+          ) : shownStep === 'where' ? (
             <>
-              {edited === null ? null : <EditIntro value={edited} shown={otherSize} />}
-              <div className="field">
-                <label htmlFor="value-name">Value name</label>
-                <input
-                  id="value-name"
-                  className="input"
-                  placeholder="Progress"
-                  value={valueName}
-                  onChange={(event) => {
-                    setValueName(event.target.value);
-                  }}
-                />
-              </div>
-              <div className="field">
-                <span className="name">
-                  <span id="check-kind">Check</span>
-                  <Hint topic="Check">{CHECK_HINT}</Hint>
-                </span>
-                <div className="seg" role="group" aria-labelledby="check-kind">
-                  {CHECK_KINDS.map((kind) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      aria-pressed={draft.kind === kind}
-                      onClick={() => {
-                        setDraft((current) => withKind(current, kind));
-                        setPicking(null);
-                      }}
-                    >
-                      {KIND_NAMES[kind]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {draft.kind === 'state' ? (
-                <SelectFields
-                  tool={tool}
-                  colorMatch={draft.colorMatch}
-                  canSelect={shownPicture !== null}
-                  preview={<SelectedPixelsField preview={selectedPreview} />}
-                  onTool={(next) => {
-                    setTool(next);
-                    setPicking(null);
-                  }}
-                  onColorMatch={(value) => {
-                    setDraft((current) => ({ ...current, colorMatch: value }));
-                  }}
-                />
-              ) : null}
-              <RegionFields
-                region={draft.region}
-                locked={edited !== null && draft.drawnOn === null}
-                onRegion={(region) => {
-                  // Typed pixels keep to the screenshot the region was drawn on.
-                  setDraft((current) => ({ ...current, region, drawnOn: current.drawnOn ?? shownOn }));
-                }}
-              />
-              <MovingContentField moving={moving} appName={choice.name} onMayMove={setMayMove} />
-              <PinPicker
-                view={staysAt}
+              <WhereFields
+                edited={edited}
+                otherSize={otherSize}
+                valueName={valueName}
+                draft={draft}
+                tool={tool}
+                canSelect={shownPicture !== null}
+                selectedPreview={selectedPreview}
+                shownOn={shownOn}
+                moving={moving}
+                appName={choice.name}
+                staysAt={staysAt}
                 scales={file?.sizeChanges !== 'rarely'}
-                onChoice={(pinChoice) => {
-                  setDraft((current) => ({ ...current, pin: pinChoice }));
+                onValueName={setValueName}
+                onDraft={setDraft}
+                onTool={setTool}
+                onMayMove={setMayMove}
+                onStopPicking={() => {
+                  setPicking(null);
                 }}
               />
-              {lookPanel}
               <div className="sep" />
               {draftError}
               <div className="actions">
@@ -1300,98 +1217,55 @@ export function Capture({
                   Discard
                 </button>
                 {draftButton}
+                {nextFromFirst}
+              </div>
+            </>
+          ) : shownStep === 'how' && threeSteps ? (
+            <>
+              {referencePicker}
+              {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
+              <div className="sep" />
+              {draftError}
+              <div className="actions">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    goTo('where');
+                  }}
+                >
+                  Back
+                </button>
+                {draftButton}
                 <button
                   type="button"
                   className="btn primary"
                   onClick={() => {
-                    setStep('how');
+                    goTo('check');
                   }}
                 >
-                  Next: how to read it
+                  Next: check and save
                 </button>
               </div>
             </>
           ) : (
             <>
               {fixing !== null && draft.kind === 'number' && sharedReference !== null ? (
-                <fieldset className="choices" aria-describedby="hint-read-with">
-                  <legend className="group-title">
-                    <span>Read with</span>
-                    <Hint topic="Read with" id="hint-read-with">
-                      {READ_WITH_HINT}
-                    </Hint>
-                  </legend>
-                  <label className="choice" aria-label="Shared reference">
-                    <input
-                      type="radio"
-                      name="read-with"
-                      aria-describedby="read-with-shared"
-                      checked={draft.reference === sharedReference}
-                      onChange={() => {
-                        setDraft((current) => ({ ...current, reference: sharedReference }));
-                      }}
-                    />
-                    <span>
-                      <span className="choice-name">
-                        {file?.references.find((reference) => reference.id === sharedReference)?.name ??
-                          'Its reference'}
-                      </span>
-                      <small id="read-with-shared" className="note">
-                        The reference it reads with at every size.
-                      </small>
-                    </span>
-                  </label>
-                  <label className="choice" aria-label="Learn a reference at this size">
-                    <input
-                      type="radio"
-                      name="read-with"
-                      aria-describedby="read-with-own"
-                      checked={draft.reference !== sharedReference}
-                      onChange={() => {
-                        background(
-                          openEditor(null, file?.references.find((saved) => saved.id === sharedReference) ?? null),
-                        );
-                      }}
-                    />
-                    <span>
-                      <span className="choice-name">
-                        {draft.reference === sharedReference
-                          ? 'Learn a reference at this size'
-                          : (file?.references.find((reference) => reference.id === draft.reference)?.name ??
-                            'A reference learned at this size')}
-                      </span>
-                      <small id="read-with-own" className="note">
-                        Teach the characters again from this size&apos;s screenshots.
-                      </small>
-                    </span>
-                  </label>
-                </fieldset>
-              ) : fixing !== null && (draft.kind === 'barFill' || draft.kind === 'color') ? (
-                <p className="note">At this size it reads with the colors of its first drawing.</p>
-              ) : draft.kind === 'number' ? (
-                <ReferencePicker
-                  appName={choice.name}
-                  file={file}
+                <ReadWith
+                  references={file?.references ?? null}
+                  shared={sharedReference}
                   selected={draft.reference}
-                  hasRegion={draft.region !== null}
-                  whole={draft.whole}
-                  onSelect={(reference) => {
-                    setDraft((current) => ({ ...current, reference }));
+                  onShared={() => {
+                    setDraft((current) => ({ ...current, reference: sharedReference }));
                   }}
-                  onEdit={(id) => {
-                    background(openEditor(file?.references.find((reference) => reference.id === id) ?? null, null));
-                  }}
-                  drafted={drafted}
-                  onNew={() => {
-                    background(openEditor(null, null));
-                  }}
-                  onRecord={() => {
-                    background(recordReadings());
-                  }}
-                  onWhole={(whole) => {
-                    setDraft((current) => ({ ...current, whole }));
+                  onLearn={(like) => {
+                    background(openEditor(null, like));
                   }}
                 />
+              ) : fixing !== null && (draft.kind === 'barFill' || draft.kind === 'color') ? (
+                <p className="note">At this size it reads with the colors of its first drawing.</p>
+              ) : threeSteps ? null : draft.kind === 'number' ? (
+                referencePicker
               ) : edited !== null && keepsStates(draft, edited.screen) ? (
                 <SavedStates
                   value={edited}
@@ -1473,7 +1347,7 @@ export function Capture({
                   type="button"
                   className="btn"
                   onClick={() => {
-                    setStep('where');
+                    goTo(threeSteps ? 'how' : 'where');
                   }}
                 >
                   Back
@@ -1495,6 +1369,7 @@ export function Capture({
         </aside>
       ) : (
         <aside className="inspector" aria-label="Reference">
+          {mode.kind === 'reference' ? null : stepper}
           <ReferenceEditor
             name={editing.name}
             appName={choice.name}
@@ -1502,15 +1377,9 @@ export function Capture({
             tolerance={draft.tolerance}
             picking={picking === 'ink'}
             canPick={shownPicture !== null}
-            selected={selected}
-            label={selected === null ? '' : (draft.labels.get(selected) ?? '')}
             saved={taught.saved}
             labeled={taught.labeled}
             recorded={taught.recorded}
-            found={taught.found}
-            onForgetFound={() => {
-              setDraft((current) => ({ ...current, found: [] }));
-            }}
             finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
             expected={editing.expects}
             coverage={covered}
@@ -1524,34 +1393,41 @@ export function Capture({
             onTolerance={(tolerance) => {
               setDraft((current) => ({ ...current, tolerance }));
             }}
-            onLabel={(text) => {
-              if (selected !== null) {
-                setDraft((current) => ({ ...current, labels: new Map(current.labels).set(selected, text) }));
-              }
-            }}
             onExpected={(expects) => {
               setEditing((current) => (current === null ? null : { ...current, expects }));
             }}
+            boxes={
+              <BoxList
+                boxes={draft.boxes}
+                selected={boxes.selectedId}
+                full={full}
+                position={position}
+                blocked={boxBlock}
+                // A reference taught from a value reads at the value's region, not at a box.
+                readsAt={draft.region === null ? (draft.boxes[0]?.id ?? null) : null}
+                onSelect={(id) => {
+                  const box = boxOf(draft.boxes, id);
+                  boxes.select(id);
+                  if (box !== null) {
+                    setSelected(box.screenshot);
+                  }
+                }}
+                onText={boxes.retype}
+                onDelete={boxes.remove}
+              />
+            }
             findPanel={
-              selected === null && finder.view === null ? null : (
+              chosen === null && finder.view === null ? null : (
                 <FoundPanel
-                  view={finder.view}
-                  rows={finder.rows}
-                  flags={finder.flags}
-                  crops={finder.crops}
+                  finder={finder}
                   findBlocked={findBlocked}
-                  addBlocked={finder.blocked}
-                  error={finder.error}
-                  searching={finder.searching}
                   onFind={() => {
-                    if (selected !== null) {
+                    if (chosen !== null) {
                       setPicking(null);
-                      background(finder.search(selected));
+                      setSelected(chosen.screenshot);
+                      background(finder.search(chosen));
                     }
                   }}
-                  onEntry={finder.edit}
-                  onAdd={finder.add}
-                  onDismiss={finder.dismiss}
                 />
               )
             }

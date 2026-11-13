@@ -1,6 +1,6 @@
-//! Finding more text like a reference's first sample: the text elsewhere on
+//! Finding more text like one of a reference's boxes: the text elsewhere on
 //! the same screenshot in the characters' color and at their size, so the
-//! user can label it all at once instead of drawing a region around each.
+//! user adds it all at once instead of drawing a box around each.
 //!
 //! It looks at the ink of the whole screenshot, as the reference's color and
 //! tolerance tell ink from background, and joins touching ink pixels into
@@ -321,6 +321,12 @@ fn same_size(height: u32, sample: u32) -> bool {
     height.abs_diff(sample) <= slack
 }
 
+/// The ink of `image`, a find's pixels, for the text reader, as `reader`
+/// tells ink from background; `None` when it shows none.
+pub(crate) fn ink_line(image: &Image, reader: &DigitReader) -> Option<Line> {
+    Ink::of(image, reader).line()
+}
+
 /// The text on `image` like the sample in `region`: in the ink `reader`
 /// tells from background and with characters as tall as the sample's,
 /// leaving out text that meets any of `skip`, such as finds added already.
@@ -375,9 +381,7 @@ pub(crate) fn like(
                 right.saturating_sub(left),
                 bottom.saturating_sub(top),
             )?;
-            let line = image
-                .crop(region)
-                .and_then(|crop| Ink::of(&crop, reader).line());
+            let line = image.crop(region).and_then(|crop| ink_line(&crop, reader));
             Some(Find { region, line })
         })
         .collect();

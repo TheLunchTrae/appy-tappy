@@ -853,6 +853,34 @@ div.match-answer {
   right: 4px;
 }
 
+/* A reference's box other than the selected one: outlined only, and pressed to select it. */
+.other-box {
+  position: absolute;
+  box-shadow:
+    0 0 0 1px var(--capture),
+    0 0 0 2px rgb(0 0 0 / 60%);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.other-box .tag {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: -2px;
+  background: var(--capture);
+  color: var(--on-capture);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  padding: 0 5px;
+  border-radius: 3px;
+}
+
+.surface:focus-visible {
+  outline: 2px solid var(--capture);
+  outline-offset: 2px;
+}
+
 .view-foot {
   display: flex;
   align-items: center;
@@ -1884,7 +1912,7 @@ div.match-answer {
   background: none;
 }
 
-/* Text found like the first sample, to check before it teaches the reference. */
+/* Text found like the selected box, to check before it teaches the reference. */
 .autofill {
   display: flex;
   flex-direction: column;
@@ -1967,6 +1995,88 @@ div.match-answer {
   grid-column: 3 / 5;
   font-size: 12px;
   color: var(--warn);
+}
+
+.autofill .select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.autofill .select-all input,
+.autofill li input[type='checkbox'],
+.box-list input[type='checkbox'] {
+  accent-color: var(--capture);
+}
+
+/* The boxes a reference learns from: each one's number, its pixels, what it shows, and its delete button. */
+.box-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.box-list li {
+  display: grid;
+  grid-template-columns: 20px 92px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.box-list li.selected {
+  box-shadow: 0 0 0 1px var(--capture);
+}
+
+.box-list .pick {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--capture);
+  background: none;
+  color: var(--capture);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.box-list li.selected .pick {
+  background: var(--capture);
+  color: var(--on-capture);
+}
+
+.box-list .crop {
+  height: 34px;
+}
+
+.box-list .crop canvas {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 34px;
+}
+
+.box-list .where {
+  grid-column: 2 / 4;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* The box a reference taught by itself reads and records at. */
+.box-list .reads-here {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--capture);
+  border-radius: 999px;
+  color: var(--capture);
 }
 
 .autofill .row {

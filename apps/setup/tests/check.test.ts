@@ -1,22 +1,28 @@
 import { describe, expect, test } from 'bun:test';
 
 import { LIMITS } from '../src/lib/bindings.ts';
+import { boxStep } from '../src/lib/boxes.ts';
 import {
+  type Draft,
   buildCharacters,
   buildSpec,
   DEFAULT_TOLERANCE,
   EMPTY_DRAFT,
+  boxBlocked,
   findBlocked,
   fixDraft,
   fromReference,
+  onPicture,
   newestOfSize,
   recordBlocked,
+  recordedPlace,
   regionScreenshot,
   reviewSpec,
   settingsDiffer,
   stateOn,
   toReference,
   withFixRegion,
+  withRecordedInk,
   withKind,
   withoutState,
   withState,
@@ -169,52 +175,43 @@ describe('states', () => {
 });
 
 describe('buildCharacters', () => {
-  test('teaches a new reference its labels, in screenshot order, skipping blank ones', () => {
+  test('teaches a new reference its boxes in list order, each at its own region, skipping blank ones', () => {
+    const other = { x: 40, y: 50, width: 30, height: 12 };
     const draft = {
       ...EMPTY_DRAFT,
-      region,
-      drawnOn: 2,
       ink: red,
-      labels: new Map([
-        [2, ' 87% '],
-        [0, '12%'],
-        [1, '  '],
-      ]),
+      boxes: [
+        { id: 4, screenshot: 2, region, text: ' 87% ' },
+        { id: 1, screenshot: 0, region: other, text: '12%' },
+        { id: 2, screenshot: 1, region, text: '  ' },
+      ],
     };
     expect(buildCharacters(draft, null)).toEqual({
       ok: true,
       spec: {
         kind: 'characters',
+        // With no value's region, the reference reads where its first box is.
         region,
         screenshot: 2,
         reference: null,
         ink: red,
         tolerance: DEFAULT_TOLERANCE.number,
         labels: [
-          { screenshot: 0, text: '12%' },
-          { screenshot: 2, text: '87%' },
+          { screenshot: 2, region, text: '87%' },
+          { screenshot: 0, region: other, text: '12%' },
         ],
         recorded: [],
       },
     });
   });
 
-  test('teaches found text after the labeled screenshots, each at its own region', () => {
-    const found = { x: 40, y: 50, width: 30, height: 12 };
-    const draft = {
-      ...EMPTY_DRAFT,
-      region,
-      drawnOn: 0,
-      ink: red,
-      labels: new Map([[0, '87%']]),
-      found: [{ screenshot: 0, region: found, text: '93.4%' }],
-    };
-    const built = buildCharacters(draft, null);
-    expect(built.ok && built.spec.labels).toEqual([
-      { screenshot: 0, text: '87%' },
-      { screenshot: 0, region: found, text: '93.4%' },
-    ]);
-    expect(buildCharacters({ ...draft, labels: new Map() }, null).ok).toBe(true);
+  test("reads at the value's region while the value has one", () => {
+    const value = { x: 9, y: 9, width: 20, height: 8 };
+    const built = buildCharacters(
+      { ...EMPTY_DRAFT, region: value, drawnOn: 3, ink: red, boxes: [{ id: 0, screenshot: 1, region, text: '5' }] },
+      null,
+    );
+    expect(built.ok && [built.spec.region, built.spec.screenshot]).toEqual([value, 3]);
   });
 
   test('teaches kept recorded readings alone, in reading order', () => {
@@ -239,21 +236,24 @@ describe('buildCharacters', () => {
   test('asks for what a new reference needs', () => {
     expect(buildCharacters(EMPTY_DRAFT, null)).toEqual({
       ok: false,
-      next: 'Draw a region around the characters on a screenshot.',
+      next: 'Draw a box around the characters on a screenshot.',
     });
     expect(buildCharacters({ ...EMPTY_DRAFT, region, ink: red }, null)).toEqual({
       ok: false,
-      next: 'Draw a region around the characters on a screenshot.',
+      next: 'Draw a box around the characters on a screenshot.',
     });
     expect(buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0 }, null)).toEqual({
       ok: false,
       next: "Pick the characters' color.",
     });
     expect(
-      buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0, ink: red, labels: new Map([[0, ' ']]) }, null),
+      buildCharacters(
+        { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red, boxes: [{ id: 0, screenshot: 0, region, text: ' ' }] },
+        null,
+      ),
     ).toEqual({
       ok: false,
-      next: 'Type what the region shows on a screenshot, or record it.',
+      next: 'Type what a box shows, or record the characters.',
     });
   });
 
@@ -298,33 +298,19 @@ describe('the reference editor', () => {
     samples: [{ image: 'ref-percent-1.png', text: '87%' }],
   };
 
-  test("opens with the reference's characters and the value's region", () => {
-    const value = { ...EMPTY_DRAFT, region, ink: gray, labels: new Map([[0, '5']]) };
-    expect(toReference(value, saved)).toEqual({ ...value, ink: red, tolerance: 25, labels: new Map() });
-    expect(toReference(value, null)).toEqual({
-      ...value,
-      ink: null,
-      tolerance: DEFAULT_TOLERANCE.number,
-      labels: new Map(),
-    });
+  test("opens with the reference's characters and the value's region, and no boxes", () => {
+    const value = { ...EMPTY_DRAFT, region, ink: gray, boxes: [{ id: 0, screenshot: 0, region, text: '5' }] };
+    expect(toReference(value, saved)).toEqual({ ...value, ink: red, tolerance: 25, boxes: [] });
+    expect(toReference(value, null)).toEqual({ ...value, ink: null, tolerance: DEFAULT_TOLERANCE.number, boxes: [] });
   });
 
-  test("puts the value's region back however the reference was taught", () => {
+  test("leaves the value's region as it was, without the editor's boxes or readings", () => {
     const editor = {
       ...toReference({ ...EMPTY_DRAFT, region, drawnOn: 0 }, saved),
-      region: taught,
-      drawnOn: 3,
-      labels: new Map([[0, '100%']]),
-      found: [{ screenshot: 0, region: taught, text: '99%' }],
+      boxes: [{ id: 0, screenshot: 3, region: taught, text: '100%' }],
+      recorded: new Map([[0, '99%']]),
     };
-    expect(fromReference(editor, { region, drawnOn: 0 })).toEqual({
-      ...editor,
-      region,
-      drawnOn: 0,
-      labels: new Map(),
-      recorded: new Map(),
-      found: [],
-    });
+    expect(fromReference(editor)).toEqual({ ...editor, boxes: [], recorded: new Map() });
   });
 });
 
@@ -357,6 +343,62 @@ describe('a stopped recording', () => {
     expect(newestOfSize(screenshots, { ...big })).toBe(2);
     expect(newestOfSize(screenshots, { width: 800, height: 600 })).toBeNull();
   });
+
+  // A reference taught by itself: no value's region, and it reads at its first box.
+  const first = { id: 0, screenshot: 0, region, text: '87%' };
+  const other = { id: 1, screenshot: 0, region: { ...region, y: 40 }, text: '12' };
+  const alone = { ...EMPTY_DRAFT, ink: red, tolerance: 40, boxes: [first, other] };
+  const sizes = [
+    [0, big],
+    [1, small],
+    [2, big],
+  ] as const;
+
+  /** `draft` after Use settings, with `boxId` the box the recording read at. */
+  function usedSettings(draft: Draft, boxId: number | null): Draft {
+    const on = draft.boxes.find((box) => box.id === boxId)?.screenshot ?? null;
+    const place = recordedPlace(draft, settings, on, sizes);
+    const { boxes } =
+      place === null
+        ? draft
+        : boxStep(
+            { boxes: draft.boxes, selectedId: null, recordedId: boxId },
+            { type: 'restore', screenshot: place, region: settings.region },
+          );
+    return withRecordedInk({ ...draft, boxes }, settings);
+  }
+
+  test('using its settings in a reference taught by itself moves the reading box back and sets no region', () => {
+    // The reading box was moved, then deleted, and the color and tolerance changed.
+    const moved = { ...alone, ink: gray, tolerance: 12, boxes: [{ ...first, region: { ...region, x: 9 } }, other] };
+    const deleted = { ...alone, boxes: [other] };
+    for (const changed of [moved, deleted]) {
+      expect(settingsDiffer(changed, settings, big)).toBe(true);
+      const back = usedSettings(changed, 0);
+      expect(back.region).toBeNull();
+      expect(back.drawnOn).toBeNull();
+      expect(settingsDiffer(back, settings, big)).toBe(false);
+      expect(back.boxes).toHaveLength(2);
+    }
+    // The box keeps its text and the other box stays; a deleted box comes back with none.
+    expect(usedSettings(moved, 0).boxes).toEqual([first, other]);
+    // It goes on the newest screenshot of the size recorded at.
+    expect(usedSettings(deleted, 0).boxes).toEqual([{ id: 2, screenshot: 2, region, text: '' }, other]);
+  });
+
+  test('the reading box goes back on a screenshot of the size recorded at', () => {
+    // Its own screenshot when that has the size, or else the newest that has, or nowhere when none has.
+    expect(recordedPlace(alone, settings, 0, sizes)).toBe(0);
+    expect(recordedPlace(alone, settings, 1, sizes)).toBe(2);
+    expect(recordedPlace(alone, settings, null, sizes)).toBe(2);
+    expect(recordedPlace(alone, settings, 1, [[1, small]])).toBeNull();
+  });
+
+  test("using its settings in a reference taught from a value leaves the value's region and the boxes", () => {
+    const taughtFrom = { ...recorded, ink: gray, tolerance: 12, boxes: [other] };
+    expect(recordedPlace(taughtFrom, settings, null, sizes)).toBeNull();
+    expect(usedSettings(taughtFrom, null)).toEqual({ ...taughtFrom, ink: red, tolerance: 40 });
+  });
 });
 
 test('the region shows over the screenshot shown, else the one it was drawn on, else the newest', () => {
@@ -372,28 +414,45 @@ test('the region shows over the screenshot shown, else the one it was drawn on, 
   expect(regionScreenshot(null, null, new Map(), null)).toBeNull();
 });
 
-test("recording waits for a drawn region and the characters' color", () => {
+test("recording waits for a place to read and the characters' color", () => {
   const ready = { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red };
+  const drawFirst = 'Draw a box around the characters on a screenshot to record them.';
   expect(recordBlocked(ready)).toBeNull();
-  expect(recordBlocked({ ...ready, region: null })).toBe('Draw the region on a screenshot to record it.');
-  expect(recordBlocked({ ...ready, drawnOn: null })).toBe('Draw the region on a screenshot to record it.');
+  expect(recordBlocked({ ...ready, region: null })).toBe(drawFirst);
+  expect(recordBlocked({ ...ready, drawnOn: null })).toBe(drawFirst);
+  // A box is a place to read while the value has none.
+  expect(recordBlocked({ ...ready, region: null, boxes: [{ id: 0, screenshot: 1, region, text: '' }] })).toBeNull();
   expect(recordBlocked({ ...ready, ink: null })).toBe("Pick the characters' color to record.");
 });
 
-test('finding more like it waits for a drawn region, the color, and a screenshot of the size it was drawn at', () => {
-  const ready = { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red };
+test('finding more like it waits for a selected box and the color', () => {
+  const ready = { ...EMPTY_DRAFT, ink: red };
+  const box = { id: 0, screenshot: 0, region, text: '' };
+  expect(findBlocked(ready, box)).toBeNull();
+  expect(findBlocked(ready, null)).toBe('Select a box around one sample first.');
+  expect(findBlocked({ ...ready, ink: null }, box)).toBe("Pick the characters' color first.");
+});
+
+test('boxes go on screenshots of the size the reference reads at, once it has one', () => {
   const size = { width: 800, height: 600 };
-  const drawFirst = 'Draw the region around one sample on a screenshot first.';
-  expect(findBlocked(ready, size, size)).toBeNull();
-  expect(findBlocked({ ...ready, region: null }, size, size)).toBe(drawFirst);
-  // A saved value's region starts with no screenshot drawn on, so its pixels may be another size's.
-  expect(findBlocked({ ...ready, drawnOn: null }, size, size)).toBe(drawFirst);
-  expect(findBlocked(ready, null, size)).toBe(drawFirst);
-  expect(findBlocked({ ...ready, ink: null }, size, size)).toBe("Pick the characters' color first.");
-  const other = 'Show a screenshot at 800 × 600, the size the region was drawn at, to search it.';
-  expect(findBlocked(ready, size, { width: 800, height: 601 })).toBe(other);
-  expect(findBlocked(ready, size, { width: 801, height: 600 })).toBe(other);
-  expect(findBlocked(ready, size, null)).toBe(other);
+  expect(boxBlocked(null, size)).toBeNull();
+  expect(boxBlocked(size, null)).toBeNull();
+  expect(boxBlocked(size, { ...size })).toBeNull();
+  const other = 'Boxes go on screenshots at 800 × 600, the size the reference reads at.';
+  expect(boxBlocked(size, { width: 800, height: 601 })).toBe(other);
+  expect(boxBlocked(size, { width: 801, height: 600 })).toBe(other);
+});
+
+test("a new screenshot carries the value's region when it fits, and clears it when it does not", () => {
+  const drawn = { ...EMPTY_DRAFT, region, drawnOn: 0 };
+  expect(onPicture(drawn, 1, true)).toEqual({ ...drawn, drawnOn: 1 });
+  expect(onPicture(drawn, 1, false)).toEqual({ ...drawn, region: null, drawnOn: null });
+  expect(onPicture(EMPTY_DRAFT, 1, true)).toBe(EMPTY_DRAFT);
+  // A saved value's region waits, on no screenshot, for one of the size it was drawn at.
+  const saved = { ...EMPTY_DRAFT, region };
+  expect(onPicture(saved, 1, false)).toBe(saved);
+  // While a size is unknown, such as before the screenshot's pixels arrive, the region stays where it is drawn.
+  expect(onPicture(drawn, 1, null)).toBe(drawn);
 });
 
 describe('fixDraft', () => {

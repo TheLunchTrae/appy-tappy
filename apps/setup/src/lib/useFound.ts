@@ -1,9 +1,10 @@
-// Finding more text like a reference's first sample, and adding what the user confirms to the draft.
+// Finding more text like a box a reference learns from, and adding what the user confirms to the draft as boxes.
 
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FoundView, ReferenceRef } from './bindings.ts';
-import { errorText, findLike, forgetFound, foundPicture, foundProblems, foundState } from './api.ts';
+import { errorText, findLike, forgetFound, foundPicture, foundProblems, foundState, rereadFound } from './api.ts';
+import { type Box, type NewBox, boxesOn } from './boxes.ts';
 import { type Draft, taughtSpec } from './check.ts';
 import {
   type FoundEntry,
@@ -13,8 +14,11 @@ import {
   asLabels,
   flaggedFinds,
   foundRows,
+  keepAll,
   keptFound,
+  rereadOffer,
   rowFlags,
+  withoutFlagged,
 } from './found.ts';
 import type { Picture } from './pixels.ts';
 import { background, useRepeat } from './repeat.ts';
@@ -26,17 +30,8 @@ const CHECK_DELAY_MS = 200;
 /** The widest a find is asked for: text is small, and the panel shows it a little larger. */
 const CROP_WIDTH = 320;
 
-/**
- * The search for text like the first sample of the reference `draft` teaches, which adds to `reference`, if any:
- * its finds with the user's edits, their pictures, and which ones the reference cannot learn. `learned` is every text
- * the reference learns from already. Leaving the component that uses it forgets the search.
- */
-export function useFound(
-  draft: Draft,
-  setDraft: Dispatch<SetStateAction<Draft>>,
-  reference: ReferenceRef | null,
-  learned: readonly string[],
-): {
+/** The search for more text like a box, as {@link useFound} runs it. */
+export interface Finder {
   readonly view: FoundView | null;
   /** The finds, with the user's edits. */
   readonly rows: readonly FoundRow[];
@@ -48,19 +43,47 @@ export function useFound(
   /** Why the last search, or the last check of the finds, failed. */
   readonly error: string | null;
   readonly searching: boolean;
-  /** Searches screenshot `screenshot` for text like the draft's region shows there, away from the finds added already. */
-  readonly search: (screenshot: number) => Promise<void>;
+  /** Searches the screenshot `sample` is on for text like it, away from the boxes there already. */
+  readonly search: (sample: Box) => Promise<void>;
   readonly edit: (index: number, entry: FoundEntry) => void;
+  /** Ticks every listed find, or with `keep` false leaves every one out. */
+  readonly keepAll: (keep: boolean) => void;
+  /** Leaves out every ticked find that is flagged. */
+  readonly leaveOutFlagged: () => void;
+  /**
+   * Whether Reread is offered, and with `blocked` why it waits: every find it would read again was last read with
+   * the characters' color and tolerance the draft has now.
+   */
+  readonly rereadOffer: { readonly blocked: string | null } | null;
+  /**
+   * Has the text reader read again, with the characters' color as the draft has it now, the finds it could not read
+   * and the flagged ones whose text is its guess and was read with another. Ticks and typed text stay.
+   */
+  readonly reread: () => Promise<void>;
   /** Adds the kept finds to the draft and forgets the search. */
   readonly add: () => void;
   /** Forgets the search without adding any of it. */
   readonly dismiss: () => void;
-} {
+}
+
+/**
+ * The search for text like a box of the reference `draft` teaches, which adds to `reference`, if any: its finds with
+ * the user's edits, their pictures, and which ones the reference cannot learn. `addBoxes` adds the kept finds to the
+ * draft as boxes. `learned` is every text the reference learns from already, and `needs` the characters it needs,
+ * which the finds listed may only show. Leaving the component that uses it forgets the search.
+ */
+export function useFound(
+  draft: Draft,
+  addBoxes: (added: readonly NewBox[]) => void,
+  reference: ReferenceRef | null,
+  learned: readonly string[],
+  needs: readonly string[],
+): Finder {
   const [view, setView] = useState<FoundView | null>(null);
   const [edits, setEdits] = useState<ReadonlyMap<number, FoundEntry>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
-  // Bumped by each search and dismissal, so an answer sent before one is ignored.
+  // Bumped by each search, reread and dismissal, so an answer sent before one is ignored.
   const turn = useRef(0);
   const [crops, setCrops] = useState<{ readonly id: number; readonly pictures: ReadonlyMap<number, Picture> }>({
     id: -1,
@@ -116,7 +139,10 @@ export function useFound(
     }
   }, [searchId, findCount]);
 
-  const rows = useMemo(() => (view === null ? [] : foundRows(view, edits, learned)), [view, edits, learned]);
+  const rows = useMemo(
+    () => (view === null ? [] : foundRows(view, edits, learned, needs)),
+    [view, edits, learned, needs],
+  );
   const asked = useMemo(() => askable(rows), [rows]);
   const spec = useMemo(() => taughtSpec(draft, reference), [draft, reference]);
   const labels = useMemo(() => (view === null ? [] : asLabels(view.screenshot, asked)), [view, asked]);
@@ -155,6 +181,8 @@ export function useFound(
   const checked = key === '' || problems.key === key;
   const flags = rowFlags(rows, checked ? problems.found : new Map());
 
+  const offer = rereadOffer(rows, flags, draft.ink, draft.tolerance);
+
   const forget = (): void => {
     turn.current += 1;
     setView(null);
@@ -167,13 +195,16 @@ export function useFound(
     );
   };
 
-  const search = async (screenshot: number): Promise<void> => {
-    const { region, ink, tolerance, found } = draft;
-    if (region === null || ink === null) {
+  const search = async (sample: Box): Promise<void> => {
+    const { ink, tolerance, boxes } = draft;
+    if (ink === null) {
       return;
     }
+    const { screenshot, region } = sample;
     // The server leaves these out, so a search after adding offers the rest.
-    const added = found.filter((label) => label.screenshot === screenshot).map((label) => label.region);
+    const added = boxesOn(boxes, screenshot)
+      .filter((box) => box.id !== sample.id)
+      .map((box) => box.region);
     turn.current += 1;
     const sent = turn.current;
     setSearching(true);
@@ -206,12 +237,38 @@ export function useFound(
     edit: (index, entry) => {
       setEdits((current) => new Map(current).set(index, entry));
     },
+    keepAll: (keep) => {
+      setEdits((current) => new Map([...current, ...keepAll(rows, keep)]));
+    },
+    leaveOutFlagged: () => {
+      setEdits((current) => new Map([...current, ...withoutFlagged(rows, flags)]));
+    },
+    rereadOffer: offer,
+    reread: async () => {
+      const again = offer?.indexes ?? [];
+      if (view === null || draft.ink === null || again.length === 0) {
+        return;
+      }
+      // The search's state read before this would show the finds as they were, and end the wait for their text.
+      turn.current += 1;
+      const sent = turn.current;
+      try {
+        const result = await rereadFound(view.id, again, draft.ink, draft.tolerance);
+        if (sent === turn.current && result !== null) {
+          setView(result);
+          setError(null);
+        }
+      } catch (error: unknown) {
+        if (sent === turn.current) {
+          setError(errorText(error));
+        }
+      }
+    },
     add: () => {
       if (view === null) {
         return;
       }
-      const kept = keptFound(view.screenshot, rows);
-      setDraft((current) => ({ ...current, found: [...current.found, ...kept] }));
+      addBoxes(keptFound(view.screenshot, rows));
       forget();
     },
     dismiss: forget,

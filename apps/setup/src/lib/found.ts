@@ -1,16 +1,10 @@
-// Text found like a reference's first sample: which finds to add, as what, and what stops them.
+// Text found like a box a reference learns from: which finds to add, as what, and what stops them.
 
-import type { FoundView, Label } from './bindings.ts';
+import type { ColorSpec, FoundView, Label } from './bindings.ts';
+import type { NewBox } from './boxes.ts';
 import type { Rect } from './region.ts';
 
-/** A find the user added to the reference: text at its own region of a screenshot. */
-export interface FoundLabel {
-  readonly screenshot: number;
-  readonly region: Rect;
-  readonly text: string;
-}
-
-/** The user's choice for one find: whether to add it, its text, and whether the user typed that text. */
+/** The user's choice for one find: whether to add it, and the text the user typed, which `typed` says is theirs. */
 export interface FoundEntry {
   readonly keep: boolean;
   readonly text: string;
@@ -27,8 +21,56 @@ export interface FoundRow {
   readonly typed: boolean;
   /** Whether the text reader has not read it yet and the user typed nothing. */
   readonly reading: boolean;
+  /** Whether the text reader could not read it and the user typed nothing. */
+  readonly failed: boolean;
+  /** The characters' color and tolerance the text reader last read it with. */
+  readonly readWith: { readonly ink: ColorSpec; readonly tolerance: number };
   /** Why it cannot be added as it is, found without asking the reference, or null. */
   readonly flag: string | null;
+  /**
+   * Whether it may show only characters the reference needs, so the panel lists it. Text being read, and text the
+   * user typed, is listed.
+   */
+  readonly fits: boolean;
+}
+
+/**
+ * The digit each letter or mark the text reader often reads in place of one stands for. A reference that needs only
+ * digits still lists a find read as 12O5, whose O may be a 0.
+ */
+const LOOKALIKES: Readonly<Record<string, string>> = {
+  O: '0',
+  o: '0',
+  D: '0',
+  Q: '0',
+  I: '1',
+  l: '1',
+  i: '1',
+  '|': '1',
+  Z: '2',
+  z: '2',
+  S: '5',
+  s: '5',
+  G: '6',
+  b: '6',
+  T: '7',
+  B: '8',
+  g: '9',
+  q: '9',
+};
+
+/** Whether `text` may show only characters among `needs`, a character or its lookalike digit; any does when it is empty. */
+export function fitsNeeds(text: string, needs: readonly string[]): boolean {
+  if (needs.length === 0) {
+    return true;
+  }
+  for (const character of text.replaceAll(/\s/gu, '')) {
+    const digit = LOOKALIKES[character];
+    if (!needs.includes(character) && (digit === undefined || !needs.includes(digit))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** The first letter in `text`, or null. */
@@ -37,34 +79,49 @@ function firstLetter(text: string): string | null {
 }
 
 /**
- * The finds of `view` with the user's `edits`. A find starts kept, with the text reader's guess. A kept one is flagged
- * when it has no text, or, while the reference has `learned` no letter, when the reader's guess has one: the reader
- * often takes a 0 for an O. Text the user typed is theirs, letters and all.
+ * The finds of `view` with the user's `edits`. A find starts left out, with the text reader's guess, and is listed
+ * when that guess may show only characters among `needs`, the ones the reference needs. A kept one is flagged when it
+ * has no text, or, while the reference has `learned` no letter, when the reader's guess has one: the reader often
+ * takes a 0 for an O. Text the user typed is theirs, letters and all.
  */
 export function foundRows(
   view: FoundView,
   edits: ReadonlyMap<number, FoundEntry>,
   learned: readonly string[],
+  needs: readonly string[],
 ): readonly FoundRow[] {
   const letters = learned.some((text) => firstLetter(text) !== null);
   return view.finds.map((find, index) => {
     const edit = edits.get(index);
     const guess = find.text.kind === 'read' ? find.text.text : '';
-    const keep = edit?.keep ?? true;
-    const text = edit?.text ?? guess;
+    const keep = edit?.keep ?? false;
     const typed = edit?.typed ?? false;
-    const reading = edit === undefined && find.text.kind === 'pending';
+    // Text the user did not type is the reader's guess, which may arrive after the find was ticked.
+    const text = typed ? (edit?.text ?? '') : guess;
+    const reading = !typed && find.text.kind === 'pending';
     const letter = letters || typed ? null : firstLetter(text);
     let flag: string | null = null;
     if (keep && !reading) {
       if (text.trim() === '') {
-        flag =
-          find.text.kind === 'failed' && edit === undefined ? find.text.text : 'Type what this shows, or leave it out.';
+        flag = find.text.kind === 'failed' && !typed ? find.text.text : 'Type what this shows, or leave it out.';
       } else if (letter !== null) {
         flag = `${letter} is a letter, and the reference has learned none. Type what this shows.`;
       }
     }
-    return { index, region: find.region, keep, text, typed, reading, flag };
+    const failed = !typed && find.text.kind === 'failed';
+    const fits = reading || typed || fitsNeeds(guess, needs);
+    return {
+      index,
+      region: find.region,
+      keep: keep && fits,
+      text,
+      typed,
+      reading,
+      failed,
+      readWith: { ink: find.ink, tolerance: find.tolerance },
+      flag: fits ? flag : null,
+      fits,
+    };
   });
 }
 
@@ -116,7 +173,7 @@ export function addBlocked(
 ): string | null {
   const kept = rows.filter((row) => row.keep);
   if (kept.length === 0) {
-    return 'Keep at least one to add it.';
+    return 'Tick at least one to add it.';
   }
   if (kept.some((row) => row.reading)) {
     return 'Reading the text…';
@@ -130,9 +187,71 @@ export function addBlocked(
   return checked ? null : 'Checking the text…';
 }
 
-/** The kept rows as labels the draft adds, on screenshot `screenshot`. */
-export function keptFound(screenshot: number, rows: readonly FoundRow[]): readonly FoundLabel[] {
+/** The kept rows as the boxes the draft adds, on screenshot `screenshot`. */
+export function keptFound(screenshot: number, rows: readonly FoundRow[]): readonly NewBox[] {
   return rows
     .filter((row) => row.keep && row.text.trim() !== '')
     .map((row) => ({ screenshot, region: row.region, text: row.text.trim() }));
+}
+
+/** The rows of `rows` the panel lists and the screenshot outlines: those that may show only characters the reference needs. */
+export function listed(rows: readonly FoundRow[]): readonly FoundRow[] {
+  return rows.filter((row) => row.fits);
+}
+
+/** The edits that keep every listed row of `rows`, or with `keep` false leave each out, each with its own text. */
+export function keepAll(rows: readonly FoundRow[], keep: boolean): ReadonlyMap<number, FoundEntry> {
+  return new Map(listed(rows).map((row) => [row.index, { keep, text: row.text, typed: row.typed }] as const));
+}
+
+/** Whether the listed rows of `rows` are all kept, some, or none, for the box that keeps or leaves out them all. */
+export function keptState(rows: readonly FoundRow[]): 'all' | 'some' | 'none' {
+  const shown = listed(rows);
+  const kept = shown.filter((row) => row.keep).length;
+  return kept === 0 ? 'none' : kept === shown.length ? 'all' : 'some';
+}
+
+/** The edits that leave out every kept row of `rows` that `flags` flags, each with its own text. */
+export function withoutFlagged(
+  rows: readonly FoundRow[],
+  flags: ReadonlyMap<number, string>,
+): ReadonlyMap<number, FoundEntry> {
+  return new Map(
+    rows
+      .filter((row) => row.keep && flags.has(row.index))
+      .map((row) => [row.index, { keep: false, text: row.text, typed: row.typed }] as const),
+  );
+}
+
+/** Why Reread waits while every find it would read again was last read with the color and tolerance set now. */
+export const REREAD_SAME = "Change the characters' color or tolerance to read them differently.";
+
+/**
+ * What Reread would do with `rows`, or null when it has nothing to offer. It is for the listed finds the text reader
+ * could not read and the ones `flags` flags whose text is its guess; text the user typed is theirs. Of those it
+ * reads again, by index, each one whose read failed, since a failure may pass, and each one last read with another
+ * characters' color or tolerance than `ink` and `tolerance`, the ones set now. The same color and tolerance read the
+ * same text, so when it would read none again, `blocked` says what to change.
+ */
+export function rereadOffer(
+  rows: readonly FoundRow[],
+  flags: ReadonlyMap<number, string>,
+  ink: ColorSpec | null,
+  tolerance: number,
+): { readonly indexes: readonly number[]; readonly blocked: string | null } | null {
+  const offered = listed(rows).filter((row) => !row.typed && (row.failed || flags.has(row.index)));
+  if (offered.length === 0 || ink === null) {
+    return null;
+  }
+  const indexes = offered
+    .filter(
+      (row) =>
+        row.failed ||
+        row.readWith.tolerance !== tolerance ||
+        row.readWith.ink.red !== ink.red ||
+        row.readWith.ink.green !== ink.green ||
+        row.readWith.ink.blue !== ink.blue,
+    )
+    .map((row) => row.index);
+  return { indexes, blocked: indexes.length === 0 ? REREAD_SAME : null };
 }

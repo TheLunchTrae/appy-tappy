@@ -9,6 +9,7 @@ import {
   moveRect,
   pixelAt,
   sameRect,
+  scaleRect,
   tagPlace,
   toPicture,
 } from '../src/lib/region.ts';
@@ -164,4 +165,25 @@ describe('bounding', () => {
   test('is null with no rectangle', () => {
     expect(bounding([])).toBeNull();
   });
+});
+
+test('scaleRect takes a box from one picture size to another, covering what it covered, inside the picture', () => {
+  const half = { width: 800, height: 450 };
+  const full = { width: 1600, height: 900 };
+  expect(scaleRect({ x: 10, y: 20, width: 30, height: 40 }, half, full)).toEqual({
+    x: 20,
+    y: 40,
+    width: 60,
+    height: 80,
+  });
+  // Down to a smaller picture, a partly covered pixel stays in, so the box keeps what it held.
+  expect(scaleRect({ x: 3, y: 3, width: 3, height: 3 }, full, half)).toEqual({ x: 1, y: 1, width: 2, height: 2 });
+  // A box at the far edge stays inside and keeps a pixel.
+  expect(scaleRect({ x: 1599, y: 899, width: 1, height: 1 }, full, half)).toEqual({
+    x: 799,
+    y: 449,
+    width: 1,
+    height: 1,
+  });
+  expect(scaleRect({ x: 0, y: 0, width: 1, height: 1 }, { width: 0, height: 9 }, full)).toBeNull();
 });

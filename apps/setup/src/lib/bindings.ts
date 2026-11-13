@@ -458,8 +458,8 @@ export type CheckSpec = DeepReadonly<{ "kind": "number", region: RegionSpec, ref
  */
 whole: boolean, } | { "kind": "characters", region: RegionSpec,
 /**
- * The screenshot the region was drawn on. Every labeled screenshot
- * and the recording must have its window size, since the region
+ * The screenshot the region was drawn on. Every screenshot with a
+ * box and the recording must have its window size, since the region
  * means another spot on a window of another size.
  */
 screenshot: number, reference: ReferenceRef | null, ink: ColorSpec, tolerance: number, labels: Array<Label>,
@@ -803,7 +803,16 @@ region: RegionSpec,
 /**
  * What the text reader made of it.
  */
-text: RecordedText, }>;
+text: RecordedText,
+/**
+ * The characters' color its ink was last cut with for the text reader,
+ * which reads the same ink as the same text.
+ */
+ink: ColorSpec,
+/**
+ * The tolerance its ink was last cut with.
+ */
+tolerance: number, }>;
 
 /**
  * A value drawn again at one window size, which it reads there exactly
@@ -929,7 +938,7 @@ matches: boolean, }>;
 export type Label = DeepReadonly<{ screenshot: number,
 /**
  * Where on the screenshot the text shows, when it is not the spec's
- * region, as for text found like a sample elsewhere on it.
+ * region: the box the user drew around it, or kept from found text.
  */
 region?: RegionSpec, text: string, }>;
 
@@ -1250,7 +1259,7 @@ problem: string | null, }>;
 
 /**
  * What one recorded reading shows, as the user confirmed it in review, so
- * a reference learns its characters like a labeled screenshot's.
+ * a reference learns its characters like a box's.
  */
 export type RecordedLabel = DeepReadonly<{
 /**

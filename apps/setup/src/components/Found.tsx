@@ -1,28 +1,20 @@
 import { useEffect, useRef } from 'react';
 
-import type { FoundView } from '../lib/bindings.ts';
-import type { FoundEntry, FoundRow } from '../lib/found.ts';
-import { FIND_LIKE_HINT, FOUND_HINT } from '../lib/hints.ts';
+import { type FoundRow, keptState, listed } from '../lib/found.ts';
+import { FIND_LIKE_HINT, FOUND_HINT, REREAD_HINT } from '../lib/hints.ts';
 import type { Picture } from '../lib/pixels.ts';
+import { background } from '../lib/repeat.ts';
+import type { Finder } from '../lib/useFound.ts';
 import type { Size } from '../lib/region.ts';
 import { PictureCanvas } from './canvas.tsx';
 import { Hint } from './Hint.tsx';
 
 interface PanelProps {
-  readonly view: FoundView | null;
-  readonly rows: readonly FoundRow[];
-  readonly flags: ReadonlyMap<number, string>;
-  readonly crops: ReadonlyMap<number, Picture>;
+  readonly finder: Finder;
   /** Why the search cannot start, or null when it can. */
   readonly findBlocked: string | null;
-  /** Why Add waits, or null. */
-  readonly addBlocked: string | null;
-  readonly error: string | null;
-  readonly searching: boolean;
+  /** Starts the search, from the selected box. */
   readonly onFind: () => void;
-  readonly onEntry: (index: number, entry: FoundEntry) => void;
-  readonly onAdd: () => void;
-  readonly onDismiss: () => void;
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -41,9 +33,43 @@ function placeholder(row: FoundRow): string {
   return row.reading ? 'Reading…' : 'Type what it shows';
 }
 
-/** The inspector's part for finding more text like the first sample, and adding what the user confirms. */
-export function FoundPanel(props: PanelProps) {
-  const { view, rows, flags, crops, findBlocked, addBlocked, error, searching } = props;
+/** The box that ticks every listed find, or leaves every one out, and shows a dash while only some are ticked. */
+function KeepAll({
+  rows,
+  onKeepAll,
+}: {
+  readonly rows: readonly FoundRow[];
+  readonly onKeepAll: (keep: boolean) => void;
+}) {
+  const box = useRef<HTMLInputElement>(null);
+  const state = keptState(rows);
+  useEffect(() => {
+    if (box.current !== null) {
+      box.current.indeterminate = state === 'some';
+    }
+  }, [state]);
+  return (
+    <label className="select-all">
+      <input
+        ref={box}
+        type="checkbox"
+        checked={state === 'all'}
+        onChange={() => {
+          onKeepAll(state !== 'all');
+        }}
+      />
+      Select all
+    </label>
+  );
+}
+
+/** The inspector's part for finding more text like the selected box, and adding what the user ticks as boxes. */
+export function FoundPanel({ finder, findBlocked, onFind }: PanelProps) {
+  const { view, blocked: addBlocked, error, searching, flags, crops } = finder;
+  // Finds that show characters the reference does not need are left out of the list.
+  const rows = listed(finder.rows);
+  const reread = finder.rereadOffer;
+  const unlisted = finder.rows.length - rows.length;
   const title = useRef<HTMLHeadingElement>(null);
   const find = useRef<HTMLButtonElement>(null);
   // The pressed button leaves with the panel it was on, so focus follows to what replaced it: the results'
@@ -76,7 +102,7 @@ export function FoundPanel(props: PanelProps) {
             aria-describedby={findBlocked === null ? 'hint-find-like' : 'hint-find-like find-blocked'}
             onClick={() => {
               if (!searching) {
-                props.onFind();
+                onFind();
               }
             }}
           >
@@ -101,6 +127,9 @@ export function FoundPanel(props: PanelProps) {
   }
   const kept = rows.filter((row) => row.keep).length;
   const skipped = [
+    unlisted === 0
+      ? null
+      : `Skipped ${plural(unlisted, 'find that shows', 'finds that show')} characters the reference does not need. A find you ticked before its text was read is skipped the same way.`,
     view.otherSizes === 0 ? null : `Skipped ${plural(view.otherSizes, 'run', 'runs')} of other sizes.`,
     view.more === 0 ? null : `${plural(view.more, 'more was', 'more were')} left out; add these, then find again.`,
   ].filter((part) => part !== null);
@@ -114,14 +143,59 @@ export function FoundPanel(props: PanelProps) {
       </div>
       {rows.length === 0 ? (
         <p className="note">
-          No other text on this screenshot, apart from what was added, has the same color and size.
+          No other text on this screenshot that the boxes leave out has the same color and size and shows only the
+          characters the reference needs.
         </p>
       ) : (
         <>
           <p className="note">
-            Text in the same color and size on this screenshot, read as text. Check each one; kept ones teach the
-            reference too.
+            Text in the same color and size on this screenshot, read as text. Tick the ones to add; each becomes a box
+            the reference learns from.
           </p>
+          <div className="row">
+            <KeepAll rows={rows} onKeepAll={finder.keepAll} />
+            {/* Each button leaves once pressed, so focus moves to the heading rather than being lost. */}
+            {flags.size === 0 ? null : (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => {
+                  finder.leaveOutFlagged();
+                  title.current?.focus();
+                }}
+              >
+                Deselect flagged
+              </button>
+            )}
+            {reread === null ? null : (
+              <span className="with-hint">
+                <button
+                  type="button"
+                  className="btn small"
+                  // Not disabled while it waits, so it keeps focus and a screen reader reads why.
+                  aria-disabled={reread.blocked !== null}
+                  aria-describedby={reread.blocked === null ? 'hint-reread' : 'hint-reread reread-blocked'}
+                  onClick={() => {
+                    if (reread.blocked !== null) {
+                      return;
+                    }
+                    background(finder.reread());
+                    title.current?.focus();
+                  }}
+                >
+                  Reread
+                </button>
+                <Hint topic="Reread" id="hint-reread">
+                  {REREAD_HINT}
+                </Hint>
+              </span>
+            )}
+          </div>
+          {reread === null || reread.blocked === null ? null : (
+            <p id="reread-blocked" className="note">
+              {reread.blocked}
+            </p>
+          )}
           <ul aria-label="Found text">
             {rows.map((row) => {
               const number = row.index + 1;
@@ -131,10 +205,10 @@ export function FoundPanel(props: PanelProps) {
                 <li key={row.index} className={row.keep ? undefined : 'off'}>
                   <input
                     type="checkbox"
-                    aria-label={`Keep find ${number}`}
+                    aria-label={`Add find ${number}`}
                     checked={row.keep}
                     onChange={(event) => {
-                      props.onEntry(row.index, { keep: event.target.checked, text: row.text, typed: row.typed });
+                      finder.edit(row.index, { keep: event.target.checked, text: row.text, typed: row.typed });
                     }}
                   />
                   <span className={flag === undefined ? 'n' : 'n flagged'} aria-hidden="true">
@@ -149,7 +223,7 @@ export function FoundPanel(props: PanelProps) {
                     aria-describedby={flag === undefined ? undefined : flagId}
                     value={row.text}
                     onChange={(event) => {
-                      props.onEntry(row.index, {
+                      finder.edit(row.index, {
                         keep: row.keep || event.target.value.trim() !== '',
                         text: event.target.value,
                         typed: true,
@@ -176,12 +250,12 @@ export function FoundPanel(props: PanelProps) {
             className="btn primary"
             disabled={addBlocked !== null}
             aria-describedby={addBlocked === null ? undefined : 'found-blocked'}
-            onClick={props.onAdd}
+            onClick={finder.add}
           >
             {kept === 1 ? 'Add 1 to the reference' : `Add ${kept} to the reference`}
           </button>
         )}
-        <button type="button" className="btn" onClick={props.onDismiss}>
+        <button type="button" className="btn" onClick={finder.dismiss}>
           {rows.length === 0 ? 'Close' : 'Not these'}
         </button>
       </div>

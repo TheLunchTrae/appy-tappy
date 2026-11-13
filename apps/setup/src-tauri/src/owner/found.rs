@@ -1,6 +1,8 @@
-//! Finding more text like a reference's sample on the screenshot it was
-//! drawn on, and having the text reader guess what each find says, so the
-//! user labels them all at once.
+//! Finding more text like one of a reference's boxes on the screenshot the
+//! box is on, and having the text reader guess what each find says, so the
+//! user only confirms them.
+
+use std::collections::BTreeSet;
 
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::{Image, Region};
@@ -8,7 +10,7 @@ use serde::Serialize;
 
 use crate::check_spec::{self, CheckSpec, ColorSpec, Label, RegionSpec};
 use crate::pixels;
-use crate::recording::{Text, find, ocr};
+use crate::recording::{Line, Text, find, ocr};
 
 use super::Owner;
 use super::host::Host;
@@ -35,6 +37,9 @@ struct Item {
     region: Region,
     image: Image,
     text: Text,
+    /// The characters' color and tolerance its ink was last cut with for
+    /// the text reader.
+    read_with: (ColorSpec, u8),
 }
 
 /// A search as the UI shows it.
@@ -64,6 +69,11 @@ pub(crate) struct FindView {
     pub(crate) region: RegionSpec,
     /// What the text reader made of it.
     pub(crate) text: Text,
+    /// The characters' color its ink was last cut with for the text reader,
+    /// which reads the same ink as the same text.
+    pub(crate) ink: ColorSpec,
+    /// The tolerance its ink was last cut with.
+    pub(crate) tolerance: u8,
 }
 
 impl Found {
@@ -77,6 +87,8 @@ impl Found {
                 .map(|item| FindView {
                     region: RegionSpec::from(item.region),
                     text: item.text.clone(),
+                    ink: item.read_with.0,
+                    tolerance: item.read_with.1,
                 })
                 .collect(),
             more: self.more,
@@ -105,10 +117,10 @@ impl<H: Host> Owner<H> {
             .get(screenshot)
             .ok_or_else(|| "Take a screenshot first.".to_owned())?;
         let region = Region::new(region.x, region.y, region.width, region.height)
-            .ok_or_else(|| "Draw the region around the first sample first.".to_owned())?;
+            .ok_or_else(|| "Draw the box around some characters first.".to_owned())?;
         if !region.fits(image.size()) {
             return Err(
-                "The region reaches past the edge of the window. Draw it inside the window."
+                "The box reaches past the edge of the window. Draw it inside the window."
                     .to_owned(),
             );
         }
@@ -118,7 +130,7 @@ impl<H: Host> Owner<H> {
             .filter_map(|spec| Region::new(spec.x, spec.y, spec.width, spec.height))
             .collect();
         let search = find::like(image, region, &added, &reader).ok_or_else(|| {
-            "The region shows no characters in that color. Pick the characters' color first."
+            "The box shows no characters in that color. Pick the characters' color first."
                 .to_owned()
         })?;
         self.search_id = self.search_id.wrapping_add(1);
@@ -129,26 +141,12 @@ impl<H: Host> Owner<H> {
                 continue;
             };
             // Its place among the finds kept, which the reader's guess names.
-            let index = items.len();
-            let text = match found.line {
-                Some(line) => {
-                    let job = ocr::Job {
-                        source: ocr::Source::Search(id),
-                        index,
-                        line,
-                    };
-                    if self.ocr.send(job).is_ok() {
-                        Text::Pending
-                    } else {
-                        Text::Failed("The text reader stopped. Type what this shows.".to_owned())
-                    }
-                },
-                None => Text::Failed("Type what this shows.".to_owned()),
-            };
+            let text = self.read(id, items.len(), found.line);
             items.push(Item {
                 region: found.region,
                 image: cropped,
                 text,
+                read_with: (ink, tolerance),
             });
         }
         let found = Found {
@@ -161,6 +159,65 @@ impl<H: Host> Owner<H> {
         let view = found.view();
         self.found = Some(found);
         Ok(view)
+    }
+
+    /// Sends `line`, the ink of find `index` of search `search`, to the text
+    /// reader, and answers what the find's text is until the reader does.
+    fn read(&self, search: u64, index: usize, line: Option<Line>) -> Text {
+        let Some(line) = line else {
+            return Text::Failed("Type what this shows.".to_owned());
+        };
+        let job = ocr::Job {
+            source: ocr::Source::Search(search),
+            index,
+            line,
+        };
+        if self.ocr.send(job).is_ok() {
+            Text::Pending
+        } else {
+            Text::Failed("The text reader stopped. Type what this shows.".to_owned())
+        }
+    }
+
+    /// Has the text reader read each of finds `indexes` of search `search`
+    /// again, as `ink` within `tolerance` tells their characters from the
+    /// background now, and answers the search; `None` when that search was
+    /// replaced or forgotten. A find the reader has yet to answer for is
+    /// left waiting, so one read at a time is out for a find and the
+    /// reader's next answer for it is for its newest read. An index named
+    /// twice is read once.
+    pub(crate) fn reread_found(
+        &mut self,
+        search: u64,
+        indexes: &[usize],
+        ink: ColorSpec,
+        tolerance: u8,
+    ) -> Option<FoundView> {
+        let reader = DigitReader::new(ink.into(), tolerance);
+        let lines: Vec<(usize, Option<Line>)> = {
+            let found = self.found.as_ref().filter(|found| found.id == search)?;
+            let named: BTreeSet<usize> = indexes.iter().copied().collect();
+            named
+                .into_iter()
+                .filter_map(|index| {
+                    let item = found.items.get(index)?;
+                    (item.text != Text::Pending)
+                        .then(|| (index, find::ink_line(&item.image, &reader)))
+                })
+                .collect()
+        };
+        for (index, line) in lines {
+            let text = self.read(search, index, line);
+            if let Some(item) = self
+                .found
+                .as_mut()
+                .and_then(|found| found.items.get_mut(index))
+            {
+                item.text = text;
+                item.read_with = (ink, tolerance);
+            }
+        }
+        self.found_state()
     }
 
     /// Keeps the text reader's guess for find `index` of search `search`,
@@ -387,6 +444,140 @@ mod tests {
         );
     }
 
+    fn reread(
+        search: u64,
+        indexes: &'static [usize],
+        ink: ColorSpec,
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Option<FoundView> {
+        move |owner: &mut Owner<FakeHost>| owner.reread_found(search, indexes, ink, 0)
+    }
+
+    /// A harness with search 1 of [`marks`], whose two finds the reader
+    /// answered: the first failed and the second read as 7.
+    fn answered() -> (Harness, FrameHandler) {
+        let (mut harness, handler) = searchable();
+        harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
+        assert_eq!(harness.jobs.try_iter().count(), 2);
+        for (index, text) in [
+            (0, Text::Failed("The text reader failed".to_owned())),
+            (1, Text::Read("7".to_owned())),
+        ] {
+            assert!(
+                harness
+                    .owner
+                    .handle(Message::FoundText {
+                        search: 1,
+                        index,
+                        text,
+                    })
+                    .is_continue()
+            );
+        }
+        (harness, handler)
+    }
+
+    #[test]
+    fn a_reread_sends_the_named_finds_again_and_leaves_the_rest() {
+        let (mut harness, _handler) = answered();
+        let view = harness.ask(reread(1, &[0, 5], red())).expect("kept");
+        assert_eq!(view.finds[0].text, Text::Pending);
+        assert_eq!(
+            view.finds[1].text,
+            Text::Read("7".to_owned()),
+            "a find that was not named keeps its text"
+        );
+        let jobs: Vec<(ocr::Source, usize)> = harness
+            .jobs
+            .try_iter()
+            .map(|job| (job.source, job.index))
+            .collect();
+        assert_eq!(jobs, [(ocr::Source::Search(1), 0)]);
+        harness.ask(reread(1, &[0, 1], red())).expect("kept");
+        let indexes: Vec<usize> = harness.jobs.try_iter().map(|job| job.index).collect();
+        assert_eq!(indexes, [1], "a find the reader has yet to answer waits");
+        for index in 0..2 {
+            assert!(
+                harness
+                    .owner
+                    .handle(Message::FoundText {
+                        search: 1,
+                        index,
+                        text: Text::Read("7".to_owned()),
+                    })
+                    .is_continue()
+            );
+        }
+        harness.ask(reread(1, &[1, 0, 1], red())).expect("kept");
+        let indexes: Vec<usize> = harness.jobs.try_iter().map(|job| job.index).collect();
+        assert_eq!(indexes, [0, 1], "a find named twice is read once");
+    }
+
+    #[test]
+    fn a_find_says_the_color_and_tolerance_it_was_last_read_with() {
+        let (mut harness, _handler) = answered();
+        let green: ColorSpec =
+            serde_json::from_str(r#"{"red":0,"green":255,"blue":0}"#).expect("valid JSON");
+        let view = harness
+            .ask(move |owner: &mut Owner<FakeHost>| owner.reread_found(1, &[1], green, 9))
+            .expect("kept");
+        let read_with: Vec<(ColorSpec, u8)> = view
+            .finds
+            .iter()
+            .map(|find| (find.ink, find.tolerance))
+            .collect();
+        assert_eq!(
+            read_with,
+            [(red(), 0), (green, 9)],
+            "only the find read again takes the new color and tolerance"
+        );
+    }
+
+    #[test]
+    fn a_reread_of_an_earlier_search_is_dropped() {
+        let (mut harness, _handler) = answered();
+        harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
+        assert_eq!(harness.jobs.try_iter().count(), 2);
+        for index in 0..2 {
+            assert!(
+                harness
+                    .owner
+                    .handle(Message::FoundText {
+                        search: 2,
+                        index,
+                        text: Text::Read("3".to_owned()),
+                    })
+                    .is_continue()
+            );
+        }
+        let before = harness.ask(|owner| owner.found_state());
+        assert_eq!(harness.ask(reread(1, &[0, 1], red())), None);
+        assert_eq!(harness.jobs.try_iter().count(), 0, "nothing is read");
+        assert_eq!(harness.ask(|owner| owner.found_state()), before);
+        harness.ask(Owner::forget_found);
+        assert_eq!(harness.ask(reread(2, &[0], red())), None, "a forgotten one");
+    }
+
+    #[test]
+    fn a_reread_takes_the_ink_as_the_color_tells_it_now() {
+        let (mut harness, _handler) = answered();
+        let green: ColorSpec =
+            serde_json::from_str(r#"{"red":0,"green":255,"blue":0}"#).expect("valid JSON");
+        let view = harness.ask(reread(1, &[1], green)).expect("kept");
+        assert_eq!(
+            view.finds[1].text,
+            Text::Failed("Type what this shows.".to_owned()),
+            "a color the find shows none of leaves no ink to read"
+        );
+        assert_eq!(harness.jobs.try_iter().count(), 0);
+        let (closed, _) = std::sync::mpsc::channel();
+        harness.owner.ocr = closed;
+        let view = harness.ask(reread(1, &[1], red())).expect("kept");
+        assert_eq!(
+            view.finds[1].text,
+            Text::Failed("The text reader stopped. Type what this shows.".to_owned())
+        );
+    }
+
     #[test]
     fn a_search_needs_a_screenshot_and_ink_in_a_region_inside_it() {
         let mut harness = harness(false);
@@ -398,19 +589,19 @@ mod tests {
         let (mut harness, _handler) = searchable();
         assert_eq!(
             harness.ask(find_like(region(0, 0, 0, 5))),
-            Err("Draw the region around the first sample first.".to_owned())
+            Err("Draw the box around some characters first.".to_owned())
         );
         assert_eq!(
             harness.ask(find_like(region(18, 0, 4, 5))),
             Err(
-                "The region reaches past the edge of the window. Draw it inside the window."
+                "The box reaches past the edge of the window. Draw it inside the window."
                     .to_owned()
             )
         );
         assert_eq!(
             harness.ask(find_like(region(14, 0, 4, 5))),
             Err(
-                "The region shows no characters in that color. Pick the characters' color first."
+                "The box shows no characters in that color. Pick the characters' color first."
                     .to_owned()
             )
         );

@@ -85,7 +85,7 @@ describe('drawing', () => {
     expect(drawn.effects).toEqual([
       { type: 'capture', pointer: MOUSE },
       { type: 'uncapture', pointer: MOUSE },
-      { type: 'region', region: { x: 50, y: 20, width: 10, height: 10 } },
+      { type: 'region', region: { x: 50, y: 20, width: 10, height: 10 }, made: 'drawn' },
     ]);
   });
 
@@ -97,12 +97,16 @@ describe('drawing', () => {
 
   test('the box stays drawn when the pointer comes back inside the slop', () => {
     const back = run([press({ x: 50.4, y: 20.6 }), moveTo(60, 30), moveTo(50.6, 20.8), releaseAt(50.6, 20.8)]);
-    expect(made(back.effects)).toEqual([{ type: 'region', region: { x: 50, y: 20, width: 1, height: 1 } }]);
+    expect(made(back.effects)).toEqual([
+      { type: 'region', region: { x: 50, y: 20, width: 1, height: 1 }, made: 'drawn' },
+    ]);
   });
 
   test('with no region, a press where one would be draws', () => {
     const drawn = run([press({ x: 15, y: 15 }, { region: null }), moveTo(25, 25), releaseAt(25, 25)]);
-    expect(made(drawn.effects)).toEqual([{ type: 'region', region: { x: 15, y: 15, width: 10, height: 10 } }]);
+    expect(made(drawn.effects)).toEqual([
+      { type: 'region', region: { x: 15, y: 15, width: 10, height: 10 }, made: 'drawn' },
+    ]);
   });
 });
 
@@ -144,7 +148,7 @@ describe('a press outside the picture', () => {
     ];
     for (const [from, to, expected] of cases) {
       const drawn = run([press(from), moveTo(to.x, to.y), releaseAt(to.x, to.y)]);
-      expect(made(drawn.effects)).toEqual([{ type: 'region', region: expected }]);
+      expect(made(drawn.effects)).toEqual([{ type: 'region', region: expected, made: 'drawn' }]);
     }
   });
 
@@ -187,7 +191,7 @@ describe('moving', () => {
     expect(moved.state.kind).toBe('moving');
     expect(shownBoxes(moved.state, region).region).toEqual({ x: 15, y: 7, width: 20, height: 10 });
     expect(made(run([releaseAt(20.9, 9.9)], moved.state).effects)).toEqual([
-      { type: 'region', region: { x: 15, y: 7, width: 20, height: 10 } },
+      { type: 'region', region: { x: 15, y: 7, width: 20, height: 10 }, made: 'adjusted' },
     ]);
   });
 
@@ -213,7 +217,7 @@ describe('resizing', () => {
     ];
     for (const [corner, from, to, expected] of cases) {
       const resized = run([moveTo(to.x, to.y), releaseAt(to.x, to.y)], grab(corner, from));
-      expect(made(resized.effects)).toEqual([{ type: 'region', region: expected }]);
+      expect(made(resized.effects)).toEqual([{ type: 'region', region: expected, made: 'adjusted' }]);
     }
   });
 
@@ -289,13 +293,17 @@ describe('a click on the region', () => {
         moveTo(47.5 + travel, 17.5),
         releaseAt(47.5 + travel, 17.5),
       ]);
-      expect(made(moved.effects)).toEqual([{ type: 'region', region: { ...typed, x: typed.x + travel } }]);
+      expect(made(moved.effects)).toEqual([
+        { type: 'region', region: { ...typed, x: typed.x + travel }, made: 'adjusted' },
+      ]);
       const resized = run([
         press({ x: 58.9, y: 22.8 }, { corner: 'se', region: typed, slop: 3 * one }),
         moveTo(58.9, 22.8 + travel),
         releaseAt(58.9, 22.8 + travel),
       ]);
-      expect(made(resized.effects)).toEqual([{ type: 'region', region: { ...typed, height: typed.height + travel } }]);
+      expect(made(resized.effects)).toEqual([
+        { type: 'region', region: { ...typed, height: typed.height + travel }, made: 'adjusted' },
+      ]);
     }
   });
   test('follows the pointer back to the press once the drag is under way', () => {
@@ -310,11 +318,17 @@ describe('letting go', () => {
   test('ends the box where the pointer is let go, which no move reached', () => {
     const drawn = run([press({ x: 50, y: 20 }), releaseAt(60, 30)]);
     expect(drawn.state).toEqual(IDLE);
-    expect(made(drawn.effects)).toEqual([{ type: 'region', region: { x: 50, y: 20, width: 10, height: 10 } }]);
+    expect(made(drawn.effects)).toEqual([
+      { type: 'region', region: { x: 50, y: 20, width: 10, height: 10 }, made: 'drawn' },
+    ]);
     const moved = run([press({ x: 15, y: 12 }), moveTo(20, 12), releaseAt(25, 16)]);
-    expect(made(moved.effects)).toEqual([{ type: 'region', region: { x: 20, y: 14, width: 20, height: 10 } }]);
+    expect(made(moved.effects)).toEqual([
+      { type: 'region', region: { x: 20, y: 14, width: 20, height: 10 }, made: 'adjusted' },
+    ]);
     const resized = run([press({ x: 30, y: 20 }, { corner: 'se' }), releaseAt(40, 25)]);
-    expect(made(resized.effects)).toEqual([{ type: 'region', region: { x: 10, y: 10, width: 30, height: 15 } }]);
+    expect(made(resized.effects)).toEqual([
+      { type: 'region', region: { x: 10, y: 10, width: 30, height: 15 }, made: 'adjusted' },
+    ]);
   });
 
   test('a move with the main button up ends the drag with the box as it last was', () => {
@@ -325,10 +339,12 @@ describe('letting go', () => {
     expect(drawn.effects).toEqual([
       { type: 'capture', pointer: MOUSE },
       { type: 'uncapture', pointer: MOUSE },
-      { type: 'region', region: { x: 50, y: 20, width: 10, height: 10 } },
+      { type: 'region', region: { x: 50, y: 20, width: 10, height: 10 }, made: 'drawn' },
     ]);
     const moved = run([press({ x: 15, y: 12 }), moveTo(20, 12), up]);
-    expect(made(moved.effects)).toEqual([{ type: 'region', region: { x: 15, y: 10, width: 20, height: 10 } }]);
+    expect(made(moved.effects)).toEqual([
+      { type: 'region', region: { x: 15, y: 10, width: 20, height: 10 }, made: 'adjusted' },
+    ]);
     // With nothing dragged yet it hands nothing over, and the next press starts a new drag.
     const clicked = run([press({ x: 50, y: 20 }), up]);
     expect(clicked.state).toEqual(IDLE);
@@ -362,7 +378,7 @@ describe('a picture that moves under the pointer', () => {
     expect(shownBoxes(resized.state, region).region).toEqual({ x: 10, y: 10, width: 26, height: 30 });
     // The drag goes on: letting go hands over the box from there.
     expect(made(run([releaseAt(60, 45)], drawn.state).effects)).toEqual([
-      { type: 'region', region: { x: 50, y: 20, width: 10, height: 25 } },
+      { type: 'region', region: { x: 50, y: 20, width: 10, height: 25 }, made: 'drawn' },
     ]);
   });
 });

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { errorText, removeScreenshots, screenshot, takeScreenshot } from './api.ts';
 import { withShot } from './looks.ts';
 import type { Picture } from './pixels.ts';
+import type { Size } from './region.ts';
 import { background } from './repeat.ts';
 
 /** A screenshot kept this session. */
@@ -19,6 +20,12 @@ interface Shot {
 const THUMB_WIDTH = 224;
 /** Wide enough for any window, so a screenshot arrives at its own pixels. */
 const FULL_WIDTH = 16_384;
+
+/** A screenshot taken: its index, and its window size, or null when its pixels did not arrive. */
+export interface Taken {
+  readonly index: number;
+  readonly size: Size | null;
+}
 
 /** A screenshot a draft kept, which is the capture's again: its index, and whether a recording had kept it. */
 export interface RestoredShot {
@@ -43,8 +50,11 @@ export function useScreenshots(restored: readonly RestoredShot[] = []): {
   readonly selected: number | null;
   readonly setSelected: (index: number | null) => void;
   readonly error: string | null;
-  /** Takes a screenshot of the newest frame and shows it. */
-  readonly take: () => Promise<void>;
+  /**
+   * Takes a screenshot of the newest frame and lists it, and with `show` shows it at once; null when it failed. With
+   * `hold`, what is shown stays, such as the live view under a drag.
+   */
+  readonly take: (how?: 'show' | 'hold') => Promise<Taken | null>;
   /** Lists the screenshot `index`, which a recording kept, without showing it. */
   readonly adopt: (index: number) => void;
   /** Removes the screenshots `indexes` and releases their pixels; the live view shows if one of them was shown. */
@@ -73,11 +83,12 @@ export function useScreenshots(restored: readonly RestoredShot[] = []): {
   }, []);
   // Lists the screenshot `index` and fetches its pixels.
   const list = useCallback(
-    async (index: number, recorded: boolean): Promise<void> => {
+    async (index: number, recorded: boolean): Promise<Picture | null> => {
       const time = new Date().toLocaleTimeString();
       setShots((current) => withShot(current, { index, time, thumb: null, recorded }));
       const [thumb, picture] = await fetchShot(index);
       keep(index, thumb, picture);
+      return picture;
     },
     [keep],
   );
@@ -100,16 +111,23 @@ export function useScreenshots(restored: readonly RestoredShot[] = []): {
     background(load());
   }, [first, keep]);
 
-  const take = useCallback(async (): Promise<void> => {
-    try {
-      const index = await takeScreenshot();
-      setSelected(index);
-      setError(null);
-      await list(index, false);
-    } catch (error: unknown) {
-      setError(errorText(error));
-    }
-  }, [list]);
+  const take = useCallback(
+    async (how: 'show' | 'hold' = 'show'): Promise<Taken | null> => {
+      try {
+        const index = await takeScreenshot();
+        if (how === 'show') {
+          setSelected(index);
+        }
+        setError(null);
+        const picture = await list(index, false);
+        return { index, size: picture === null ? null : { width: picture.width, height: picture.height } };
+      } catch (error: unknown) {
+        setError(errorText(error));
+        return null;
+      }
+    },
+    [list],
+  );
 
   const adopt = useCallback(
     (index: number): void => {

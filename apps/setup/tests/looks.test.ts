@@ -55,52 +55,25 @@ describe('recording looks', () => {
 });
 
 describe('removing a screenshot', () => {
-  test('is refused while the region, a state, or a label uses it', () => {
-    const used = { ...withState(drawn, 1), labels: new Map([[2, ' 87% ']]) };
-    expect(removeBlocked(used, null, 0, false)).toBe(
+  test('is refused while the region, a state, or a box uses it', () => {
+    const used = { ...withState(drawn, 1), boxes: [{ id: 0, screenshot: 2, region: REGION, text: '' }] };
+    expect(removeBlocked(used, 0, false)).toBe(
       'The region is drawn on this screenshot. Draw it on another one to remove this one.',
     );
-    expect(removeBlocked(used, null, 1, false)).toBe(
+    expect(removeBlocked(used, 1, false)).toBe(
       'A state is taken from this screenshot. Remove the state to remove the screenshot.',
     );
-    expect(removeBlocked(used, null, 2, false)).toBe('This screenshot is labeled. Clear what it shows to remove it.');
-    expect(removeBlocked(used, null, 3, false)).toBeNull();
-    // A label cleared again, or one of only spaces, labels nothing.
-    expect(removeBlocked({ ...used, labels: new Map([[2, '  ']]) }, null, 2, false)).toBeNull();
-  });
-
-  test('is refused for a screenshot that added found text is on', () => {
-    const found = { ...drawn, found: [{ screenshot: 4, region: REGION, text: '12' }] };
-    expect(removeBlocked(found, null, 4, false)).toBe(
-      'Text found on this screenshot is added. Remove found text to remove the screenshot.',
+    // A box blocks the removal before it shows anything, so the box is not lost with its screenshot.
+    expect(removeBlocked(used, 2, false)).toBe(
+      'A box is on this screenshot. Delete its boxes to remove the screenshot.',
     );
-    expect(removeBlocked(found, null, 5, false)).toBeNull();
-    expect(
-      removableRecorded(
-        [
-          { index: 4, recorded: true },
-          { index: 5, recorded: true },
-        ],
-        found,
-        null,
-      ),
-    ).toEqual([5]);
-  });
-
-  test("is refused for the value's region while the reference editor is open over it", () => {
-    const editor = { ...drawn, drawnOn: 1 };
-    const value = { region: REGION, drawnOn: 3 };
-    expect(removeBlocked(editor, value, 3, false)).toBe(
-      'The region is drawn on this screenshot. Draw it on another one to remove this one.',
-    );
-    expect(removeBlocked(editor, value, 2, false)).toBeNull();
-    expect(removeBlocked(editor, { region: null, drawnOn: null }, 2, false)).toBeNull();
+    expect(removeBlocked(used, 3, false)).toBeNull();
   });
 
   test('is refused for every screenshot while a recording of looks records', () => {
     const blocked = 'Stop recording to remove a screenshot.';
-    expect(removeBlocked(drawn, null, 3, true)).toBe(blocked);
-    expect(removeBlocked(drawn, null, 0, true)).toBe(blocked);
+    expect(removeBlocked(drawn, 3, true)).toBe(blocked);
+    expect(removeBlocked(drawn, 0, true)).toBe(blocked);
   });
 
   test('removes every recorded screenshot that nothing uses, and none the user took', () => {
@@ -111,8 +84,10 @@ describe('removing a screenshot', () => {
       { index: 3, recorded: false },
       { index: 4, recorded: true },
     ];
-    expect(removableRecorded(shots, withState(drawn, 2), null)).toEqual([1, 4]);
-    expect(removableRecorded(shots, { ...drawn, drawnOn: 4 }, { region: REGION, drawnOn: 1 })).toEqual([2]);
+    expect(removableRecorded(shots, withState(drawn, 2))).toEqual([1, 4]);
+    expect(
+      removableRecorded(shots, { ...drawn, drawnOn: 4, boxes: [{ id: 0, screenshot: 1, region: REGION, text: '5' }] }),
+    ).toEqual([2]);
   });
 });
 

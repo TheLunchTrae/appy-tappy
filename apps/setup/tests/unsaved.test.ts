@@ -5,7 +5,7 @@ import { held, onLeave, sameContent } from '../src/lib/unsaved.ts';
 
 describe('sameContent', () => {
   test('compares what objects hold, not which objects they are', () => {
-    expect(sameContent({ ...EMPTY_DRAFT, labels: new Map(), states: [] }, EMPTY_DRAFT)).toBe(true);
+    expect(sameContent({ ...EMPTY_DRAFT, recorded: new Map(), states: [] }, EMPTY_DRAFT)).toBe(true);
     expect(
       sameContent(
         { name: 'A', window: { title: 'T', mustMatch: { title: true } } },
@@ -15,7 +15,7 @@ describe('sameContent', () => {
   });
 
   test('finds a change at any depth', () => {
-    expect(sameContent(EMPTY_DRAFT, { ...EMPTY_DRAFT, labels: new Map([[0, '87%']]) })).toBe(false);
+    expect(sameContent(EMPTY_DRAFT, { ...EMPTY_DRAFT, recorded: new Map([[0, '87%']]) })).toBe(false);
     expect(sameContent(new Map([[0, '87%']]), new Map([[1, '87%']]))).toBe(false);
     expect(sameContent(EMPTY_DRAFT, { ...EMPTY_DRAFT, region: { x: 0, y: 0, width: 4, height: 2 } })).toBe(false);
     expect(sameContent([{ key: 0 }], [{ key: 0 }, { key: 1 }])).toBe(false);

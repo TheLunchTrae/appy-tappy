@@ -3,10 +3,9 @@ import type { ReactNode } from 'react';
 import type { Coverage } from '../lib/expected.ts';
 import type { Color } from '../lib/pixels.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
-import { INK_HINT, INK_TOLERANCE_HINT, LABEL_HINT } from '../lib/hints.ts';
+import { INK_HINT, INK_TOLERANCE_HINT } from '../lib/hints.ts';
 import { CharacterChips, MissingChips } from './CharacterChips.tsx';
 import { ExpectedCharacters } from './ExpectedCharacters.tsx';
-import { Hint } from './Hint.tsx';
 import { ColorField, ToleranceField } from './Fields.tsx';
 
 interface Props {
@@ -16,25 +15,22 @@ interface Props {
   readonly tolerance: number;
   readonly picking: boolean;
   readonly canPick: boolean;
-  /** The selected screenshot's index, or null while the live window shows. */
-  readonly selected: number | null;
-  /** The selected screenshot's label. */
-  readonly label: string;
   /** What the saved reference learned from already. */
   readonly saved: readonly string[];
-  /** The labeled screenshots', kept readings' and added found text's texts. */
+  /** The labeled boxes' texts. */
   readonly labeled: readonly string[];
   readonly recorded: readonly string[];
   /** The characters it needs, each once. */
   readonly expected: readonly string[];
   /** How the characters in those texts compare with the ones it needs. */
   readonly coverage: Coverage;
-  readonly found: readonly string[];
   /** The texts of found text not added yet, whose new characters are outlined. */
   readonly finding: readonly string[];
   /** The values that read with the saved reference. */
   readonly readers: readonly string[];
-  /** The panel that finds more text like the first sample. */
+  /** The list of boxes the reference learns from. */
+  readonly boxes: ReactNode;
+  /** The panel that finds more text like the selected box. */
   readonly findPanel: ReactNode;
   /** The matching pixels preview of the characters' color. */
   readonly preview: ReactNode;
@@ -43,22 +39,18 @@ interface Props {
   readonly onName: (name: string) => void;
   readonly onPick: () => void;
   readonly onTolerance: (tolerance: number) => void;
-  readonly onLabel: (text: string) => void;
   readonly onExpected: (expected: readonly string[]) => void;
-  /** Takes the added found text back out of the reference. */
-  readonly onForgetFound: () => void;
 }
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-function learnedNote(saved: number, labeled: number, recorded: number, found: number): string {
+function learnedNote(saved: number, labeled: number, recorded: number): string {
   const parts = [
     saved === 0 ? null : plural(saved, 'saved picture', 'saved pictures'),
-    labeled === 0 ? null : plural(labeled, 'labeled screenshot', 'labeled screenshots'),
+    labeled === 0 ? null : plural(labeled, 'labeled box', 'labeled boxes'),
     recorded === 0 ? null : plural(recorded, 'recorded reading', 'recorded readings'),
-    found === 0 ? null : `${found} found like it`,
   ].filter((part) => part !== null);
   return parts.length === 0 ? 'Nothing learned yet.' : `Learned from ${andList(parts)}.`;
 }
@@ -88,7 +80,7 @@ function Known({
 
 /** The inspector of a reference: its name and color, the characters it needs, and the ones it learns. */
 export function ReferenceEditor(props: Props) {
-  const { name, appName, ink, tolerance, selected, saved, labeled, recorded, found, finding } = props;
+  const { name, appName, ink, tolerance, saved, labeled, recorded, finding } = props;
   const { expected, coverage, readers } = props;
   // Without a choice of what it needs, every character it learned shows as one group.
   const chosen = expected.length > 0;
@@ -135,28 +127,7 @@ export function ReferenceEditor(props: Props) {
       />
       {props.preview}
       <ExpectedCharacters expected={expected} onExpected={props.onExpected} />
-      <div className="field">
-        <span className="name">
-          <label htmlFor="label-text">What the region shows on this screenshot</label>
-          <Hint topic="What the region shows" id="hint-label">
-            {LABEL_HINT}
-          </Hint>
-        </span>
-        {selected === null ? (
-          <p className="note">Select a screenshot to type what it shows, such as 87%.</p>
-        ) : (
-          <input
-            id="label-text"
-            className="input"
-            aria-describedby="hint-label"
-            placeholder="87%"
-            value={props.label}
-            onChange={(event) => {
-              props.onLabel(event.target.value);
-            }}
-          />
-        )}
-      </div>
+      {props.boxes}
       {props.findPanel}
       {chosen ? (
         <div className="field">
@@ -167,8 +138,8 @@ export function ReferenceEditor(props: Props) {
             <>
               <MissingChips characters={coverage.missing} large />
               <span className="note">
-                Label a screenshot that shows them, find more text like it, or record the region until it has shown
-                them.
+                Draw a box around them and type what it shows, find more text like a box, or record until they have
+                shown.
               </span>
             </>
           )}
@@ -184,17 +155,9 @@ export function ReferenceEditor(props: Props) {
           </>
         )}
         <span className="note">
-          {learnedNote(saved.length, labeled.length, recorded.length, found.length)}
-          {pending.length === 0 ? '' : ' Outlined characters come from the found text, once you add it.'} Draw a region
-          around text on any screenshot, then type what it shows or record it.
+          {learnedNote(saved.length, labeled.length, recorded.length)}
+          {pending.length === 0 ? '' : ' Outlined characters come from the found text, once you add it.'}
         </span>
-        {found.length === 0 ? null : (
-          <div className="row">
-            <button type="button" className="btn" onClick={props.onForgetFound}>
-              Remove found text
-            </button>
-          </div>
-        )}
       </div>
       {props.record}
       {readers.length === 0 ? null : (
