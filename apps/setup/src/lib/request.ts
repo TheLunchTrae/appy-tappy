@@ -5,9 +5,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * Asks `request`, at once or once `delayMs` passed, and hands what it answers to `answered`, or why it failed to
- * `failed`, which also hears what `answered` throws. The function it returns cancels the ask: a request not yet sent is never sent, and the answer to one
- * that was is dropped. It is what an effect returns, so an ask ends when what it asked about changes or its
- * component goes; the delay makes a run of changes, such as a dragged slider, ask once.
+ * `failed`, which also hears what `answered` throws. The function it returns cancels the ask: a request not yet sent
+ * is never sent, and the answer to one that was is dropped. It is what an effect returns, so an ask ends when what it
+ * asked about changes or its component goes; the delay makes a run of changes, such as a dragged slider, ask once.
  */
 export function ask<Answer>(
   request: () => Promise<Answer>,
