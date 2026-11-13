@@ -2218,8 +2218,13 @@ stateDiagram-v2
   leaves, so a text that fits by now stays while the user types it. **Next**
   takes each listed text that fits as the answer for its shapes that had
   none, and goes to `Done`.
-- Escape closes the check, and is kept from review's own Escape underneath
-  (`useCharacterCheck.ts`).
+- Escape closes the check and is marked as handled, so review underneath
+  does not close with it (`useCharacterCheck.ts`, `useReview.ts`).
+- A character typed under a shape commits when the field loses focus, which
+  pressing a button causes, and can move the check to its next stop before
+  the button is let go. Each step has its own buttons, and a click whose
+  press began on another stop is dropped (`CharacterCheck.tsx`), so a click
+  never answers for a step the user did not see.
 - Closing forgets the answers. The texts and ticks they wrote stay with the
   finds and with review.
 
@@ -2245,6 +2250,15 @@ render (`settle`) or the next answer:
   none of whose places is left.
 - **No places at all.** The check is `Done` and says there is nothing to
   check.
+
+#### Open problems
+
+- [#327](https://github.com/TheLunchTrae/appy-tappy/issues/327): an answer
+  is written only in the turn that gives it, so a place that arrives later
+  does not get it. A place that appears while the check is open and shows a
+  shape answered **Not a character** is not left out. A reading that review
+  leaves out, whose text arrives after an answer and disagrees with it,
+  joins no step, so the step does not ask again and review flags the clash.
 
 ### Bar detection
 

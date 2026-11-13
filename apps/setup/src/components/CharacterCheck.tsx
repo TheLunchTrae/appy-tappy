@@ -410,7 +410,11 @@ export function CharacterCheckSheet(props: Props) {
   const { cursor } = guide;
   const sheet = useRef<HTMLDivElement>(null);
   // Each step replaces the buttons of the last, so focus moves to the new step's heading.
-  const stop = cursor.at === 'character' ? cursor.character : cursor.at;
+  const stop = cursor.at === 'character' ? `character ${cursor.character}` : cursor.at;
+  // The stop a press of the pointer began on. Pressing a button takes focus from a field, which commits what was
+  // typed there and can move the check to its next stop before the button is let go. A click that began on another
+  // stop is dropped, so it never answers for a step the user did not see when they pressed.
+  const pressedOn = useRef<string | null>(null);
   useEffect(() => {
     sheet.current?.querySelector<HTMLElement>('[data-check-head]')?.focus();
   }, [stop]);
@@ -430,9 +434,24 @@ export function CharacterCheckSheet(props: Props) {
   const unread = beingRead(places);
   const skipped = all.filter((each) => each.shapes.some((use) => !use.answered)).map((each) => each.character);
   return (
-    <div ref={sheet} className="check-sheet">
+    <div
+      ref={sheet}
+      className="check-sheet"
+      onPointerDownCapture={() => {
+        pressedOn.current = stop;
+      }}
+      onClickCapture={(event) => {
+        const began = pressedOn.current;
+        pressedOn.current = null;
+        if (began !== null && began !== stop) {
+          event.stopPropagation();
+          event.preventDefault();
+        }
+      }}
+    >
       {step !== undefined ? (
-        <CharacterStep {...props} step={step} />
+        // Keyed by its character, so the next step's buttons are never the last step's, reused.
+        <CharacterStep key={step.character} {...props} step={step} />
       ) : cursor.at === 'unfitted' ? (
         <UnfittedStep {...props} />
       ) : (

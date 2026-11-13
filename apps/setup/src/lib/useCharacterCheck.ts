@@ -107,16 +107,17 @@ export function useCharacterCheck(
     }
   };
 
-  // Escape closes the check. It is taken as the window hears it, before review's own Escape, which would close the
-  // review the check was opened from underneath it.
+  // Escape closes the check. It is taken as the window hears it, before review's own Escape, and marked as handled
+  // with preventDefault, so review does not also close underneath the check. It still reaches every other listener,
+  // such as a hint's.
   const open = held !== null;
   useEffect(() => {
     if (!open) {
       return undefined;
     }
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        event.preventDefault();
         setHeld(null);
       }
     };
