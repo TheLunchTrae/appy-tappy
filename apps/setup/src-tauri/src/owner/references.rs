@@ -7,7 +7,7 @@ use appytappy_config::app_file::{OriginDef, new_reference_id, reference_id};
 use crate::check_spec::{ReferenceRef, SavedReference, Session};
 
 use super::host::Host;
-use super::messages::{ReferenceSaveSpec, ReferenceTrial, SavedReferenceId};
+use super::messages::{ReferenceSaveSpec, SavedReferenceId};
 use super::{Changed, Edit, Owner};
 
 impl<H: Host> Owner<H> {
@@ -73,13 +73,6 @@ impl<H: Host> Owner<H> {
             .ok()
             .filter(|saved| saved.pictures.len() == saved.reference.samples.len())
             .map(|saved| (reference.clone(), saved));
-    }
-
-    /// Tries `trial` on the live frame as [`Owner::set_characters`] does,
-    /// with the saved reference it adds to kept for the asks that follow.
-    pub(crate) fn try_characters(&mut self, trial: &ReferenceTrial) -> Result<(), String> {
-        self.keep_reference(trial.characters.reference.as_ref());
-        self.set_characters(trial)
     }
 
     /// Saves the reference `spec` teaches to its application, and says
@@ -494,7 +487,7 @@ mod tests {
         let adding = reference("example", "Digits", Some(("example", "digits"))).characters;
         let trial = teaching(adding.clone());
         [
-            harness.ask(|owner| owner.try_characters(&trial)),
+            harness.ask(|owner| owner.set_characters(&trial)),
             harness
                 .ask(|owner| owner.review_problems(&adding))
                 .map(drop),

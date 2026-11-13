@@ -18,7 +18,7 @@ export interface ReferenceSave {
 
 /** What Save reference says while review is open. */
 export const SAVE_AFTER_REVIEW =
-  'Keep the readings or select Back before you save. The reference has only the readings you kept, and saving ends the recording.';
+  "Keep the readings to save them with the reference, or go back to the screenshot to save without review's changes. Saving ends the recording.";
 
 /**
  * Whether the reference can be saved now, and what the editor says when it waits for review. Saving ends the
@@ -32,9 +32,10 @@ export function referenceSave(save: ReferenceSave): { readonly can: boolean; rea
 }
 
 /**
- * Why the value's capture changes no saved reference `chosen`, or null when it may: one of the `drafted`, the
- * references that have a draft of changes, is changed by finishing its draft, which would undo what was changed
- * apart from it. It holds for every way into the reference's editor from a value: Edit, and Record readings.
+ * Why the value's capture may not change the saved reference `chosen`, or null when it may. `drafted` holds the IDs
+ * of the references that have a draft of changes. Such a reference changes only by finishing its draft, since
+ * finishing the draft would undo a change made apart from it. This holds for every way into the reference's editor
+ * from a value: Edit, and Record readings.
  */
 export function draftHolds(
   chosen: { readonly id: string; readonly name: string },

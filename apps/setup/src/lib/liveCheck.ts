@@ -23,7 +23,10 @@ export type ReadAnswer =
   | { readonly ok: true; readonly reading: Reading | null }
   | { readonly ok: false; readonly problem: string };
 
-/** Whether `shown` already shows what `next` would. */
+/**
+ * Whether `shown` already shows what `next` would. It compares every field of a `Reading`, its kind and its value:
+ * a field added to a reading is compared here too, or a read that differs only in it would never show.
+ */
 function sameRead(shown: LiveRead, next: LiveRead): boolean {
   if (shown.problem !== next.problem) {
     return false;

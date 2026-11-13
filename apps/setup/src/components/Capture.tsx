@@ -664,6 +664,7 @@ export function Capture({
   // the owner records one thing at a time, so a recording of looks goes first.
   const openEditor = async (existing: ReferenceDef | null, like: ReferenceDef | null): Promise<void> => {
     teaching.open(existing, like);
+    // Why the value was not saved is about the value before this edit, so it does not show when the editor closes.
     setSaveError(null);
     await looks.discard();
   };
