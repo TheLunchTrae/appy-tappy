@@ -124,13 +124,13 @@ impl<H: Host> Owner<H> {
         let taught = self
             .with_session(|session| spec.teach(session, None, "", ""))
             .map_err(|error| error.to_string())?;
-        let reader = match reads {
-            Some(characters) => taught
-                .reader
-                .reading_only(characters)
-                .ok_or_else(|| SpecError::NoCharacters.to_string())?,
-            None => taught.reader,
-        };
+        let reader = taught.reader.reading(reads).ok_or_else(|| {
+            SpecError::NoCharacters {
+                reference: "The reference".to_owned(),
+                characters: reads.unwrap_or_default().to_owned(),
+            }
+            .to_string()
+        })?;
         let size = taught.window_size;
         let region = taught.region.size();
         let pin = PinDef::guess(
@@ -490,17 +490,18 @@ mod tests {
             harness.ask(|owner| owner.reading()),
             Err(DIGITS_ONLY.to_owned())
         );
-        for none in ["2", ""] {
-            assert_eq!(
-                harness.ask(|owner| owner.set_check(&reading(none))),
-                Err(
-                    "The reference knows none of the characters this value reads. Choose \
-                     characters it knows."
-                        .to_owned()
-                ),
-                "{none:?}"
-            );
-        }
+        assert_eq!(
+            harness.ask(|owner| owner.set_check(&reading("2"))),
+            Err(
+                "Percent knows none of the characters this value reads, \"2\". Teach it one of \
+                 them, or change which characters the value reads."
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.set_check(&reading(""))),
+            Err("Choose at least one character for the value to read.".to_owned())
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -575,8 +576,8 @@ mod tests {
         assert_eq!(
             harness.ask(|owner| owner.set_characters(&taught, Some("2"))),
             Err(
-                "The reference knows none of the characters this value reads. Choose characters \
-                 it knows."
+                "The reference knows none of the characters this value reads, \"2\". Teach it \
+                 one of them, or change which characters the value reads."
                     .to_owned()
             )
         );

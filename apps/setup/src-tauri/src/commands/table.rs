@@ -85,6 +85,9 @@ macro_rules! with_commands {
             commands::found_state() -> Option<FoundView>;
             /// A find of search `search` at most `maxWidth` wide, or null for an unknown index or a replaced search.
             commands::found_picture(search: U64AsNumber, index: usize, max_width: u32) -> Pixels;
+            /// Has the text reader read finds `indexes` of search `search` again, in the color `ink` within `tolerance`,
+            /// and answers the search, or null when that search was replaced or forgotten.
+            commands::reread_found(search: U64AsNumber, indexes: Vec<usize>, ink: ColorSpec, tolerance: u8) -> Option<FoundView>;
             /// Forgets the search.
             commands::forget_found() -> ();
             /// Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can.

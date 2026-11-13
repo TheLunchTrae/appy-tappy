@@ -349,6 +349,14 @@ describe('a draft and what it belongs to', () => {
     expect(captureProblem(fits, apps)).toBeNull();
     // The reference a fix reads with is its own choice, so another one still fits.
     expect(fixOutdated(fixOf({ ...fixDraft(progress.screen.check), reference: 'other' }), progress)).toBe(false);
+    // What a number counts and which characters it reads are the value's, which a fix follows.
+    const whole = { ...progress.screen.check, whole: true };
+    expect(fixOutdated(fits, { ...progress, screen: { ...progress.screen, check: whole } })).toBe(true);
+    const digits = { ...progress.screen.check, characters: '0123456789' };
+    expect(fixOutdated(fits, { ...progress, screen: { ...progress.screen, check: digits } })).toBe(true);
+    expect(fixOutdated(fixOf(fixDraft(digits)), { ...progress, screen: { ...progress.screen, check: digits } })).toBe(
+      false,
+    );
     const bar = {
       kind: 'barFill' as const,
       filled: { red: 1, green: 2, blue: 3 },

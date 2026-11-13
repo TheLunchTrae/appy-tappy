@@ -814,6 +814,23 @@ pub(crate) async fn found_picture(
     .map(pixels)
 }
 
+/// Has the text reader read finds `indexes` of search `search` again, with
+/// the characters' color `ink` within `tolerance`; `None` when that search
+/// was replaced or forgotten.
+#[tauri::command]
+pub(crate) async fn reread_found(
+    app: AppHandle,
+    search: u64,
+    indexes: Vec<usize>,
+    ink: ColorSpec,
+    tolerance: u8,
+) -> Result<Option<FoundView>, String> {
+    ask(&app, "reread_found", move |owner| {
+        owner.reread_found(search, &indexes, ink, tolerance)
+    })
+    .await
+}
+
 /// Forgets the search.
 #[tauri::command]
 pub(crate) async fn forget_found(app: AppHandle) -> Result<(), String> {

@@ -21,6 +21,8 @@ export interface FoundRow {
   readonly typed: boolean;
   /** Whether the text reader has not read it yet and the user typed nothing. */
   readonly reading: boolean;
+  /** Whether the text reader could not read it and the user typed nothing. */
+  readonly failed: boolean;
   /** Why it cannot be added as it is, found without asking the reference, or null. */
   readonly flag: string | null;
   /**
@@ -104,8 +106,19 @@ export function foundRows(
         flag = `${letter} is a letter, and the reference has learned none. Type what this shows.`;
       }
     }
+    const failed = !typed && find.text.kind === 'failed';
     const fits = reading || typed || fitsNeeds(guess, needs);
-    return { index, region: find.region, keep: keep && fits, text, typed, reading, flag: fits ? flag : null, fits };
+    return {
+      index,
+      region: find.region,
+      keep: keep && fits,
+      text,
+      typed,
+      reading,
+      failed,
+      flag: fits ? flag : null,
+      fits,
+    };
   });
 }
 
@@ -190,4 +203,24 @@ export function keptState(rows: readonly FoundRow[]): 'all' | 'some' | 'none' {
   const listed = rows.filter((row) => row.fits);
   const kept = listed.filter((row) => row.keep).length;
   return kept === 0 ? 'none' : kept === listed.length ? 'all' : 'some';
+}
+
+/** The edits that leave out every kept row of `rows` that `flags` flags, each with its own text. */
+export function withoutFlagged(
+  rows: readonly FoundRow[],
+  flags: ReadonlyMap<number, string>,
+): ReadonlyMap<number, FoundEntry> {
+  return new Map(
+    rows
+      .filter((row) => row.keep && flags.has(row.index))
+      .map((row) => [row.index, { keep: false, text: row.text, typed: row.typed }] as const),
+  );
+}
+
+/**
+ * The listed rows of `rows` the text reader reads again, by index: those it could not read, and those `flags` flags
+ * whose text is its guess. Text the user typed is theirs.
+ */
+export function rereadable(rows: readonly FoundRow[], flags: ReadonlyMap<number, string>): readonly number[] {
+  return rows.filter((row) => row.fits && !row.typed && (row.failed || flags.has(row.index))).map((row) => row.index);
 }

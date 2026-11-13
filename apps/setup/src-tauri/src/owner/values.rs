@@ -353,15 +353,22 @@ pub(super) fn read_back(
             .find(|(name, _)| name == picture)
             .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
     })
-    .map_err(|error| {
-        if matches!(error, SavedError::NoReference { .. }) {
-            return format!("{} no longer has that reference.", file.name);
-        }
-        file.references
+    .map_err(|error| match error {
+        SavedError::NoReference { .. } => format!("{} no longer has that reference.", file.name),
+        SavedError::NoCharacters { id, characters } => {
+            let saved = file.references.iter().find(|reference| reference.id == id);
+            SpecError::NoCharacters {
+                reference: saved.map_or(id, |reference| reference.name.clone()),
+                characters,
+            }
+            .to_string()
+        },
+        error => file
+            .references
             .iter()
             .find_map(|reference| check_spec::sample_problem_of(&error, reference))
             .unwrap_or_else(|| SpecError::from(error))
-            .to_string()
+            .to_string(),
     })
 }
 

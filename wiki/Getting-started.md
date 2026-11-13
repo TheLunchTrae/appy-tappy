@@ -87,9 +87,10 @@ AppyTappy saves only the part of a window inside a box you drew, or around
 text it found that you added, never the rest of the window, and only where it
 needs a picture to read or to click:
 
-- A [reference](References.md) keeps the box from each screenshot you
-  labeled and from each recorded reading you kept, and the box around each
-  text you added with [Find more like it](References.md#find-more-like-it).
+- A [reference](References.md) keeps each [box](References.md#boxes) you
+  drew and typed the text of, each recorded reading you kept, and the box
+  around each text you added with
+  [Find more like it](References.md#find-more-like-it).
 - A **State** value keeps the box for each of its states, and again for each
   size you [fixed it at](Values.md#fix-a-value-at-one-size).
 - A click on **A picture** keeps the picture you marked.

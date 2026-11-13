@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { readChoice, readChoices, savedCharacters, withCharacter, withReadChoice } from '../src/lib/charactersRead.ts';
+import {
+  forReference,
+  readChoice,
+  readChoices,
+  savedCharacters,
+  withCharacter,
+  withReadChoice,
+} from '../src/lib/charactersRead.ts';
 import { checkSummary } from '../src/lib/describe.ts';
 
 const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
@@ -23,9 +30,23 @@ describe('the characters a number reads', () => {
     expect(readChoice([], known)).toBe('choose');
   });
 
-  test('choosing starts from what is read so far', () => {
+  test('choosing starts from what is read so far that the reference knows', () => {
     expect(withReadChoice('choose', known, null)).toEqual(known);
-    expect(withReadChoice('choose', known, digits)).toEqual(digits);
+    // Not the digits it has yet to learn, which would be saved with no box to turn them off.
+    expect(withReadChoice('choose', known, digits)).toEqual(['0', '1', '2']);
+    expect(withReadChoice('choose', known, ['%', '1', 'x'])).toEqual(['1', '%']);
+  });
+
+  test('another reference keeps the choice that was picked', () => {
+    const other = ['1', '5', ':', 'L'];
+    expect(forReference(null, known, other)).toBeNull();
+    expect(forReference(digits, known, other)).toEqual(digits);
+    // Digits and symbols takes the new reference's symbols, and a chosen set keeps what the new one knows.
+    expect(forReference([...digits, '%', '.'], known, other)).toEqual([...digits, ':']);
+    expect(forReference(['1', '%', 'L'], known, other)).toEqual(['1', 'L']);
+    // A saved set that was the digits and symbols before the reference learned another is a chosen set.
+    expect(readChoice([...digits, '%'], known)).toBe('choose');
+    expect(forReference([...digits, '%'], known, known)).toEqual(['0', '1', '2', '%']);
   });
 
   test('digits and symbols is offered only for a reference that knows a symbol', () => {
