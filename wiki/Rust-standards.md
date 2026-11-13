@@ -135,13 +135,19 @@ cargo-mutants runs for each mutant, which is quick when `target/` is already
 current. The standards gate starts the lane only after the other Cargo tasks
 finish, so the copy never catches a build half written. Both lanes also run
 every workspace package's tests against each mutant (`--test-workspace=true`),
-because a mutant in one crate can be caught by another crate's tests. Whether
+because a mutant in one crate can be caught by another crate's tests. A
+mutant's run can take several times the baseline's, since `cargo test` stops
+only at the first failing test binary, so `.cargo/mutants.toml` sets a
+minimum test timeout of 120 seconds. Whether
 testing only the mutated package catches the same mutants is still to be
 measured.
 
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
-`mutants.out/` and validate its JSON, so stale evidence cannot pass. A report in
-which every mutant is unviable fails. A surviving mutant is a review finding.
+`mutants.out/` and validate its JSON, so stale evidence cannot pass. Every
+report needs a baseline that built and passed in the same build directory. A
+full report in which every mutant is unviable fails; a diff report may hold
+only unviable mutants, as a shard of a small change can, since its baseline
+already shows the build works. A surviving mutant is a review finding.
 
 Both lanes hold `target/standards-mutants.lock` through the run and its
 verification, so a second run fails instead of replacing the report. If a
