@@ -572,12 +572,12 @@ review without keeping, and review's edits stay for the next one.
 
 [Find more like it](References.md#find-more-like-it) searches the screenshot
 the selected box is on for more text like the box shows
-(`recording/find.rs`). It
-marks each pixel as ink with the reference's color and tolerance, as
-`DigitReader` does, and takes the band of inked rows with the most ink in the
-region, as the reader segments it. It joins touching ink, corners included,
-into blobs, leaving out blobs over twice that band's height, such as a panel in
-the same color. The sample's height is its tallest blob centered in the region,
+(`recording/find.rs`). It reads the screenshot's ink with `DigitReader::ink`,
+the ink a read works from, and takes the band of inked rows with the most ink
+in the region with `Ink::line`, the rule a read finds its line by, so the two
+cannot differ. It joins touching ink, corners included, into blobs, leaving
+out blobs over twice that band's height, such as a panel in the same color.
+The sample's height is its tallest blob centered in the region,
 and a run's is its tallest blob, so a comma or a mark below the characters
 measures neither. Blobs whose rows meet and that start no further than the
 sample's height past each other join into a run of text; runs are looked up by
