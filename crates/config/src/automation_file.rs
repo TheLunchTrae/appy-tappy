@@ -773,6 +773,7 @@ mod tests {
         ValueDef {
             id: id.to_owned(),
             name: name.to_owned(),
+            origin: OriginDef::ByHand,
             screen: ScreenDef {
                 window_size: SizeDef {
                     width: 100,
@@ -810,7 +811,6 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             values: vec![
                 value(
                     "progress",
@@ -860,6 +860,7 @@ mod tests {
             references: vec![ReferenceDef {
                 id: "percent".to_owned(),
                 name: "Percent".to_owned(),
+                origin: OriginDef::ByHand,
                 ink: white,
                 tolerance: 10,
                 samples: vec![SampleDef {

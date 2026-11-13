@@ -785,11 +785,11 @@ saved file still names.
     "build": { "version": "1.4.2.0", "size": 48234496, "modified": 1762500000 },
     "at": 1762600000
   },
-  "origin": { "kind": "imported", "file": "appytappy-example-app.zip" },
   "values": [
     {
       "id": "progress",
       "name": "Progress",
+      "origin": { "kind": "imported", "file": "appytappy-example-app.zip" },
       "screen": {
         "windowSize": { "width": 1920, "height": 1080 },
         "region": { "x": 1146, "y": 14, "width": 74, "height": 38 },
@@ -814,6 +814,7 @@ saved file still names.
     {
       "id": "percent_font",
       "name": "Percent font",
+      "origin": { "kind": "recording" },
       "ink": { "red": 255, "green": 255, "blue": 255 },
       "tolerance": 40,
       "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }],
@@ -860,15 +861,25 @@ build was of the values or the executable that are gone. The Values page shows
 the runtime's log, as [Build detection](Architecture.md#build-detection)
 describes.
 
-An application's `origin` is how its definition was made, and is `byHand`
-when the file leaves it out. Its `kind` is `byHand` for a new application,
-`recording` once a reference of it was saved with a recorded reading, or
+Each value and each reference has an `origin`, how it was made, which is
+`byHand` when the file leaves it out. Its `kind` is `byHand`, `recording`, or
 `imported` with the name of the `file` it was imported from, which is empty
-in a [shared file](#sharing). A recording of
-looks leaves it alone, since the screenshots it keeps are labeled by hand
-like any other. An imported application stays `imported` whatever is changed
-in it later. Only the setup app reads it, to show where an application came
-from, so no rule covers it and a file loads whatever it holds.
+in a [shared file](#sharing).
+
+- A value is `recording` when a recording of looks kept a screenshot it is
+  set up on: the one its region is drawn on, or one a state's picture is
+  taken from (`check_spec::origin`). `Screenshots` in `screenshots.rs` holds
+  which screenshots a recording kept, for the session. A draft's screenshots
+  come back without that, so a value finished from a draft is `byHand`.
+- An edit that keeps a value's region keeps its `origin`, and one that draws
+  the region again sets it as for a new value. A fix leaves it alone.
+- A reference is `recording` once a recorded reading, or a box on a
+  screenshot that a recording of looks kept, teaches it. A reference that is
+  `imported` stays so whatever is taught in it later, since most of what it
+  learned still came with the file.
+
+Only the setup app reads an `origin`, to show where a value or a reference
+came from, so no rule covers it and a file loads whatever it holds.
 
 The settings live in `%APPDATA%\AppyTappy\settings.json`. A setting the
 file leaves out takes its default:
@@ -979,9 +990,9 @@ commands: `export_app`, `read_shared_app`, and `import_app`.
 A shared file is a zip file with the application's folder in it, flat:
 `app.json` and each picture that file names. `Shared` is an application in
 that form. It has no overlay, which holds where a panel is on one machine's
-screens, and it keeps `checked` and `origin`, with an empty `file` for an
-application that was itself imported, since that names a file on its maker's
-machine. `ZipPack` in `zip_pack.rs` packs it, as it packs the
+screens, and it keeps `checked` and each `origin`, with an empty `file` for a value
+or a reference that was itself imported, since that names a file on its
+maker's machine. `ZipPack` in `zip_pack.rs` packs it, as it packs the
 [debug bundle](#debug-page).
 
 An imported file is a trust boundary, so `Shared::unpack` holds it to what a
@@ -1038,7 +1049,8 @@ When the ID's name is taken by something the store does not list, a file or on
 Windows a folder that differs only in case, it takes the next ID, and gives up
 after `NEW_FOLDER_TRIES` of them. The import refuses a name that a saved
 application has. It saves the anti-cheat class the user picked, never the
-file's, and sets `origin` to `imported` with the picked file's name, without
+file's, and sets the `origin` of every value and reference to `imported`
+with the picked file's name, without
 control characters and the format characters that reorder or hide text, which
 can turn a name around on screen, and at most 60 characters long. The page
 offers the file's class in the dialog unless it is `none`, which only the

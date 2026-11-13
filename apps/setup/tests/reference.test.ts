@@ -21,6 +21,7 @@ test("referenceCharacters reads a reference's samples", () => {
     referenceCharacters({
       id: 'percent',
       name: 'Percent font',
+      origin: { kind: 'byHand' } as const,
       ink: white,
       tolerance: 40,
       samples: [
@@ -45,27 +46,34 @@ test('readers names the number values that read with a reference, in a check or 
     },
     sizeChanges: 'often',
     antiCheat: 'unknown',
-    origin: { kind: 'byHand' },
     references: [],
     values: [
       {
         id: 'a',
         name: 'Progress',
+        origin: { kind: 'byHand' } as const,
         screen: { ...screen, check: { kind: 'number', reference: 'percent', whole: true } },
       },
       {
         id: 'b',
         name: 'Lives',
+        origin: { kind: 'byHand' } as const,
         screen: {
           ...screen,
           check: { kind: 'number', reference: 'digits', whole: false },
           fixes: [{ windowSize: { width: 20, height: 20 }, region: screen.region, images: [], reference: 'percent' }],
         },
       },
-      { id: 'c', name: 'Icon', screen: { ...screen, check: { kind: 'color', color: white, tolerance: 0 } } },
+      {
+        id: 'c',
+        name: 'Icon',
+        origin: { kind: 'byHand' } as const,
+        screen: { ...screen, check: { kind: 'color', color: white, tolerance: 0 } },
+      },
       {
         id: 'd',
         name: 'Best run',
+        origin: { kind: 'byHand' } as const,
         screen: { ...screen, check: { kind: 'number', reference: 'percent', whole: false } },
       },
     ],

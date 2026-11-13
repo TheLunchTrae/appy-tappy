@@ -146,8 +146,17 @@ impl Shared {
         decoding: u64,
     ) -> Result<Self, ShareError> {
         file.overlay = None;
-        if let OriginDef::Imported { file: from } = &mut file.origin {
-            from.clear();
+        // A shared file says that its maker imported a value or a
+        // reference, and not from which file of theirs.
+        let origins = file
+            .values
+            .iter_mut()
+            .map(|value| &mut value.origin)
+            .chain(file.references.iter_mut().map(|saved| &mut saved.origin));
+        for origin in origins {
+            if let OriginDef::Imported { file: from } = origin {
+                from.clear();
+            }
         }
         let mut pictures = BTreeMap::new();
         let mut held = 0_u64;
@@ -446,7 +455,6 @@ mod tests {
             anti_cheat: AntiCheatDef::None,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             values: Vec::new(),
             references: Vec::new(),
         }
@@ -471,6 +479,7 @@ mod tests {
         let value = ValueDef {
             id: id.to_owned(),
             name: format!("Value {id}"),
+            origin: OriginDef::ByHand,
             screen: ScreenDef {
                 window_size: SizeDef { width, height },
                 region: RegionDef {
@@ -500,6 +509,7 @@ mod tests {
         ReferenceDef {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
+            origin: OriginDef::ByHand,
             ink: ColorDef {
                 red: 255,
                 green: 0,
@@ -985,9 +995,15 @@ mod tests {
             mode: OverlayModeDef::PictureInPicture,
             panel: None,
         });
-        file.origin = OriginDef::Imported {
+        let theirs = OriginDef::Imported {
             file: "their-file.zip".to_owned(),
         };
+        file.values[0].origin = theirs.clone();
+        file.references.push(ReferenceDef {
+            origin: theirs,
+            ..digits(1)
+        });
+        let sample = sample_name("digits", 1);
         let json = file.to_json();
         let bytes = zip_of(&[
             ("unnamed.png", &picture),
@@ -995,14 +1011,17 @@ mod tests {
             ("program.exe", b"MZ"),
             (APP_FILE, json.as_bytes()),
             (&image, &picture),
+            (&sample, &eleven(1)),
         ]);
         let (read, pictures) = Shared::unpack(&bytes).expect("reads").into_parts();
         file.overlay = None;
-        file.origin = OriginDef::Imported {
+        let imported = OriginDef::Imported {
             file: String::new(),
         };
+        file.values[0].origin = imported.clone();
+        file.references[0].origin = imported;
         assert_eq!(read, file, "without what belongs to its maker's machine");
-        assert_eq!(pictures, [(image, picture)]);
+        assert_eq!(pictures, [(sample, eleven(1)), (image, picture)]);
     }
 
     prop_compose! {
@@ -1032,15 +1051,16 @@ mod tests {
                 build: BuildDef { version, size: size.into(), modified: at.into() },
                 at: at.into(),
             });
-            file.origin = origin;
             let mut held = BTreeMap::new();
             for (number, (width, height, [blue, green, red])) in pictures.into_iter().enumerate() {
-                let (value, image) = state_value(&format!("value_{number}"), width, height);
+                let (mut value, image) = state_value(&format!("value_{number}"), width, height);
+                value.origin = origin.clone();
                 file.values.push(value);
                 held.insert(image, png(width, height, [blue, green, red, 255]));
             }
             if !samples.is_empty() {
-                let reference = digits(samples.len());
+                let mut reference = digits(samples.len());
+                reference.origin = origin;
                 for (sample, scale) in reference.samples.iter().zip(samples) {
                     held.insert(sample.image.clone(), eleven(scale));
                 }

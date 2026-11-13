@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use appytappy_config::app_file::{ReferenceDef, SampleDef, is_label_character};
+use appytappy_config::app_file::{OriginDef, ReferenceDef, SampleDef, is_label_character};
 use appytappy_config::names::sample_name;
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::saved::{self, SavedError};
@@ -194,10 +194,27 @@ impl CharactersSpec {
         let id = id
             .or_else(|| self.reference.as_ref().map(|saved| saved.id.as_str()))
             .unwrap_or(UNSAVED);
-        let (mut samples, kept): (Vec<SampleDef>, Pictures) = saved
-            .map_or_else(Default::default, |saved| {
-                (saved.reference.samples, saved.pictures)
+        let (mut samples, kept, made): (Vec<SampleDef>, Pictures, OriginDef) =
+            saved.map_or_else(Default::default, |saved| {
+                (
+                    saved.reference.samples,
+                    saved.pictures,
+                    saved.reference.origin,
+                )
             });
+        // A recording that teaches a reference made by hand makes it one a
+        // recording made. One that says where it was imported from goes on
+        // saying so.
+        let by_recording = !recorded.is_empty()
+            || self
+                .labels
+                .iter()
+                .any(|label| session.screenshots.is_recorded(label.screenshot));
+        let origin = if made == OriginDef::ByHand && by_recording {
+            OriginDef::Recording
+        } else {
+            made
+        };
         let labeled = self.labels.iter().map(|label| {
             let image = label_image(session.screenshots, region, label)?;
             Ok((image, label.text.as_str()))
@@ -235,6 +252,7 @@ impl CharactersSpec {
         let reference = ReferenceDef {
             id: id.to_owned(),
             name: name.to_owned(),
+            origin,
             ink: self.ink.into(),
             tolerance: self.tolerance,
             samples,

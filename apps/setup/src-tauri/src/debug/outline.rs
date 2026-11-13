@@ -137,6 +137,7 @@ mod tests {
         ValueDef {
             id: id.to_owned(),
             name: id.to_uppercase(),
+            origin: OriginDef::ByHand,
             screen: ScreenDef {
                 window_size: SizeDef {
                     width: WINDOW.width,
@@ -171,7 +172,6 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             references: Vec::new(),
             values,
         }

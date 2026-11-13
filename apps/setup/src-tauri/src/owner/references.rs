@@ -2,7 +2,6 @@
 //! application. Saving one learns its samples, as the check that reads with
 //! it would, and deleting one waits until no value reads with it.
 
-use appytappy_config::app_file::OriginDef;
 use appytappy_config::names::{new_reference_id, reference_id};
 
 use serde::{Deserialize, Serialize};
@@ -124,11 +123,6 @@ impl<H: Host> Owner<H> {
                         .teach(session, Some(&id), name, &spec.expects)
                 })
                 .map_err(|error| error.to_string())?;
-            // A recording taught it, which the definition says of itself
-            // from then on, unless it says where it was imported from.
-            if !spec.characters.recorded.is_empty() && file.origin == OriginDef::ByHand {
-                file.origin = OriginDef::Recording;
-            }
             match file.references.iter_mut().find(|saved| saved.id == id) {
                 Some(saved) => *saved = taught.reference,
                 None => file.references.push(taught.reference),

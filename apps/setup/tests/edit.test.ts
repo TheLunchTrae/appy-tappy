@@ -23,7 +23,12 @@ const red = { red: 255, green: 0, blue: 0 };
 const gray = { red: 40, green: 40, blue: 40 };
 
 function value(check: ValueDef['screen']['check']): ValueDef {
-  return { id: 'status', name: 'Status', screen: { windowSize, region, check, pin: 'topLeft', fixes: [] } };
+  return {
+    id: 'status',
+    name: 'Status',
+    origin: { kind: 'byHand' } as const,
+    screen: { windowSize, region, check, pin: 'topLeft', fixes: [] },
+  };
 }
 
 const states = value({

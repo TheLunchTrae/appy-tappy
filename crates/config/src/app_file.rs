@@ -67,30 +67,27 @@ pub struct AppFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub checked: Option<CheckedDef>,
-    /// How the definition was made, which the setup app shows beside
-    /// `checked`. [`OriginDef::ByHand`] when the file leaves it out.
-    #[serde(default)]
-    pub origin: OriginDef,
 }
 
-/// How an application's definition was made: its provenance.
+/// How a value or a reference was made: its provenance.
 ///
 /// Setup guidance only. The setup app shows it, so whoever reads a
-/// definition can tell where its values came from. Nothing that finds the
-/// window or reads a value looks at it, and no rule of the file covers it,
-/// whatever file name it holds.
+/// definition can tell where each value and reference came from. Nothing
+/// that finds the window or reads a value looks at it, and no rule of the
+/// file covers it, whatever file name it holds.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum OriginDef {
-    /// The user drew its values and labeled its references' pictures in the
-    /// setup app.
+    /// The user made it in the setup app on screenshots they took: a value
+    /// drawn on them, or a reference whose pictures they labeled.
     #[default]
     ByHand,
-    /// Made in the setup app, where a recording taught at least one of its
-    /// references.
+    /// Made in the setup app with a recording: a value set up on a
+    /// screenshot that a recording of looks kept, or a reference that a
+    /// recorded reading or such a screenshot taught.
     Recording,
-    /// Imported from a file that someone exported.
+    /// Imported with a file that someone exported.
     Imported {
         /// The name of the file it was imported from, such as
         /// `appytappy-example.zip`. Empty in a shared file, which says
@@ -375,6 +372,10 @@ pub struct ValueDef {
     pub id: String,
     /// The value's name as the user sees it, such as `Progress`.
     pub name: String,
+    /// How the value was made. [`OriginDef::ByHand`] when the file leaves
+    /// it out.
+    #[serde(default)]
+    pub origin: OriginDef,
     /// Where on the window the value is read and how.
     pub screen: ScreenDef,
 }
@@ -393,6 +394,10 @@ pub struct ReferenceDef {
     pub id: String,
     /// The reference's name as the user sees it, such as `Percent font`.
     pub name: String,
+    /// How the reference was made. [`OriginDef::ByHand`] when the file
+    /// leaves it out.
+    #[serde(default)]
+    pub origin: OriginDef,
     /// The characters' color.
     pub ink: ColorDef,
     /// How far a pixel may stray from `ink` and still count.
@@ -1123,10 +1128,10 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             values: vec![ValueDef {
                 id: "progress".to_owned(),
                 name: "Progress".to_owned(),
+                origin: OriginDef::ByHand,
                 screen: ScreenDef {
                     window_size: SizeDef {
                         width: 1920,
@@ -1151,6 +1156,7 @@ mod tests {
             references: vec![ReferenceDef {
                 id: "percent".to_owned(),
                 name: "Percent".to_owned(),
+                origin: OriginDef::ByHand,
                 ink: ColorDef {
                     red: 255,
                     green: 255,
@@ -1526,22 +1532,34 @@ mod tests {
     }
 
     #[test]
-    fn how_it_was_made_round_trips_and_reads_as_by_hand_when_left_out() {
+    fn how_each_was_made_round_trips_and_reads_as_by_hand_when_left_out() {
         let mut file = dash();
         let json = file.to_json();
-        assert!(json.contains("\"origin\": {\n    \"kind\": \"byHand\"\n  }"));
-        let left_out = json.replace(",\n  \"origin\": {\n    \"kind\": \"byHand\"\n  }", "");
-        assert_ne!(left_out, json, "the origin was written last");
-        assert_eq!(AppFile::parse(&left_out), Ok(file.clone()));
-        for origin in [
-            OriginDef::Recording,
-            OriginDef::Imported {
-                file: "appytappy-example.zip".to_owned(),
-            },
-        ] {
-            file.origin = origin;
-            assert_eq!(AppFile::parse(&file.to_json()), Ok(file.clone()));
+        let mut left_out: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        for list in ["values", "references"] {
+            let removed = left_out[list][0]
+                .as_object_mut()
+                .expect("an object")
+                .remove("origin");
+            assert_eq!(
+                removed,
+                Some(serde_json::json!({ "kind": "byHand" })),
+                "{list}"
+            );
         }
+        assert_eq!(AppFile::parse(&left_out.to_string()), Ok(file.clone()));
+        file.values[0].origin = OriginDef::Recording;
+        file.references[0].origin = OriginDef::Imported {
+            file: "appytappy-example.zip".to_owned(),
+        };
+        assert_eq!(AppFile::parse(&file.to_json()), Ok(file.clone()));
+        // An application's file says nothing of how it was made as a whole.
+        let mut whole: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        whole["origin"] = serde_json::json!({ "kind": "byHand" });
+        assert!(matches!(
+            AppFile::parse(&whole.to_string()),
+            Err(AppFileError::Json(_))
+        ));
     }
 
     #[test]
@@ -1553,7 +1571,7 @@ mod tests {
         assert_eq!(
             AppFile::parse("[]"),
             Err(AppFileError::Json(
-                "invalid length 0, expected struct AppFile with 10 elements at line 1 column 2"
+                "invalid length 0, expected struct AppFile with 9 elements at line 1 column 2"
                     .to_owned()
             )),
             "the message names the file, not how it is read"

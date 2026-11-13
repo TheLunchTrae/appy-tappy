@@ -126,9 +126,9 @@ export const DRAFT_HINT =
 export const SHARED_CHECKED_HINT =
   'The build of the application that whoever made this file checked its values against. An update can move or restyle what a value reads, so the Values page warns while you run another build.';
 
-/** How a shared file's definition was made. */
+/** How a shared file's values and references were made. */
 export const ORIGIN_HINT =
-  'How whoever made this file got its values: drawn and labeled by hand, taught with a recording, or imported from a file of someone else.';
+  'How whoever made this file got its values and references: by hand on screenshots they took, with a recording, or imported from a file of someone else.';
 
 /** Confirming the anti-cheat setting of an imported application. */
 export const IMPORT_ANTI_CHEAT_HINT =

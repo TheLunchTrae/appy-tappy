@@ -7,7 +7,7 @@ import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/describe.ts';
 import { IMPORT_ANTI_CHEAT_HINT, ORIGIN_HINT, SHARED_CHECKED_HINT } from '../lib/hints.ts';
 import { matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
-import { type ImportState, NO_IMPORT, importBusy, nextImport, originText, sizeProblem } from '../lib/sharing.ts';
+import { type ImportState, NO_IMPORT, importBusy, nextImport, originsText, sizeProblem } from '../lib/sharing.ts';
 import { Dialog } from './Dialog.tsx';
 import { Hint } from './Hint.tsx';
 
@@ -65,7 +65,7 @@ function Asking({ state, onName, onClass }: AskingProps) {
             <Hint topic="How it was made">{ORIGIN_HINT}</Hint>
           </span>
         </dt>
-        <dd>{originText(file.origin)}</dd>
+        <dd>{originsText([...file.values, ...file.references].map((made) => made.origin))}</dd>
       </dl>
       <div className="field decide">
         <span className="with-hint">

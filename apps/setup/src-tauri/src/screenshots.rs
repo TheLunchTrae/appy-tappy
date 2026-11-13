@@ -1,7 +1,11 @@
 //! The session's screenshots: whole frames of the picked window, kept in
 //! memory from when each is taken or recorded until it is removed or the
 //! capture ends. Only a draft writes them to disk, in its own folder
-//! ([`crate::drafts`]).
+//! ([`crate::drafts`]). The session remembers which of them a recording of
+//! looks kept, so a value set up on one says that a recording made it. A
+//! draft does not keep that: a restored screenshot counts as taken by hand.
+
+use std::collections::BTreeSet;
 
 use appytappy_sources::screen::Image;
 
@@ -10,35 +14,55 @@ pub(crate) trait Shots {
     /// Screenshot `index`, or `None` when there never was one or it was
     /// removed.
     fn get(&self, index: usize) -> Option<&Image>;
+
+    /// Whether a recording of looks kept screenshot `index`, and the user
+    /// did not take it.
+    fn is_recorded(&self, index: usize) -> bool;
 }
 
 /// The session's screenshots, each named by the index it got when it was
 /// kept. Removing one releases its pixels and leaves its index empty, so
 /// the others keep theirs and what the UI set up on them stays right.
 #[derive(Debug)]
-pub(crate) struct Screenshots(Vec<Option<Image>>);
+pub(crate) struct Screenshots {
+    /// Every index given out so far, in order.
+    slots: Vec<Option<Image>>,
+    /// The indexes a recording of looks kept.
+    recorded: BTreeSet<usize>,
+}
 
 impl Screenshots {
     /// No screenshots.
     pub(crate) const fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            slots: Vec::new(),
+            recorded: BTreeSet::new(),
+        }
     }
 
-    /// Keeps `image` and answers its index.
+    /// Keeps `image`, which the user took, and answers its index.
     pub(crate) fn push(&mut self, image: Image) -> usize {
-        self.0.push(Some(image));
-        self.0.len().saturating_sub(1)
+        self.slots.push(Some(image));
+        self.slots.len().saturating_sub(1)
+    }
+
+    /// Keeps `image`, which a recording of looks kept, and answers its
+    /// index.
+    pub(crate) fn push_recorded(&mut self, image: Image) -> usize {
+        let index = self.push(image);
+        self.recorded.insert(index);
+        index
     }
 
     /// Screenshot `index`, or `None` when there never was one or it was
     /// removed.
     pub(crate) fn get(&self, index: usize) -> Option<&Image> {
-        self.0.get(index).and_then(Option::as_ref)
+        self.slots.get(index).and_then(Option::as_ref)
     }
 
     /// Releases screenshot `index`, if there is one.
     pub(crate) fn remove(&mut self, index: usize) {
-        if let Some(slot) = self.0.get_mut(index) {
+        if let Some(slot) = self.slots.get_mut(index) {
             *slot = None;
         }
     }
@@ -56,24 +80,31 @@ impl Screenshots {
                 *slot = Some(image);
             }
         }
-        Self(slots)
+        Self {
+            slots,
+            recorded: BTreeSet::new(),
+        }
     }
 
     /// Every index given out so far, in order: the screenshot kept under
     /// it, or `None` for one that was removed.
     pub(crate) fn slots(&self) -> &[Option<Image>] {
-        &self.0
+        &self.slots
     }
 
     /// The screenshots still kept, in the order they were kept.
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Image> {
-        self.0.iter().flatten()
+        self.slots.iter().flatten()
     }
 }
 
 impl Shots for Screenshots {
     fn get(&self, index: usize) -> Option<&Image> {
         Self::get(self, index)
+    }
+
+    fn is_recorded(&self, index: usize) -> bool {
+        self.recorded.contains(&index)
     }
 }
 
@@ -115,6 +146,17 @@ mod tests {
             3,
             "a removed index is not reused"
         );
+    }
+
+    #[test]
+    fn only_a_recorded_screenshot_counts_as_recorded() {
+        let mut screenshots = Screenshots::new();
+        assert_eq!(screenshots.push(pixel(1)), 0);
+        assert_eq!(screenshots.push_recorded(pixel(2)), 1);
+        assert_eq!(screenshots.get(1), Some(&pixel(2)));
+        assert!(!screenshots.is_recorded(0));
+        assert!(screenshots.is_recorded(1));
+        assert!(!screenshots.is_recorded(2), "there is no such screenshot");
     }
 
     #[test]

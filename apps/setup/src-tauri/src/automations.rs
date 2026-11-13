@@ -261,6 +261,7 @@ mod tests {
         let value = |id: &str, name: &str, check| ValueDef {
             id: id.to_owned(),
             name: name.to_owned(),
+            origin: OriginDef::ByHand,
             screen: ScreenDef {
                 window_size: SizeDef {
                     width: 100,
@@ -290,7 +291,6 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
-            origin: OriginDef::ByHand,
             references: Vec::new(),
             values: vec![
                 value(

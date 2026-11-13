@@ -751,6 +751,22 @@ the application starts while it has an automation that can run. AppyTappy finds
 the executable without opening the application, so this works whatever the
 application's [anti-cheat](Applications.md#anti-cheat) setting.
 
+## How a value was made
+
+The Values page says under a value's name how it was made, unless you made
+it by hand on screenshots you took:
+
+- **Made with a recording.** A [recording](#record-screenshots) kept a
+  screenshot the value is set up on.
+- **Imported from** a file, with the file's name. The value came with an
+  application you [imported](Applications.md#share-an-application).
+
+A value you edit keeps what it says while its region stays where it is.
+Draw the region again and the value says how you make it now.
+
+A screenshot that a recording kept counts as one you took once it comes back
+from a [draft](Drafts.md).
+
 ## Delete a value
 
 Select **Delete** next to a value, then confirm. A value that an automation

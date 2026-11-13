@@ -94,6 +94,7 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
         reference: ReferenceDef {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
+            origin: OriginDef::ByHand,
             ink: RED.into(),
             tolerance: 0,
             samples: vec![SampleDef {
@@ -115,6 +116,10 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
 
 /// A test's screenshots are an array, each named by its place in it.
 impl<const N: usize> Shots for [Image; N] {
+    fn is_recorded(&self, _index: usize) -> bool {
+        false
+    }
+
     fn get(&self, index: usize) -> Option<&Image> {
         self.as_slice().get(index)
     }
@@ -689,6 +694,7 @@ fn a_new_reference_names_one_picture_per_label() {
         ReferenceDef {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
+            origin: OriginDef::ByHand,
             ink: RED.into(),
             tolerance: 0,
             // The one label teaches the one sample, whatever it expects.

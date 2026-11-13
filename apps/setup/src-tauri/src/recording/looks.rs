@@ -142,7 +142,7 @@ impl LookRecording {
             .any(|look| look.matches(&crop) == Ok(true))
         {
             self.looks.push(ImageMatch::whole(crop, self.tolerance));
-            self.kept.push(screenshots.push(frame.clone()));
+            self.kept.push(screenshots.push_recorded(frame.clone()));
             if self.kept.len() >= MAX_LOOKS {
                 self.life.fail(
                     arrived,

@@ -73,6 +73,7 @@ describe('the characters a number reads', () => {
     const reference = {
       id: 'percent',
       name: 'Percent font',
+      origin: { kind: 'byHand' } as const,
       ink: { red: 255, green: 255, blue: 255 },
       tolerance: 40,
       samples: [],

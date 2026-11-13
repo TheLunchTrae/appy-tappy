@@ -92,6 +92,11 @@ impl<H: Host> Owner<H> {
             file.values.push(ValueDef {
                 id: id.clone(),
                 name: name.to_owned(),
+                origin: check_spec::origin(
+                    &spec.check,
+                    owner.capture.screenshots(),
+                    spec.screenshot,
+                ),
                 screen,
             });
             // The first value is checked against the build that runs now.

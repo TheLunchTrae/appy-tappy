@@ -533,6 +533,18 @@ It has limits, and review is where you deal with them:
 
 **Record more** goes on looking where the recording looked before.
 
+## How a reference was made
+
+The References page says under a reference's name how it was made, unless
+you made it by hand with boxes on screenshots you took:
+
+- **Made with a recording.** A [recorded reading](#record-readings), or a
+  box on a screenshot that a
+  [recording of looks](Values.md#record-screenshots) kept, taught it.
+- **Imported from** a file, with the file's name. The reference came with an
+  application you [imported](Applications.md#share-an-application). It goes
+  on saying so when you teach it more.
+
 ## Delete a reference
 
 Select **Delete** next to a reference, then confirm. A reference that a value

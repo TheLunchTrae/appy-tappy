@@ -19,6 +19,7 @@ function value(id: string, name: string, check: CheckDef): ValueDef {
   return {
     id,
     name,
+    origin: { kind: 'byHand' },
     screen: {
       windowSize: { width: 100, height: 50 },
       region: { x: 0, y: 0, width: 10, height: 10 },
@@ -43,7 +44,6 @@ function app(id: string, name: string, values: readonly ValueDef[]): AppSummary 
       },
       sizeChanges: 'often',
       antiCheat: 'none',
-      origin: { kind: 'byHand' },
       values,
       references: [],
     },
