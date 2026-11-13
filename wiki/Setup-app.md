@@ -581,8 +581,8 @@ was last read with. `lib/confirm.ts` groups the shapes by the character the
 places' texts give them and turns each answer into edits of those texts and
 ticks, so the check keeps no texts of its own, and the list of finds and
 review show what it wrote. An answer edits only the shapes it is about, in
-the turn that gives it, so a text typed by hand afterward stays and reopens
-the question instead. [Character check](State-machines.md#character-check)
+the turn that gives it and in each place whose text is read afterward, so
+a text typed by hand afterward stays and reopens the question instead. [Character check](State-machines.md#character-check)
 has its states.
 
 ### Recording looks

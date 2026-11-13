@@ -2203,9 +2203,11 @@ stateDiagram-v2
 
 The check of a reference's characters one at a time
 (`apps/setup/src/lib/confirm.ts`, held by `useCharacterCheck.ts`) is closed, or
-a `Guide`: the answers given so far, by shape, the places it left out, and a
-cursor. `turn` is its pure `(state, event)` transition, and it answers with
-the next guide and the edits of the places' texts and ticks.
+a `Guide`: the answers given so far, by shape, the places it left out, the
+places that have joined it, and a cursor. `turn` is its pure
+`(state, event)` transition for what the user does, and `join` is the one
+for places that show under an open check. Each answers with the next guide
+and the edits of the places' texts and ticks.
 
 ```mermaid
 stateDiagram-v2
@@ -2223,6 +2225,9 @@ stateDiagram-v2
     Unfitted --> Done: Next
     Done --> Unfitted: Back, while text fits no step
     Done --> Character: Back
+    Character --> Character: a place joins
+    Unfitted --> Unfitted: a place joins
+    Done --> Done: a place joins
     Character --> Closed: Back to the screenshot, Back to review, or Escape
     Unfitted --> Closed: Back to the screenshot, Back to review, or Escape
     Done --> Closed: Done, or Escape
@@ -2257,6 +2262,19 @@ stateDiagram-v2
   shape's character, and the rest of its text stays. A place the check asks
   about is ticked or kept once all its shapes have answers, and left out
   when one is no character. A tick the user changes afterward stays.
+- **A place joins once its text is read.** The guide names the places that
+  have joined in `seen`: the ones whose text was read when the check opened,
+  and each one since. A place that first shows under an open check, or
+  whose text the reader sends then, gets every answer that stands for its
+  shapes, as the turn that gave the answer would have written it (`join`,
+  which `useCharacterCheck.ts` runs after each render). Its text takes the
+  answered characters, it is left out and remembered in `left` for a shape
+  that is no character, and it is ticked or kept once all its shapes have
+  answers. A reading that review leaves out gets the text and keeps its
+  keep. A place whose text the user typed keeps that text and is only left
+  out. A place joins once, so a text or a tick the user changes afterward
+  stays. One that is gone, or being read again, leaves `seen` and joins
+  anew.
 - **Text that fits no step.** A place whose text has another number of
   characters than its picture has shapes joins no step. Once every one of
   its shapes has an answer, the answers are its text. One still left is the
@@ -2283,15 +2301,15 @@ turn is an edit the list of finds or review takes. What goes wrong is that
 the places change under an open check, and each case recovers on the next
 render (`settle`) or the next answer:
 
-- **A text disagrees with an answer.** The user types over a text by hand,
-  or the text reader's text arrives after the answer. The text stays as it
-  is. The shape counts as unanswered again, so its step shows the other
-  character the text has and asks once more, and the next answer writes
-  every place that shows the shape.
+- **A text disagrees with an answer.** The user types over a text by hand.
+  The text stays as it is. The shape counts as unanswered again, so its
+  step shows the other character the text has and asks once more, and the
+  next answer writes every place that shows the shape.
 - **A place is still being read.** It has no text, so it joins no step and
   is not on the `Unfitted` stop. `Done` says how many are not checked yet.
-  When its text arrives it joins the steps, and the cursor stays where it
-  is: the user reaches the step with **Back**, or by opening the check
+  When its text arrives it joins: it gets the answers that stand, and its
+  other shapes join the steps. The cursor stays where it is: the user
+  reaches a step that asks again with **Back**, or by opening the check
   again, which starts at the first step that still asks.
 - **The step under the cursor is gone.** An edit by hand leaves no place
   that gives a shape the step's character, or a search or a recording is
@@ -2300,15 +2318,6 @@ render (`settle`) or the next answer:
   none of whose places is left.
 - **No places at all.** The check is `Done` and says there is nothing to
   check.
-
-#### Open problems
-
-- [#327](https://github.com/TheLunchTrae/appy-tappy/issues/327): an answer
-  is written only in the turn that gives it, so a place that arrives later
-  does not get it. A place that appears while the check is open and shows a
-  shape answered **Not a character** is not left out. A reading that review
-  leaves out, whose text arrives after an answer and disagrees with it,
-  joins no step, so the step does not ask again and review flags the clash.
 
 ### Bar detection
 
