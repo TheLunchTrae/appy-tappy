@@ -16,7 +16,7 @@ use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 use crate::applications::AppSpec;
 use crate::check_spec::{CharactersSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayWindow;
-use crate::recording::ocr;
+use crate::recording::{Scope, ocr};
 use crate::stores::{self, Stores};
 
 use super::host::{ClickNow, ClickedWindow, Host};
@@ -460,6 +460,7 @@ pub(super) fn characters_in(region: RegionSpec, ink: ColorSpec) -> RecordSpec {
         screenshot: 0,
         ink,
         tolerance: 0,
+        scope: Scope::Place,
     }
 }
 

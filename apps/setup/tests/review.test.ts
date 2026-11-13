@@ -20,6 +20,7 @@ import {
   sighted,
   startEntry,
   tileNote,
+  unrelated,
   untaught,
   untaughtNote,
 } from '../src/lib/review.ts';
@@ -281,6 +282,38 @@ describe('review entries', () => {
       { reading: 0, text: '1' },
       { reading: 3, text: '4' },
     ]);
+  });
+});
+
+describe("text that is not the reference's", () => {
+  const digits = Array.from('0123456789');
+  const readings = [read('12'), read('MENU'), read('PLAY 1'), read('SOS')];
+
+  test('is text with none of the needed characters, counting a lookalike as its digit', () => {
+    expect(unrelated('MENU', digits)).toBe(true);
+    expect(unrelated('PLAY 1', digits)).toBe(false);
+    expect(unrelated('SOS', digits)).toBe(false);
+    expect(unrelated('', digits)).toBe(false);
+    expect(unrelated('MENU', [])).toBe(false);
+  });
+
+  test('starts left out, says so, and is not offered as something to teach', () => {
+    const all = entries(readings, new Map(), new Map(), new Map(), digits);
+    expect(all.map((entry) => entry.keep)).toEqual([true, false, true, true]);
+    expect(entries(readings, new Map(), new Map()).map((entry) => entry.keep)).toEqual([true, true, true, true]);
+    const menu = all[1] ?? { keep: true, text: '' };
+    expect(tileNote(read('MENU'), menu, undefined, undefined, digits)).toBe(
+      'Shows none of the characters the reference needs, so it is left out unless you keep it.',
+    );
+    expect(tileNote(read('MENU'), { ...menu, keep: true }, undefined, undefined, digits)).toBeNull();
+    const adds = keptAdditions(readings, all);
+    expect(untaught(readings, all, adds, digits)).toEqual({ characters: [], readings: [] });
+    expect(untaught(readings, all, adds).readings).toEqual([1]);
+  });
+
+  test('stays kept when it was kept before', () => {
+    const all = entries(readings, new Map(), new Map([[1, 'MENU']]), new Map(), digits);
+    expect(all[1]).toEqual({ keep: true, text: 'MENU' });
   });
 });
 

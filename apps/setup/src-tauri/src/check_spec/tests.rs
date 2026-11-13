@@ -552,7 +552,7 @@ fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 2, 2).expect("not empty");
     let mut recording = Recording::new(1, region, (RED.into(), 0), small.size(), now);
-    recording.offer(&small, now).expect("a reading");
+    recording.offer(&small, now).pop().expect("a reading");
     let kept = vec![RecordedLabel {
         reading: 0,
         text: "1".to_owned(),
@@ -831,7 +831,10 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 4, 2).expect("not empty");
     let mut recording = Recording::new(1, region, (RED.into(), 0), screenshot().size(), now);
-    recording.offer(&screenshot(), now).expect("a reading");
+    recording
+        .offer(&screenshot(), now)
+        .pop()
+        .expect("a reading");
     let recorded = |reading| {
         vec![RecordedLabel {
             reading,
@@ -881,7 +884,10 @@ fn recorded_problems_judge_each_reading_after_the_saved_samples() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 2, 2).expect("not empty");
     let mut recording = Recording::new(1, region, (RED.into(), 0), screenshot().size(), now);
-    recording.offer(&screenshot(), now).expect("a reading");
+    recording
+        .offer(&screenshot(), now)
+        .pop()
+        .expect("a reading");
     let as_text = |text: &str| {
         vec![RecordedLabel {
             reading: 0,

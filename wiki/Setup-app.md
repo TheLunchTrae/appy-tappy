@@ -418,6 +418,27 @@ character is one shape.
   hold is not bounded by a number: a kept reading holds its crop at four
   bytes a pixel, so it grows with the region the user draws, 72 KB a reading
   for a region 300 by 60 pixels and 8 MB for a whole 1920 by 1080 window.
+- **The whole window.** A recording that looks over the whole window
+  (`Scope::Window`, **Look in** in the UI) collects from every run of text
+  like its region's, as [Finding more like it](#finding-more-like-it) finds
+  them (`find::lines`): in the characters' color and within 15% of the
+  height the region's characters had on its screenshot, which starting the
+  recording measures once (`find::sample_height`) and refuses when the
+  region shows no ink there. Each run is cropped with its margin and goes
+  through the same counting and keeping as a place's crop, so the bounds
+  above hold, and a kept reading is the run's own crop. A run the reader
+  cannot split, such as one of more than 24 characters, is skipped. The
+  example's color and size are all that tie a run to the reference's font;
+  nothing compares shapes with the example, since a recording starts before
+  any shape has a character. Review starts a reading left out when its text
+  shows none of the expected characters (`unrelated` in `lib/review.ts`),
+  counting the text reader's usual lookalikes as digits, and `untaught`
+  then offers only expected characters. A look reads every pixel of the
+  frame in the owner thread, which took about 30 ms for a 1920 by 1080 frame and 125 ms
+  for a 3840 by 2160 one in a release build,
+  so it looks at most once every `SCAN_EVERY`, 500 ms, and skips the frames
+  between without counting them. The view carries where the last look found
+  text (`spots`), which the page outlines on the live window.
 - **Sizes.** A frame of another window size is skipped because a recording
   has a region and no [pin](Screen-regions.md#window-sizes): only a value
   says which side of the window its region keeps its distance from, and a

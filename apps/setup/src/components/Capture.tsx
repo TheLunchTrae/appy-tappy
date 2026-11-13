@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ReferenceDef, ReferenceRef, ReferenceTrial, TrialSpec, ValueDef } from '../lib/bindings.ts';
+import type {
+  RecordingScope,
+  ReferenceDef,
+  ReferenceRef,
+  ReferenceTrial,
+  TrialSpec,
+  ValueDef,
+} from '../lib/bindings.ts';
 import {
   editValue,
   errorText,
@@ -62,7 +69,7 @@ import { ReferenceEditor } from './ReferenceEditor.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
 import type { Choice } from './Picker.tsx';
 import { colorAt } from '../lib/pixels.ts';
-import { RecordPanel, ReviewSheet } from './Recording.tsx';
+import { RecordPanel, RecordingSpots, ReviewSheet } from './Recording.tsx';
 import { LookPanel } from './LookRecording.tsx';
 import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
 import { type Point, type Size, scaleRect } from '../lib/region.ts';
@@ -273,6 +280,8 @@ export function Capture({
   const boxes = useBoxes(draft, setDraft, selected);
   const recorder = useRecording();
   const recording = recorder.view;
+  // Where the next new recording looks for characters. Record more goes on with the recording's own.
+  const [recordScope, setRecordScope] = useState<RecordingScope>('place');
   const looks = useLookRecording(screenshots.adopt);
   // The screenshots the recording the user just stopped kept, until the first that the strip lists shows.
   const [toReview, setToReview] = useState<readonly number[] | null>(null);
@@ -395,7 +404,9 @@ export function Capture({
     shots.map((each) => each.index),
     step === 'how' && editing === null && fixing === null,
   );
-  const review = useReview(recording, draft, setDraft, editingRef);
+  // The characters it needs, which what it learns from is compared with.
+  const needs = editing?.expects ?? NO_NEEDS;
+  const review = useReview(recording, draft, setDraft, editingRef, needs);
   // What the reference being edited learns from: its saved pictures, its boxes with text, and its kept readings.
   const savedSamples = editing?.existing?.samples;
   const taught = useMemo(
@@ -408,8 +419,6 @@ export function Capture({
   );
   // Every text it learns from already, which tells a find's letters apart from a misread.
   const learnedTexts = useMemo(() => [...taught.saved, ...taught.labeled, ...taught.recorded], [taught]);
-  // The characters it needs, and how the ones it learns from compare with them.
-  const needs = editing?.expects ?? NO_NEEDS;
   const covered = coverage(needs, knownCharacters(learnedTexts));
   const finder = useFound(draft, boxes.add, editingRef, learnedTexts, needs);
   const { reviewing } = review;
@@ -687,7 +696,8 @@ export function Capture({
     }
     // A reference taught by itself reads at its first box, which the recording is of.
     const readAt = draft.region === null ? (draft.boxes[0]?.id ?? null) : null;
-    await recorder.start({ region, ink, tolerance, drawnOn }, more, () => {
+    const scope = more ? (recording?.settings.scope ?? recordScope) : recordScope;
+    await recorder.start({ region, ink, tolerance, drawnOn, scope }, more, () => {
       review.show(false);
       setSelected(null);
       setPicking(null);
@@ -1045,7 +1055,7 @@ export function Capture({
           <ReviewSheet
             view={recording}
             found={found}
-            needs={needs.length > 0}
+            needs={needs}
             adds={review.adds}
             entries={review.entries}
             problems={review.flagged}
@@ -1097,6 +1107,9 @@ export function Capture({
               {native === undefined || outline === null ? null : (
                 <CaptureOutlines outline={outline} size={native} shown={shown} />
               )}
+              {recording?.recording === true && selected === null ? (
+                <RecordingSpots view={recording} shown={shown} />
+              ) : null}
               {drawsLive ? (
                 <RegionSurface
                   size={liveSize}
@@ -1490,6 +1503,8 @@ export function Capture({
                 kept={draft.recorded.size}
                 keeping={review.keeping.length}
                 blocked={recordingBlocked}
+                scope={recordScope}
+                onScope={setRecordScope}
                 appName={choice.name}
                 crops={recorder.crops}
                 error={recordError}

@@ -328,7 +328,13 @@ describe('the reference editor', () => {
 });
 
 describe('a stopped recording', () => {
-  const settings = { region, ink: red, tolerance: 40, windowSize: { width: 1920, height: 1080 } };
+  const settings = {
+    region,
+    ink: red,
+    tolerance: 40,
+    windowSize: { width: 1920, height: 1080 },
+    scope: 'place' as const,
+  };
   const recorded = { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red, tolerance: 40 };
   const big = { width: 1920, height: 1080 };
   const small = { width: 1280, height: 720 };

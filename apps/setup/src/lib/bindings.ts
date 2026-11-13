@@ -1323,7 +1323,12 @@ ink: ColorSpec,
 /**
  * How far from `ink` a pixel of a character may be.
  */
-tolerance: number, }>;
+tolerance: number,
+/**
+ * Where to look for characters: in the region alone, or wherever the
+ * window shows text like the region's.
+ */
+scope: RecordingScope, }>;
 
 /**
  * What one recorded reading shows, as the user confirmed it in review, so
@@ -1382,6 +1387,11 @@ readings: number, }>;
 export type RecordedText = DeepReadonly<{ "kind": "pending" } | { "kind": "read", "text": string } | { "kind": "failed", "text": string }>;
 
 /**
+ * Where a recording looks for characters, as the UI names it.
+ */
+export type RecordingScope = DeepReadonly<"place" | "window">;
+
+/**
  * What a recording records: the region of a window of one size, and what
  * counts as ink there.
  */
@@ -1401,7 +1411,11 @@ tolerance: number,
 /**
  * The window's size when the region was drawn.
  */
-windowSize: SizeView, }>;
+windowSize: SizeView,
+/**
+ * Where it looks for characters.
+ */
+scope: RecordingScope, }>;
 
 /**
  * A recording as the UI shows it.
@@ -1431,6 +1445,11 @@ problem: string | null,
  * What it records, which going on with it needs again.
  */
 settings: RecordingSettings,
+/**
+ * Where a recording of the whole window found text like its region's
+ * the last time it looked, while it records; empty otherwise.
+ */
+spots: Array<RegionView>,
 /**
  * The readings it kept, in the order they first showed.
  */

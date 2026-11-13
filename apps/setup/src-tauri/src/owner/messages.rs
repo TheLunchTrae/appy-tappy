@@ -14,7 +14,7 @@ use tokio::sync::oneshot;
 
 use crate::check_spec::{CharactersSpec, CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{FrameRead, Purpose};
-use crate::recording::Text;
+use crate::recording::{Scope, Text};
 use crate::window_list::{WindowFit, WindowList};
 
 use super::{Desktop, Host, Owner};
@@ -148,6 +148,9 @@ pub(crate) struct RecordSpec {
     pub(crate) ink: ColorSpec,
     /// How far from `ink` a pixel of a character may be.
     pub(crate) tolerance: u8,
+    /// Where to look for characters: in the region alone, or wherever the
+    /// window shows text like the region's.
+    pub(crate) scope: Scope,
 }
 
 /// Where and why a value is not read on a window of `size`, as the end of

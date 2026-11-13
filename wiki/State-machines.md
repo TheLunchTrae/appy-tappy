@@ -1472,6 +1472,14 @@ stateDiagram-v2
     Ended --> None: Discard, Change window, a window is picked, or the flow closes
 ```
 
+- A recording looks in its region alone or over the whole window
+  (`Looking`), chosen when it starts and kept for its life. Over the whole
+  window it holds when it last looked: a frame less than `SCAN_EVERY` after
+  that is skipped and not counted, and any other frame is searched for runs
+  of text like the region's, each cropped and kept or counted as a place's
+  crop is. A frame of another window size sets the problem, clears the
+  places the last look found, and is skipped whenever it arrives; the first
+  frame back at the size is looked at once the interval has passed.
 - Each frame is cropped to the region. A crop of another window size, or one
   the reader cannot read, sets the recording's `problem` and is skipped while
   it goes on recording. A crop with no ink is skipped and clears the problem,
@@ -1489,8 +1497,10 @@ stateDiagram-v2
   recording stays full when it stops and when **Record more** goes on with
   it: **Stop** and review what it found, or **Discard** it to start a new
   one.
-- **Record more** needs the same region, ink, tolerance, and window size, and
-  clears the problem. When any of them differs (`settingsDiffer`), **Use its
+- **Record more** needs the same region, ink, tolerance, window size, and
+  choice of where to look, and clears the problem. The page sends the
+  stopped recording's own choice of where to look, so only the others can
+  differ. When any of them differs (`settingsDiffer`), **Use its
   settings** shows and puts the ink and the tolerance back
   (`withRecordedInk`). A reference taught by itself read at a box, and the
   [Reference boxes](#reference-boxes) machine keeps the ID of the box each

@@ -53,6 +53,10 @@ export const INK_TOLERANCE_HINT = `From 0, only the exact color, up to ${LIMITS.
 export const BAR_COLORS_HINT =
   "Pick a filled part of the bar for Filled color and an empty part for Empty color. Borders and labels inside the region don't count.";
 
+/** Where a recording of readings looks for characters. */
+export const RECORD_SCOPE_HINT =
+  "This place records only where the reference reads: its first box, or the value's region. The whole window also records text in the characters' color and as tall as the text there, wherever the window shows it, so a stats panel or a second counter in the same font teaches the reference too. It looks over the window twice a second, so text that flashes by faster can be missed, and it can pick up other text of that color and size, which you leave out in review.";
+
 /** What a reference is. */
 export const REFERENCE_HINT =
   'A reference knows what each character looks like in one font and color, learned from the boxes you draw on screenshots and the readings you record. Values that show the same font can share one.';

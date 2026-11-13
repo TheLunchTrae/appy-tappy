@@ -12,7 +12,10 @@ const RECORDING_PAUSE_MS = 250;
 /** The widest a recorded reading is asked for: a region is small, and review shows it a few times larger. */
 const CROP_WIDTH = 480;
 
-/** What a recording records: a region drawn on a screenshot, read with the characters' color and tolerance. */
+/**
+ * What a recording records: a region drawn on a screenshot, read with the characters' color and tolerance, in that
+ * place alone or wherever the window shows text like it.
+ */
 type Recordable = Omit<RecordingSettings, 'windowSize'> & { readonly drawnOn: number };
 
 /** Each recorded reading's pixels, by its index, for the recording `id`. */
@@ -115,8 +118,8 @@ export function useRecording(): {
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
     turn.current += 1;
     try {
-      const { region, ink, tolerance, drawnOn } = settings;
-      await startRecording({ region, screenshot: drawnOn, ink, tolerance }, more);
+      const { region, ink, tolerance, drawnOn, scope } = settings;
+      await startRecording({ region, screenshot: drawnOn, ink, tolerance, scope }, more);
       if (!more) {
         // A new recording replaced the old one, whose readings' pixels go with it.
         setCrops(NO_CROPS);
