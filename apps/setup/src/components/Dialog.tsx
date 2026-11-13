@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useRef } from 'react';
 
 interface Props {
   /** The id of the heading that names the dialog. */
-  readonly labelledBy: string;
+  readonly titleId: string;
   /** The id of the text that says what the dialog does. */
   readonly describedBy: string;
   /** Whether the dialog waits for an answer to what it started, so it stays open until that ends. */
@@ -15,7 +15,7 @@ interface Props {
  * A modal dialog over the page, open while it is mounted. Escape closes it unless it is busy, and focus goes back
  * to whatever opened it, such as its button, once it closes.
  */
-export function Dialog({ labelledBy, describedBy, busy, onClose, children }: Props) {
+export function Dialog({ titleId, describedBy, busy, onClose, children }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
@@ -30,7 +30,7 @@ export function Dialog({ labelledBy, describedBy, busy, onClose, children }: Pro
     <dialog
       ref={dialog}
       className="card dialog"
-      aria-labelledby={labelledBy}
+      aria-labelledby={titleId}
       aria-describedby={describedBy}
       onCancel={(event) => {
         event.preventDefault();

@@ -36,7 +36,7 @@ export function ExportApp({ app, name, onClose }: Props) {
     }
   };
   return (
-    <Dialog labelledBy="export-title" describedBy="export-what" busy={busy} onClose={onClose}>
+    <Dialog titleId="export-title" describedBy="export-what" busy={busy} onClose={onClose}>
       <h2 id="export-title">Export {name}</h2>
       <p id="export-what">
         Saves one zip file with how AppyTappy finds {name}, its values and references, and the pictures they use, for

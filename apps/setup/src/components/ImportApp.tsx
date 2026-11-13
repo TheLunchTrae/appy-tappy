@@ -174,7 +174,7 @@ export function ImportApp({ onImported }: Props) {
         onChange={pick}
       />
       {state.kind === 'closed' ? null : (
-        <Dialog labelledBy="import-title" describedBy="import-what" busy={busy} onClose={close}>
+        <Dialog titleId="import-title" describedBy="import-what" busy={busy} onClose={close}>
           <h2 id="import-title">Import application</h2>
           {state.kind === 'reading' ? (
             <p id="import-what" role="status">

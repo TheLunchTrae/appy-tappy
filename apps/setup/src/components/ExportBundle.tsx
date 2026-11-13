@@ -38,7 +38,7 @@ export function ExportBundle({ trace, onClose }: Props) {
     }
   };
   return (
-    <Dialog labelledBy="bundle-title" describedBy="bundle-what" busy={busy} onClose={onClose}>
+    <Dialog titleId="bundle-title" describedBy="bundle-what" busy={busy} onClose={onClose}>
       <h2 id="bundle-title">Export debug bundle</h2>
       <p id="bundle-what">
         Saves one zip file with your settings, automations, applications and both logs, to share when something goes

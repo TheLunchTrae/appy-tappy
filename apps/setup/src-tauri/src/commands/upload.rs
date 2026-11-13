@@ -86,8 +86,8 @@ mod tests {
         let body = InvokeBody::Raw(vec![80, 75]);
         // As `aboutHeader` writes a name outside ASCII.
         assert_eq!(
-            read::<String>(&body, &headers(r#""caf\u00e9 \ud83c\udf89.zip""#)),
-            Ok((vec![80, 75], "café 🎉.zip".to_owned()))
+            read::<String>(&body, &headers(r#""r\u00e9sum\u00e9 \ud83c\udf89.zip""#)),
+            Ok((vec![80, 75], "résumé 🎉.zip".to_owned()))
         );
         assert_eq!(
             read::<String>(&body, &HeaderMap::new()),
