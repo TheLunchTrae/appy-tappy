@@ -396,6 +396,14 @@ fn passes_a_diff_whose_mutants_the_compiler_rejects() {
             "other-file",
             "error[E0308]: mismatched types\n  --> src/other.rs:3:9\n",
         ),
+        (
+            "killed-then-warning",
+            "error: could not compile `b` (signal: 9, SIGKILL: kill)\nwarning: unused variable\n --> src/lib.rs:3:9\n",
+        ),
+        (
+            "warning-naming-error",
+            "warning: this error handling looks odd\n --> src/lib.rs:3:9\n",
+        ),
     ] {
         let broken = TestReport::unviable_with_log(label, log).expect("create broken-build report");
         assert!(
@@ -403,6 +411,32 @@ fn passes_a_diff_whose_mutants_the_compiler_rejects() {
             "{label} must fail"
         );
     }
+
+    let compiler_log =
+        "error[E0015]: cannot call non-const associated function\n --> src/lib.rs:167:9\n";
+    let outside = env::temp_dir().join(format!(
+        "standards-mutation-report-{}-outside.log",
+        std::process::id()
+    ));
+    let outside = outside.to_str().expect("temporary paths are UTF-8 here");
+    for (label, log_path, written_at, log) in [
+        (
+            "parent-log",
+            "log/../mutant.log",
+            "log/../mutant.log",
+            Some(compiler_log),
+        ),
+        ("absolute-log", outside, outside, Some(compiler_log)),
+        ("missing-log", "log/mutant.log", "log/mutant.log", None),
+    ] {
+        let report = TestReport::unviable_logged_at(label, log_path, written_at, log)
+            .expect("create report with an unusable log path");
+        assert!(
+            verify_report(ReportMode::Diff, report.path()).is_err(),
+            "{label} must fail"
+        );
+    }
+    fs::remove_file(outside).expect("remove the outside log");
 }
 
 #[test]
@@ -442,6 +476,18 @@ impl TestReport {
     /// A diff report with one unviable mutant in `src/lib.rs` whose build
     /// wrote `log`.
     fn unviable_with_log(label: &str, log: &str) -> Result<Self, String> {
+        Self::unviable_logged_at(label, "log/mutant.log", "log/mutant.log", Some(log))
+    }
+
+    /// A diff report with one unviable mutant in `src/lib.rs` whose outcome
+    /// names `log_path`, with `log`, if any, written at `written_at` under
+    /// the report or at that absolute path.
+    fn unviable_logged_at(
+        label: &str,
+        log_path: &str,
+        written_at: &str,
+        log: Option<&str>,
+    ) -> Result<Self, String> {
         let report = Self::new(
             label,
             Counts {
@@ -454,17 +500,24 @@ impl TestReport {
             "\"name\": \"mutant-Unviable-0\", \"file\": \"src/lib.rs\"",
             1,
         );
+        let log_path = serde_json::to_string(log_path)
+            .map_err(|error| format!("cannot encode synthetic log path: {error}"))?;
         let document = document.replacen(
             "\"summary\": \"Unviable\"",
-            "\"summary\": \"Unviable\", \"log_path\": \"log/mutant.log\"",
+            &format!("\"summary\": \"Unviable\", \"log_path\": {log_path}"),
             1,
         );
         fs::write(report.root.join("outcomes.json"), document)
             .map_err(|error| format!("cannot write synthetic mutation report: {error}"))?;
-        fs::create_dir_all(report.root.join("log"))
-            .map_err(|error| format!("cannot create synthetic log directory: {error}"))?;
-        fs::write(report.root.join("log/mutant.log"), log)
-            .map_err(|error| format!("cannot write synthetic mutant log: {error}"))?;
+        if let Some(log) = log {
+            let written_at = report.root.join(written_at);
+            if let Some(parent) = written_at.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("cannot create synthetic log directory: {error}"))?;
+            }
+            fs::write(&written_at, log)
+                .map_err(|error| format!("cannot write synthetic mutant log: {error}"))?;
+        }
         Ok(report)
     }
 
