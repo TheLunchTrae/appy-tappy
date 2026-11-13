@@ -76,13 +76,9 @@ pub fn in_frame(region: Region, content: Region) -> Option<Region> {
 /// whole frame, and where it finds none, the whole frame, as for a capture.
 #[must_use]
 pub fn content_on_screen(frame: Bounds, client: Option<Bounds>) -> Bounds {
-    let length = |from: i32, to: i32| u32::try_from(to.saturating_sub(from)).unwrap_or_default();
-    let whole = Size {
-        width: length(frame.left, frame.right),
-        height: length(frame.top, frame.bottom),
-    };
     client
-        .and_then(|client| content(frame, client, whole))
+        .zip(frame.size())
+        .and_then(|(client, whole)| content(frame, client, whole))
         .and_then(|area| {
             let left = frame.left.checked_add_unsigned(area.x())?;
             let top = frame.top.checked_add_unsigned(area.y())?;

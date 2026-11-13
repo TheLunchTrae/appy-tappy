@@ -713,8 +713,10 @@ mod tests {
             .into_iter()
             .find(|window| {
                 window.visible
-                    && window.bounds.right - window.bounds.left >= 64
-                    && window.bounds.bottom - window.bounds.top >= 64
+                    && window
+                        .bounds
+                        .size()
+                        .is_some_and(|size| size.width >= 64 && size.height >= 64)
                     && !window.title.is_empty()
             })
             .expect("a visible window of at least 64 by 64 pixels");
@@ -783,8 +785,10 @@ mod tests {
             .into_iter()
             .find(|window| {
                 window.visible
-                    && window.bounds.right - window.bounds.left >= 256
-                    && window.bounds.bottom - window.bounds.top >= 256
+                    && window
+                        .bounds
+                        .size()
+                        .is_some_and(|size| size.width >= 256 && size.height >= 256)
                     && !window.title.is_empty()
             })
             .expect("a visible window of at least 256 by 256 pixels");
