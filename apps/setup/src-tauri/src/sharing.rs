@@ -64,8 +64,11 @@ pub(crate) struct Shared {
 /// cannot be read, when packing fails, or when [`Shared::unpack`] would
 /// refuse the file, such as one that holds more than [`MAX_SHARED_BYTES`].
 pub(crate) fn pack(app: &SavedApp) -> Result<Vec<u8>, ShareError> {
+    // No picture past what a whole export holds is read in full; the
+    // budget in `pack_with` refuses it from the byte past that.
+    let most = u64::try_from(MAX_SHARED_BYTES).unwrap_or(u64::MAX);
     pack_with(app.file.clone(), |name| {
-        app.picture(name).map_err(|source| {
+        app.picture_within(name, most).map_err(|source| {
             if source.kind() == io::ErrorKind::NotFound {
                 ShareError::NoPicture(name.to_owned())
             } else {

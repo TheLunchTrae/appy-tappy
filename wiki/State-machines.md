@@ -2813,9 +2813,12 @@ second copy over to the first, which brings its window forward
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
 one. Each save reads the file, changes it, and writes it back. A save of an
-application's file, an edit of one of its values included, goes through
-`Owner::update_app`, which loads the file,
-changes it and hands it to `Owner::write_app`, and a save of the automations
+existing application's file, an edit of one of its values included, goes
+through `Owner::update_app`, which loads the file,
+changes it and hands it to `Owner::write_app`. A new application, saved in the
+editor or imported, goes through `AppStore::create`, which removes the
+application's whole folder when its save fails, so a failed new application
+leaves nothing behind. A save of the automations
 or the settings goes through `Owner::update_runtime`. After a save that works,
 they tell who reads what it changed, as its `Changed` kind says:
 
@@ -2856,9 +2859,9 @@ picture could be read, so one that is missing a picture is read again on
 each ask and learned once the picture is back. It keeps the pictures, not a
 reader learned from them: the color and tolerance being taught decide what
 the samples teach, so each ask learns them again. `Owner::write_app` empties it
-before any saved application is written or removed, whether that works or
-fails, and keeping another reference replaces it. An import writes a new
-application, which no kept reference is part of. A file changed outside the setup app
+before any existing application is written or removed, whether that works or
+fails, and keeping another reference replaces it. A new application, saved in
+the editor or imported, has no reference kept, since its ID is new. A file changed outside the setup app
 while a reference is kept is not seen until then.
 
 A click's picture is written to the `clicks` folder when its target is set

@@ -3,7 +3,7 @@
 //! runtime writes its logs and traces.
 
 use std::fs;
-use std::io;
+use std::io::{self, Read as _};
 use std::path::PathBuf;
 
 use appytappy_config::app_file::AppFile;
@@ -91,6 +91,20 @@ impl SavedApp {
     pub(crate) fn picture(&self, name: &str) -> io::Result<Vec<u8>> {
         fs::read(self.folder.join(name))
     }
+
+    /// The picture `name`, read only up to one byte past `most`, so a
+    /// picture larger than `most` is known to be without reading it all.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from reading it.
+    pub(crate) fn picture_within(&self, name: &str, most: u64) -> io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        fs::File::open(self.folder.join(name))?
+            .take(most.saturating_add(1))
+            .read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
 }
 
 /// Fresh, empty stores for one test, all in a folder named for `name`, which
@@ -145,6 +159,12 @@ mod tests {
         assert_eq!(saved.file, file);
         assert_eq!(stores.file("example"), Ok(Some(file)));
         assert_eq!(saved.picture("shown.png").expect("reads"), [1, 2]);
+        assert_eq!(saved.picture_within("shown.png", 2).expect("reads"), [1, 2]);
+        assert_eq!(
+            saved.picture_within("shown.png", 0).expect("reads"),
+            [1],
+            "a picture past the most is read only one byte past it"
+        );
         fs::write(saved.folder.join("app.json"), "{").expect("breaks the file");
         for read in [
             stores.app("example").map(drop),
