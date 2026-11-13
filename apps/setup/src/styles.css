@@ -1950,6 +1950,17 @@ div.match-answer {
   margin-left: auto;
 }
 
+.tile.shape .retype .it-is {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tile.shape.off .cutout,
+.tile.shape.off .marks {
+  opacity: 0.45;
+}
+
 /* The characters a recording found so far, in rows of a name and its characters. */
 .discovered {
   margin: 0;

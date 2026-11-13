@@ -327,17 +327,17 @@ impl DigitReader {
         ))
     }
 
-    /// The columns of `image` each of its characters covers, left to right,
-    /// as a read splits them: one range for each shape that
-    /// [`DigitReader::shapes`] gives, so a picture can show which part of
-    /// the image a shape came from.
+    /// The characters of `image`, left to right, as a read splits and
+    /// samples them: each shape that [`DigitReader::shapes`] gives, with
+    /// the columns of the image it came from, so a picture can show which
+    /// part of the image has that shape.
     ///
     /// # Errors
     ///
     /// The errors of [`DigitReader::shapes`].
-    pub fn columns(&self, image: &Image) -> Result<Vec<Range<u32>>, ReadError> {
+    pub fn placed(&self, image: &Image) -> Result<Vec<(Shape, Range<u32>)>, ReadError> {
         let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (_, count) = self
+        let (line, count) = self
             .segment(image, &mut spans)
             .map_err(|failure| match failure {
                 Segmentation::NoInk => ReadError::NoInk,
@@ -346,7 +346,7 @@ impl DigitReader {
         Ok(spans
             .iter()
             .take(count)
-            .map(|span| span.left..span.right)
+            .map(|span| (self.shape(image, line, *span), span.left..span.right))
             .collect())
     }
 
@@ -1454,16 +1454,24 @@ mod tests {
     }
 
     #[test]
-    fn columns_are_where_each_shape_came_from() {
+    fn placed_characters_are_the_shapes_with_where_each_came_from() {
         let reader = DigitReader::new(WHITE, 0);
         // A stray pixel under the line widens no character.
         let mut noisy = TWELVE.to_vec();
         noisy.extend([".....", ".#..."]);
-        assert_eq!(reader.columns(&draw(&noisy)), Ok(vec![0..1, 2..5]));
-        assert_eq!(reader.columns(&draw(&["..."])), Err(ReadError::NoInk));
+        let image = draw(&noisy);
+        let placed = reader.placed(&image).expect("two characters");
+        let columns: Vec<Range<u32>> = placed.iter().map(|(_, columns)| columns.clone()).collect();
+        assert_eq!(columns, [0..1, 2..5]);
+        let shapes: Vec<Shape> = placed.into_iter().map(|(shape, _)| shape).collect();
+        assert_eq!(
+            shapes,
+            reader.shapes(&image).expect("the same image").characters()
+        );
+        assert_eq!(reader.placed(&draw(&["..."])), Err(ReadError::NoInk));
         let crowded = "#.".repeat(MAX_CHARACTERS + 1);
         assert_eq!(
-            reader.columns(&draw(&[crowded.as_str()])),
+            reader.placed(&draw(&[crowded.as_str()])),
             Err(ReadError::TooManyCharacters)
         );
     }

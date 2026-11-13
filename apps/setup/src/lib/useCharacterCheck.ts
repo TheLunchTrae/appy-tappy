@@ -1,9 +1,9 @@
 // The check of a reference's characters, one at a time, over the finds and the recorded readings it would learn from.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { FoundView, RecordingView } from './bindings.ts';
-import { type Change, type Guide, type Place, type Turn, changes, openGuide, settle, turn } from './confirm.ts';
+import { type Change, type Guide, type Place, type Turn, openGuide, settle, turn } from './confirm.ts';
 import { type FoundRow, listed } from './found.ts';
 import type { Picture } from './pixels.ts';
 import type { ReviewEntry } from './review.ts';
@@ -11,11 +11,11 @@ import type { Finder } from './useFound.ts';
 import type { useRecording } from './useRecording.ts';
 import type { useReview } from './useReview.ts';
 
-const NO_SHAPES: ReadonlySet<string> = new Set();
-
 /**
- * The places a check goes over: every find listed, ticked or not, and every recorded reading that review keeps. A
- * reading review leaves out shows only characters the kept ones show, so it has nothing to ask about.
+ * The places a check goes over: every find listed, ticked or not, and every recorded reading. It asks about the
+ * finds and about the readings review keeps. A reading review leaves out shows only shapes the kept ones show, so it
+ * has nothing to ask about, but it gets the answers too: review compares the texts of all the readings, and would
+ * flag a kept reading the check fixed against a left-out one it did not.
  */
 export function checkPlaces(
   found: FoundView['finds'],
@@ -35,12 +35,14 @@ export function checkPlaces(
             width: find.region.width,
             text: row.text,
             keep: row.keep,
+            reading: row.reading,
+            asks: true,
           },
         ];
   });
   const readings = recorded.flatMap((reading, index): Place[] => {
     const entry = entries[index];
-    return entry === undefined || !entry.keep
+    return entry === undefined
       ? []
       : [
           {
@@ -49,7 +51,9 @@ export function checkPlaces(
             characters: reading.characters,
             width: reading.width,
             text: entry.text,
-            keep: true,
+            keep: entry.keep,
+            reading: reading.text.kind === 'pending' && entry.text === '',
+            asks: entry.keep,
           },
         ];
   });
@@ -63,7 +67,7 @@ export interface CharacterCheck {
   /** The open check, where it can be for the places as they are now, or null while it is closed. */
   readonly guide: Guide | null;
   readonly open: () => void;
-  /** Closes it and forgets its answers; the texts they wrote stay. */
+  /** Closes it and forgets its answers; the texts they wrote stay. Escape closes it too. */
   readonly close: () => void;
   readonly act: (event: Turn) => void;
   /** Edits one place's text and tick by hand, as its row in the list of finds or its tile in review does. */
@@ -103,6 +107,25 @@ export function useCharacterCheck(
     }
   };
 
+  // Escape closes the check. It is taken as the window hears it, before review's own Escape, which would close the
+  // review the check was opened from underneath it.
+  const open = held !== null;
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setHeld(null);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+
   return {
     places,
     guide,
@@ -110,10 +133,6 @@ export function useCharacterCheck(
       setHeld(openGuide(places, needs));
     },
     close: () => {
-      // A text that arrived after the last answer still gets the answers.
-      if (guide !== null) {
-        apply(changes(places, guide.answers, NO_SHAPES));
-      }
       setHeld(null);
     },
     act: (event) => {

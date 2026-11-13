@@ -35,15 +35,13 @@ fn name(shape: &Shape) -> String {
 /// The characters `image` shows, left to right, as `reader` splits and
 /// samples them; none when it cannot, as for a picture without ink.
 pub(crate) fn of(image: &Image, reader: &DigitReader) -> Vec<CharacterView> {
-    let (Ok(shapes), Ok(columns)) = (reader.shapes(image), reader.columns(image)) else {
+    let Ok(placed) = reader.placed(image) else {
         return Vec::new();
     };
-    shapes
-        .characters()
-        .iter()
-        .zip(columns)
+    placed
+        .into_iter()
         .map(|(shape, columns)| CharacterView {
-            shape: name(shape),
+            shape: name(&shape),
             left: columns.start,
             right: columns.end,
         })

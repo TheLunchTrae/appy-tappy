@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   type Guide,
@@ -6,6 +6,9 @@ import {
   type ShapeUse,
   type Step,
   type Turn,
+  beingRead,
+  listed,
+  placeKey,
   progress,
   steps,
   unfitted,
@@ -108,6 +111,53 @@ function Marked({
   );
 }
 
+/**
+ * The field that says which character a shape is. It shows the step's character, and typing another answers for the
+ * shape once the user presses Enter or leaves the field, not at each key, so the tile stays put while they type.
+ */
+function Retype({
+  character,
+  label,
+  describedBy,
+  onRetype,
+}: {
+  readonly character: string;
+  readonly label: string;
+  readonly describedBy: string;
+  readonly onRetype: (character: string) => void;
+}) {
+  // What the user typed and has not committed; null shows the step's character.
+  const [typed, setTyped] = useState<string | null>(null);
+  const commit = (): void => {
+    const [first] = labelCharacters(typed ?? '');
+    setTyped(null);
+    if (first !== undefined && first !== character) {
+      onRetype(first);
+    }
+  };
+  return (
+    <input
+      className="input"
+      value={typed ?? character}
+      aria-label={label}
+      aria-describedby={describedBy}
+      onFocus={(event) => {
+        event.target.select();
+      }}
+      onChange={(event) => {
+        // One character: the newest one typed replaces what was there.
+        setTyped(labelCharacters(event.target.value).at(-1) ?? '');
+      }}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          commit();
+        }
+      }}
+    />
+  );
+}
+
 /** One shape of a step: the shape drawn large, where it shows, and what to do when it is not the step's character. */
 function ShapeTile({
   use,
@@ -129,8 +179,9 @@ function ShapeTile({
   const shown = first === undefined ? undefined : firstPlace?.characters[first.at];
   const name = step.shapes.length === 1 ? 'this shape' : `shape ${number}`;
   const noteId = `shape-${use.shape}-note`;
+  const state = use.aside ? 'Left out: not a character. ' : use.answered ? 'Checked. ' : '';
   return (
-    <li className={use.answered ? 'tile shape kept' : 'tile shape'}>
+    <li className={use.aside ? 'tile shape off' : use.answered ? 'tile shape kept' : 'tile shape'}>
       <Cutout
         picture={firstPlace === undefined ? undefined : picture(firstPlace)}
         left={shown?.left ?? 0}
@@ -139,55 +190,59 @@ function ShapeTile({
         label={`The shape read as ${step.character}`}
       />
       <span id={noteId} className="meta">
-        {use.answered ? 'Checked. ' : ''}
+        {state}
         Shows in {plural(use.spots.length, 'place', 'places')}.
-        {use.also.length === 0 ? '' : ` The text reader also read it as ${use.also.join(', ')}.`}
+        {use.also.length === 0 || use.aside ? '' : ` The text of some has it as ${use.also.join(', ')}.`}
       </span>
       <span className="marks">
         {use.spots.slice(0, SHOWN_PLACES).map((spot) => {
           const place = places[spot.place];
           return place === undefined ? null : (
-            <Marked
-              key={`${place.source}-${place.index}-${spot.at}`}
-              place={place}
-              at={spot.at}
-              picture={picture(place)}
-            />
+            <Marked key={`${placeKey(place)}-${spot.at}`} place={place} at={spot.at} picture={picture(place)} />
           );
         })}
         {use.spots.length > SHOWN_PLACES ? (
           <span className="meta">and {use.spots.length - SHOWN_PLACES} more</span>
         ) : null}
       </span>
-      <label className="retype">
-        It is
-        <input
-          className="input"
-          // The field always shows the one character the shape has, so typing replaces it.
-          value={step.character}
-          aria-label={`The character ${name} is`}
-          aria-describedby={noteId}
-          onFocus={(event) => {
-            event.target.select();
-          }}
-          onChange={(event) => {
-            const typed = labelCharacters(event.target.value).filter((character) => character !== step.character);
-            const character = typed.at(-1);
-            if (character !== undefined) {
-              onTurn({ kind: 'retype', shape: use.shape, character });
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="btn small"
-          onClick={() => {
-            onTurn({ kind: 'setAside', shape: use.shape });
-          }}
-        >
-          Not a character
-        </button>
-      </label>
+      {use.aside ? (
+        <span className="retype">
+          <button
+            type="button"
+            className="btn small"
+            aria-describedby={noteId}
+            onClick={() => {
+              onTurn({ kind: 'restore', shape: use.shape });
+            }}
+          >
+            It is a character
+          </button>
+        </span>
+      ) : (
+        <span className="retype">
+          <span className="it-is">
+            It is
+            <Retype
+              character={step.character}
+              label={`The character ${name} is`}
+              describedBy={noteId}
+              onRetype={(character) => {
+                onTurn({ kind: 'retype', shape: use.shape, character });
+              }}
+            />
+          </span>
+          <button
+            type="button"
+            className="btn small"
+            aria-describedby={noteId}
+            onClick={() => {
+              onTurn({ kind: 'setAside', shape: use.shape });
+            }}
+          >
+            Not a character
+          </button>
+        </span>
+      )}
     </li>
   );
 }
@@ -210,7 +265,8 @@ function CharacterStep({ step, ...props }: Props & { readonly step: Step }) {
             {several
               ? `The text has ${step.character} drawn ${step.shapes.length} ways, in ${plural(count, 'place', 'places')}. `
               : `It shows in ${plural(count, 'place', 'places')}. `}
-            Your answer fixes every place that shows it. If a shape is another character, type that character under it.
+            Your answer fixes every place that shows it. If a shape is another character, type that character under it
+            and press Enter.
           </p>
         </div>
         <div className="end">
@@ -265,7 +321,8 @@ function CharacterStep({ step, ...props }: Props & { readonly step: Step }) {
 
 /** The last step: the places whose text has another number of characters than the place shows. */
 function UnfittedStep({ guide, places, picture, onTurn, onEdit }: Props) {
-  const left = unfitted(places, guide.answers);
+  // The places the stop named when the check came to it, so none leaves the list while its text is typed.
+  const left = listed(guide.cursor, places);
   return (
     <>
       <div className="sheet-head">
@@ -275,7 +332,8 @@ function UnfittedStep({ guide, places, picture, onTurn, onEdit }: Props) {
           </h2>
           <p>
             The text of each has another number of characters than the picture shows, so its characters could not be
-            checked one at a time. Type what it shows, or leave it out.
+            checked one at a time. Type what it shows, or leave it out. What you type counts as your answer for its
+            characters.
           </p>
         </div>
         <div className="end">
@@ -306,7 +364,7 @@ function UnfittedStep({ guide, places, picture, onTurn, onEdit }: Props) {
             return null;
           }
           const name = placeName(place);
-          const noteId = `unfitted-${place.source}-${place.index}`;
+          const noteId = `unfitted-${placeKey(place)}`;
           return (
             <li key={noteId} className={place.keep ? 'tile kept' : 'tile off'}>
               <label className="top">
@@ -334,7 +392,9 @@ function UnfittedStep({ guide, places, picture, onTurn, onEdit }: Props) {
               <span id={noteId} className="meta">
                 {place.characters.length === 0
                   ? 'No characters were found in its picture.'
-                  : `Its picture shows ${plural(place.characters.length, 'character', 'characters')}, and its text has ${labelCharacters(place.text).length}.`}
+                  : labelCharacters(place.text).length === place.characters.length
+                    ? `Its text has the ${plural(place.characters.length, 'character', 'characters')} its picture shows.`
+                    : `Its picture shows ${plural(place.characters.length, 'character', 'characters')}, and its text has ${labelCharacters(place.text).length}.`}
               </span>
             </li>
           );
@@ -354,12 +414,20 @@ export function CharacterCheckSheet(props: Props) {
   useEffect(() => {
     sheet.current?.querySelector<HTMLElement>('[data-check-head]')?.focus();
   }, [stop]);
+  // An answer can take away the tile that had focus, such as a shape retyped to another step's character. Focus
+  // then falls to the page, and goes to the step's heading instead.
+  useEffect(() => {
+    if (document.activeElement === document.body) {
+      sheet.current?.querySelector<HTMLElement>('[data-check-head]')?.focus();
+    }
+  });
   const step =
     cursor.at === 'character'
-      ? steps(places, guide.answers, needs).find((each) => each.character === cursor.character)
+      ? steps(places, guide, needs).find((each) => each.character === cursor.character)
       : undefined;
-  const all = steps(places, guide.answers, needs);
-  const left = unfitted(places, guide.answers).length;
+  const all = steps(places, guide, needs);
+  const left = unfitted(places, guide).length;
+  const unread = beingRead(places);
   const skipped = all.filter((each) => each.shapes.some((use) => !use.answered)).map((each) => each.character);
   return (
     <div ref={sheet} className="check-sheet">
@@ -371,29 +439,32 @@ export function CharacterCheckSheet(props: Props) {
         <div className="sheet-head">
           <div>
             <h2 tabIndex={-1} data-check-head>
-              {all.length === 0 && left === 0
+              {all.length === 0 && left === 0 && unread === 0
                 ? 'Nothing to check yet'
-                : skipped.length === 0 && left === 0
+                : skipped.length === 0 && left === 0 && unread === 0
                   ? 'Every character is checked'
                   : 'That was the last one'}
             </h2>
             <p>
-              {all.length === 0 && left === 0
+              {all.length === 0 && left === 0 && unread === 0
                 ? 'No find or kept reading has text to check. Find more like a box, or record the reference, first.'
                 : [
                     skipped.length === 0
                       ? 'Each place has the text you confirmed, and a find you checked in full is ticked, ready to add.'
-                      : `You skipped ${skipped.join(', ')}. The places that show ${skipped.length === 1 ? 'it' : 'them'} keep the text they had.`,
+                      : `${skipped.join(', ')} ${skipped.length === 1 ? 'is' : 'are'} not checked yet. The places that show ${skipped.length === 1 ? 'it' : 'them'} keep the text they have.`,
                     left === 0
                       ? null
                       : `${plural(left, 'place still needs its text typed', 'places still need their text typed')}; Back shows ${left === 1 ? 'it' : 'them'}.`,
+                    unread === 0
+                      ? null
+                      : `${plural(unread, 'place is', 'places are')} still being read, and ${unread === 1 ? 'its' : 'their'} characters are asked about once the text arrives.`,
                   ]
                     .filter((part) => part !== null)
                     .join(' ')}
             </p>
           </div>
           <div className="end">
-            {all.length === 0 && left === 0 ? null : (
+            {all.length === 0 && left === 0 && unread === 0 ? null : (
               <button
                 type="button"
                 className="btn"

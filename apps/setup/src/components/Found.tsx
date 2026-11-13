@@ -193,6 +193,11 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
               </span>
             )}
           </div>
+          {reread === null || reread.blocked === null ? null : (
+            <p id="reread-blocked" className="note">
+              {reread.blocked}
+            </p>
+          )}
           <div className="row">
             <button
               type="button"
@@ -207,11 +212,6 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
               {CHECK_CHARACTERS_HINT}
             </Hint>
           </div>
-          {reread === null || reread.blocked === null ? null : (
-            <p id="reread-blocked" className="note">
-              {reread.blocked}
-            </p>
-          )}
           <ul aria-label="Found text">
             {rows.map((row) => {
               const number = row.index + 1;

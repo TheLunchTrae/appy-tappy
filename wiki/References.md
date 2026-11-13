@@ -210,23 +210,35 @@ together.
    **Yes, they are all 7**. The characters the reference
    [needs](#choose-what-it-needs) come first.
 2. **Fix one that is something else.** Type the right character in
-   **It is** under its tile. Every place that shows it gets that character,
-   and the tile moves to that character's step. **Not a character** is for
-   something that is no text, such as part of an icon: every place that
-   shows it is left out.
+   **It is** under its tile and press Enter. Every place that shows it gets
+   that character, and the tile moves to that character's step.
+   **Not a character** is for something that is no text, such as part of an
+   icon: every place that shows it is left out. The tile stays in its step,
+   and **It is a character** takes that back.
 3. **Type what does not fit.** A last step, **Type what these show**, lists
    any place whose text has another number of characters than its picture
    shows, so its characters could not be checked one at a time. Type what it
-   shows, or leave it out. A place like that gets its text by itself when
-   your answers cover all its characters.
-4. **Finish.** **Done**, **Back to the screenshot**, or **Back to review**
-   closes the check. The texts it fixed stay in the list of finds and in
-   review, where you add or keep them as before.
+   shows, or leave it out. What you type counts as your answer for its
+   characters. A place like that gets its text by itself when your answers
+   cover all its characters.
+4. **Finish.** **Done**, **Back to the screenshot**, **Back to review**, or
+   Escape closes the check. The texts it fixed stay in the list of finds and
+   in review, where you add or keep them as before.
 
 **Skip** goes on without answering, and **Back** returns to the step before.
 A find whose characters you all answered for is ticked, and you can clear
-the tick afterward. You can still change any text by hand; while the check is
-open, an answer you gave for a character wins over text typed against it.
+the tick afterward. A reading that review leaves out is not asked about and
+stays left out, and its text gets your answers too.
+
+You can still change any text by hand. An answer changes only the character
+it is about, in the places that show it, and never a text you typed since.
+When a text you typed gives a character another answer than you gave in the
+check, the check asks about that character again.
+
+A find that AppyTappy is still reading has no text to check. The last
+screen says how many are still being read. Their characters join the steps
+once the text arrives: go **Back** to them, or select **Check characters**
+again.
 
 ## What a reference can't learn
 
