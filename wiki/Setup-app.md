@@ -1069,8 +1069,9 @@ saved file is held to and takes nothing else from it:
   with a value the runtime could not read is refused.
 
 `pack` holds an application to the same rules as it exports it. It packs
-each picture as it reads it and stops at the first that takes the zip file
-past `MAX_SHARED_BYTES`, so it reads no picture after that one. It then reads
+each picture as it reads it and stops at the first that takes what the zip
+file holds past `MAX_SHARED_BYTES`, so it reads no picture after that one,
+and reads that one only to the byte past the limit. It then reads
 back what it packed with `unpack` and refuses what that refuses, such as an
 application whose pictures hold more bytes or pixels than an import reads.
 So an application that AppyTappy exports is one it imports; a property test

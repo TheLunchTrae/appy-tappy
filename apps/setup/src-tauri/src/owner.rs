@@ -102,8 +102,9 @@ pub(crate) struct Owner<H: Host> {
     /// with what it keeps.
     capture: Capture<H::Session>,
     /// The saved reference the reference editor's characters add to, as
-    /// read when its editor first asked about them, until an application
-    /// is written: [`Owner::keep_reference`].
+    /// read when its editor first asked about them, until an existing
+    /// application is written or removed: [`Owner::keep_reference`]. A new
+    /// application has none kept.
     kept_reference: Option<(ReferenceRef, SavedReference)>,
     /// Sends new readings to the text reader's thread.
     ocr: Sender<ocr::Job>,
