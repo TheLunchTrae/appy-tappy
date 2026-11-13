@@ -3120,9 +3120,8 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
             flag.trim()
         );
     }
-    // cargo-mutants writes a report with no outcomes when the diff or the
-    // shard selects no mutants, so the list must select the same mutants as
-    // the run.
+    // cargo-mutants writes a report without outcomes when a shard selects no
+    // mutants, so the list must select the same mutants as the run.
     let Some(mutants_list) = diff
         .lines()
         .find(|line| line.contains("cargo mutants --list "))
