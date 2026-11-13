@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import type { AppSummary } from '../lib/bindings.ts';
-import { restoreDraftScreenshots, stopCapture } from '../lib/api.ts';
+import { restoreDraftScreenshots } from '../lib/api.ts';
+import { useCapture } from '../lib/capture.ts';
 import { Capture, type CaptureMode, type Restored } from '../components/Capture.tsx';
 import { type Choice, Picker } from '../components/Picker.tsx';
 import type { Made, SavedRef } from '../lib/flow.ts';
-import { background } from '../lib/repeat.ts';
 import type { Held } from '../lib/unsaved.ts';
 import type { ReportDraft, Resumed } from '../lib/drafts.ts';
 
@@ -59,13 +59,8 @@ export function ReferenceFlow({
   // Whether a window was picked before: only the first pick brings a draft's screenshots back.
   const [pickedBefore, setPickedBefore] = useState(false);
   const [mode] = useState<CaptureMode>({ kind: 'reference', existing: existing?.reference ?? null });
-  // Leaving the flow stops the window's capture, and its screenshots and recording go with it.
-  useEffect(
-    () => () => {
-      background(stopCapture());
-    },
-    [],
-  );
+  // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at.
+  const stop = useCapture();
   if (picking || choice === null) {
     return (
       <Picker
@@ -101,7 +96,7 @@ export function ReferenceFlow({
       onCancel={onCancel}
       onChangeWindow={() => {
         // The capture ends here, not when another window is picked, so nothing keeps its screenshots meanwhile.
-        background(stopCapture());
+        stop();
         setPicking(true);
       }}
       onSaved={onSaved}

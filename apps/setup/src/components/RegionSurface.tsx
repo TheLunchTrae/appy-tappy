@@ -52,8 +52,8 @@ interface Props {
   readonly label: string;
   /** Whether the user may draw on it, which they may only on a screenshot. */
   readonly editable: boolean;
-  /** Whether a click picks a color instead of drawing. */
-  readonly picking: boolean;
+  /** Takes the pixel a click picks a color at, which it does instead of drawing; null or left out, clicks draw. */
+  readonly pick?: ((point: Point) => void) | null;
   /** How a drag or a click marks the region; the box is drawn by hand unless one is given. */
   readonly tool?: SelectTool;
   /** Which pixels of the region a selection leaves out, row by row, to shade them. */
@@ -72,7 +72,6 @@ interface Props {
   readonly onPointer?: (phase: 'down' | 'up') => void;
   /** Called with the region a finished drag made, drawn anew or adjusted. A drag that is interrupted calls nothing. */
   readonly onRegion: (region: Rect, made: 'drawn' | 'adjusted') => void;
-  readonly onPick: (point: Point) => void;
   /** Called with the rough box dragged with the snap tool. */
   readonly onSnap?: (rough: Rect, combine: Combine) => void;
   /** Called with the pixel clicked with the click tool. */
@@ -155,7 +154,7 @@ export function RegionSurface({
   area = false,
   label,
   editable,
-  picking,
+  pick = null,
   tool = 'box',
   ignored = null,
   others = [],
@@ -164,11 +163,11 @@ export function RegionSurface({
   describedBy,
   onPointer,
   onRegion,
-  onPick,
   onSnap,
   onSelectAt,
 }: Props) {
   const surface = useRef<HTMLDivElement>(null);
+  const picking = pick !== null;
   // The drag as the handlers left it, which several pointer events can change before the next render.
   const latest = useRef<Drag>(IDLE);
   const [drag, setDrag] = useState<Drag>(IDLE);
@@ -248,7 +247,7 @@ export function RegionSurface({
     }
     const point = at(event);
     if (picking) {
-      onPick(pixelAt(point, size));
+      pick(pixelAt(point, size));
       return;
     }
     if (tool === 'click') {

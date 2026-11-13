@@ -1,6 +1,6 @@
 // Recording a value's region for its looks, and which of the session's screenshots can be removed.
 
-import { type Draft, DEFAULT_TOLERANCE, stateOn } from './check.ts';
+import { type Draft, CHECKS, stateOn } from './check.ts';
 import { clock } from './review.ts';
 
 /** A screenshot in the strip: its index in the session, and whether a recording kept it. */
@@ -21,7 +21,7 @@ export function lookBlocked(draft: Draft): string | null {
  * with.
  */
 export function lookTolerance(draft: Draft): number {
-  return draft.kind === 'state' ? draft.tolerance : DEFAULT_TOLERANCE.state;
+  return draft.kind === 'state' ? draft.tolerance : CHECKS.state.tolerance;
 }
 
 /**

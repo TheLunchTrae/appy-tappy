@@ -127,6 +127,10 @@ run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 # hours; see wiki/Rust-standards.md#mutation-testing. It waits for the other
 # Cargo tasks, so a copied target/ never holds a build half written.
 #
+# MUTANTS_SHARD=k/n tests only the kth of n shards of the selected mutants,
+# counting from 0; CI runs the shards on separate runners. Unset, the lane
+# tests every selected mutant.
+#
 # cargo-mutants builds in its own copy of the tree and leaves target/ out of
 # it. MUTANTS_COPY_TARGET=true copies target/ too, so the baseline reuses the
 # builds already there; CI sets it, and a local run leaves it off rather than
@@ -191,9 +195,14 @@ trap 'exit 143' TERM
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
   run_mutants_task_child cargo test --no-run --workspace --all-features --locked
 fi
+shard_args=""
+if [ -n "${MUTANTS_SHARD:-}" ]; then
+  shard_args="--shard=$MUTANTS_SHARD"
+fi
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked --in-diff "$diff_file"
+# shard_args is unquoted so that it expands to nothing when the lane is whole.
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked $shard_args --in-diff "$diff_file"
 if [ ! -d mutants.out ]; then
   echo "The diff selects no mutants; nothing to verify."
   exit 0
@@ -218,8 +227,10 @@ run = "cargo deny --workspace --all-features --locked check"
 description = "Run the Rust standards workflow with autofixes"
 depends = ["rust:fmt"]
 
-[tasks."rust:standards:check"]
-description = "Run the Rust standards CI gate"
+# CI runs the mutation lane in shards of its own, so its quality job runs the
+# gate without it.
+[tasks."rust:standards:check:base"]
+description = "Run the Rust standards CI gate without the mutation lane"
 depends = [
   "rust:fmt:check",
   "rust:lint",
@@ -227,7 +238,10 @@ depends = [
   "rust:doc",
   "rust:test",
   "rust:package",
-  "rust:mutants:diff",
   "rust:machete",
   "rust:deny",
 ]
+
+[tasks."rust:standards:check"]
+description = "Run the Rust standards CI gate"
+depends = ["rust:standards:check:base", "rust:mutants:diff"]

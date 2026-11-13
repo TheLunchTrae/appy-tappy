@@ -43,7 +43,8 @@ This page covers what the user guide leaves out.
   (`lib/flow.ts`). `save_value` answers the saved value's application and ID,
   which the editor picks once the pages' lists show it, so nothing is looked
   up by name. Until then the draft has no value and cannot be saved. The
-  pages' lists are read every three seconds and after each save; the reads
+  pages' lists are read every three seconds, except while a screen holds
+  the capture (`lib/capture.ts`), and after each save; the reads
   are numbered, so an answer that arrives after a newer one is dropped
   (`lib/reads.ts`), and the editor can tell what is still on its way from
   what a newer read shows to be gone. When a flow shows because another
@@ -628,6 +629,10 @@ wrote. An answer edits only the shapes it is about, in the turn that gives
 it and in each place whose text is read afterward, so a text typed by hand
 afterward stays and reopens the question instead.
 [Character check](State-machines.md#character-check) has its states.
+A step's keys send the same turns as its buttons: `checkKey` in
+`lib/checkKeys.ts` says what a key answers with, given what has focus and
+which buttons the step shows, and `StepAnswers` in `CharacterCheck.tsx`
+renders the buttons and listens for the keys.
 
 ### Recording looks
 
@@ -1394,6 +1399,16 @@ and `PICTURES` how a picture a command answers starts, with a sample picture
 that `apps/setup/tests/pixels.test.ts` decodes. The UI's formatting and lint
 checks skip both generated files, and its unused-type check skips
 `bindings.ts`.
+
+What the page knows of each kind of check is one entry of `CHECKS` in
+`apps/setup/src/lib/check.ts`: its name, the tolerance it starts with, the
+kind of value it reads, how a draft builds it, how a saved one reads on the
+Values page, and what a fix keeps of it. The table's keys are the generated
+`CheckDef` kinds, and so are those of the capture screen's fields for each
+kind (`howFields` in `Capture.tsx`). What a kind does about content that
+moves is a switch over the same kinds that must cover each
+(`lib/moving.ts`). A kind the Rust side adds does not compile until it has
+all three.
 
 The page reads a typed path, link, key press, screenshot shortcut, or app name
 itself, so the user sees what to fix as they type, and places a click's spot
