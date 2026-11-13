@@ -218,9 +218,11 @@ impl DigitReader {
     /// It takes its number from its glyphs for them alone, in the order it
     /// learned them: a shape matches the closest of those glyphs first, so
     /// a reader of digits cannot read a `0` as the `O` its font also has.
-    /// A digit it leaves out is the exception: a shape closer to it than
-    /// to every glyph it reads is that digit, so leaving out a `9` cannot
-    /// turn a `9` into the `3` it looks like. The other characters it learned are still characters to it, which
+    /// A digit it leaves out is the exception: when the closest glyph it
+    /// leaves out is a digit that matches the shape and is closer to it
+    /// than every glyph it reads, the shape is that digit, so leaving out a
+    /// `9` cannot turn a `9` into the `3` it looks like. The other
+    /// characters it learned are still characters to it, which
     /// [`DigitReader::read`] takes as text and not as shapes it has yet to
     /// learn, and so are those an earlier call left out. A check that names
     /// no characters reads with the reader as it is.
@@ -1399,6 +1401,12 @@ mod tests {
         assert!(knows(&digits, '0'));
         assert!(!knows(&digits, 'O'));
         assert_eq!(digits.read(&letter, false), Ok(Number::new(0.0).unwrap()));
+        // A value that also leaves out a digit still takes the shape for its
+        // own `0`, since only a left-out digit wins over a kept lookalike.
+        let mut with_one = reader.clone();
+        with_one.learn(&draw(&["#"; 16]), "1").unwrap();
+        let zero = with_one.reading(Some("0")).unwrap();
+        assert_eq!(zero.read(&letter, false), Ok(Number::new(0.0).unwrap()));
         // The glyphs kept stay in the order they were learned.
         assert_eq!(reader.clone().reading(Some("0 O")), Some(reader.clone()));
         assert_eq!(reader.clone().reading(Some("%")), None);

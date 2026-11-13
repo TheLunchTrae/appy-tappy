@@ -89,6 +89,27 @@ export async function arrive(
 }
 
 /**
+ * The screenshot `index` to list, with its pixels, once `fetch` gets both its thumbnail and its own pixels. When
+ * either does not arrive, it calls `release` once and rejects, so a screenshot taken or recorded is listed only once
+ * it has them.
+ */
+export async function arrived(
+  index: number,
+  recorded: boolean,
+  release: (index: number) => void,
+  fetch: (index: number) => Promise<readonly [Picture | null, Picture | null]> = fetchShot,
+): Promise<{ readonly shot: Shot; readonly picture: Picture }> {
+  const time = new Date().toLocaleTimeString();
+  try {
+    const { thumb, picture } = await arrive(index, fetch);
+    return { shot: { index, time, thumb: { kind: 'loaded', picture: thumb }, recorded }, picture };
+  } catch (failure: unknown) {
+    release(index);
+    throw failure;
+  }
+}
+
+/**
  * The screenshots kept this session, and the one shown, or null while the live view shows. Those in `restored` came
  * back from a draft, so they are listed from the start, and one whose pixels fail to load loads again when it is
  * shown.
@@ -148,14 +169,12 @@ export function useScreenshots(restored: readonly DraftShot[] = []): {
   // Fetches the pixels of the screenshot `index` and then lists it. One whose pixels do not arrive is released and
   // never listed, so the strip shows no blank tile for it.
   const list = useCallback(async (index: number, recorded: boolean): Promise<Picture> => {
-    const time = new Date().toLocaleTimeString();
-    const { thumb, picture } = await arrive(index).catch((failure: unknown) => {
-      removed.current.add(index);
-      background(removeScreenshots([index]));
-      throw failure;
+    const { shot, picture } = await arrived(index, recorded, (failed) => {
+      removed.current.add(failed);
+      background(removeScreenshots([failed]));
     });
     if (!removed.current.has(index)) {
-      setShots((current) => withShot(current, { index, time, thumb: { kind: 'loaded', picture: thumb }, recorded }));
+      setShots((current) => withShot(current, shot));
       setFull((current) => new Map(current).set(index, picture));
     }
     return picture;
