@@ -683,7 +683,7 @@ mod tests {
         // The page asks for a reading's pixels by its recording's ID, which
         // it still holds after the stop.
         let recording = harness
-            .ask(|owner| owner.recording_state())
+            .ask(Owner::recording_state)
             .expect("a recording runs")
             .id;
         // What the page can ask for of the picked window: the newest frame,
