@@ -7,7 +7,6 @@ import {
   type AppSummary,
   type AutomationDef,
   type AutomationSummary,
-  type CheckDef,
   type ClickAtDef,
   type ClickButtonDef,
   type ClickDeliveryDef,
@@ -21,25 +20,10 @@ import {
   type ValueDef,
   type WhenDef,
 } from './bindings.ts';
+import { CHECKS, type ValueKind } from './check.ts';
 import { clickBlocked, clickName } from './click.ts';
 import { spellKeys } from './shortcut.ts';
 import { asciiLower, hasControl, trimmed, utf8Bytes } from './text.ts';
-
-/** What a value reads: a number, yes or no, or a state's name. */
-export type ValueKind = 'number' | 'flag' | 'state';
-
-/** The kind of value a check reads. */
-export function valueKind(check: CheckDef): ValueKind {
-  switch (check.kind) {
-    case 'number':
-    case 'barFill':
-      return 'number';
-    case 'color':
-      return 'flag';
-    case 'state':
-      return 'state';
-  }
-}
 
 /** A saved value an automation can watch. */
 export interface ValueChoice {
@@ -63,7 +47,7 @@ export function valueChoices(apps: readonly AppSummary[]): readonly ValueChoice[
           appName: app.file?.name ?? app.id,
           antiCheat: app.file?.antiCheat ?? 'unknown',
           value,
-          kind: valueKind(value.screen.check),
+          kind: CHECKS[value.screen.check.kind].reads,
           states: value.screen.check.kind === 'state' ? value.screen.check.states.map((state) => state.name) : [],
         })),
   );
