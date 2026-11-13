@@ -95,7 +95,9 @@ impl<H: Host> Owner<H> {
     pub(crate) fn live_values(&mut self, app: &str) -> Result<OverlayView, String> {
         let stores = known(&self.stores);
         self.live
-            .view(&self.host, &self.messages, app, || stores?.app(app))
+            .view(&self.host, (&self.messages, &mut self.tickets), app, || {
+                stores?.app(app)
+            })
     }
 
     /// Stops reading the values of the application `app` for the Values
@@ -111,7 +113,9 @@ impl<H: Host> Owner<H> {
     pub(super) fn overlay_view(&mut self, app: &str) -> Result<OverlayView, String> {
         let stores = known(&self.stores);
         self.overlays
-            .view(&self.host, &self.messages, app, || stores?.app(app))
+            .view(&self.host, (&self.messages, &mut self.tickets), app, || {
+                stores?.app(app)
+            })
     }
 
     /// Saves where the user put each panel, once it settled or, with `all`,
@@ -152,7 +156,7 @@ mod tests {
     use crate::overlay::{
         Card, FrameRead, OVERLAY_INTERVAL, Place, RETRY_POLLS, SETTLE_POLLS, ValueRead, ValueView,
     };
-    use crate::owner::messages::{Message, Reading};
+    use crate::owner::messages::{Event, Message, Reading};
     use appytappy_config::app_file::AntiCheatDef;
 
     use crate::owner::test_support::{
@@ -362,6 +366,11 @@ mod tests {
 
         // A capture that stops closes, says why, and starts again about a
         // second later.
+        let stopped = harness
+            .owner
+            .overlays
+            .ticket("example")
+            .expect("it captures");
         harness.deliver_at(
             &mut handler,
             Err(io::Error::other("the window closed")),
@@ -378,13 +387,15 @@ mod tests {
         }
         let mut handler = overlay_capture(&mut harness);
         // Readings from the stopped capture are dropped.
-        let message = Message::Overlay {
-            purpose: crate::overlay::Purpose::Overlay,
-            app: "example".to_owned(),
-            generation: 0,
-            read: Ok(FrameRead::Values(vec![ValueRead::Read(Reading::Flag(
-                true,
-            ))])),
+        let message = Message::Sent {
+            ticket: stopped,
+            event: Event::Overlay {
+                purpose: crate::overlay::Purpose::Overlay,
+                app: "example".to_owned(),
+                read: Ok(FrameRead::Values(vec![ValueRead::Read(Reading::Flag(
+                    true,
+                ))])),
+            },
         };
         assert!(harness.owner.handle(message).is_continue());
         assert_eq!(harness.ask(overlay_state), Ok(bar_view(over, None, None)));

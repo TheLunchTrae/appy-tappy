@@ -23,22 +23,23 @@ impl<H: Host> Owner<H> {
         screenshot: usize,
     ) -> Result<(), String> {
         let (region, window_size) = self.recordable(region, screenshot)?;
-        let id = self.next_recording_id();
-        self.recording = Some(Recorder::Looks(LookRecording::new(
+        let id = self.tickets.next();
+        let recording = LookRecording::new(
             id,
             region,
             tolerance,
             window_size,
-            &self.screenshots,
+            self.capture.screenshots(),
             Instant::now(),
-        )));
+        );
+        self.record_with(Recorder::Looks(recording));
         Ok(())
     }
 
     /// The recording of looks as the interface shows it, or `None` without
     /// one.
     pub(crate) fn look_recording_state(&self) -> Option<LookRecordingView> {
-        match &self.recording {
+        match self.capture.recording() {
             Some(Recorder::Looks(recording)) => Some(recording.view(Instant::now())),
             Some(Recorder::Readings(_)) | None => None,
         }
@@ -53,14 +54,14 @@ mod tests {
     use appytappy_sources::screen::{FrameHandler, Image, Size};
 
     use crate::check_spec::ColorSpec;
-    use crate::owner::messages::Message;
     use crate::owner::test_support::{
-        FakeHost, Harness, capturing, characters_in, frame_image, harness, trial,
+        FakeHost, Harness, capturing, characters_in, frame_image, harness, recognized, trial,
     };
     use crate::pixels;
     use crate::recording::Text;
     use crate::recording::looks::MAX_LOOKS;
     use crate::recording::ocr;
+    use crate::ticket::Ticket;
 
     use super::*;
 
@@ -427,7 +428,8 @@ mod tests {
             .try_iter()
             .map(|job| (job.source, job.index))
             .collect();
-        assert_eq!(jobs, [(ocr::Source::Recording(1), 0)]);
+        let first = harness.ask(Owner::recording_state).expect("a recording").id;
+        assert_eq!(jobs, [(ocr::Source::Recording(Ticket::numbered(first)), 0)]);
 
         harness.ask(start_looks).expect("records looks instead");
         assert_eq!(
@@ -435,7 +437,8 @@ mod tests {
             None,
             "the recording of readings is gone"
         );
-        assert_eq!(harness.looks().expect("it records").id, 2);
+        let looks = harness.looks().expect("it records").id;
+        assert!(looks > first, "a recording of looks takes a new number");
         assert_eq!(
             harness.ask(start_readings(true)),
             Err(
@@ -446,12 +449,8 @@ mod tests {
             "a recording of looks has no readings to record more of"
         );
         assert!(harness.looks().is_some(), "the refused start left it");
-        let late = |recording| Message::Recognized {
-            recording,
-            index: 0,
-            text: Text::Read("1".to_owned()),
-        };
-        assert!(harness.owner.handle(late(1)).is_continue());
+        let late = |recording| recognized(recording, 0, Text::Read("1".to_owned()));
+        assert!(harness.owner.handle(late(first)).is_continue());
         harness.deliver(&mut handler, Ok(&shade(100)));
         assert_eq!(harness.jobs.try_iter().count(), 0, "it reads no text");
         assert_eq!(harness.kept(), [1]);
@@ -466,10 +465,12 @@ mod tests {
             .try_iter()
             .map(|job| (job.source, job.index))
             .collect();
-        assert_eq!(jobs, [(ocr::Source::Recording(3), 0)]);
+        let third = harness.ask(Owner::recording_state).expect("a recording").id;
+        assert!(third > looks, "and so does the next recording of readings");
+        assert_eq!(jobs, [(ocr::Source::Recording(Ticket::numbered(third)), 0)]);
         // Text for the first recording of readings, which a recording of
         // looks replaced, and for the recording of looks' own number.
-        for recording in [1, 2] {
+        for recording in [first, looks] {
             assert!(harness.owner.handle(late(recording)).is_continue());
         }
         let text_of = |harness: &mut Harness| {
@@ -484,7 +485,7 @@ mod tests {
             [Text::Pending],
             "late text is dropped"
         );
-        assert!(harness.owner.handle(late(3)).is_continue());
+        assert!(harness.owner.handle(late(third)).is_continue());
         assert_eq!(text_of(&mut harness), [Text::Read("1".to_owned())]);
         assert_eq!(
             harness.ask(|owner| owner.screenshot_pixels(1, 4)),

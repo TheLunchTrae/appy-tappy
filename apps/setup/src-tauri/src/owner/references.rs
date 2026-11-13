@@ -17,7 +17,7 @@ impl<H: Host> Owner<H> {
     pub(super) fn with_session<T>(&self, work: impl FnOnce(Session<'_>) -> T) -> T {
         let references = |reference: &ReferenceRef| self.saved_reference(reference);
         work(Session {
-            screenshots: &self.screenshots,
+            screenshots: self.capture.screenshots(),
             recording: self.readings(),
             references: &references,
         })

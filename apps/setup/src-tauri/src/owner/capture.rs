@@ -2,6 +2,8 @@
 //! keeping screenshots, and reading the check the user sets up on its frames.
 
 use std::io;
+use std::mem;
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use appytappy_config::app_file::WindowDef;
@@ -14,29 +16,157 @@ use crate::debug::workings::{self, ReadingDetails};
 use crate::match_preview::{self, MatchRule, MatchView};
 use crate::pixels;
 use crate::recording::Recorder;
+use crate::screenshots::Screenshots;
 use crate::selection::{self, SelectionSpec, SelectionView};
+use crate::ticket::{Running, Ticket, Tickets};
 use crate::window_list::{self, WindowChoice, WindowFit, WindowList, WindowScore};
 
+use super::found::Found;
 use super::host::Host;
-use super::messages::{CaptureFailure, Message, Reading};
+use super::live::LiveCheck;
+use super::messages::{CaptureFailure, Event, Message, Reading};
+use super::watch::Watching;
 use super::{Owner, PREVIEW_INTERVAL};
 
-/// A preview capture's message for one frame.
-fn preview_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Message<H> {
+/// What the owner's one capture slot holds. The capture screen's preview and
+/// the automation editor's watch share it, so starting one ends the other
+/// with everything it kept.
+#[derive(Debug)]
+pub(super) enum Capture<S> {
+    /// No capture runs and nothing is kept.
+    Idle,
+    /// The capture screen previews the window the user picked.
+    Picked(Box<Picked<S>>),
+    /// The automation editor watches a saved value.
+    Watching(Box<Watching<S>>),
+}
+
+/// The picked window: its capture, and what the capture screen keeps of it
+/// until the capture stops.
+#[derive(Debug)]
+pub(super) struct Picked<S> {
+    /// The window's capture, which runs until the slot is stopped, even
+    /// once it failed.
+    capture: Running<S>,
+    /// The newest frame and when it arrived.
+    pub(super) latest: Option<(Image, Instant)>,
+    /// Why the capture failed, until a good frame arrives.
+    pub(super) failure: Option<CaptureFailure>,
+    /// The session's screenshots.
+    pub(super) screenshots: Screenshots,
+    /// The check the capture screen is setting up, which the live frame is
+    /// read with.
+    pub(super) check: Option<LiveCheck>,
+    /// What the capture records: the readings a number's region shows or
+    /// the looks a value's region shows, one recording at a time.
+    pub(super) recording: Option<Recorder>,
+    /// The text found like a reference's sample, until the user adds it or
+    /// moves on.
+    pub(super) found: Option<Found>,
+}
+
+/// What a method reads when no window is picked.
+static NO_SCREENSHOTS: Screenshots = Screenshots::new();
+
+impl<S> Capture<S> {
+    /// The picked window, while the capture screen previews one.
+    pub(super) fn picked(&self) -> Option<&Picked<S>> {
+        match self {
+            Self::Picked(picked) => Some(picked),
+            Self::Idle | Self::Watching(_) => None,
+        }
+    }
+
+    /// The picked window, to change what is kept of it.
+    pub(super) fn picked_mut(&mut self) -> Option<&mut Picked<S>> {
+        match self {
+            Self::Picked(picked) => Some(picked),
+            Self::Idle | Self::Watching(_) => None,
+        }
+    }
+
+    /// The watch, while the automation editor watches a value.
+    pub(super) fn watching(&self) -> Option<&Watching<S>> {
+        match self {
+            Self::Watching(watching) => Some(watching),
+            Self::Idle | Self::Picked(_) => None,
+        }
+    }
+
+    /// The watch, to change it.
+    pub(super) fn watching_mut(&mut self) -> Option<&mut Watching<S>> {
+        match self {
+            Self::Watching(watching) => Some(watching),
+            Self::Idle | Self::Picked(_) => None,
+        }
+    }
+
+    /// The ticket of the picked window's capture.
+    pub(super) fn picked_ticket(&self) -> Option<Ticket> {
+        self.picked().map(|picked| picked.capture.ticket)
+    }
+
+    /// The session's screenshots: none unless a window is picked.
+    pub(super) fn screenshots(&self) -> &Screenshots {
+        self.picked()
+            .map_or(&NO_SCREENSHOTS, |picked| &picked.screenshots)
+    }
+
+    /// What the picked window's capture records, if anything.
+    pub(super) fn recording(&self) -> Option<&Recorder> {
+        self.picked().and_then(|picked| picked.recording.as_ref())
+    }
+
+    /// What the picked window's capture records, to change it.
+    pub(super) fn recording_mut(&mut self) -> Option<&mut Recorder> {
+        self.picked_mut()
+            .and_then(|picked| picked.recording.as_mut())
+    }
+}
+
+/// A preview capture's event for one frame.
+fn preview_event(frame: io::Result<Frame<'_>>) -> Event {
     match frame {
-        Ok(frame) => Message::Frame {
-            generation,
+        Ok(frame) => Event::Frame {
             image: frame.image.clone(),
             received: frame.received,
         },
-        Err(error) => Message::CaptureFailed {
-            generation,
-            failure: CaptureFailure {
-                ended: error.kind() == io::ErrorKind::NotConnected,
-                error: error.to_string(),
-            },
-        },
+        Err(error) => Event::CaptureFailed(CaptureFailure {
+            ended: error.kind() == io::ErrorKind::NotConnected,
+            error: error.to_string(),
+        }),
     }
+}
+
+/// Starts capturing `crop` of `window` on `host` under a new ticket, sending
+/// each frame to `messages` as the event `to_event` makes of it.
+pub(super) fn start<H: Host>(
+    host: &H,
+    tickets: &mut Tickets,
+    messages: &Sender<Message<H>>,
+    (window, crop): (u64, Crop),
+    interval: Duration,
+    to_event: fn(io::Result<Frame<'_>>) -> Event,
+) -> Result<Running<H::Session>, String> {
+    let ticket = tickets.next();
+    let messages = messages.clone();
+    let handler: FrameHandler = Box::new(move |frame| {
+        // The owner stopped when the send fails, and the capture is about
+        // to be stopped too, so the wait does not matter.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a failed send means the owner stopped and will close this capture"
+        )]
+        let _ = messages.send(Message::Sent {
+            ticket,
+            event: to_event(frame),
+        });
+        interval
+    });
+    let session = host
+        .capture(window, crop, interval, handler)
+        .map_err(|error| error.to_string())?;
+    Ok(Running { ticket, session })
 }
 
 impl<H: Host> Owner<H> {
@@ -53,6 +183,21 @@ impl<H: Host> Owner<H> {
         Ok((processes, windows))
     }
 
+    /// Stops the capture, if one runs, and forgets what the slot kept: the
+    /// picked window's frames, screenshots, recording, search, and check,
+    /// or the watch.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error the capture's thread ended with.
+    pub(super) fn end_capture(&mut self) -> io::Result<()> {
+        match mem::replace(&mut self.capture, Capture::Idle) {
+            Capture::Idle => Ok(()),
+            Capture::Picked(picked) => picked.capture.close(),
+            Capture::Watching(watching) => watching.close(),
+        }
+    }
+
     /// Stops the capture and forgets its frames, screenshots, recording,
     /// search, and check.
     pub(crate) fn stop(&mut self) {
@@ -61,23 +206,15 @@ impl<H: Host> Owner<H> {
             clippy::let_underscore_must_use,
             reason = "the old capture's error is moot once the user moved on"
         )]
-        let _ = self.close();
-        self.generation = self.generation.wrapping_add(1);
-        self.latest = None;
-        self.latest_at = None;
-        self.failure = None;
-        self.screenshots.clear();
-        self.check = None;
-        self.recording = None;
-        self.found = None;
-        self.watched = None;
+        let _ = self.end_capture();
     }
 
     /// Stops capture `capture`, the number [`Owner::pick`] answered, unless
     /// another capture took its place: a screen that goes stops its own
     /// capture, and its stop can arrive after the next screen started one.
     pub(crate) fn stop_capture(&mut self, capture: u64) {
-        if capture == self.generation {
+        let picked = self.capture.picked();
+        if picked.is_some_and(|picked| picked.capture.ticket.number() == capture) {
             self.stop();
         }
     }
@@ -85,60 +222,56 @@ impl<H: Host> Owner<H> {
     /// Captures `window`, dropping the previous window's screenshots and
     /// check, and answers the capture's number once it started.
     pub(crate) fn pick(&mut self, window: u64) -> Result<u64, String> {
-        self.start(window, Crop::Whole, PREVIEW_INTERVAL, preview_message)
-    }
-
-    /// Stops the capture and starts capturing `crop` of `window`, sending
-    /// each frame as `to_message` makes it. Answers the new capture's
-    /// generation.
-    pub(super) fn start(
-        &mut self,
-        window: u64,
-        crop: Crop,
-        interval: Duration,
-        to_message: fn(u64, io::Result<Frame<'_>>) -> Message<H>,
-    ) -> Result<u64, String> {
         self.stop();
-        let generation = self.generation;
-        let messages = self.messages.clone();
-        let handler: FrameHandler = Box::new(move |frame| {
-            // The owner stopped when the send fails, and the capture is
-            // about to be stopped too, so the wait does not matter.
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "a failed send means the owner stopped and will close this capture"
-            )]
-            let _ = messages.send(to_message(generation, frame));
-            interval
-        });
-        let session = self
-            .host
-            .capture(window, crop, interval, handler)
-            .map_err(|error| error.to_string())?;
-        self.session = Some(session);
-        Ok(generation)
+        let capture = start(
+            &self.host,
+            &mut self.tickets,
+            &self.messages,
+            (window, Crop::Whole),
+            PREVIEW_INTERVAL,
+            preview_event,
+        )?;
+        let number = capture.ticket.number();
+        self.capture = Capture::Picked(Box::new(Picked {
+            capture,
+            latest: None,
+            failure: None,
+            screenshots: Screenshots::new(),
+            check: None,
+            recording: None,
+            found: None,
+        }));
+        Ok(number)
     }
 
     /// Keeps `image`, a frame of the picked window that arrived at
     /// `received`, unless the capture ended. A good frame ends a failure
     /// that did not end the capture.
     pub(super) fn frame(&mut self, image: Image, received: Instant) {
-        if self.failure.as_ref().is_some_and(|failure| failure.ended) {
+        let Some(picked) = self.capture.picked_mut() else {
+            return;
+        };
+        if picked.failure.as_ref().is_some_and(|failure| failure.ended) {
             return;
         }
-        self.failure = None;
+        picked.failure = None;
         self.record(&image, received);
-        if let Some(check) = &mut self.check {
-            check.saw(image.size(), received);
+        if let Some(picked) = self.capture.picked_mut() {
+            if let Some(check) = &mut picked.check {
+                check.saw(image.size(), received);
+            }
+            picked.latest = Some((image, received));
         }
-        self.latest = Some(image);
-        self.latest_at = Some(received);
     }
 
-    /// Notes that the capture failed, and stops a recording, which records
-    /// nothing until frames come again, with the failure as its problem.
+    /// Notes that the picked window's capture failed, and stops a
+    /// recording, which records nothing until frames come again, with the
+    /// failure as its problem.
     pub(super) fn capture_failed(&mut self, failure: CaptureFailure) {
-        if let Some(recording) = &mut self.recording {
+        let Some(picked) = self.capture.picked_mut() else {
+            return;
+        };
+        if let Some(recording) = &mut picked.recording {
             let next = recording.after_failure();
             let recording = recording.life_mut();
             let error = check_spec::sentence(&failure.error);
@@ -151,37 +284,59 @@ impl<H: Host> Owner<H> {
                 recording.fail(Instant::now(), format!("Recording stopped: {error} {next}"));
             }
         }
-        self.failure = Some(failure);
+        picked.failure = Some(failure);
+    }
+
+    /// The newest frame of the picked window, or why there is none to act
+    /// on: its capture failed, as `failed` words it, or no frame arrived
+    /// yet.
+    pub(super) fn newest_frame(
+        &self,
+        failed: impl FnOnce(&CaptureFailure) -> String,
+    ) -> Result<&Image, String> {
+        let picked = self.capture.picked();
+        if let Some(failure) = picked.and_then(|picked| picked.failure.as_ref()) {
+            return Err(failed(failure));
+        }
+        picked
+            .and_then(|picked| picked.latest.as_ref())
+            .map(|(image, _arrived)| image)
+            .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())
     }
 
     /// Keeps the newest frame as a screenshot and answers its index.
     pub(crate) fn screenshot(&mut self) -> Result<usize, String> {
-        if let Some(failure) = &self.failure {
-            let next = if failure.ended {
-                "Change window to pick it again."
-            } else {
-                "Take it once the window shows again."
-            };
-            return Err(format!("{} {next}", check_spec::sentence(&failure.error)));
-        }
         let image = self
-            .latest
-            .clone()
+            .newest_frame(|failure| {
+                let next = if failure.ended {
+                    "Change window to pick it again."
+                } else {
+                    "Take it once the window shows again."
+                };
+                format!("{} {next}", check_spec::sentence(&failure.error))
+            })?
+            .clone();
+        let picked = self
+            .capture
+            .picked_mut()
             .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())?;
-        Ok(self.screenshots.push(image))
+        Ok(picked.screenshots.push(image))
     }
 
     /// Releases each of the screenshots `indexes` names. The others keep
     /// their indexes. Refused while a recording of looks records: it knows
     /// each look it kept, so it would not keep a removed one again.
     pub(crate) fn remove_screenshots(&mut self, indexes: &[usize]) -> Result<(), String> {
-        if let Some(Recorder::Looks(recording)) = &self.recording
+        let Some(picked) = self.capture.picked_mut() else {
+            return Ok(());
+        };
+        if let Some(Recorder::Looks(recording)) = &picked.recording
             && recording.life.is_recording()
         {
             return Err("Stop recording to remove a screenshot.".to_owned());
         }
         for &index in indexes {
-            self.screenshots.remove(index);
+            picked.screenshots.remove(index);
         }
         Ok(())
     }
@@ -193,7 +348,12 @@ impl<H: Host> Owner<H> {
     /// placed too.
     pub(crate) fn reading(&mut self) -> Result<Option<Reading>, String> {
         let now = self.host.now();
-        let (Some(check), Some(latest)) = (&mut self.check, &self.latest) else {
+        let Some(Picked {
+            check: Some(check),
+            latest: Some((latest, _arrived)),
+            ..
+        }) = self.capture.picked_mut()
+        else {
             return Ok(None);
         };
         check.settled(now);
@@ -203,12 +363,15 @@ impl<H: Host> Owner<H> {
     /// How the check reads the newest frame, for the debug details: `None`
     /// while [`Owner::reading`] answers none.
     pub(crate) fn explain_reading(&self) -> Result<Option<ReadingDetails>, String> {
-        let (Some(check), Some(latest), Some(arrived)) =
-            (&self.check, &self.latest, self.latest_at)
+        let Some(Picked {
+            check: Some(check),
+            latest: Some((latest, arrived)),
+            ..
+        }) = self.capture.picked()
         else {
             return Ok(None);
         };
-        let age = self.host.now().saturating_duration_since(arrived);
+        let age = self.host.now().saturating_duration_since(*arrived);
         Ok(check
             .region_of(latest)?
             .map(|(check, region)| workings::details(check, &region, age)))
@@ -217,15 +380,21 @@ impl<H: Host> Owner<H> {
     /// The newest frame's pixels, at most `max_width` wide, or `None`
     /// before one arrived. A failed capture answers why it failed.
     pub(crate) fn preview(&self, max_width: u32) -> Result<Option<Vec<u8>>, String> {
-        match (&self.failure, &self.latest) {
+        let Some(picked) = self.capture.picked() else {
+            return Ok(None);
+        };
+        match (&picked.failure, &picked.latest) {
             (Some(failure), _) => Err(failure.error.clone()),
-            (None, latest) => Ok(latest.as_ref().map(|image| pixels::rgba(image, max_width))),
+            (None, latest) => Ok(latest
+                .as_ref()
+                .map(|(image, _arrived)| pixels::rgba(image, max_width))),
         }
     }
 
     /// Screenshot `index`'s pixels, at most `max_width` wide.
     pub(crate) fn screenshot_pixels(&self, index: usize, max_width: u32) -> Option<Vec<u8>> {
-        self.screenshots
+        self.capture
+            .screenshots()
             .get(index)
             .map(|image| pixels::rgba(image, max_width))
     }
@@ -236,7 +405,8 @@ impl<H: Host> Owner<H> {
         screenshot: usize,
         selection: &SelectionSpec,
     ) -> Result<Option<SelectionView>, String> {
-        self.screenshots
+        self.capture
+            .screenshots()
             .get(screenshot)
             .map(|image| {
                 selection::select(image, selection)
@@ -253,7 +423,8 @@ impl<H: Host> Owner<H> {
         region: RegionSpec,
         screenshot: usize,
     ) -> Result<BarDetection, String> {
-        bar::detect(self.screenshots.slots(), region, screenshot).map_err(|error| error.to_string())
+        bar::detect(self.capture.screenshots().slots(), region, screenshot)
+            .map_err(|error| error.to_string())
     }
 
     /// What a bar of the colors `filled` and `empty` reads in `region`,
@@ -266,8 +437,14 @@ impl<H: Host> Owner<H> {
         filled: ColorSpec,
         empty: ColorSpec,
     ) -> Result<BarMeasure, String> {
-        bar::measure(self.screenshots.slots(), region, screenshot, filled, empty)
-            .map_err(|error| error.to_string())
+        bar::measure(
+            self.capture.screenshots().slots(),
+            region,
+            screenshot,
+            filled,
+            empty,
+        )
+        .map_err(|error| error.to_string())
     }
 
     /// The pixels of `area` on screenshot `screenshot` that `rule` takes.
@@ -277,7 +454,8 @@ impl<H: Host> Owner<H> {
         area: RegionSpec,
         rule: MatchRule,
     ) -> Result<MatchView, String> {
-        self.screenshots
+        self.capture
+            .screenshots()
             .get(screenshot)
             .ok_or(check_spec::SpecError::NoScreenshot)
             .and_then(|image| match_preview::find(image, area, rule))
@@ -704,7 +882,7 @@ mod tests {
         harness
             .ask(|owner| owner.set_check(&trial(STATE)))
             .expect("a valid check");
-        // The page asks for a reading's pixels by its recording's ID, which
+        // The page asks for a reading's pixels by its recording's number, which
         // it still holds after the stop.
         let recording = harness
             .ask(Owner::recording_state)

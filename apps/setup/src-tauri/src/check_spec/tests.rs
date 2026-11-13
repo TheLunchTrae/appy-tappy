@@ -4,6 +4,8 @@
 use std::error::Error as _;
 use std::io;
 
+use crate::ticket::Ticket;
+
 use appytappy_config::app_file::{
     CheckDefError, MAX_STATES, ReferenceDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
 };
@@ -558,7 +560,7 @@ fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 2, 2).expect("not empty");
     let mut recording = Recording::new(
-        1,
+        Ticket::numbered(1),
         region,
         (RED.into(), 0),
         (small.size(), Follows::Drawn),
@@ -843,7 +845,7 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 4, 2).expect("not empty");
     let mut recording = Recording::new(
-        1,
+        Ticket::numbered(1),
         region,
         (RED.into(), 0),
         (screenshot().size(), Follows::Drawn),
@@ -899,7 +901,7 @@ fn recorded_problems_judge_each_reading_after_the_saved_samples() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 2, 2).expect("not empty");
     let mut recording = Recording::new(
-        1,
+        Ticket::numbered(1),
         region,
         (RED.into(), 0),
         (screenshot().size(), Follows::Drawn),

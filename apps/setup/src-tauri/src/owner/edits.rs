@@ -47,8 +47,10 @@ impl<H: Host> Owner<H> {
         let tried = self.tried(spec);
         // An edit that cannot be tried reads nothing, rather than what the
         // edit before it read.
-        if tried.is_err() {
-            self.check = None;
+        if tried.is_err()
+            && let Some(picked) = self.capture.picked_mut()
+        {
+            picked.check = None;
         }
         tried
     }
@@ -56,7 +58,8 @@ impl<H: Host> Owner<H> {
     /// The size of the picked window on its newest frame, which an edit is
     /// tried at, or `None` before a frame arrived.
     pub(crate) fn window_size(&self) -> Option<SizeDef> {
-        self.latest.as_ref().map(|frame| frame.size().into())
+        let (frame, _arrived) = self.capture.picked()?.latest.as_ref()?;
+        Some(frame.size().into())
     }
 
     /// Tries `spec` as [`Owner::try_edit`] describes.
@@ -67,7 +70,7 @@ impl<H: Host> Owner<H> {
         // A value that is not read at the window's size stays the live
         // check: the answer says why, as each read does until a frame has
         // a size it is read at.
-        let unread = self.go_live(value).unread();
+        let unread = self.go_live(value);
         Ok(EditPreview {
             unread,
             dropped_fixes: edited.dropped,
@@ -131,10 +134,10 @@ impl<H: Host> Owner<H> {
                 (saved.screen.region, check.clone(), Vec::new())
             },
             EditDrawing::Drawn { check, screenshot } => {
-                if self.screenshots.get(*screenshot).is_none() {
+                if self.capture.screenshots().get(*screenshot).is_none() {
                     return Err("Take a screenshot first.".to_owned());
                 }
-                let size = check_spec::drawn_size(check, &self.screenshots, *screenshot)
+                let size = check_spec::drawn_size(check, self.capture.screenshots(), *screenshot)
                     .map_err(|error| error.to_string())?;
                 if (size.width, size.height) != (drawn.width, drawn.height) {
                     return Err(format!(
@@ -154,7 +157,7 @@ impl<H: Host> Owner<H> {
                 let number = free_picture_number(&saved.id, saved.screen.images());
                 let built = check_spec::to_saved_fix(
                     check,
-                    &self.screenshots,
+                    self.capture.screenshots(),
                     &spec.app,
                     &saved.id,
                     Some(number),

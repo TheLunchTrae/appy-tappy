@@ -147,10 +147,12 @@ impl<H: Host> Owner<H> {
     /// at the window's size now.
     pub(crate) fn set_check(&mut self, trial: &TrialSpec) -> Result<(), String> {
         let found = self.stores()?.app(&trial.app)?;
-        let size = check_spec::drawn_size(&trial.check, &self.screenshots, trial.screenshot)
-            .map_err(|error| error.to_string())?;
-        let saved = check_spec::to_saved(&trial.check, &self.screenshots, &trial.app, TRIED)
-            .map_err(|error| error.to_string())?;
+        let size =
+            check_spec::drawn_size(&trial.check, self.capture.screenshots(), trial.screenshot)
+                .map_err(|error| error.to_string())?;
+        let saved =
+            check_spec::to_saved(&trial.check, self.capture.screenshots(), &trial.app, TRIED)
+                .map_err(|error| error.to_string())?;
         let screen = ScreenDef {
             window_size: size.into(),
             region: saved.region,
@@ -204,14 +206,21 @@ impl<H: Host> Owner<H> {
         Ok(())
     }
 
-    /// Reads the live frame with `value` from now on, placed at the newest
-    /// frame's size, or at the size it was drawn at before a frame arrived.
-    pub(super) fn go_live(&mut self, value: SavedValue) -> &LiveCheck {
-        let size = self
+    /// Reads the live frame of the picked window with `value` from now on,
+    /// placed at the newest frame's size, or at the size it was drawn at
+    /// before a frame arrived, and answers why it is not read at that size,
+    /// if it is not. With no window picked there is no frame to read, so
+    /// the check is not kept.
+    pub(super) fn go_live(&mut self, value: SavedValue) -> Option<String> {
+        let Some(picked) = self.capture.picked_mut() else {
+            let size = value.drawn.window_size;
+            return LiveCheck::new(value, size).unread();
+        };
+        let size = picked
             .latest
             .as_ref()
-            .map_or(value.drawn.window_size, Image::size);
-        self.check.insert(LiveCheck::new(value, size))
+            .map_or(value.drawn.window_size, |(frame, _arrived)| frame.size());
+        picked.check.insert(LiveCheck::new(value, size)).unread()
     }
 }
 

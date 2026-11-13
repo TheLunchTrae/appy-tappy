@@ -16,11 +16,12 @@ use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 use crate::applications::AppSpec;
 use crate::check_spec::{CharactersSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayWindow;
-use crate::recording::{Scope, look, ocr};
+use crate::recording::{Scope, Text, look, ocr};
 use crate::stores::{self, Stores};
+use crate::ticket::Ticket;
 
 use super::host::{ClickNow, ClickedWindow, Host};
-use super::messages::{Message, RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
+use super::messages::{Event, Message, RecordSpec, ReferenceTrial, SaveSpec, TrialSpec};
 use super::{Owner, PREVIEW_INTERVAL};
 
 /// A host with one window whose captures the test drives by hand: each
@@ -323,6 +324,24 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         reloads,
         synced,
         clicks,
+    }
+}
+
+/// The text reader's message that reading `index` of the recording numbered
+/// `recording` reads `text`.
+pub(super) fn recognized(recording: u64, index: usize, text: Text) -> Message<FakeHost> {
+    Message::Sent {
+        ticket: Ticket::numbered(recording),
+        event: Event::Recognized { index, text },
+    }
+}
+
+/// The text reader's message that find `index` of the search numbered
+/// `search` reads `text`.
+pub(super) fn found_text(search: u64, index: usize, text: Text) -> Message<FakeHost> {
+    Message::Sent {
+        ticket: Ticket::numbered(search),
+        event: Event::FoundText { index, text },
     }
 }
 

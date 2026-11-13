@@ -37,7 +37,7 @@ impl<H: Host> Owner<H> {
         let mut pictures = Vec::new();
         let mut left_out = false;
         let slots = if screenshots {
-            self.screenshots.slots()
+            self.capture.screenshots().slots()
         } else {
             &[]
         };
@@ -79,8 +79,12 @@ impl<H: Host> Owner<H> {
                      draft on its page to start again."
                 )
             })?;
+        let picked = self
+            .capture
+            .picked_mut()
+            .ok_or_else(|| "Pick the window first.".to_owned())?;
         let indexes = screenshots.iter().map(|(index, _)| *index).collect();
-        self.screenshots = Screenshots::restored(screenshots);
+        picked.screenshots = Screenshots::restored(screenshots);
         Ok(indexes)
     }
 
@@ -160,6 +164,12 @@ mod tests {
             harness.ask(|owner| owner.restore_draft_screenshots(&without)),
             Ok(Vec::new()),
             "a draft without screenshots leaves none"
+        );
+        // With no window picked, there is no session to give them back to.
+        harness.ask(Owner::stop);
+        assert_eq!(
+            harness.ask(|owner| owner.restore_draft_screenshots(&id)),
+            Err("Pick the window first.".to_owned())
         );
 
         harness

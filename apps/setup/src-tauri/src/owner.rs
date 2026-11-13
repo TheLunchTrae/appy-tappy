@@ -3,9 +3,11 @@
 //! Tauri runs commands on its own threads, and the capture hands frames over
 //! on another. None of them touches the state: each sends a [`Message`] here.
 //! A command sends a [`Run`], work that runs on this thread with the state
-//! and answers on a oneshot channel. The state is
-//! the picked window's capture, its newest frame, the session's screenshots,
-//! what it records, and the check the user is setting up.
+//! and answers on a oneshot channel. The state is the one capture slot,
+//! which holds the picked window's capture with its newest frame, the
+//! session's screenshots, what it records, and the check the user is setting
+//! up, or the automation editor's watch; the overlays; and what the Debug
+//! page reads.
 //!
 //! This file keeps the state and the thread's loop, and the one way each
 //! save of an application reaches the runtime, the overlays and their
@@ -42,34 +44,32 @@ use std::collections::BTreeMap;
 use std::io;
 use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use appytappy_config::app_file::{AppFile, BuildDef};
 use appytappy_config::process::ProcessId;
-use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::check_spec::{Pictures, ReferenceRef, SavedReference};
 use crate::debug::log::SetupLog;
 use crate::debug::trace_file::TraceTail;
 use crate::debug::trace_view::TraceView;
 use crate::overlay::{Overlays, Purpose};
-use crate::recording::{Recorder, look, ocr};
-use crate::screenshots::Screenshots;
+use crate::recording::{look, ocr};
 use crate::stores::{SavedApp, Stores};
+use crate::ticket::{Ticket, Tickets};
 use crate::updates::Downloaded;
 
+use self::capture::Capture;
 pub(crate) use self::clicks::{ClickPictureView, ClickSent, ClickSpec, FoundClick};
 pub(crate) use self::found::FoundView;
 pub(crate) use self::host::{Desktop, Host};
-use self::live::LiveCheck;
-use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
-    AppSummary, AppWindows, EditPreview, EditSpec, FixSpec, Live, Message, Reading, RecordSpec,
-    ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
-    at_size,
+    AppSummary, AppWindows, EditPreview, EditSpec, Event, FixSpec, Live, Message, Reading,
+    RecordSpec, ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue,
+    TrialSpec, at_size,
 };
 pub(crate) use self::sharing::{ImportSpec, SharedView};
-use self::watch::Watched;
+use self::watch::Watching;
 
 /// The shortest time between two frames the preview takes: about 30 a
 /// second, smooth to the eye at a fraction of an application's frame rate.
@@ -90,30 +90,12 @@ pub(crate) struct Owner<H: Host> {
     own_process: u32,
     /// A sender for this thread's messages, handed to each capture.
     messages: Sender<Message<H>>,
-    /// Counts captures, so a frame from a window the user left is dropped.
-    generation: u64,
-    session: Option<H::Session>,
-    latest: Option<Image>,
-    /// When `latest` arrived.
-    latest_at: Option<Instant>,
-    /// Why the picked window's capture failed, until a good frame arrives.
-    failure: Option<CaptureFailure>,
-    screenshots: Screenshots,
-    /// The check the capture screen is setting up, which the live frame is
-    /// read with.
-    check: Option<LiveCheck>,
-    /// What the capture records: the readings a number's region shows or
-    /// the looks a value's region shows, one recording at a time.
-    recording: Option<Recorder>,
-    /// Counts recordings of both kinds, so text read for one the user
-    /// discarded or replaced is dropped.
-    recording_id: u64,
-    /// The text found like a reference's sample, until the user adds it or
-    /// moves on.
-    found: Option<found::Found>,
-    /// Counts searches, so text read for one the user dismissed or replaced
-    /// is dropped.
-    search_id: u64,
+    /// Hands out the ticket of each capture, recording, and search, so a
+    /// message about one the user left is dropped.
+    tickets: Tickets,
+    /// The one capture the capture screen and the automation editor share,
+    /// with what it keeps.
+    capture: Capture<H::Session>,
     /// The saved reference the reference editor's characters add to, as
     /// read when its editor first asked about them, until an application
     /// is written: [`Owner::keep_reference`].
@@ -122,8 +104,6 @@ pub(crate) struct Owner<H: Host> {
     ocr: Sender<ocr::Job>,
     /// Where whole-window recordings send the frames to look over.
     looks: Sender<look::Job>,
-    /// The saved value the automation editor watches.
-    watched: Option<Watched>,
     /// The overlays that show, each with a capture of its own.
     overlays: Overlays<H::Session>,
     /// The Values page's readings of the application it shows, with a
@@ -157,21 +137,11 @@ impl<H: Host> Owner<H> {
             host,
             own_process,
             messages,
-            generation: 0,
-            session: None,
-            latest: None,
-            latest_at: None,
-            failure: None,
-            screenshots: Screenshots::new(),
-            check: None,
-            recording: None,
-            recording_id: 0,
-            found: None,
-            search_id: 0,
+            tickets: Tickets::default(),
+            capture: Capture::Idle,
             kept_reference: None,
             ocr,
             looks,
-            watched: None,
             overlays: Overlays::new(Purpose::Overlay),
             live: Overlays::new(Purpose::ValuesPage),
             update: None,
@@ -190,83 +160,10 @@ impl<H: Host> Owner<H> {
     pub(crate) fn handle(&mut self, message: Message<H>) -> ControlFlow<()> {
         match message {
             Message::Run(run) => run.run(self),
-            Message::Frame {
-                generation,
-                image,
-                received,
-            } => {
-                if generation == self.generation {
-                    self.frame(image, received);
+            Message::Sent { ticket, event } => {
+                if self.is_current(ticket, &event) {
+                    self.apply(event);
                 }
-            },
-            Message::Recognized {
-                recording,
-                index,
-                text,
-            } => {
-                if let Some(current) = self
-                    .readings_mut()
-                    .filter(|current| current.id == recording)
-                {
-                    current.read(index, text);
-                }
-            },
-            Message::Looked {
-                recording,
-                at,
-                seen,
-            } => self.looked(recording, at, seen),
-            Message::FoundText {
-                search,
-                index,
-                text,
-            } => self.found_text(search, index, text),
-            Message::CaptureFailed {
-                generation,
-                failure,
-            } => {
-                if generation == self.generation {
-                    self.capture_failed(failure);
-                }
-            },
-            Message::Watch { generation, seen } => {
-                if let Some(watched) = self
-                    .watched
-                    .as_mut()
-                    .filter(|_| generation == self.generation)
-                {
-                    match seen {
-                        Ok(seen) => self.watch_seen(seen),
-                        Err(error) => {
-                            watched.failure = Some(error);
-                            // The editor watches again, so nothing needs this
-                            // capture, even if it would go on.
-                            #[expect(
-                                clippy::let_underscore_must_use,
-                                reason = "the capture already failed, and the editor shows why"
-                            )]
-                            let _ = self.close();
-                        },
-                    }
-                }
-            },
-            Message::Overlay {
-                purpose,
-                app,
-                generation,
-                read,
-            } => {
-                let overlays = match purpose {
-                    Purpose::Overlay => &mut self.overlays,
-                    Purpose::ValuesPage => &mut self.live,
-                };
-                // The overlay or the Values page shows why its capture
-                // stopped, and looks for the window again.
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "the capture already failed, and the overlay shows why"
-                )]
-                let _ = overlays.read(&app, generation, read, self.host.now());
             },
             Message::PanelPlaced { app, panel } => self.overlays.placed(&app, panel),
             Message::Shutdown => return ControlFlow::Break(()),
@@ -274,13 +171,65 @@ impl<H: Host> Owner<H> {
         ControlFlow::Continue(())
     }
 
-    /// Stops the capture, if one runs.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error the capture's thread ended with.
-    pub(crate) fn close(&mut self) -> io::Result<()> {
-        self.session.take().map_or(Ok(()), CaptureSession::close)
+    /// Whether the work `event` is about still holds `ticket`: the one
+    /// guard every late message from a capture or a worker thread passes.
+    /// It drops what the picked window's capture sent after the user left
+    /// it, what a watch's capture sent after it stopped or started again,
+    /// text and looks for a recording or a search that was discarded or
+    /// replaced, and readings from an overlay capture that closed.
+    fn is_current(&self, ticket: Ticket, event: &Event) -> bool {
+        let current = match event {
+            Event::Frame { .. } | Event::CaptureFailed(_) => self.capture.picked_ticket(),
+            Event::Watch(_) => self.capture.watching().and_then(Watching::ticket),
+            Event::Recognized { .. } | Event::Looked { .. } => {
+                self.readings().map(|recording| recording.id)
+            },
+            Event::FoundText { .. } => self.found().map(|found| found.id),
+            Event::Overlay { purpose, app, .. } => self.overlays_for(*purpose).ticket(app),
+        };
+        current == Some(ticket)
+    }
+
+    /// Applies `event`, which [`Owner::is_current`] passed.
+    fn apply(&mut self, event: Event) {
+        match event {
+            Event::Frame { image, received } => self.frame(image, received),
+            Event::CaptureFailed(failure) => self.capture_failed(failure),
+            Event::Watch(seen) => self.watch_sent(seen),
+            Event::Recognized { index, text } => {
+                if let Some(recording) = self.readings_mut() {
+                    recording.read(index, text);
+                }
+            },
+            Event::Looked { at, seen } => self.looked(at, seen),
+            Event::FoundText { index, text } => self.found_text(index, text),
+            Event::Overlay { purpose, app, read } => {
+                let now = self.host.now();
+                // The overlay or the Values page shows why its capture
+                // stopped, and looks for the window again.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the capture already failed, and the overlay shows why"
+                )]
+                let _ = self.overlays_mut(purpose).read(&app, read, now);
+            },
+        }
+    }
+
+    /// The captures that read for `purpose`.
+    const fn overlays_for(&self, purpose: Purpose) -> &Overlays<H::Session> {
+        match purpose {
+            Purpose::Overlay => &self.overlays,
+            Purpose::ValuesPage => &self.live,
+        }
+    }
+
+    /// The captures that read for `purpose`, to change them.
+    const fn overlays_mut(&mut self, purpose: Purpose) -> &mut Overlays<H::Session> {
+        match purpose {
+            Purpose::Overlay => &mut self.overlays,
+            Purpose::ValuesPage => &mut self.live,
+        }
     }
 
     /// Saves where each panel is, closes the overlays, and stops the
@@ -302,7 +251,7 @@ impl<H: Host> Owner<H> {
             reason = "the Values page showed its capture's error already, and it is closing"
         )]
         let _ = self.live.close(None);
-        self.close()
+        self.end_capture()
     }
 
     /// Where the applications', automations' and settings files live, or

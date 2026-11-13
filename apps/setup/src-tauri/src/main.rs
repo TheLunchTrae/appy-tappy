@@ -25,6 +25,7 @@ mod selection;
 mod settings;
 mod sharing;
 mod stores;
+mod ticket;
 mod updates;
 mod window_list;
 mod zip_pack;
