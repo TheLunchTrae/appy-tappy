@@ -1,10 +1,11 @@
 // Reviewing a recording's readings before they teach a reference.
 
-import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
+import { type Dispatch, type RefObject, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { RecordedLabel, RecordingView, ReferenceRef } from './bindings.ts';
 import { errorText, reviewProblems } from './api.ts';
 import { type Draft, reviewSpec } from './check.ts';
+import { ask } from './request.ts';
 import {
   type ReviewEntry,
   type Untaught,
@@ -23,17 +24,32 @@ import {
 /** How long review waits after the last edit before it asks which readings the check cannot learn. */
 const REVIEW_DELAY_MS = 200;
 
-/** Moves focus to the inspector's recording part once it shows again, after the button that had focus went. */
-function focusRecordPanel(): void {
+/**
+ * What takes the focus when the button that had it goes: the title of the inspector's recording part, and its Record
+ * more or the review bar's, whichever shows.
+ */
+export interface RecordFocus {
+  readonly title: RefObject<HTMLHeadingElement | null>;
+  readonly more: RefObject<HTMLButtonElement | null>;
+}
+
+/** Moves focus to `target` once the next frame shows it. */
+export function focusNext(target: RefObject<HTMLElement | null>): void {
   requestAnimationFrame(() => {
-    document.getElementById('record-title')?.focus();
+    target.current?.focus();
   });
+}
+
+export function useRecordFocus(): RecordFocus {
+  const title = useRef<HTMLHeadingElement>(null);
+  const more = useRef<HTMLButtonElement>(null);
+  return useMemo(() => ({ title, more }), []);
 }
 
 /**
  * Review of `recording`'s readings for the reference `draft` teaches, which adds to `reference`, if any, and needs
  * the characters `needs`: the user's edits, and which kept readings the check cannot learn. Keep puts the kept
- * readings on the draft.
+ * readings on the draft. Leaving review moves the focus to the recording part's title, in `focus`.
  */
 export function useReview(
   recording: RecordingView | null,
@@ -41,6 +57,7 @@ export function useReview(
   setDraft: Dispatch<SetStateAction<Draft>>,
   reference: ReferenceRef | null,
   needs: readonly string[],
+  focus: RecordFocus,
 ): {
   readonly reviewing: boolean;
   /** Opens or closes review, leaving focus where it is. */
@@ -114,29 +131,20 @@ export function useReview(
     if (!reviewing || toReview === null) {
       return undefined;
     }
-    let current = true;
-    const timer = setTimeout(() => {
-      reviewProblems(toReview)
-        .then((answers) => {
-          if (!current) {
-            return;
-          }
-          setProblems({ spec: reviewKey, found: flaggedReadings(toReview.recorded, answers) });
-          setError(null);
-        })
-        .catch((error: unknown) => {
-          if (current) {
-            // Saving checks the readings again, so a failed check flags none
-            // rather than leaving Keep waiting for an answer that never comes.
-            setProblems({ spec: reviewKey, found: new Map() });
-            setError(errorText(error));
-          }
-        });
-    }, REVIEW_DELAY_MS);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
+    return ask(
+      async () => reviewProblems(toReview),
+      (answers) => {
+        setProblems({ spec: reviewKey, found: flaggedReadings(toReview.recorded, answers) });
+        setError(null);
+      },
+      (error) => {
+        // Saving checks the readings again, so a failed check flags none
+        // rather than leaving Keep waiting for an answer that never comes.
+        setProblems({ spec: reviewKey, found: new Map() });
+        setError(errorText(error));
+      },
+      REVIEW_DELAY_MS,
+    );
   }, [reviewing, reviewKey]);
   // Flags found on another spec are stale: none show, and Keep waits for the answer.
   const checked = problems.spec === reviewKey;
@@ -147,7 +155,7 @@ export function useReview(
       return;
     }
     setReviewing(false);
-    focusRecordPanel();
+    focusNext(focus.title);
   };
 
   const forget = (): void => {
@@ -184,7 +192,7 @@ export function useReview(
       setError(null);
       setReviewing(false);
       // Discarding removes the button that had focus, wherever it was.
-      focusRecordPanel();
+      focusNext(focus.title);
       forget();
     },
   };

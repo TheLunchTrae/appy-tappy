@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { captureOutline } from '../lib/api.ts';
+import { ask } from '../lib/request.ts';
 import type { AppFile, CaptureOutline, RegionDef } from '../lib/bindings.ts';
 import { outlineSummary } from '../lib/outline.ts';
 import { useSettings } from '../lib/settings.ts';
@@ -20,20 +21,13 @@ export function useCaptureOutline(app: string, size: Size | undefined, file: App
     if (!showDebug || file === null || width === 0 || height === 0) {
       return undefined;
     }
-    let current = true;
-    captureOutline(app, width, height).then(
-      (found) => {
-        if (current) {
-          setOutline(found);
-        }
-      },
+    return ask(
+      async () => captureOutline(app, width, height),
+      setOutline,
       () => {
         // An application that is not saved yet has nothing to outline.
       },
     );
-    return () => {
-      current = false;
-    };
   }, [showDebug, app, width, height, file]);
   return outline;
 }
