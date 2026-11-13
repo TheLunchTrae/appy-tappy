@@ -11,21 +11,26 @@ import {
   keepAll,
   keptFound,
   keptState,
-  rereadable,
+  rereadOffer,
+  REREAD_SAME,
+  listed,
   rowFlags,
   withoutFlagged,
 } from '../src/lib/found.ts';
 
 const at = (x: number) => ({ x, y: 10, width: 30, height: 12 });
+// What the search read every find with.
+const white = { red: 255, green: 255, blue: 255 };
+const readWith = { ink: white, tolerance: 40 };
 
 const view: FoundView = {
   id: 1,
   screenshot: 2,
   finds: [
-    { region: at(0), text: { kind: 'read', text: '93.4%' } },
-    { region: at(40), text: { kind: 'read', text: '12O5' } },
-    { region: at(80), text: { kind: 'pending' } },
-    { region: at(120), text: { kind: 'failed', text: 'The text reader stopped. Type what this shows.' } },
+    { region: at(0), text: { kind: 'read', text: '93.4%' }, ...readWith },
+    { region: at(40), text: { kind: 'read', text: '12O5' }, ...readWith },
+    { region: at(80), text: { kind: 'pending' }, ...readWith },
+    { region: at(120), text: { kind: 'failed', text: 'The text reader stopped. Type what this shows.' }, ...readWith },
   ],
   more: 0,
   otherSizes: 2,
@@ -132,7 +137,7 @@ describe('adding found text', () => {
 
   test('asks the reference about the kept, read, unflagged rows, and maps its answers back', () => {
     const rows = foundRows(
-      { ...view, finds: view.finds.with(2, { region: at(80), text: { kind: 'read', text: '60%' } }) },
+      { ...view, finds: view.finds.with(2, { region: at(80), text: { kind: 'read', text: '60%' }, ...readWith }) },
       edits,
       [],
       [],
@@ -174,7 +179,7 @@ describe('flagged finds', () => {
   // letter, and 3, which the reader could not read, is left out.
   const read: FoundView = {
     ...view,
-    finds: view.finds.with(2, { region: at(80), text: { kind: 'read', text: 'O' } }),
+    finds: view.finds.with(2, { region: at(80), text: { kind: 'read', text: 'O' }, ...readWith }),
   };
   const edits = new Map([
     [0, { keep: true, text: '', typed: false }],
@@ -196,15 +201,29 @@ describe('flagged finds', () => {
     expect(withoutFlagged(after, rowFlags(after, new Map())).size).toBe(0);
   });
 
-  test('Reread takes the finds the reader failed on and the flagged guesses, not typed text', () => {
+  test('Reread is for the finds the reader failed on and the flagged guesses, not typed text', () => {
+    const gray = { red: 90, green: 90, blue: 90 };
     // 1 is flagged but typed; 2 is a flagged guess; 3 failed, ticked or not.
-    expect(rereadable(rows, flags)).toEqual([2, 3]);
-    expect(rereadable(foundRows(view, new Map(), [], []), new Map())).toEqual([3]);
-    const typedOver = foundRows(view, new Map([[3, { keep: true, text: '7', typed: true }]]), [], []);
-    expect(rereadable(typedOver, new Map())).toEqual([]);
+    expect(rereadOffer(rows, flags, gray, 40)).toEqual({ indexes: [2, 3], blocked: null });
     // A find that shows characters the reference does not need is not listed, so it is not read again.
     const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
     const unlisted = foundRows(view, new Map(), [], digits);
-    expect(rereadable(unlisted, new Map([[0, 'Nope.']]))).toEqual([3]);
+    expect(listed(unlisted).map((row) => row.index)).toEqual([1, 2, 3]);
+    expect(rereadOffer(unlisted, new Map([[0, 'Nope.']]), gray, 40)).toEqual({ indexes: [3], blocked: null });
+    // With nothing flagged or failed, and with no characters' color, there is nothing to offer.
+    const typedOver = foundRows(view, new Map([[3, { keep: true, text: '7', typed: true }]]), [], []);
+    expect(rereadOffer(typedOver, new Map(), gray, 40)).toBeNull();
+    expect(rereadOffer(rows, flags, null, 40)).toBeNull();
+  });
+
+  test('Reread reads a guess again only with another color or tolerance, and a failed read whenever asked', () => {
+    // The same color and tolerance read the same text, so only the failed find is read again.
+    expect(rereadOffer(rows, flags, { ...white }, 40)).toEqual({ indexes: [3], blocked: null });
+    expect(rereadOffer(rows, flags, white, 41)).toEqual({ indexes: [2, 3], blocked: null });
+    expect(rereadOffer(rows, flags, { ...white, blue: 254 }, 40)).toEqual({ indexes: [2, 3], blocked: null });
+    // With no failed find, the flagged guess keeps Reread offered, and says what to change.
+    const guesses = rows.filter((row) => !row.failed);
+    expect(rereadOffer(guesses, flags, white, 40)).toEqual({ indexes: [], blocked: REREAD_SAME });
+    expect(rereadOffer(guesses, flags, white, 39)).toEqual({ indexes: [2], blocked: null });
   });
 });

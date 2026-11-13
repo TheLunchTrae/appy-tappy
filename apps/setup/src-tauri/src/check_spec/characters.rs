@@ -39,7 +39,7 @@ const UNSAVED: &str = "unsaved";
 pub(crate) struct Label {
     pub(crate) screenshot: usize,
     /// Where on the screenshot the text shows, when it is not the spec's
-    /// region, as for text found like a sample elsewhere on it.
+    /// region: the box the user drew around it, or kept from found text.
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
     pub(crate) region: Option<RegionSpec>,
@@ -47,7 +47,7 @@ pub(crate) struct Label {
 }
 
 /// What one recorded reading shows, as the user confirmed it in review, so
-/// a reference learns its characters like a labeled screenshot's.
+/// a reference learns its characters like a box's.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct RecordedLabel {
@@ -66,8 +66,8 @@ pub(crate) struct CharactersSpec {
     /// Where the characters show, which a recording records and the live
     /// window is read at.
     pub(crate) region: RegionSpec,
-    /// The screenshot the region was drawn on. Every labeled screenshot
-    /// and the recording must have its window size, since the region
+    /// The screenshot the region was drawn on. Every screenshot with a
+    /// box and the recording must have its window size, since the region
     /// means another spot on a window of another size.
     pub(crate) screenshot: usize,
     /// The saved reference these characters add to, or `None` for a new

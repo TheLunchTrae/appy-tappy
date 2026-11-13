@@ -285,7 +285,7 @@ describe('leaving a stack of flows', () => {
       `${lost} Save as draft keeps this value, without a recording.`,
     );
     expect(leaveQuestion(reference, 'unsaved', true).text).toBe(
-      `Leave without saving? The screenshots, the labels and any recording are lost. Save as draft keeps this reference, without a recording.`,
+      `Leave without saving? The screenshots, the boxes and any recording are lost. Save as draft keeps this reference, without a recording.`,
     );
     expect(leaveQuestion(automation, 'unsaved', true)).toEqual({
       text: 'Leave without saving? The changes to this automation are lost. Save as draft keeps this automation.',

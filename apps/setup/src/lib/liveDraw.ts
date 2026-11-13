@@ -1,5 +1,6 @@
 // Drawing the value's region over the live window. The press takes the screenshot the region goes on and holds the
-// live view still; once the pointer is let go and the screenshot has arrived, the region is placed on it.
+// live view still, and the screenshot shows in its place once it arrives; once the pointer is let go and the
+// screenshot has arrived, the region is placed on it.
 
 import { useCallback, useRef, useState } from 'react';
 
@@ -78,28 +79,59 @@ export function liveDraw(
     : { state: next, placed: null };
 }
 
+/** What the stage shows of a press over the live view. */
+export interface LiveShown {
+  /** Whether the live view holds still for a press under way. */
+  readonly frozen: boolean;
+  /** The screenshot the press took, once it arrives, which shows in place of the frame held still. */
+  readonly shot: Taken | null;
+  /** The box drawn, once the pointer is let go, which stays outlined until its screenshot arrives. */
+  readonly box: LiveBox | null;
+}
+
+/** What the stage shows for `state`. */
+export function liveShown(state: LiveDraw): LiveShown {
+  return state.kind === 'idle'
+    ? { frozen: false, shot: null, box: null }
+    : { frozen: true, shot: state.shot === 'taking' ? null : state.shot, box: state.released ? state.box : null };
+}
+
+/**
+ * The live view's size after a frame of size `frame` arrives. A frame asked for before a press can arrive while the
+ * view holds still for it, `frozen`; the box being drawn is measured in the size held, so that frame's size is not
+ * taken. A frame of the size held keeps `current` itself.
+ */
+export function liveSizeAfter(current: Size | null, frame: Size, frozen: boolean): Size | null {
+  if (frozen || (current?.width === frame.width && current.height === frame.height)) {
+    return current;
+  }
+  return frame;
+}
+
 /**
  * Drawing over the live view with `take`, which takes a screenshot without showing it; `onPlaced` hears what each
- * press made. `frozen` says the live view holds still for a press under way.
+ * press made. `shown` is what the stage shows of the press under way, and `isFrozen` says, as of the last event
+ * rather than the last render, whether the live view holds still.
  */
 export function useLiveDraw(
   take: () => Promise<Taken | null>,
   onPlaced: (placed: Placed) => void,
 ): {
-  readonly frozen: boolean;
+  readonly shown: LiveShown;
+  readonly isFrozen: () => boolean;
   readonly press: () => void;
   readonly drew: (box: LiveBox) => void;
   readonly release: () => void;
 } {
   const state = useRef<LiveDraw>(LIVE_IDLE);
   const presses = useRef(0);
-  const [frozen, setFrozen] = useState(false);
+  const [rendered, setRendered] = useState<LiveDraw>(LIVE_IDLE);
   const placedRef = useRef(onPlaced);
   placedRef.current = onPlaced;
   const send = useCallback((event: LiveDrawEvent): void => {
     const next = liveDraw(state.current, event);
     state.current = next.state;
-    setFrozen(next.state.kind !== 'idle');
+    setRendered(next.state);
     if (next.placed !== null) {
       placedRef.current(next.placed);
     }
@@ -121,7 +153,8 @@ export function useLiveDraw(
     );
   }, [send, take]);
   return {
-    frozen,
+    shown: liveShown(rendered),
+    isFrozen: useCallback(() => state.current.kind !== 'idle', []),
     press,
     drew: useCallback(
       (box: LiveBox) => {

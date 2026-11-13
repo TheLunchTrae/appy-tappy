@@ -149,13 +149,14 @@ impl fmt::Display for SpecError {
             ),
             Self::StateName(problem) => formatter.write_str(problem),
             Self::NoLabels => formatter.write_str(
-                "Type what the region shows on at least one screenshot, or keep a recorded reading.",
+                "Type what at least one box shows, or keep a recorded reading.",
             ),
             Self::NoRecording => {
                 formatter.write_str("That recording is gone. Record the region again.")
             },
             Self::RecordedElsewhere => formatter.write_str(
-                "The region changed since it was recorded. Put it back, or record it again.",
+                "The reference reads another place than the recording recorded. Use its settings, or \
+                 record again.",
             ),
             Self::OtherSize {
                 cut,
@@ -167,7 +168,10 @@ impl fmt::Display for SpecError {
                 let drawn_on = drawn_on.saturating_add(1);
                 let what = match cut {
                     Cut::Label(screenshot) => {
-                        format!("Screenshot {} is", screenshot.saturating_add(1))
+                        format!(
+                            "Screenshot {}, which a box is on, is",
+                            screenshot.saturating_add(1)
+                        )
                     },
                     Cut::Recording => "The recording is of a window of".to_owned(),
                     Cut::State(screenshot) => format!(
@@ -176,14 +180,18 @@ impl fmt::Display for SpecError {
                     ),
                 };
                 let fix = match cut {
-                    Cut::Label(_) => "Clear its label, or draw the region on it instead.",
+                    Cut::Label(_) => "Delete its boxes, or draw them on a screenshot of that size.",
                     Cut::Recording => "Use its settings, or discard the recording.",
                     Cut::State(_) => "Take that state from a screenshot of that size.",
                 };
+                // A reference reads at a value's region or at one of its boxes.
+                let place = match cut {
+                    Cut::Label(_) | Cut::Recording => "the reference reads on",
+                    Cut::State(_) => "the region was drawn on",
+                };
                 write!(
                     formatter,
-                    "{what} {size}, but the region was drawn on screenshot {drawn_on}, which is \
-                     {drawn}. {fix}"
+                    "{what} {size}, but {place} screenshot {drawn_on}, which is {drawn}. {fix}"
                 )
             },
             Self::Picture => formatter.write_str("A picture of the region could not be saved."),

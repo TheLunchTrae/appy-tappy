@@ -1,6 +1,6 @@
-//! Finding more text like a reference's first sample: the text elsewhere on
+//! Finding more text like one of a reference's boxes: the text elsewhere on
 //! the same screenshot in the characters' color and at their size, so the
-//! user can label it all at once instead of drawing a region around each.
+//! user adds it all at once instead of drawing a box around each.
 //!
 //! It looks at the ink of the whole screenshot, as the reference's color and
 //! tolerance tell ink from background, and joins touching ink pixels into
