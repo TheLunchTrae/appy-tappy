@@ -3,7 +3,7 @@
 //!
 //! A capture is started for one window size: its crop and packing are fixed
 //! then. Every reader of saved values, the runtime's and the setup app's,
-//! asks [`Shown`] what a frame means, so a frame of another size means the
+//! asks [`FrameMeaning`] what a frame means, so a frame of another size means the
 //! same to all of them.
 
 use std::io;
@@ -13,7 +13,7 @@ use super::{Frame, Image, Layout, OutsideWindow, Size};
 
 /// What a frame means to a capture that reads at one window size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shown<T> {
+pub enum FrameMeaning<T> {
     /// The window has the size the capture reads at: what the capture
     /// copied of it.
     Readable(T),
@@ -27,7 +27,7 @@ pub enum Shown<T> {
     Unreadable(OutsideWindow),
 }
 
-impl<T> Shown<T> {
+impl<T> FrameMeaning<T> {
     /// What a frame of a window of `window_size` means to a capture that
     /// reads at `reads_at`. `copied` is what the capture copied of the
     /// frame, or `None` when it copied nothing because a region lies
@@ -44,7 +44,7 @@ impl<T> Shown<T> {
     }
 }
 
-impl<'buffer> Shown<Frame<'buffer>> {
+impl<'buffer> FrameMeaning<Frame<'buffer>> {
     /// What `frame` means, as a capture hands it to its handler, to a
     /// capture that reads at `reads_at`.
     ///
@@ -115,11 +115,11 @@ impl Placed {
     ///
     /// Returns the frame's error when it says nothing about the window's
     /// size, such as that the capture ended.
-    pub fn shown<'buffer>(
+    pub fn meaning<'buffer>(
         &self,
         frame: io::Result<Frame<'buffer>>,
-    ) -> io::Result<Shown<Frame<'buffer>>> {
-        Shown::of_frame(self.size, frame)
+    ) -> io::Result<FrameMeaning<Frame<'buffer>>> {
+        FrameMeaning::of_frame(self.size, frame)
     }
 
     /// The pixels of the value at `position` in `image`, a readable frame's
@@ -134,9 +134,13 @@ impl Placed {
 mod tests {
     use std::time::{Duration, Instant};
 
+    use appytappy_config::app_file::{PinDef, SizeChangesDef};
+
     use super::super::Region;
-    use super::super::saved::Drawing;
+    use super::super::check::{Check, ColorMatch};
+    use super::super::saved::{SavedCheck, SavedValue};
     use super::*;
+    use crate::system::Rgb;
 
     const WINDOW: Size = Size {
         width: 16,
@@ -160,14 +164,23 @@ mod tests {
     fn a_frame_is_read_only_at_the_size_its_capture_reads_at() {
         // What the capture copied at another size is of regions placed for
         // this one, so it is not read.
-        assert_eq!(Shown::of(WINDOW, WINDOW, Some(7)), Shown::Readable(7));
-        assert_eq!(Shown::of(WINDOW, SMALL, Some(7)), Shown::Resized(SMALL));
+        assert_eq!(
+            FrameMeaning::of(WINDOW, WINDOW, Some(7)),
+            FrameMeaning::Readable(7)
+        );
+        assert_eq!(
+            FrameMeaning::of(WINDOW, SMALL, Some(7)),
+            FrameMeaning::Resized(SMALL)
+        );
         // A window too small for the regions is another size, not a region
         // that cannot be read; one of the capture's own size is.
-        assert_eq!(Shown::<u8>::of(WINDOW, SMALL, None), Shown::Resized(SMALL));
         assert_eq!(
-            Shown::<u8>::of(WINDOW, WINDOW, None),
-            Shown::Unreadable(OutsideWindow {
+            FrameMeaning::<u8>::of(WINDOW, SMALL, None),
+            FrameMeaning::Resized(SMALL)
+        );
+        assert_eq!(
+            FrameMeaning::<u8>::of(WINDOW, WINDOW, None),
+            FrameMeaning::Unreadable(OutsideWindow {
                 window_size: WINDOW
             })
         );
@@ -178,24 +191,24 @@ mod tests {
         let outside = |window_size| Err(io::Error::from(OutsideWindow { window_size }));
         let image = Image::new(SMALL, vec![0; 8 * 6 * 4]).unwrap();
         let shown = |frame| {
-            Shown::of_frame(WINDOW, frame).map(|shown| match shown {
-                Shown::Readable(frame) => Shown::Readable(frame.window_size),
-                Shown::Resized(size) => Shown::Resized(size),
-                Shown::Unreadable(outside) => Shown::Unreadable(outside),
+            FrameMeaning::of_frame(WINDOW, frame).map(|shown| match shown {
+                FrameMeaning::Readable(frame) => FrameMeaning::Readable(frame.window_size),
+                FrameMeaning::Resized(size) => FrameMeaning::Resized(size),
+                FrameMeaning::Unreadable(outside) => FrameMeaning::Unreadable(outside),
             })
         };
         assert_eq!(
             shown(Ok(frame(&image, WINDOW))).unwrap(),
-            Shown::Readable(WINDOW)
+            FrameMeaning::Readable(WINDOW)
         );
         assert_eq!(
             shown(Ok(frame(&image, SMALL))).unwrap(),
-            Shown::Resized(SMALL)
+            FrameMeaning::Resized(SMALL)
         );
-        assert_eq!(shown(outside(SMALL)).unwrap(), Shown::Resized(SMALL));
+        assert_eq!(shown(outside(SMALL)).unwrap(), FrameMeaning::Resized(SMALL));
         assert_eq!(
             shown(outside(WINDOW)).unwrap(),
-            Shown::Unreadable(OutsideWindow {
+            FrameMeaning::Unreadable(OutsideWindow {
                 window_size: WINDOW
             })
         );
@@ -206,9 +219,27 @@ mod tests {
     #[test]
     fn a_capture_copies_only_the_values_that_read_at_the_size() {
         let region = |x| Region::new(x, 0, 2, 2).unwrap();
-        let at = |x| AtSize {
-            region: region(x),
-            check: Drawing::First,
+        // A color value drawn at `x` on a window of [`WINDOW`], where it
+        // reads.
+        let at = |x| {
+            SavedValue {
+                drawn: SavedCheck {
+                    window_size: WINDOW,
+                    region: region(x),
+                    check: Check::Color(ColorMatch {
+                        color: Rgb {
+                            red: 255,
+                            green: 0,
+                            blue: 0,
+                        },
+                        tolerance: 0,
+                    }),
+                },
+                fixes: Vec::new(),
+                pin: PinDef::TopLeft,
+                size_changes: SizeChangesDef::Rarely,
+            }
+            .first()
         };
         let placed = Placed::new(WINDOW, [Ok(at(0)), Err(Unread::NotDrawn), Ok(at(8))]);
         let layout = placed.layout().expect("two values read");

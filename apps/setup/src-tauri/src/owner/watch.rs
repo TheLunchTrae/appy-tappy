@@ -3,7 +3,7 @@
 //!
 //! The capture copies only the value's region as it reads at one window
 //! size, and each frame means to the watch what it means to the runtime
-//! ([`Shown`]). Once frames show another size, and no other, for a quarter
+//! ([`FrameMeaning`]). Once frames show another size, and no other, for a quarter
 //! of a second, the value is placed there once, and the capture starts
 //! again for its region there, so the watch reads the value at each size as
 //! the runtime does, and a drag across many sizes starts it again only
@@ -17,12 +17,12 @@ use appytappy_config::automation_file::WhenDef;
 use appytappy_config::signal::SignalName;
 use appytappy_sources::screen::saved::{self, AtSize, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
-use appytappy_sources::screen::{Crop, Frame, Layout, OutsideWindow, Shown, Size};
+use appytappy_sources::screen::{Crop, Frame, FrameMeaning, Layout, OutsideWindow, Size};
 
 use crate::debug::workings::{self, ReadingDetails};
 
 use super::host::Host;
-use super::messages::{Live, Message, Seen};
+use super::messages::{Live, Message, Seen, at_size};
 use super::{Owner, WATCH_INTERVAL};
 
 /// The saved value the automation editor watches.
@@ -158,6 +158,7 @@ impl<H: Host> Owner<H> {
             Some((size, Ok(at))) => {
                 let moved = at.region != watched.reads.1.region;
                 watched.reads = (size, at);
+                watched.unread = None;
                 if moved {
                     // Starting again drops the old capture's frames, which
                     // are of the old region.
@@ -202,23 +203,24 @@ impl<H: Host> Owner<H> {
             return Ok(Live::Waiting);
         };
         let (reads_at, at) = &watched.reads;
-        let image = match Shown::of(*reads_at, seen.window_size, seen.image.as_ref()) {
-            Shown::Readable(image) => image,
+        let image = match FrameMeaning::of(*reads_at, seen.window_size, seen.image.as_ref()) {
+            FrameMeaning::Readable(image) => image,
             // Nothing is read at another size: once it settled, the value
             // either reads there, and the capture's size is that one, or
             // does not, and this says why.
-            Shown::Resized(size) => {
+            FrameMeaning::Resized(size) => {
                 return Ok(watched
                     .unread
                     .filter(|(unread_at, _)| *unread_at == size)
                     .map_or(Live::Waiting, |(_, unread)| Live::Problem {
                         message: format!(
-                            "{name} is not read at {size}: {unread}. {}",
+                            "{name} is not read {}. {}",
+                            at_size(size, unread),
                             advice(unread)
                         ),
                     }));
             },
-            Shown::Unreadable(outside) => {
+            FrameMeaning::Unreadable(outside) => {
                 return Ok(Live::Problem {
                     message: format!("{name} cannot be read now: {outside}."),
                 });
@@ -260,7 +262,8 @@ impl<H: Host> Owner<H> {
         else {
             return Ok(None);
         };
-        let Shown::Readable(image) = Shown::of(*reads_at, seen.window_size, seen.image.as_ref())
+        let FrameMeaning::Readable(image) =
+            FrameMeaning::of(*reads_at, seen.window_size, seen.image.as_ref())
         else {
             return Ok(None);
         };
@@ -459,7 +462,7 @@ mod tests {
         assert_eq!(
             harness.ask(watched(watch, None)),
             Ok(Live::Problem {
-                message: "Progress bar is not read at 3x2: scaled to this window size, its \
+                message: "Progress bar is not read at 3 × 2, the window's size now: scaled to this window size, its \
                           region reaches outside the window. Fix the value at this size on the \
                           Values page."
                     .to_owned()
@@ -475,7 +478,7 @@ mod tests {
         assert!(
             matches!(
                 harness.ask(watched(watch, None)),
-                Ok(Live::Problem { message }) if message.starts_with("Progress bar is not read at 3x2: ")
+                Ok(Live::Problem { message }) if message.starts_with("Progress bar is not read at 3 × 2, the window's size now: ")
             ),
             "its region still fits, and it is not read there all the same"
         );
@@ -490,6 +493,10 @@ mod tests {
             message.starts_with("Progress bar cannot be read now: ") && message.ends_with('.'),
             "{message}"
         );
+        // The capture reads at another size since, so a frame that only
+        // passes the size the bar was not read at says nothing of it.
+        harness.deliver_at(&mut handler, Ok((narrower, &frame_image())), WATCH_INTERVAL);
+        assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
         harness.deliver_at(
             &mut handler,
             Err(io::Error::other("the window closed")),
@@ -579,7 +586,7 @@ mod tests {
         assert_eq!(
             harness.ask(watched(watch, None)),
             Ok(Live::Problem {
-                message: "Progress bar is not read at 8x4: it is read only at the window sizes \
+                message: "Progress bar is not read at 8 × 4, the window's size now: it is read only at the window sizes \
                           it was drawn at. Resize the window, or fix the value at this size on \
                           the Values page."
                     .to_owned()

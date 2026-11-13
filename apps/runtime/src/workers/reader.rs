@@ -20,7 +20,7 @@
 //! A value is sent to the owner only when it reads differently from its last
 //! read.
 //!
-//! [`Placed::shown`] says what each frame means, as it does for the setup
+//! [`Placed::meaning`] says what each frame means, as it does for the setup
 //! app's readers. When frames show the window at another size, the reader
 //! reads nothing until the size settles: frames show it, and no other, for
 //! [`SETTLE`](appytappy_sources::screen::settle::SETTLE), so dragging a
@@ -74,7 +74,7 @@ use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
 use appytappy_sources::screen::check::CheckError;
 use appytappy_sources::screen::saved::Unread;
 use appytappy_sources::screen::settle::Settle;
-use appytappy_sources::screen::{Capture, CaptureSession, Crop, Frame, Placed, Shown, Size};
+use appytappy_sources::screen::{Capture, CaptureSession, Crop, Frame, FrameMeaning, Placed, Size};
 use appytappy_sources::system::{Pick, SessionWindow, System, session_window, shows};
 
 use crate::model::{ReaderNumber, SessionId};
@@ -983,19 +983,19 @@ impl<E: From<Reading>> FrameReader<E> {
         if let Some(trace) = self.traces.try_iter().last() {
             self.trace = trace;
         }
-        match self.placed.shown(frame) {
-            Ok(Shown::Readable(frame)) => {
+        match self.placed.meaning(frame) {
+            Ok(FrameMeaning::Readable(frame)) => {
                 self.captured();
                 self.read_all(&frame)
             },
-            Ok(Shown::Resized(size)) => {
+            Ok(FrameMeaning::Resized(size)) => {
                 self.captured();
                 self.resizing(size);
                 Duration::ZERO
             },
             // A new capture would fail the same way, so the frame does not
             // count toward starting one.
-            Ok(Shown::Unreadable(outside)) => self.frame_failed(&outside.to_string()),
+            Ok(FrameMeaning::Unreadable(outside)) => self.frame_failed(&outside.to_string()),
             Err(error) if error.kind() == io::ErrorKind::NotConnected => {
                 self.unseen();
                 self.tell(Control::Lost(format!("its capture ended: {error}")));

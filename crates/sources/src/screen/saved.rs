@@ -79,12 +79,12 @@ pub struct AtSize {
     /// The region of the window's content it reads.
     pub region: Region,
     /// Which check reads it.
-    pub(super) check: Drawing,
+    check: Drawing,
 }
 
 /// The check a value reads with at one size.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Drawing {
+enum Drawing {
     /// The first drawing's.
     First,
     /// The fix at this position's own.

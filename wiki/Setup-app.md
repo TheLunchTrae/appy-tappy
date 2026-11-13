@@ -110,10 +110,12 @@ This page covers what the user guide leaves out.
   saved form with `check_spec::to_saved` and reads it back with
   `saved::build`, as a save does, so no second implementation of a check
   exists for the two to disagree in. The owner then places the value at
-  each frame's window size with `SavedValue::at`, as the runtime does: the
-  drawing made at that size, the first drawing scaled to it while the
-  application's window changes size often, or nothing, and then the box
-  says that the value is not read at that size and why. A reference being
+  the window size its frames settle at with `SavedValue::at`, as the
+  runtime does: the drawing made at that size, the first drawing scaled to
+  it while the application's window changes size often, or nothing, and
+  then the box says that the value is not read at that size and why.
+  [Live check](State-machines.md#live-check) says what a frame of another
+  size means meanwhile. A reference being
   taught (`CharactersSpec`, `set_characters`) is never read by the text
   reader: its labels become the reference's saved form, pictures included,
   and `saved::reader` learns it as the runtime learns the saved file. It

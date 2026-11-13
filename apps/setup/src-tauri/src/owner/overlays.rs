@@ -324,7 +324,8 @@ mod tests {
                 over,
                 None,
                 Some(&format!(
-                    "Not read at {width}x2: it is read only at the window sizes it was drawn at."
+                    "Not read at {width} × 2, the window's size now: it is read only at the window \
+                     sizes it was drawn at."
                 )),
             );
             view.window_size = Some(SizeDef { width, height: 2 });
@@ -493,7 +494,9 @@ mod tests {
             (
                 "Small",
                 None,
-                Some("Not read at 4x2: it is read only at the window sizes it was drawn at.")
+                Some(
+                    "Not read at 4 × 2, the window's size now: it is read only at the window sizes it was drawn at."
+                )
             )
         );
         let (icon, reading, problem) = lines[2].clone();
@@ -519,7 +522,9 @@ mod tests {
         let view = harness.ask(overlay_state).expect("shows");
         assert_eq!(
             view.values[0].problem.as_deref(),
-            Some("Not read at 8x4: it is read only at the window sizes it was drawn at.")
+            Some(
+                "Not read at 8 × 4, the window's size now: it is read only at the window sizes it was drawn at."
+            )
         );
         assert_eq!(view.values[1].reading, Some(Reading::Number(50.0)));
         // A panel does not go over the window.

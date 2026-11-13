@@ -33,4 +33,4 @@ pub use capture::{
 };
 pub use image::{FrameBuffer, Image, ImageError, OutsideWindow, Region, Size};
 pub use layout::{Layout, Placement};
-pub use placed::{Placed, Shown};
+pub use placed::{FrameMeaning, Placed};

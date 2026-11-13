@@ -4,50 +4,88 @@
 //!
 //! The owner builds a check's saved form and reads it back with
 //! `saved::build`, exactly as a save does, so a check that reads here is
-//! one the runtime can read. It then places the value at each frame's
-//! window size with `SavedValue::at`, as the runtime does: the drawing
-//! made at that size, the first drawing scaled to it while the
+//! one the runtime can read. It then reads the value where
+//! `SavedValue::at` places it at the window's size, as the runtime does:
+//! the drawing made at that size, the first drawing scaled to it while the
 //! application's window changes size often, or nothing, with the reason.
+//! Each frame means to it what it means to the runtime ([`FrameMeaning`]): at
+//! another size nothing is read until the size settles, and the value is
+//! then placed there once. The capture copies the whole window, so it
+//! goes on at every size.
 
 use appytappy_config::app_file::{PinDef, RegionDef, ScreenDef, SizeDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::check::Check;
+use std::time::Instant;
+
 use appytappy_sources::screen::saved::{AtSize, SavedCheck, SavedValue, Unread};
-use appytappy_sources::screen::{Image, Size};
+use appytappy_sources::screen::settle::Settle;
+use appytappy_sources::screen::{FrameMeaning, Image, Size};
 
 use crate::check_spec::{self, SpecError};
 
 use super::Owner;
 use super::host::Host;
-use super::messages::{ReferenceTrial, TrialSpec};
+use super::messages::{ReferenceTrial, TrialSpec, at_size};
 use super::values::read_back;
 
 /// The ID a value is tried under before it is saved under its own. It
 /// names only pictures that are never written.
 const TRIED: &str = "tried";
 
-/// A value as it would be saved, placed at the window size of the newest
-/// frame.
+/// A value as it would be saved, placed at the window size its frames
+/// settled at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LiveCheck {
     value: SavedValue,
     /// The window size the value is placed at, and where and how it reads
     /// there or why it does not.
     placed: (Size, Result<AtSize, Unread>),
+    /// The size frames last settled at where the value does not read, and
+    /// why, while it is placed at a size it reads at. It stays placed
+    /// there, as the runtime's capture stays at the size it reads, so a
+    /// frame that shows that size again is read at once.
+    unread: Option<(Size, Unread)>,
+    /// The window size frames show, settled.
+    settle: Settle,
 }
 
 impl LiveCheck {
     /// `value`, placed at `size`.
     pub(super) fn new(value: SavedValue, size: Size) -> Self {
         let placed = (size, value.at(size));
-        Self { value, placed }
+        Self {
+            value,
+            placed,
+            unread: None,
+            settle: Settle::new(size),
+        }
     }
 
-    /// Places the value at `size`, the window size a new frame shows,
-    /// unless it is placed there already.
-    pub(super) fn place(&mut self, size: Size) {
-        if self.placed.0 != size {
-            self.placed = (size, self.value.at(size));
+    /// Notes that a frame at `now` showed the window at `size`.
+    pub(super) fn saw(&mut self, size: Size, now: Instant) {
+        self.settle.saw(size, now);
+        self.settled(now);
+    }
+
+    /// Places the value at the size its frames settled at by `now`, once
+    /// they have, unless it is placed there already. Placing redraws a
+    /// scaled state check's pictures, so a drag across many sizes places
+    /// it once.
+    pub(super) fn settled(&mut self, now: Instant) {
+        let Some(size) = self
+            .settle
+            .settled(now)
+            .filter(|size| *size != self.placed.0)
+        else {
+            return;
+        };
+        match (self.value.at(size), &self.placed.1) {
+            (Err(unread), Ok(_)) => self.unread = Some((size, unread)),
+            (placed, _) => {
+                self.placed = (size, placed);
+                self.unread = None;
+            },
         }
     }
 
@@ -55,34 +93,52 @@ impl LiveCheck {
     /// sentence, or `None` when it reads there.
     pub(super) fn unread(&self) -> Option<String> {
         let (size, placed) = &self.placed;
-        placed.as_ref().err().map(|unread| {
-            format!(
-                "Not read at {} × {}, the window's size now: {unread}.",
-                size.width, size.height
-            )
-        })
+        placed.as_ref().err().map(|unread| not_read(*size, *unread))
     }
 
     /// The check that reads the value where it is placed and its region's
-    /// pixels on `frame`, or why the value is not read there, for the user.
-    pub(super) fn region_of(&self, frame: &Image) -> Result<(&Check, Image), String> {
-        let Ok(at) = &self.placed.1 else {
-            return Err(self.unread().unwrap_or_default());
+    /// pixels on `frame`, a frame of the whole window; `None` while the
+    /// frame shows a size that has yet to settle; or why the value is not
+    /// read, for the user.
+    pub(super) fn region_of(&self, frame: &Image) -> Result<Option<(&Check, Image)>, String> {
+        let (size, placed) = &self.placed;
+        // What a capture of the value's region would copy of the frame.
+        let copied = match placed {
+            Ok(at) => frame.crop(at.region).map(|region| Ok((at, region))),
+            Err(unread) => Some(Err(*unread)),
         };
-        let region = frame
-            .crop(at.region)
-            .ok_or_else(|| SpecError::Outside.to_string())?;
-        Ok((self.value.check(at), region))
+        match FrameMeaning::of(*size, frame.size(), copied) {
+            FrameMeaning::Readable(Ok((at, region))) => Ok(Some((self.value.check(at), region))),
+            FrameMeaning::Readable(Err(unread)) => Err(not_read(*size, unread)),
+            FrameMeaning::Resized(other) => self
+                .unread
+                .filter(|(unread_at, _)| *unread_at == other)
+                .map_or(Ok(None), |(_, unread)| Err(not_read(other, unread))),
+            FrameMeaning::Unreadable(outside) => Err(on_window(&outside)),
+        }
     }
 
-    /// What the value reads on `frame`, or why it cannot be read there, for
-    /// the user.
-    pub(super) fn read(&self, frame: &Image) -> Result<Value, String> {
-        let (check, region) = self.region_of(frame)?;
+    /// What the value reads on `frame`, `None` while the frame's size has
+    /// yet to settle, or why it cannot be read there, for the user.
+    pub(super) fn read(&self, frame: &Image) -> Result<Option<Value>, String> {
+        let Some((check, region)) = self.region_of(frame)? else {
+            return Ok(None);
+        };
         check
             .read(&region)
-            .map_err(|error| format!("Not read on the live window now: {error}."))
+            .map(Some)
+            .map_err(|error| on_window(&error))
     }
+}
+
+/// That a value is not read on a window of `size`, and why, as a sentence.
+fn not_read(size: Size, unread: Unread) -> String {
+    format!("Not read {}.", at_size(size, unread))
+}
+
+/// That the newest frame cannot be read, and why, as a sentence.
+fn on_window(error: &dyn std::fmt::Display) -> String {
+    format!("Not read on the live window now: {error}.")
 }
 
 impl<H: Host> Owner<H> {
@@ -180,6 +236,7 @@ mod tests {
 
     use appytappy_config::app_file::{CheckDef, SizeChangesDef, ValueDef};
     use appytappy_sources::screen::saved;
+    use appytappy_sources::screen::settle::SETTLE;
 
     use crate::check_spec::{CharactersSpec, CheckSpec};
     use crate::debug::workings::WorkingsView;
@@ -195,15 +252,12 @@ mod tests {
     #[test]
     fn the_check_reads_the_live_frame() {
         let (mut harness, _handler, root) = capturing("live-reads");
-        assert_eq!(harness.ask(|owner| owner.reading()), Ok(None));
+        assert_eq!(harness.ask(Owner::reading), Ok(None));
         assert_eq!(harness.ask(|owner| owner.explain_reading()), Ok(None));
         harness
             .ask(|owner| owner.set_check(&trial(BAR)))
             .expect("valid check");
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Ok(Some(Reading::Number(50.0)))
-        );
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(50.0))));
         harness.wait(Duration::from_millis(30));
         let details = harness
             .ask(|owner| owner.explain_reading())
@@ -256,7 +310,7 @@ mod tests {
             ),
             Err("Example App no longer has that reference.".to_owned())
         );
-        assert_eq!(harness.ask(|owner| owner.reading()), Ok(None));
+        assert_eq!(harness.ask(Owner::reading), Ok(None));
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -272,10 +326,7 @@ mod tests {
         harness
             .ask(|owner| owner.set_characters(&teaching(spec.clone())))
             .expect("valid check");
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Ok(Some(Reading::Number(1.0)))
-        );
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(1.0))));
         let gray = Image::new(
             Size {
                 width: 4,
@@ -286,7 +337,7 @@ mod tests {
         .expect("matching length");
         harness.deliver(&mut handler, Ok(&gray));
         assert_eq!(
-            harness.ask(|owner| owner.reading()),
+            harness.ask(Owner::reading),
             Err(
                 "Not read on the live window now: no pixel in the region has the characters' \
                  color."
@@ -420,9 +471,11 @@ mod tests {
         harness
             .ask(|owner| owner.set_check(&trial(CHARGE)))
             .expect("valid check");
+        // A frame of another size is read once its size settled.
         let tried_at = |harness: &mut Harness, handler: &mut _, frame: &Image| {
             harness.deliver(handler, Ok(frame));
-            harness.ask(|owner| owner.reading())
+            harness.wait(SETTLE);
+            harness.ask(Owner::reading)
         };
         let same_size = showing("37%", 1);
         // The window at twice the size it was drawn at: the unscaled region
@@ -481,7 +534,7 @@ mod tests {
             .ask(|owner| owner.set_check(&reading("0123456789%")))
             .expect("the reference knows four of them");
         assert_eq!(
-            harness.ask(|owner| owner.reading()),
+            harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
         // Read with the digits alone, the percent sign is a shape the value
@@ -489,10 +542,7 @@ mod tests {
         harness
             .ask(|owner| owner.set_check(&reading("0123456789")))
             .expect("the reference knows three of them");
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Err(DIGITS_ONLY.to_owned())
-        );
+        assert_eq!(harness.ask(Owner::reading), Err(DIGITS_ONLY.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.set_check(&reading("2"))),
             Err(
@@ -543,10 +593,7 @@ mod tests {
         harness
             .ask(|owner| owner.set_characters(&teaching(taught.clone())))
             .expect("learns");
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Ok(Some(Reading::Number(3.7)))
-        );
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(3.7))));
         // Made for a whole number, it reads as one.
         let whole = ReferenceTrial {
             whole: true,
@@ -555,17 +602,12 @@ mod tests {
         harness
             .ask(|owner| owner.set_characters(&whole))
             .expect("learns");
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Ok(Some(Reading::Number(3.0)))
-        );
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(3.0))));
         // Its application's window changes size rarely, so at another size
         // it reads nothing, as the number will.
         harness.deliver(&mut handler, Ok(&a_column_wider(&showing("3.7%", 1))));
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Err(A_COLUMN_WIDER.to_owned())
-        );
+        harness.wait(SETTLE);
+        assert_eq!(harness.ask(Owner::reading), Err(A_COLUMN_WIDER.to_owned()));
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -576,26 +618,46 @@ mod tests {
             .ask(|owner| owner.set_check(&trial(CHARGE)))
             .expect("valid check");
         assert_eq!(
-            harness.ask(|owner| owner.reading()),
+            harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
-        // A frame of another size places the value again. Its text still
-        // shows inside the region as drawn, which is not read all the same.
+        // A frame of another size reads nothing until the size settles, as
+        // the runtime reads nothing: a drag passes many sizes, and placing
+        // the value at each would redraw a state check's pictures for each.
         let wider = a_column_wider(&showing("37%", 1));
         harness.deliver(&mut handler, Ok(&wider));
+        assert_eq!(harness.ask(Owner::reading), Ok(None));
+        assert_eq!(harness.ask(|owner| owner.explain_reading()), Ok(None));
+        harness.wait(SETTLE / 2);
+        harness.deliver(&mut handler, Ok(&showing("37%", 2)));
+        harness.deliver(&mut handler, Ok(&wider));
+        harness.wait(SETTLE / 2);
+        assert_eq!(
+            harness.ask(Owner::reading),
+            Ok(None),
+            "another size started the wait again"
+        );
+        // The poll places the value once the size settled, with no frame.
+        // Its text still shows inside the region as drawn, which is not
+        // read all the same.
+        harness.wait(SETTLE / 2);
         let unread = "Not read at 25 × 12, the window's size now: it is read only at the window \
                       sizes it was drawn at.";
-        assert_eq!(harness.ask(|owner| owner.reading()), Err(unread.to_owned()));
+        assert_eq!(harness.ask(Owner::reading), Err(unread.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.explain_reading()),
             Err(unread.to_owned())
         );
-        // A frame of the drawn size places it back.
+        // The value stays placed at the size it reads at, so a frame that
+        // shows it again is read at once, as the runtime reads it, and a
+        // frame of the size it does not read at says why at once.
         harness.deliver(&mut handler, Ok(&showing("37%", 1)));
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Ok(Some(Reading::Number(37.0)))
-        );
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(37.0))));
+        harness.deliver(&mut handler, Ok(&wider));
+        assert_eq!(harness.ask(Owner::reading), Err(unread.to_owned()));
+        // A third size, not settled, says nothing of the second.
+        harness.deliver(&mut handler, Ok(&showing("37%", 2)));
+        assert_eq!(harness.ask(Owner::reading), Ok(None));
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -613,7 +675,7 @@ mod tests {
             .ask(|owner| owner.set_characters(&teaching(taught.clone())))
             .expect("learns");
         assert_eq!(
-            harness.ask(|owner| owner.reading()),
+            harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
         let digits = ReferenceTrial {
@@ -625,10 +687,7 @@ mod tests {
         harness
             .ask(|owner| owner.set_characters(&digits))
             .expect("learns the digits");
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Err(DIGITS_ONLY.to_owned())
-        );
+        assert_eq!(harness.ask(Owner::reading), Err(DIGITS_ONLY.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.set_characters(&ReferenceTrial {
                 reads: Some("2".to_owned()),
@@ -644,10 +703,8 @@ mod tests {
             .ask(|owner| owner.set_characters(&teaching(taught.clone())))
             .expect("learns");
         harness.deliver(&mut handler, Ok(&showing("97%", 2)));
-        assert_eq!(
-            harness.ask(|owner| owner.reading()),
-            Ok(Some(Reading::Number(97.0)))
-        );
+        harness.wait(SETTLE);
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(97.0))));
         fs::remove_dir_all(root).expect("clean up");
     }
 }

@@ -958,7 +958,7 @@ fn trying_an_edit_reads_the_live_frame_as_the_runtime_would_and_saves_nothing() 
     let (mut harness, mut handler, root) = with_saved_states("edit-try");
     let files = folder_files(&harness);
     harness.forget_reloads();
-    let read = |harness: &mut Harness| harness.ask(|owner| owner.reading());
+    let read = |harness: &mut Harness| harness.ask(Owner::reading);
     let unchanged = EditPreview {
         unread: None,
         dropped_fixes: Vec::new(),
@@ -1034,8 +1034,10 @@ fn trying_an_edit_reads_the_live_frame_as_the_runtime_would_and_saves_nothing() 
         "each read says why"
     );
     // The edit stays the live check, so a frame of a size it is read at
-    // reads with no new try.
+    // reads with no new try, once that size settled.
     harness.deliver(&mut handler, Ok(&frame_image()));
+    assert_eq!(read(&mut harness), Ok(None), "not settled yet");
+    harness.wait(appytappy_sources::screen::settle::SETTLE);
     assert!(
         matches!(read(&mut harness), Ok(Some(Reading::State(_)))),
         "read at the size it was drawn at"

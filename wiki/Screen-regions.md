@@ -234,10 +234,11 @@ on them. Why a value does not read at a size leaves the size out, so the
 log says it once for each reason, not once for each size the window
 passes.
 
-A capture is started for one window size, and `Shown` in
+A capture is started for one window size, and `FrameMeaning` in
 `screen/placed.rs` says what each of its frames means. The runtime's
-reader, the overlays and the Values page, and the automation editor's live
-reading all ask it, so a frame means the same to each:
+reader, the overlays and the Values page, the automation editor's live
+reading, and the capture screen's live check all ask it, so a frame means
+the same to each:
 
 - **Readable.** The window has the size the capture reads at, and the frame
   is read.
