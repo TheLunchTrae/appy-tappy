@@ -101,7 +101,8 @@ export type DragInput =
 export type DragEffect =
   | { readonly type: 'capture'; readonly pointer: number }
   | { readonly type: 'uncapture'; readonly pointer: number }
-  | { readonly type: 'region'; readonly region: Rect }
+  /** The region a drag made: drawn anew, or the region as it was moved or resized. */
+  | { readonly type: 'region'; readonly region: Rect; readonly made: 'drawn' | 'adjusted' }
   | { readonly type: 'snap'; readonly rough: Rect; readonly combine: Combine };
 
 interface Step {
@@ -160,13 +161,13 @@ function move(state: Dragging, point: Point): Dragging {
 /** What `state` hands over when it is let go. */
 function made(state: Dragging): readonly DragEffect[] {
   if (state.kind !== 'drawing') {
-    return sameRect(state.box, state.rect) ? [] : [{ type: 'region', region: state.box }];
+    return sameRect(state.box, state.rect) ? [] : [{ type: 'region', region: state.box, made: 'adjusted' }];
   }
   if (state.box === null) {
     return [];
   }
   return state.draws.as === 'region'
-    ? [{ type: 'region', region: state.box }]
+    ? [{ type: 'region', region: state.box, made: 'drawn' }]
     : [{ type: 'snap', rough: state.box, combine: state.draws.combine }];
 }
 

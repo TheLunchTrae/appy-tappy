@@ -62,19 +62,19 @@ export const INK_HINT =
   'Pick a pixel inside a character, not on its edge. Pixels within the tolerance of this color count as part of the characters.';
 
 /** A screenshot's label in the reference editor. */
-export const LABEL_HINT =
-  'Type exactly what the region shows, such as 87% or 1,250. Each labeled screenshot teaches the reference the characters in it.';
+export const BOXES_HINT =
+  'Drag on any screenshot to draw a box tightly around some characters, then type exactly what it shows, such as 87% or 1,250. Draw as many as you like, several on one screenshot too. Press a box to select it; drag it to move it, drag a corner to resize it, or press Delete to remove it. Each box with text teaches the reference the characters in it.';
 
 /** The characters a reference needs. */
 export const EXPECTED_HINT =
   'Your list of what to teach. AppyTappy shows which of these characters the reference has yet to learn. It only guides you: a character is learned from what you label or record, never from this list, and a number reads the same way whatever you turn on.';
 /** Finding more text like the first sample. */
 export const FIND_LIKE_HINT =
-  "Looks on this screenshot for other text in the characters' color and as tall as the text in the region, and reads each as text. Check what it read; each one you add teaches the reference like a labeled screenshot. Draw the region tightly around the text and type what it shows first, so the size is right.";
+  "Looks on the selected box's screenshot for other text in the characters' color and as tall as the text in the box, and reads each as text. It lists only text that shows the characters the reference needs. Each one you tick and add becomes a box. Draw the box tightly around the text and type what it shows first, so the size is right.";
 
 /** What the found text's list shows, and what each row's box and field do. */
 export const FOUND_HINT =
-  'Each find is numbered here and outlined on the screenshot, with what the text reader made of it. Clear its box to leave it out, or fix its text. A flagged one needs its text typed, or leaving out, before you can add them.';
+  'Each find is numbered here and outlined on the screenshot, with what the text reader made of it. Tick the ones to add, or Select all, and fix any text it misread. A flagged one needs its text typed, or leaving out, before you can add them.';
 
 /** The read interval's two waits. */
 export const READING_HINT = `AppyTappy reads a value only when its window draws something new. It waits the fastest read while a value changes, and up to the slowest read while it holds still. Each is ${LIMITS.fastestReadMs} to ${LIMITS.slowestReadMs} ms.`;

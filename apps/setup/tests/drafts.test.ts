@@ -92,22 +92,23 @@ describe('what a draft keeps', () => {
     expect(isKept(null, 'application')).toBe(false);
   });
 
-  test('a capture keeps its labels and drops the recording readings', () => {
+  test('a capture keeps its boxes and drops the recording readings', () => {
+    const region = { x: 1, y: 2, width: 3, height: 4 };
     const setup: CaptureSetup = {
       ...EMPTY_SETUP,
       valueName: 'Score',
       step: 'how',
-      draft: { ...EMPTY_DRAFT, labels: new Map([[0, '12']]), recorded: new Map([[3, '45']]) },
+      draft: { ...EMPTY_DRAFT, boxes: [{ id: 0, screenshot: 0, region, text: '12' }], recorded: new Map([[3, '45']]) },
     };
     // The draft goes through JSON, as the file keeps it.
     const kept: unknown = JSON.parse(JSON.stringify(keep('value', storeSetup(setup))));
     const back = keptSetup(def('value', kept));
     expect(back?.valueName).toBe('Score');
     expect(back?.step).toBe('how');
-    expect([...(back?.draft.labels ?? [])]).toEqual([[0, '12']]);
+    expect(back?.draft.boxes).toEqual([{ id: 0, screenshot: 0, region, text: '12' }]);
     expect(back?.draft.recorded.size).toBe(0);
     expect(keptSetup(def('reference', kept))).toBeNull();
-    expect(restoreSetup(storeSetup(setup)).draft.labels.get(0)).toBe('12');
+    expect(restoreSetup(storeSetup(setup)).draft.boxes).toEqual(setup.draft.boxes);
   });
 
   test('a capture comes back with everything it set up, but for what belongs to a recording', () => {
@@ -121,12 +122,11 @@ describe('what a draft keeps', () => {
       pin: { kind: 'byHand', pin: 'bottomRight' },
       tolerance: 7,
       ink: black,
-      labels: new Map([
-        [0, '12%'],
-        [2, '7'],
-      ]),
+      boxes: [
+        { id: 0, screenshot: 0, region, text: '12%' },
+        { id: 3, screenshot: 2, region: { x: 1, y: 2, width: 3, height: 4 }, text: '99' },
+      ],
       recorded: new Map([[3, '45']]),
-      found: [{ screenshot: 2, region: { x: 1, y: 2, width: 3, height: 4 }, text: '99' }],
       filled: { red: 1, green: 2, blue: 3 },
       empty: { red: 4, green: 5, blue: 6 },
       color: { red: 7, green: 8, blue: 9 },
@@ -158,7 +158,6 @@ describe('what a draft keeps', () => {
         existing: null,
         name: 'Digits',
         expects: ['1', '2', '%'],
-        valueRegion: { region, drawnOn: 0 },
       },
       draft,
       recordedShots: [2],
@@ -176,7 +175,7 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(1);
+    expect(DRAFT_FORMAT).toBe(2);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -208,16 +207,15 @@ describe('the shape a draft keeps', () => {
     const stored = storeSetup(EMPTY_SETUP);
     expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'mayMove', 'recordedShots', 'step', 'valueName']);
     expect(Object.keys(stored.draft).sort()).toEqual([
+      'boxes',
       'color',
       'colorMatch',
       'drawnOn',
       'empty',
       'filled',
-      'found',
       'ignoreBackground',
       'ink',
       'kind',
-      'labels',
       'pin',
       'reference',
       'region',
@@ -317,7 +315,7 @@ describe('what an unfinished item still needs', () => {
     expect(captureMissing(drawn, next, false)).toEqual(['Pick the reference.']);
     const editing = {
       ...drawn,
-      editing: { existing: null, name: '', expects: [], valueRegion: { region: null, drawnOn: null } },
+      editing: { existing: null, name: '', expects: [] },
     };
     expect(captureMissing(editing, next, false)).toEqual(['Name the reference.']);
   });
@@ -327,11 +325,11 @@ describe('what an unfinished item still needs', () => {
       ...EMPTY_SETUP,
       draft: {
         ...EMPTY_DRAFT,
-        labels: new Map([
-          [0, '12'],
-          [1, '2 3'],
-          [2, ''],
-        ]),
+        boxes: [
+          { id: 0, screenshot: 0, region: { x: 0, y: 0, width: 4, height: 2 }, text: '12' },
+          { id: 1, screenshot: 0, region: { x: 9, y: 0, width: 4, height: 2 }, text: '2 3' },
+          { id: 2, screenshot: 1, region: { x: 0, y: 0, width: 4, height: 2 }, text: '' },
+        ],
       },
     };
     expect(labeledCharacters(setup)).toBe('1 2 3');
@@ -372,7 +370,7 @@ describe('a draft and what it belongs to', () => {
   test('a reference editor a draft kept open goes on from the reference as it is saved now', () => {
     const saved = { id: 'percent', name: 'Percent', ink: { red: 0, green: 0, blue: 0 }, tolerance: 0, samples: [] };
     const taught = { ...saved, tolerance: 12 };
-    const editing = { existing: saved, name: 'Percent', expects: ['1'], valueRegion: { region: null, drawnOn: null } };
+    const editing = { existing: saved, name: 'Percent', expects: ['1'] };
     expect(refreshedEditing(editing, [taught])).toEqual({ ...editing, existing: taught });
     // A reference deleted since is made as a new one, and a new one stays new.
     expect(refreshedEditing(editing, [])).toEqual({ ...editing, existing: null });

@@ -1,4 +1,4 @@
-import { type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 
 import type { Combine } from '../lib/bindings.ts';
 import { type Drag, type DragInput, IDLE, shownBoxes, step } from '../lib/drag.ts';
@@ -7,6 +7,7 @@ import {
   type Point,
   type Rect,
   type Size,
+  contains,
   pixelAt,
   sameRect,
   tagPlace,
@@ -26,6 +27,14 @@ const TAG_ROOM = 26;
 function cornerOf(target: EventTarget): Corner | null {
   const name = target instanceof HTMLElement ? target.dataset['corner'] : undefined;
   return CORNERS.find((corner) => corner === name) ?? null;
+}
+
+/** A box on the picture other than the region, which a press selects. */
+export interface OtherBox {
+  readonly id: number;
+  readonly rect: Rect;
+  /** What its tag says, such as its number. */
+  readonly label: string;
 }
 
 interface Props {
@@ -49,8 +58,18 @@ interface Props {
   readonly tool?: SelectTool;
   /** Which pixels of the region a selection leaves out, row by row, to shade them. */
   readonly ignored?: Uint8Array | null;
-  /** Called with the region a finished drag made. A drag that is interrupted calls nothing. */
-  readonly onRegion: (region: Rect) => void;
+  /**
+   * The other boxes on the picture, outlined without dimming the rest. A press on one selects it, through
+   * `onSelectOther`, and drags it; the region is the selected box, and a drag away from every box draws a new one.
+   */
+  readonly others?: readonly OtherBox[];
+  readonly onSelectOther?: (id: number) => void;
+  /** Called when Delete or Backspace is pressed on the surface, which can then take focus. */
+  readonly onDelete?: () => void;
+  /** Called when the main button goes down on the surface to draw, and when that pointer is let go or cancelled. */
+  readonly onPointer?: (phase: 'down' | 'up') => void;
+  /** Called with the region a finished drag made, drawn anew or adjusted. A drag that is interrupted calls nothing. */
+  readonly onRegion: (region: Rect, made: 'drawn' | 'adjusted') => void;
   readonly onPick: (point: Point) => void;
   /** Called with the rough box dragged with the snap tool. */
   readonly onSnap?: (rough: Rect, combine: Combine) => void;
@@ -74,6 +93,7 @@ export function Marquee({
   label,
   recording = false,
   area = false,
+  dim = true,
   children,
 }: {
   readonly rect: Rect;
@@ -82,6 +102,8 @@ export function Marquee({
   readonly label: string;
   readonly recording?: boolean;
   readonly area?: boolean;
+  /** Whether the rest of the picture is dimmed, which it is not while other boxes show beside it. */
+  readonly dim?: boolean;
   readonly children?: ReactNode;
 }) {
   const tag = tagPlace(rect, picture, scale, TAG_ROOM);
@@ -93,7 +115,7 @@ export function Marquee({
     `${left}px ${top}px, ${left}px ${bottom}px, ${right}px ${bottom}px, ${right}px ${top}px, ${left}px ${top}px)`;
   return (
     <>
-      <div className="dim" style={{ clipPath: rest }} />
+      {dim ? <div className="dim" style={{ clipPath: rest }} /> : null}
       <div
         className={['marquee', recording ? 'recording' : null, area ? 'area' : null].filter(Boolean).join(' ')}
         style={box}
@@ -134,6 +156,10 @@ export function RegionSurface({
   picking,
   tool = 'box',
   ignored = null,
+  others = [],
+  onSelectOther,
+  onDelete,
+  onPointer,
   onRegion,
   onPick,
   onSnap,
@@ -167,7 +193,7 @@ export function RegionSurface({
           }
           break;
         case 'region':
-          onRegion(effect.region);
+          onRegion(effect.region, effect.made);
           break;
         case 'snap':
           onSnap?.(effect.rough, effect.combine);
@@ -226,15 +252,25 @@ export function RegionSurface({
       onSelectAt?.(pixelAt(point, size), combineOf(event));
       return;
     }
+    onPointer?.('down');
     const drawn = event.currentTarget.getBoundingClientRect().width;
+    const corner = cornerOf(event.target);
+    // A press on another box, away from the region, selects that box and drags it.
+    const other =
+      tool === 'box' && corner === null && (region === null || !contains(region, point))
+        ? others.findLast((box) => contains(box.rect, point))
+        : undefined;
+    if (other !== undefined) {
+      onSelectOther?.(other.id);
+    }
     send({
       type: 'press',
       pointer: event.pointerId,
       point,
-      corner: cornerOf(event.target),
+      corner,
       tool,
       combine: combineOf(event),
-      region,
+      region: other?.rect ?? region,
       bounds: { width: size.width, height: size.height },
       slop: drawn > 0 ? (DRAG_SLOP * size.width) / drawn : 0,
     });
@@ -246,10 +282,19 @@ export function RegionSurface({
 
   const end = (event: PointerEvent<HTMLDivElement>): void => {
     send({ type: 'release', pointer: event.pointerId, point: at(event) });
+    onPointer?.('up');
   };
 
   const cancel = (event: PointerEvent<HTMLDivElement>): void => {
     send({ type: 'cancel', pointer: event.pointerId });
+    onPointer?.('up');
+  };
+
+  const key = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (onDelete !== undefined && (event.key === 'Delete' || event.key === 'Backspace')) {
+      event.preventDefault();
+      onDelete();
+    }
   };
 
   const scale = size.width > 0 ? shown.width / size.width : 0;
@@ -271,6 +316,10 @@ export function RegionSurface({
     <div
       ref={surface}
       className={classes}
+      // With boxes to delete, the surface takes focus, so Delete reaches it after a box is pressed.
+      {...(onDelete === undefined
+        ? {}
+        : { tabIndex: 0, role: 'group', 'aria-label': 'Boxes on this screenshot', onKeyDown: key })}
       onPointerDown={start}
       onPointerMove={move}
       onPointerUp={end}
@@ -282,8 +331,21 @@ export function RegionSurface({
           <Shade ignored={ignored} width={region.width} />
         </div>
       ) : null}
+      {others.map((other) => (
+        <div key={other.id} className="other-box" style={placed(other.rect, scale)}>
+          <span className="tag">{other.label}</span>
+        </div>
+      ))}
       {boxes.region === null ? null : (
-        <Marquee rect={boxes.region} picture={size} scale={scale} label={label} recording={recording} area={area}>
+        <Marquee
+          rect={boxes.region}
+          picture={size}
+          scale={scale}
+          label={label}
+          recording={recording}
+          area={area}
+          dim={onSelectOther === undefined}
+        >
           {drags && tool === 'box' ? (
             <>
               <span className="grip" />

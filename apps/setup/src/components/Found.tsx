@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import type { FoundView } from '../lib/bindings.ts';
-import type { FoundEntry, FoundRow } from '../lib/found.ts';
+import { type FoundEntry, type FoundRow, keptState } from '../lib/found.ts';
 import { FIND_LIKE_HINT, FOUND_HINT } from '../lib/hints.ts';
 import type { Picture } from '../lib/pixels.ts';
 import type { Size } from '../lib/region.ts';
@@ -21,6 +21,8 @@ interface PanelProps {
   readonly searching: boolean;
   readonly onFind: () => void;
   readonly onEntry: (index: number, entry: FoundEntry) => void;
+  /** Ticks every listed find, or with false leaves every one out. */
+  readonly onKeepAll: (keep: boolean) => void;
   readonly onAdd: () => void;
   readonly onDismiss: () => void;
 }
@@ -41,9 +43,42 @@ function placeholder(row: FoundRow): string {
   return row.reading ? 'Reading…' : 'Type what it shows';
 }
 
-/** The inspector's part for finding more text like the first sample, and adding what the user confirms. */
+/** The box that ticks every listed find, or leaves every one out, and shows a dash while only some are ticked. */
+function KeepAll({
+  rows,
+  onKeepAll,
+}: {
+  readonly rows: readonly FoundRow[];
+  readonly onKeepAll: (keep: boolean) => void;
+}) {
+  const box = useRef<HTMLInputElement>(null);
+  const state = keptState(rows);
+  useEffect(() => {
+    if (box.current !== null) {
+      box.current.indeterminate = state === 'some';
+    }
+  }, [state]);
+  return (
+    <label className="check">
+      <input
+        ref={box}
+        type="checkbox"
+        checked={state === 'all'}
+        onChange={() => {
+          onKeepAll(state !== 'all');
+        }}
+      />
+      Select all
+    </label>
+  );
+}
+
+/** The inspector's part for finding more text like the selected box, and adding what the user ticks as boxes. */
 export function FoundPanel(props: PanelProps) {
-  const { view, rows, flags, crops, findBlocked, addBlocked, error, searching } = props;
+  const { view, findBlocked, addBlocked, error, searching, flags, crops } = props;
+  // Finds that show characters the reference does not need are left out of the list.
+  const rows = props.rows.filter((row) => row.fits);
+  const unlisted = props.rows.length - rows.length;
   const title = useRef<HTMLHeadingElement>(null);
   const find = useRef<HTMLButtonElement>(null);
   // The pressed button leaves with the panel it was on, so focus follows to what replaced it: the results'
@@ -101,6 +136,9 @@ export function FoundPanel(props: PanelProps) {
   }
   const kept = rows.filter((row) => row.keep).length;
   const skipped = [
+    unlisted === 0
+      ? null
+      : `Skipped ${plural(unlisted, 'find that shows', 'finds that show')} characters the reference does not need.`,
     view.otherSizes === 0 ? null : `Skipped ${plural(view.otherSizes, 'run', 'runs')} of other sizes.`,
     view.more === 0 ? null : `${plural(view.more, 'more was', 'more were')} left out; add these, then find again.`,
   ].filter((part) => part !== null);
@@ -114,14 +152,16 @@ export function FoundPanel(props: PanelProps) {
       </div>
       {rows.length === 0 ? (
         <p className="note">
-          No other text on this screenshot, apart from what was added, has the same color and size.
+          No other text on this screenshot that the boxes leave out has the same color and size and shows only the
+          characters the reference needs.
         </p>
       ) : (
         <>
           <p className="note">
-            Text in the same color and size on this screenshot, read as text. Check each one; kept ones teach the
-            reference too.
+            Text in the same color and size on this screenshot, read as text. Tick the ones to add; each becomes a box
+            the reference learns from.
           </p>
+          <KeepAll rows={rows} onKeepAll={props.onKeepAll} />
           <ul aria-label="Found text">
             {rows.map((row) => {
               const number = row.index + 1;
@@ -131,7 +171,7 @@ export function FoundPanel(props: PanelProps) {
                 <li key={row.index} className={row.keep ? undefined : 'off'}>
                   <input
                     type="checkbox"
-                    aria-label={`Keep find ${number}`}
+                    aria-label={`Add find ${number}`}
                     checked={row.keep}
                     onChange={(event) => {
                       props.onEntry(row.index, { keep: event.target.checked, text: row.text, typed: row.typed });

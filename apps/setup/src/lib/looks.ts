@@ -1,6 +1,6 @@
 // Recording a value's region for its looks, and which of the session's screenshots can be removed.
 
-import { type Draft, type Drawn, DEFAULT_TOLERANCE, stateOn } from './check.ts';
+import { type Draft, DEFAULT_TOLERANCE, stateOn } from './check.ts';
 import { clock } from './review.ts';
 
 /** A screenshot in the strip: its index in the session, and whether a recording kept it. */
@@ -27,25 +27,21 @@ export function lookTolerance(draft: Draft): number {
 /**
  * Why screenshot `index` cannot be removed, or null when it can. None can while a recording of looks records, as
  * `recording` says: the recording knows each look it kept and would not keep a removed one again. Otherwise one
- * can when nothing set up uses it: `draft`'s region is not drawn on it, no state is taken from it, and it has no
- * label. `value` is the value's region while the reference editor is open over it, which comes back when the editor
- * closes.
+ * can when nothing set up uses it: `draft`'s region is not drawn on it, no state is taken from it, and no box is on
+ * it.
  */
-export function removeBlocked(draft: Draft, value: Drawn | null, index: number, recording: boolean): string | null {
+export function removeBlocked(draft: Draft, index: number, recording: boolean): string | null {
   if (recording) {
     return 'Stop recording to remove a screenshot.';
   }
-  if (draft.drawnOn === index || value?.drawnOn === index) {
+  if (draft.drawnOn === index) {
     return 'The region is drawn on this screenshot. Draw it on another one to remove this one.';
   }
   if (stateOn(draft, index) !== -1) {
     return 'A state is taken from this screenshot. Remove the state to remove the screenshot.';
   }
-  if ((draft.labels.get(index) ?? '').trim() !== '') {
-    return 'This screenshot is labeled. Clear what it shows to remove it.';
-  }
-  if (draft.found.some((found) => found.screenshot === index)) {
-    return 'Text found on this screenshot is added. Remove found text to remove the screenshot.';
+  if (draft.boxes.some((box) => box.screenshot === index)) {
+    return 'A box is on this screenshot. Delete its boxes to remove the screenshot.';
   }
   return null;
 }
@@ -54,9 +50,9 @@ export function removeBlocked(draft: Draft, value: Drawn | null, index: number, 
  * The recorded screenshots among `shots` that nothing set up uses, which Remove all recorded removes once no
  * recording runs.
  */
-export function removableRecorded(shots: readonly Listed[], draft: Draft, value: Drawn | null): readonly number[] {
+export function removableRecorded(shots: readonly Listed[], draft: Draft): readonly number[] {
   return shots
-    .filter((shot) => shot.recorded && removeBlocked(draft, value, shot.index, false) === null)
+    .filter((shot) => shot.recorded && removeBlocked(draft, shot.index, false) === null)
     .map((shot) => shot.index);
 }
 

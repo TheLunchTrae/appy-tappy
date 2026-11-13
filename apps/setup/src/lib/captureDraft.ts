@@ -1,7 +1,7 @@
 // What a draft of a value, a fix, or a reference keeps of the capture screen, and what it still needs.
 
 import type { AppSummary, DraftDef, ReferenceDef, ValueDef } from './bindings.ts';
-import { type Built, type Draft, type Drawn, fixDraft } from './check.ts';
+import { type Built, type Draft, fixDraft } from './check.ts';
 import { type Kept, draftProblem, isKept } from './drafts.ts';
 import { sameContent } from './unsaved.ts';
 
@@ -11,12 +11,13 @@ export interface Editing {
   readonly name: string;
   /** The characters it needs, each once. */
   readonly expects: readonly string[];
-  /** The value's region when the editor opened from a value, to put back when it closes. */
-  readonly valueRegion: Drawn;
 }
 
-/** The value's two steps: where it shows, then how to read it. */
-export type Step = 'where' | 'how';
+/**
+ * The value's steps: where it shows, then how to read it, which for a number is its characters, then, for a number
+ * only, the check of how it reads and its save.
+ */
+export type Step = 'where' | 'how' | 'check';
 
 /**
  * What the capture screen has set up, apart from its screenshots' pixels, which the draft keeps beside it. The
@@ -34,9 +35,9 @@ export interface CaptureSetup {
   readonly recordedShots: readonly number[];
 }
 
-/** {@link CaptureSetup} as JSON holds it: the labels as pairs, and no recorded readings, which go with the recording. */
+/** {@link CaptureSetup} as JSON holds it: no recorded readings, which go with the recording. */
 export interface StoredSetup extends Omit<CaptureSetup, 'draft'> {
-  readonly draft: Omit<Draft, 'labels' | 'recorded'> & { readonly labels: readonly (readonly [number, string])[] };
+  readonly draft: Omit<Draft, 'recorded'>;
 }
 
 /** What a draft of a value, a fix, or a reference keeps. */
@@ -44,13 +45,13 @@ export type CaptureKept = Kept<'value' | 'fix' | 'reference', StoredSetup>;
 
 /** `setup` as a draft keeps it. */
 export function storeSetup(setup: CaptureSetup): StoredSetup {
-  const { labels, recorded: _recorded, ...rest } = setup.draft;
-  return { ...setup, draft: { ...rest, labels: [...labels] } };
+  const { recorded: _recorded, ...rest } = setup.draft;
+  return { ...setup, draft: rest };
 }
 
 /** The setup a draft kept, as the capture screen holds it again. */
 export function restoreSetup(stored: StoredSetup): CaptureSetup {
-  return { ...stored, draft: { ...stored.draft, labels: new Map(stored.draft.labels), recorded: new Map() } };
+  return { ...stored, draft: { ...stored.draft, recorded: new Map() } };
 }
 
 /**
@@ -62,7 +63,8 @@ export function captureMissing(setup: CaptureSetup, built: Built<unknown>, fixin
   const named = editing === null ? fixing || setup.valueName.trim() !== '' : editing.name.trim() !== '';
   const missing = [
     named ? null : editing === null ? 'Name the value.' : 'Name the reference.',
-    draft.region === null ? 'Draw the region where it shows.' : null,
+    // A reference reads where its first box is, which what it needs says.
+    editing === null && draft.region === null ? 'Draw the region where it shows.' : null,
   ].filter((part) => part !== null);
   return missing.length > 0 || built.ok ? missing : [built.next];
 }
@@ -74,10 +76,10 @@ export function keptSetup(def: DraftDef): CaptureSetup | null {
     : null;
 }
 
-/** The characters a reference draft has labeled so far, each once, in the order they were first labeled. */
+/** The characters a reference draft has labeled so far, each once, in the order its boxes list them. */
 export function labeledCharacters(setup: CaptureSetup): string {
   const seen = new Set<string>();
-  for (const text of setup.draft.labels.values()) {
+  for (const { text } of setup.draft.boxes) {
     for (const character of text.replaceAll(/\s/gu, '')) {
       seen.add(character);
     }

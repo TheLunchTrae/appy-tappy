@@ -100,6 +100,23 @@ export function moveRect(rect: Rect, dx: number, dy: number, bounds: Size): Rect
   };
 }
 
+/**
+ * `rect`, measured on a `from`-sized copy of a picture, in the pixels of its `to`-sized copy: every pixel it reaches
+ * into, and at least one each way, inside the picture. Null when either size is empty.
+ */
+export function scaleRect(rect: Rect, from: Size, to: Size): Rect | null {
+  if (from.width <= 0 || from.height <= 0 || to.width <= 0 || to.height <= 0) {
+    return null;
+  }
+  const x = to.width / from.width;
+  const y = to.height / from.height;
+  const left = clamp(Math.floor(rect.x * x), 0, to.width - 1);
+  const top = clamp(Math.floor(rect.y * y), 0, to.height - 1);
+  const right = clamp(Math.ceil((rect.x + rect.width) * x), left + 1, to.width);
+  const bottom = clamp(Math.ceil((rect.y + rect.height) * y), top + 1, to.height);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 /** The pixel of a `bounds`-sized picture under `point`, or the nearest one when `point` is on or past its far edge. */
 export function pixelAt(point: Point, bounds: Size): Point {
   return {

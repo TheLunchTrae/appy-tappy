@@ -33,13 +33,15 @@ const LIVE_PAUSE_MS = 50;
 
 interface LiveProps {
   readonly maxWidth: number;
+  /** Whether the newest frame drawn stays, such as while a region is drawn over it. */
+  readonly paused?: boolean;
   /** Called with each frame's size, so the stage can lay it out. */
   readonly onFrame: (width: number, height: number) => void;
   readonly onError: (error: unknown) => void;
 }
 
 /** The picked window's newest frame, redrawn as frames arrive. */
-export function LiveCanvas({ maxWidth, onFrame, onError }: LiveProps) {
+export function LiveCanvas({ maxWidth, paused = false, onFrame, onError }: LiveProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const next = useCallback(async (): Promise<void> => {
     try {
@@ -52,6 +54,6 @@ export function LiveCanvas({ maxWidth, onFrame, onError }: LiveProps) {
       onError(error);
     }
   }, [maxWidth, onError, onFrame]);
-  useRepeat(next, LIVE_PAUSE_MS, true);
+  useRepeat(next, LIVE_PAUSE_MS, !paused);
   return <canvas ref={canvas} role="img" aria-label="The live window" />;
 }

@@ -12,7 +12,7 @@ import { useShortcutChoice } from './useShortcutChoice.ts';
  * The global shortcut that takes a screenshot with `onPress`, and the user's choice of a new one, which is saved in
  * the settings. It is on while the component that uses it shows, except while the user is choosing.
  */
-export function useScreenshotShortcut(onPress: () => Promise<void>): Omit<
+export function useScreenshotShortcut(onPress: () => Promise<unknown>): Omit<
   ReturnType<typeof useShortcutChoice>,
   'shortcut'
 > & {
