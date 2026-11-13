@@ -1844,8 +1844,9 @@ second (`try_edit`, through `useLiveCheck`). The same edit is tried again
 when the window's size changes, which the page asks the owner for twice a
 second (`window_size`), and after a save the owner refused. The owner makes
 the edited value its `check`, placed where the value reads at the newest
-frame's size, or clears `check` when the value is not read at that size or
-the edit cannot be tried, and answers what a save would do. An answer for an
+frame's size, and answers what a save would do. At a size the value is not
+read at, the check stays set and the answer says why. The owner clears
+`check` only when the edit cannot be tried. An answer for an
 edit that has changed since is dropped, as a late check's is.
 
 - **The edit cannot be built or read back.** The reading box says why, such
