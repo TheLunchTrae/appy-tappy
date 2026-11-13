@@ -38,8 +38,8 @@ function Characters({ workings }: { readonly workings: Extract<WorkingsView, { k
         sampled onto, and the closest other character. A cell is apart when one of the two sets it and the other sets
         neither it nor a cell beside it. A character reads while at most 1 in 32 of the cells either sets are apart. A
         close second means the reference needs more samples of both. A character the value leaves out reads as text: it
-        ends the number or comes before it. A read stops at the first character after the number, so any after it are
-        shown but not read.
+        ends the number or comes before it, and the read fails when it is a part of the number. A read stops at the
+        first character after the number, so any after it are shown but not read.
       </p>
     </>
   );
