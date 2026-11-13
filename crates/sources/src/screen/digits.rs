@@ -205,12 +205,6 @@ impl DigitReader {
         Ok(())
     }
 
-    /// Whether the reader has learned a glyph for `character`.
-    #[must_use]
-    pub fn knows(&self, character: char) -> bool {
-        self.glyphs.iter().any(|glyph| glyph.character == character)
-    }
-
     /// The reader a number check reads with when it names `characters`, as
     /// `CheckDef::Number` does: with only its glyphs for them, in the order
     /// it learned them, or `None` when it has learned none of them. It then
@@ -928,6 +922,14 @@ mod tests {
     use super::*;
     use crate::screen::Size;
 
+    /// Whether `reader` has learned a glyph for `character`.
+    fn knows(reader: &DigitReader, character: char) -> bool {
+        reader
+            .glyphs
+            .iter()
+            .any(|glyph| glyph.character == character)
+    }
+
     /// The characters of `text` as a read made them out.
     fn read_text(text: &str) -> ReadText {
         let mut read = ReadText::default();
@@ -1208,8 +1210,8 @@ mod tests {
         ]);
         let mut reader = DigitReader::new(WHITE, 0);
         reader.learn(&digits, "1 2 3").unwrap();
-        assert!(reader.knows('2'));
-        assert!(!reader.knows('4'));
+        assert!(knows(&reader, '2'));
+        assert!(!knows(&reader, '4'));
         let swapped = draw(&[
             "###.#.###", //
             "..#.#...#",
@@ -1248,7 +1250,7 @@ mod tests {
                 new: '2'
             })
         );
-        assert!(!reader.knows('1'));
+        assert!(!knows(&reader, '1'));
         assert_eq!(reader.learn(&draw(&["..."]), "1"), Err(LearnError::NoInk));
         reader.learn(&draw(&["#"]), "1").unwrap();
         reader.learn(&draw(&["#"]), "1").unwrap();
@@ -1323,8 +1325,8 @@ mod tests {
             })
         );
         let digits = reader.clone().reading(Some("0123456789")).unwrap();
-        assert!(digits.knows('0'));
-        assert!(!digits.knows('O'));
+        assert!(knows(&digits, '0'));
+        assert!(!knows(&digits, 'O'));
         assert_eq!(digits.read(&letter, false), Ok(Number::new(0.0).unwrap()));
         // The glyphs kept stay in the order they were learned.
         assert_eq!(reader.clone().reading(Some("0 O")), Some(reader.clone()));

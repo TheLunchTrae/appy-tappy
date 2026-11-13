@@ -2,18 +2,20 @@
 //!
 //! The UI sends the steps the user took on a screenshot: a rough box to snap
 //! to the thing inside it, or a click to grow over the thing's colors, each
-//! replacing the selection, adding to it, or taking from it. [`select`]
+//! replacing the selection, adding to it, or taking from it. [`select()`]
 //! replays them, so the same steps give the same selection on the screenshot
 //! the check is built from as on the one the UI showed.
 
-use std::ops::Range;
-
 use appytappy_config::app_file::RegionDef;
-use appytappy_sources::screen::select::{Selection, grow, snap};
+use appytappy_sources::screen::mask::Mask;
 use appytappy_sources::screen::{Image, Region};
 use serde::{Deserialize, Serialize};
 
 use crate::check_spec::RegionSpec;
+
+mod select;
+
+use select::{Selection, grow, snap};
 
 /// How a step's pick combines with the selection before it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -99,14 +101,24 @@ impl From<&Selection> for SelectionView {
     fn from(selection: &Selection) -> Self {
         Self {
             region: selection.region().into(),
-            spans: selection
-                .mask()
-                .spans()
-                .into_iter()
-                .map(|Range { start, end }| [start, end])
-                .collect(),
+            spans: spans(selection.mask()),
         }
     }
+}
+
+/// The runs of pixels `mask` keeps, each as the index of its first pixel
+/// and of the pixel after its last. A run goes on across the end of a row.
+fn spans(mask: &Mask) -> Vec<[usize; 2]> {
+    let mut spans = Vec::new();
+    let mut index = 0_usize;
+    for run in mask.kept().chunk_by(|one, other| one == other) {
+        let end = index.saturating_add(run.len());
+        if run.first() == Some(&true) {
+            spans.push([index, end]);
+        }
+        index = end;
+    }
+    spans
 }
 
 #[cfg(test)]
@@ -168,6 +180,23 @@ mod tests {
 
     fn click(x: u32, y: u32, combine: Combine) -> SelectStep {
         SelectStep::Click { x, y, combine }
+    }
+
+    #[test]
+    fn spans_cover_each_run_of_kept_pixels() {
+        let size = Size {
+            width: 3,
+            height: 2,
+        };
+        let mask = |kept: [bool; 6]| Mask::new(size, kept.to_vec()).expect("keeps one");
+        assert_eq!(
+            spans(&mask([true, false, true, true, false, true])),
+            [[0, 1], [2, 4], [5, 6]]
+        );
+        assert_eq!(
+            spans(&mask([false, true, true, true, true, false])),
+            [[1, 5]]
+        );
     }
 
     #[test]

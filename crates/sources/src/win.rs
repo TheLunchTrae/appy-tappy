@@ -26,7 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::BOOL;
 
 use crate::screen::{Rgb, Size, content_on_screen};
-use crate::system::{Bounds, ProcessEntry, System, WindowEntry, WindowPlace};
+use crate::system::{Bounds, ProcessEntry, ScreenPixels, System, WindowEntry, WindowPlace};
 
 mod build;
 mod capture;
@@ -318,7 +318,9 @@ impl System for WindowsSystem {
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {
         build::executable_build(process)
     }
+}
 
+impl ScreenPixels for WindowsSystem {
     fn screen_pixel(&self, x: i32, y: i32) -> io::Result<Rgb> {
         #[expect(unsafe_code, reason = "Win32 calls")]
         // SAFETY: the screen device context is released before the block ends and

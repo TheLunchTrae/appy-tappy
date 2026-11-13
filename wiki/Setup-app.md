@@ -148,7 +148,8 @@ This page covers what the user guide leaves out.
   and drops only its own work.
 - **Selection.** Each state of a state check has its own selection, which travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
-  selection, with one color match for all of them (`selection.rs`). The owner
+  selection, with one color match for all of them (`selection.rs`, with the
+  snap and the grow themselves in `selection/select.rs`). The owner
   replays a state's steps on the screenshot the state is taken from, both to
   answer the UI's `select` command and to build and save the check, so moving
   the slider remakes every selection from the same steps. A new step fits the

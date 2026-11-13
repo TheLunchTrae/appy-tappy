@@ -97,6 +97,16 @@ each game session. `apps/setup/src-tauri`
 is a workspace member like the other programs; the setup app takes `engine`
 once it previews automations.
 
+`appytappy-sources` holds what both programs read with, so a change to it
+rebuilds the runtime. Code that only the setup app needs and that stands by
+itself lives in the setup app, such as selecting the thing a state check
+looks for (`apps/setup/src-tauri/src/selection/select.rs`). A setup-only
+item stays in `sources` when it is the other half of something the runtime
+uses: writing the PNG files the runtime decodes, and the shapes and ink a
+number read decides with. Its crate documentation lists them. Reading a
+pixel of the screen serves only the MCP server, so it is the `ScreenPixels`
+trait, apart from the `System` trait that every fake implements.
+
 The design uses the [`windows`](https://github.com/microsoft/windows-rs) crate
 rather than `windows-sys`. Media sessions and Core Audio are WinRT and COM
 APIs, which only `windows` covers; `windows-sys` covers plain Win32 functions.
@@ -327,7 +337,7 @@ When a session starts, the lifecycle thread sends the `Started` change, then
 reads which build of the application's executable runs and sends it as an
 `Identified` change, so reading the file never holds back the session. A
 build is the executable's file version, its size, and when it was written
-(`appytappy_sources::build`). The Windows adapter
+(`crates/sources/src/build.rs`). The Windows adapter
 (`crates/sources/src/win/build.rs`) asks `NtQuerySystemInformation` for the
 process's executable path by its process ID, which needs no process handle, so
 it is allowed for every anti-cheat class, and turns the device path it gives

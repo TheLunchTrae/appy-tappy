@@ -131,14 +131,19 @@ pub trait System {
     }
 
     /// The build of `process`'s executable, read from the file without
-    /// opening the process: see [`crate::build`].
+    /// opening the process: its file version, its size, and when it was
+    /// written.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error, such as for a process that
     /// exited or a file it cannot read.
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef>;
+}
 
+/// Reading the screen itself, which only the MCP server does. It is apart
+/// from [`System`] so that nothing else carries it.
+pub trait ScreenPixels {
     /// Reads one pixel of the screen.
     ///
     /// # Errors
@@ -179,7 +184,9 @@ impl System for Unsupported {
     fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
         unsupported()
     }
+}
 
+impl ScreenPixels for Unsupported {
     fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
         unsupported()
     }
@@ -597,9 +604,6 @@ mod tests {
                 unsupported()
             }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
-                unsupported()
-            }
-            fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
                 unsupported()
             }
         }

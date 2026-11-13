@@ -2410,10 +2410,6 @@ mod tests {
         ) -> io::Result<appytappy_config::app_file::BuildDef> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
-
-        fn screen_pixel(&self, _: i32, _: i32) -> io::Result<Rgb> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
     }
 
     impl Capture for FakeSystem {
@@ -2968,10 +2964,6 @@ mod tests {
             &self,
             _process: appytappy_config::anti_cheat::ProcessId,
         ) -> io::Result<appytappy_config::app_file::BuildDef> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn screen_pixel(&self, _: i32, _: i32) -> io::Result<Rgb> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
     }

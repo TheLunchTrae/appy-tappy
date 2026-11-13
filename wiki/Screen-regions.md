@@ -13,8 +13,7 @@ and where a window's content lies in its frame,
 `screen/check.rs` and `screen/digits.rs` the checks, `screen/detect.rs` the
 proposal of a bar's colors, `screen/masked.rs` the comparison of a region
 with a saved picture, which a state check and a click's picture search
-share, `screen/mask.rs` and
-`screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
+share, `screen/mask.rs` a state picture's mask, `screen/saved.rs`
 the saved checks, `screen/scale.rs` and `screen/resample.rs` how a value
 reads at another window size, and `schedule.rs` the read interval.
 Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
@@ -309,7 +308,10 @@ with and without it (`saved::build`).
 
 ## Selection
 
-`screen::select` finds the thing to compare on a screenshot, without a model:
+The setup app's `selection/select.rs` finds the thing to compare on a
+screenshot, without a model. Only the setup app selects, so the code lives
+there and not in `appytappy-sources`; the runtime reads the mask the
+selection saved:
 
 - **Snap** takes a rough box drawn around the thing. The colors along the
   box's edge are the background, the first 256 different ones. Every pixel

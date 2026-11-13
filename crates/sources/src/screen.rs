@@ -17,7 +17,6 @@ pub mod mask;
 pub mod place;
 pub mod saved;
 pub mod scale;
-pub mod select;
 pub mod settle;
 pub mod workings;
 

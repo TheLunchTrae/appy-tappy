@@ -261,12 +261,6 @@ impl ImageMatch {
         }
     }
 
-    /// The region as the setup screenshot showed it.
-    #[must_use]
-    pub const fn picture(&self) -> &Image {
-        self.picture.picture()
-    }
-
     /// This check for a region of `size`, with its picture and mask redrawn,
     /// or `None` when `size` is empty or the redrawn mask keeps no pixel.
     ///
@@ -855,7 +849,7 @@ mod tests {
             unmasked.matches(&row(&[GRAY, GREEN, GREEN, GRAY])),
             Ok(false)
         );
-        assert_eq!(check.picture(), &picture);
+        assert_eq!(check.picture.picture(), &picture);
     }
 
     #[test]
@@ -868,7 +862,7 @@ mod tests {
             height: 1,
         };
         let resized = check.resized(wide).expect("keeps pixels");
-        assert_eq!(resized.picture().size(), wide);
+        assert_eq!(resized.picture.size(), wide);
         // The background left out at both ends stays out at twice the size.
         let changed = row(&[GRAY, GRAY, GREEN, GREEN, GREEN, GREEN, GRAY, GRAY]);
         assert_eq!(resized.matches(&changed), Ok(true));
