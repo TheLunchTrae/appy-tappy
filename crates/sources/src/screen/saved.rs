@@ -611,6 +611,13 @@ impl fmt::Display for SavedError {
                 "its region lies outside the {window_size} window it was drawn on"
             ),
             Self::Missing { name, .. } => write!(formatter, "its picture {name} cannot be read"),
+            Self::Picture {
+                name,
+                source: ImageError::TooLarge { size },
+            } => write!(
+                formatter,
+                "its picture {name} is {size}, larger than AppyTappy reads"
+            ),
             Self::Picture { name, .. } => {
                 write!(
                     formatter,
@@ -1257,7 +1264,14 @@ mod tests {
         let reference = |image: &str| state_check(&[("Shown", image)]);
         let mut files = pictures(&[("small.png", &solid(3, RED))]);
         files.insert("broken.png".to_owned(), b"not a picture".to_vec());
-        let problems = ["gone.png", "broken.png", "small.png"].map(|name| {
+        // Only a header, which says the picture is one column wider than the
+        // largest AppyTappy reads: it is refused before any of it decodes.
+        let mut huge = Vec::new();
+        png::Encoder::new(&mut huge, 7681, 4320)
+            .write_header()
+            .expect("a header");
+        files.insert("huge.png".to_owned(), huge);
+        let problems = ["gone.png", "broken.png", "huge.png", "small.png"].map(|name| {
             let error = build(&reference(name), &[], OFTEN, from(&files)).expect_err("refused");
             (error.to_string(), error.source().is_some())
         });
@@ -1267,6 +1281,10 @@ mod tests {
                 ("its picture gone.png cannot be read".to_owned(), true),
                 (
                     "its picture broken.png is not a PNG file it can read".to_owned(),
+                    true
+                ),
+                (
+                    "its picture huge.png is 7681x4320, larger than AppyTappy reads".to_owned(),
                     true
                 ),
                 (

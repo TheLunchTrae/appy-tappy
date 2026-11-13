@@ -9,11 +9,26 @@ use std::num::NonZeroU32;
 use super::mask::{self, Mask, MaskError};
 use crate::system::Rgb;
 
-/// The widest or tallest image a PNG may hold, in pixels.
+/// The widest or tallest picture AppyTappy reads or writes, in pixels.
 const MAX_PNG_SIDE: u32 = 8192;
 
-/// The most memory PNG decoding may allocate, in bytes.
-const MAX_PNG_BYTES: usize = 256 << 20;
+/// The most pixels a picture AppyTappy reads or writes may hold: an 8K
+/// display's worth.
+///
+/// Every picture AppyTappy saves is a window's content or a part of it. A
+/// window can span displays and grow past this, but AppyTappy chooses this
+/// bound, a whole 8K display, so that what one picture costs, about 10 bytes
+/// a pixel while it decodes, stays bounded wherever the file came from.
+pub const LARGEST_PICTURE: Size = Size {
+    width: 7680,
+    height: 4320,
+};
+
+/// The most memory the PNG decoder may allocate beside the picture's own
+/// pixels, which [`LARGEST_PICTURE`] bounds: a row at a time and the file's
+/// metadata, such as a color profile, which a picture AppyTappy writes does
+/// not have.
+const MAX_PNG_BYTES: usize = 4 << 20;
 
 /// Bytes per pixel in an [`Image`]: blue, green, red, and an unused byte.
 const BYTES_PER_PIXEL: usize = 4;
@@ -31,6 +46,25 @@ pub struct Size {
 }
 
 impl Size {
+    /// The number of pixels.
+    #[must_use]
+    pub const fn pixels(self) -> u64 {
+        (self.width as u64).saturating_mul(self.height as u64)
+    }
+
+    /// Whether AppyTappy reads and writes a picture of this size: no wider
+    /// or taller than 8192 pixels, and with no more pixels than
+    /// [`LARGEST_PICTURE`]. A larger one is [`ImageError::TooLarge`].
+    const fn fits_picture(self) -> Result<(), ImageError> {
+        if self.width > MAX_PNG_SIDE
+            || self.height > MAX_PNG_SIDE
+            || self.pixels() > LARGEST_PICTURE.pixels()
+        {
+            return Err(ImageError::TooLarge { size: self });
+        }
+        Ok(())
+    }
+
     /// The number of bytes an image of this size holds, if it fits in memory.
     fn bytes(self) -> Option<usize> {
         usize::try_from(self.width)
@@ -220,6 +254,17 @@ impl Image {
         })
     }
 
+    /// The size a PNG file's header gives its picture, read without
+    /// decoding the picture.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ImageError::Decode`] for a file without a PNG header, and
+    /// [`ImageError::TooLarge`] for a picture larger than AppyTappy reads.
+    pub fn png_size(bytes: &[u8]) -> Result<Size, ImageError> {
+        header_size(&mut decoder(bytes))
+    }
+
     /// Decodes a PNG file, such as a screen binding's reference image. Every
     /// PNG color type and bit depth reads as 8-bit color, and any alpha is
     /// dropped.
@@ -227,7 +272,8 @@ impl Image {
     /// # Errors
     ///
     /// Returns [`ImageError::Decode`] for a malformed file, and
-    /// [`ImageError::TooLarge`] for an image wider or taller than 8192 pixels.
+    /// [`ImageError::TooLarge`] for a picture larger than AppyTappy reads,
+    /// as its header says, before any of it is decoded.
     pub fn decode_png(bytes: &[u8]) -> Result<Self, ImageError> {
         Self::decode(bytes).map(|(image, _alpha)| image)
     }
@@ -252,22 +298,9 @@ impl Image {
 
     /// Decodes a PNG file into an image and each pixel's alpha.
     fn decode(bytes: &[u8]) -> Result<(Self, Vec<u8>), ImageError> {
-        let mut decoder = png::Decoder::new_with_limits(
-            Cursor::new(bytes),
-            png::Limits {
-                bytes: MAX_PNG_BYTES,
-            },
-        );
-        decoder.set_transformations(png::Transformations::normalize_to_color8());
+        let mut decoder = decoder(bytes);
+        let size = header_size(&mut decoder)?;
         let mut reader = decoder.read_info().map_err(ImageError::Decode)?;
-        let header = reader.info();
-        let size = Size {
-            width: header.width,
-            height: header.height,
-        };
-        if size.width > MAX_PNG_SIDE || size.height > MAX_PNG_SIDE {
-            return Err(ImageError::TooLarge { size });
-        }
         let length = reader
             .output_buffer_size()
             .ok_or(ImageError::TooLarge { size })?;
@@ -309,8 +342,10 @@ impl Image {
     ///
     /// # Errors
     ///
-    /// Returns [`ImageError::Encode`] when the encoder fails.
+    /// Returns [`ImageError::TooLarge`] for an image larger than AppyTappy
+    /// reads back, and [`ImageError::Encode`] when the encoder fails.
     pub fn encode_png(&self) -> Result<Vec<u8>, ImageError> {
+        self.size.fits_picture()?;
         let mut rgb = Vec::with_capacity(self.bgra.len());
         for &[blue, green, red, _] in self.pixels() {
             rgb.extend_from_slice(&[red, green, blue]);
@@ -325,8 +360,9 @@ impl Image {
     /// # Errors
     ///
     /// Returns [`ImageError::Mask`] when the mask's size differs from the
-    /// image's, and [`ImageError::Encode`] when the encoder fails.
+    /// image's, and the errors [`Image::encode_png`] does.
     pub fn encode_png_masked(&self, mask: &Mask) -> Result<Vec<u8>, ImageError> {
+        self.size.fits_picture()?;
         if mask.size() != self.size {
             return Err(ImageError::Mask(MaskError::SizeMismatch {
                 image: self.size,
@@ -354,6 +390,30 @@ impl Image {
         writer.finish().map_err(ImageError::Encode)?;
         Ok(file)
     }
+}
+
+/// A decoder for the PNG file `bytes`, which reads every color type and bit
+/// depth as 8-bit color.
+fn decoder(bytes: &[u8]) -> png::Decoder<Cursor<&[u8]>> {
+    let mut decoder = png::Decoder::new_with_limits(
+        Cursor::new(bytes),
+        png::Limits {
+            bytes: MAX_PNG_BYTES,
+        },
+    );
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    decoder
+}
+
+/// The size `decoder`'s header gives its picture, once it fits.
+fn header_size(decoder: &mut png::Decoder<Cursor<&[u8]>>) -> Result<Size, ImageError> {
+    let header = decoder.read_header_info().map_err(ImageError::Decode)?;
+    let size = Size {
+        width: header.width,
+        height: header.height,
+    };
+    size.fits_picture()?;
+    Ok(size)
 }
 
 /// The reusable buffer a capture copies each frame's region into, so a
@@ -463,7 +523,8 @@ impl fmt::Display for ImageError {
             },
             Self::TooLarge { size } => write!(
                 formatter,
-                "a {size} image is larger than {MAX_PNG_SIDE} pixels on a side"
+                "a {size} picture is larger than AppyTappy reads, which is at most \
+                 {MAX_PNG_SIDE} pixels on a side and no more pixels than {LARGEST_PICTURE}"
             ),
             Self::Unsupported => formatter.write_str("the PNG file uses an unsupported layout"),
             Self::Decode(_) => formatter.write_str("the PNG file could not be decoded"),
@@ -715,20 +776,112 @@ mod tests {
         file
     }
 
+    /// A PNG file with a header that says its picture is `width` by
+    /// `height` pixels, and no pixels.
+    fn header(width: u32, height: u32) -> Vec<u8> {
+        let mut file = Vec::new();
+        // The writer ends the file as it drops, with no image data.
+        png::Encoder::new(&mut file, width, height)
+            .write_header()
+            .unwrap();
+        file
+    }
+
     #[test]
     fn rejects_malformed_and_oversized_pngs() {
         assert!(matches!(
             Image::decode_png(b"not a png"),
             Err(ImageError::Decode(_))
         ));
+        assert!(matches!(
+            Image::png_size(b"not a png"),
+            Err(ImageError::Decode(_))
+        ));
         assert!(Image::decode_png(&gray_png(MAX_PNG_SIDE, 1)).is_ok());
         assert!(Image::decode_png(&gray_png(1, MAX_PNG_SIDE)).is_ok());
-        for (width, height) in [(MAX_PNG_SIDE + 1, 1), (1, MAX_PNG_SIDE + 1)] {
+        let size = |width, height| Size { width, height };
+        // 4050 by 8192 is exactly as many pixels as the largest picture.
+        for fits in [
+            LARGEST_PICTURE,
+            size(MAX_PNG_SIDE, 1),
+            size(1, MAX_PNG_SIDE),
+            size(4050, MAX_PNG_SIDE),
+        ] {
+            let file = header(fits.width, fits.height);
+            assert_eq!(Image::png_size(&file).unwrap(), fits);
+            // It goes on to the pixels, which this file lacks.
             assert!(matches!(
-                Image::decode_png(&gray_png(width, height)),
-                Err(ImageError::TooLarge { .. })
+                Image::decode_png(&file),
+                Err(ImageError::Decode(_))
             ));
         }
+        for over in [
+            size(7681, 4320),
+            size(7680, 4321),
+            size(4051, MAX_PNG_SIDE),
+            size(MAX_PNG_SIDE + 1, 1),
+            size(1, MAX_PNG_SIDE + 1),
+        ] {
+            let file = header(over.width, over.height);
+            assert!(matches!(
+                Image::png_size(&file),
+                Err(ImageError::TooLarge { size }) if size == over
+            ));
+            // Refused from its header, before the missing pixels are found.
+            assert!(matches!(
+                Image::decode_png(&file),
+                Err(ImageError::TooLarge { size }) if size == over
+            ));
+            assert!(matches!(
+                Image::decode_png_masked(&file),
+                Err(ImageError::TooLarge { size }) if size == over
+            ));
+        }
+    }
+
+    #[test]
+    fn a_picture_larger_than_appytappy_reads_is_not_written() {
+        let size = Size {
+            width: 7681,
+            height: 4320,
+        };
+        let length = size.bytes().unwrap();
+        // The refusal reads none of the pixels, so the zeroed memory is
+        // never touched.
+        let picture = Image::new(size, vec![0; length]).unwrap();
+        assert!(matches!(
+            picture.encode_png(),
+            Err(ImageError::TooLarge { size: refused }) if refused == size
+        ));
+        let mut kept = vec![false; mask::pixels(size).unwrap()];
+        kept[0] = true;
+        let mask = Mask::new(size, kept).unwrap();
+        assert!(matches!(
+            picture.encode_png_masked(&mask),
+            Err(ImageError::TooLarge { size: refused }) if refused == size
+        ));
+    }
+
+    #[test]
+    fn a_picture_carries_no_more_metadata_than_the_decoder_may_hold() {
+        let with_text = |length: usize| {
+            let mut file = Vec::new();
+            let mut encoder = png::Encoder::new(&mut file, 1, 1);
+            encoder
+                .add_text_chunk("Comment".to_owned(), "a".repeat(length))
+                .unwrap();
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&[0]).unwrap();
+            writer.finish().unwrap();
+            file
+        };
+        // The decoder counts a chunk's bytes more than once as it reads
+        // them, so a picture keeps somewhat less than the limit.
+        assert!(Image::decode_png(&with_text(MAX_PNG_BYTES / 4)).is_ok());
+        assert!(matches!(
+            Image::decode_png(&with_text(MAX_PNG_BYTES)),
+            Err(ImageError::Decode(png::DecodingError::LimitsExceeded))
+        ));
     }
 
     #[test]
@@ -772,7 +925,8 @@ mod tests {
             ),
             (
                 ImageError::TooLarge { size },
-                "a 3x2 image is larger than 8192 pixels on a side",
+                "a 3x2 picture is larger than AppyTappy reads, which is at most 8192 pixels on \
+                 a side and no more pixels than 7680x4320",
             ),
             (
                 ImageError::Unsupported,
