@@ -21,8 +21,9 @@ Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
 ## Checks
 
 Each check reads a cropped region and produces a signal value. All four are
-plain Rust over the region's pixels: they call no operating system API, give
-the same answer on every system, and allocate nothing per read.
+plain Rust over the region's pixels: they call no operating system API and
+give the same answer on every system. Only a number allocates as it reads: a
+byte for each pixel of its region, for which of them are ink.
 
 - **Number** reads digits, a decimal point, and a minus sign, with a reference
   of the application's: the characters' color and tolerance, and pictures
@@ -37,8 +38,9 @@ the same answer on every system, and allocate nothing per read.
   other character ends the number, so `12/50` reads as 12, and so does a `,`
   that is not followed by exactly three digits, so `12,5` reads as 12 rather
   than guessing that the `,` is a decimal point. A read finds the ink (pixels
-  near the text color), splits it into characters at blank columns, and
-  scales each one to a fixed grid by the height of the text line. The text
+  near the text color) once, as `digits::Ink`, splits it into characters at
+  blank columns, and scales each one to a fixed grid by the height of the
+  text line. The text
   line is the band of rows with the most ink, so a stray speck elsewhere in
   the region does not throw it off. Each character takes the closest learned
   shape, if the two are the same but for their edges, as

@@ -3,13 +3,16 @@
 //!
 //! An app draws its counter with one font at one size, so the screenshot's
 //! own glyphs are the best possible templates. Reading is a fixed sequence of
-//! integer passes with no allocation, so it is deterministic and costs
-//! microseconds, where general text recognition costs milliseconds and can
-//! differ between machines.
+//! integer passes, so it is deterministic and costs microseconds, where
+//! general text recognition costs milliseconds and can differ between
+//! machines. Its one allocation is the ink, a byte for each pixel of the
+//! region.
 //!
 //! 1. **Ink.** A pixel is ink when each of its red, green, and blue is within
-//!    the tolerance of the text color the user picked.
-//! 2. **Line.** The rows from the first to the last that hold ink.
+//!    the tolerance of the text color the user picked. [`Ink`] holds which
+//!    pixels are, found once, and the later passes read it.
+//! 2. **Line.** The run of adjacent inked rows that holds the most ink
+//!    ([`Ink::line`]).
 //! 3. **Characters.** Runs of columns that hold ink in the line, left to
 //!    right. Characters must not touch.
 //! 4. **Shapes.** Each character is sampled onto a grid 16 cells tall, scaled
@@ -33,10 +36,13 @@ use std::ops::Range;
 use appytappy_config::app_file::is_label_character;
 use appytappy_config::signal::Number;
 
-use super::{Image, Rgb};
+use super::{Image, Rgb, Size};
 
 #[cfg(test)]
 pub(crate) mod drawn;
+mod ink;
+
+pub use ink::Ink;
 
 /// Grid rows: each character is scaled to this many cells tall.
 const GRID_ROWS: u32 = 16;
@@ -120,13 +126,6 @@ struct Span {
     right: u32,
 }
 
-/// Rows `top..bottom` that hold ink.
-#[derive(Debug, Clone, Copy)]
-struct Line {
-    top: u32,
-    bottom: u32,
-}
-
 /// Reads a number drawn in one text color, from glyphs learned from
 /// screenshots of the same counter.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,13 +164,12 @@ impl DigitReader {
     /// with `text`, when a shape is already learned as another character, or
     /// when the reader is full. On error the reader is unchanged.
     pub fn learn(&mut self, image: &Image, text: &str) -> Result<(), LearnError> {
+        let ink = self.ink(image);
         let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (line, count) = self
-            .segment(image, &mut spans)
-            .map_err(|error| match error {
-                Segmentation::NoInk => LearnError::NoInk,
-                Segmentation::TooMany => LearnError::TooManyCharacters,
-            })?;
+        let (line, count) = segment(&ink, &mut spans).map_err(|error| match error {
+            Segmentation::NoInk => LearnError::NoInk,
+            Segmentation::TooMany => LearnError::TooManyCharacters,
+        })?;
         let expected = text
             .chars()
             .filter(|&character| is_label_character(character));
@@ -194,7 +192,7 @@ impl DigitReader {
         }
         let mut learned = self.glyphs.clone();
         for (character, span) in expected.zip(found) {
-            let shape = self.shape(image, line, *span);
+            let shape = shape(&ink, &line, *span);
             match learned.iter().find(|glyph| glyph.shape == shape) {
                 Some(glyph) if glyph.character == character => {},
                 Some(glyph) => {
@@ -258,13 +256,9 @@ impl DigitReader {
     /// the read made out, so a number is never made of only the characters
     /// that matched.
     pub fn read(&self, image: &Image, whole: bool) -> Result<Number, ReadError> {
+        let ink = self.ink(image);
         let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (line, count) = self
-            .segment(image, &mut spans)
-            .map_err(|error| match error {
-                Segmentation::NoInk => ReadError::NoInk,
-                Segmentation::TooMany => ReadError::TooManyCharacters,
-            })?;
+        let (line, count) = segment(&ink, &mut spans)?;
         let mut number = NumberText {
             point: Point::for_whole(whole),
             ..NumberText::default()
@@ -278,7 +272,7 @@ impl DigitReader {
         // The first digit the value leaves out, which fails the read too.
         let mut digit_left_out = None;
         for (position, span) in spans.iter().take(count).enumerate() {
-            let shape = self.shape(image, line, *span);
+            let shape = shape(&ink, &line, *span);
             let closest = closest(&self.glyphs, &shape);
             if let Some(closest) = closest.filter(|closest| closest.matches) {
                 read.push(closest.character);
@@ -335,19 +329,9 @@ impl DigitReader {
     /// [`ReadError::TooManyCharacters`] when it has more characters than a
     /// read takes.
     pub fn shapes(&self, image: &Image) -> Result<Shapes, ReadError> {
-        let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (line, count) = self
-            .segment(image, &mut spans)
-            .map_err(|failure| match failure {
-                Segmentation::NoInk => ReadError::NoInk,
-                Segmentation::TooMany => ReadError::TooManyCharacters,
-            })?;
+        let placed = self.placed(image)?;
         Ok(Shapes(
-            spans
-                .iter()
-                .take(count)
-                .map(|span| self.shape(image, line, *span))
-                .collect(),
+            placed.into_iter().map(|(shape, _columns)| shape).collect(),
         ))
     }
 
@@ -360,124 +344,21 @@ impl DigitReader {
     ///
     /// The errors of [`DigitReader::shapes`].
     pub fn placed(&self, image: &Image) -> Result<Vec<(Shape, Range<u32>)>, ReadError> {
+        let ink = self.ink(image);
         let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (line, count) = self
-            .segment(image, &mut spans)
-            .map_err(|failure| match failure {
-                Segmentation::NoInk => ReadError::NoInk,
-                Segmentation::TooMany => ReadError::TooManyCharacters,
-            })?;
+        let (line, count) = segment(&ink, &mut spans)?;
         Ok(spans
             .iter()
             .take(count)
-            .map(|span| (self.shape(image, line, *span), span.left..span.right))
+            .map(|span| (shape(&ink, &line, *span), span.left..span.right))
             .collect())
     }
 
-    fn is_ink_at(&self, image: &Image, x: u32, y: u32) -> bool {
-        let index = u64::from(y)
-            .saturating_mul(u64::from(image.size().width))
-            .saturating_add(u64::from(x));
-        usize::try_from(index)
-            .ok()
-            .and_then(|index| image.pixels().get(index))
-            .is_some_and(|&pixel| self.is_ink(pixel))
-    }
-
-    /// Counts the ink pixels in a rectangle, and all its pixels.
-    fn ink_in(&self, image: &Image, columns: Range<u32>, rows: Range<u32>) -> (u32, u32) {
-        let mut ink = 0_u32;
-        let mut area = 0_u32;
-        for y in rows {
-            for x in columns.clone() {
-                ink = ink.saturating_add(u32::from(self.is_ink_at(image, x, y)));
-                area = area.saturating_add(1);
-            }
-        }
-        (ink, area)
-    }
-
-    /// Finds the line and its characters, writing their spans into `spans`
-    /// and returning how many it wrote.
-    fn segment(
-        &self,
-        image: &Image,
-        spans: &mut [Span; MAX_CHARACTERS],
-    ) -> Result<(Line, usize), Segmentation> {
-        let line = self.line(image).ok_or(Segmentation::NoInk)?;
-
-        let mut count = 0_usize;
-        let mut start = None;
-        for x in 0..=image.size().width {
-            let inked = x < image.size().width
-                && (line.top..line.bottom).any(|y| self.is_ink_at(image, x, y));
-            match (start, inked) {
-                (None, true) => start = Some(x),
-                (Some(left), false) => {
-                    let slot = spans.get_mut(count).ok_or(Segmentation::TooMany)?;
-                    *slot = Span { left, right: x };
-                    count = count.saturating_add(1);
-                    start = None;
-                },
-                _ => {},
-            }
-        }
-        Ok((line, count))
-    }
-
-    /// The run of adjacent inked rows that holds the most ink, so a stray
-    /// pixel elsewhere in the region does not stretch the line.
-    fn line(&self, image: &Image) -> Option<Line> {
-        let rows = image
-            .rows()
-            .map(|row| row.iter().filter(|&&pixel| self.is_ink(pixel)).count());
-        let mut best: Option<(Line, usize)> = None;
-        let mut run: Option<(Line, usize)> = None;
-        // The trailing zero ends a run that reaches the bottom edge.
-        for (ink, y) in rows.chain([0]).zip(0_u32..) {
-            if ink > 0 {
-                let (line, total) = run.get_or_insert((Line { top: y, bottom: y }, 0));
-                line.bottom = y.saturating_add(1);
-                *total = total.saturating_add(ink);
-            } else if let Some(ended) = run.take()
-                && best.is_none_or(|(_, most)| ended.1 > most)
-            {
-                best = Some(ended);
-            }
-        }
-        best.map(|(line, _)| line)
-    }
-
-    /// Samples the character in `span` onto the grid, scaled by the line's
-    /// height.
-    fn shape(&self, image: &Image, line: Line, span: Span) -> Shape {
-        let height = line.bottom.saturating_sub(line.top);
-        // The start of grid cell `index`, in pixels from the cell grid's origin.
-        let edge = |index: u32| index.saturating_mul(height) / GRID_ROWS;
-        let mut shape = Shape::default();
-        for (row, cells) in (0..GRID_ROWS).zip(shape.iter_mut()) {
-            let y0 = line.top.saturating_add(edge(row));
-            let y1 = line
-                .top
-                .saturating_add(edge(row.saturating_add(1)))
-                .max(y0.saturating_add(1));
-            for column in 0..GRID_COLUMNS {
-                let x0 = span.left.saturating_add(edge(column));
-                if x0 >= span.right {
-                    break;
-                }
-                let x1 = span
-                    .left
-                    .saturating_add(edge(column.saturating_add(1)))
-                    .max(x0.saturating_add(1))
-                    .min(span.right);
-                let (ink, area) = self.ink_in(image, x0..x1, y0..y1);
-                if ink.saturating_mul(2) >= area {
-                    *cells |= 1 << column;
-                }
-            }
-        }
-        shape
+    /// Which pixels of `image` are ink. A read, a lesson, and
+    /// [`DigitReader::shapes`] each find them once and work from them.
+    #[must_use]
+    pub fn ink(&self, image: &Image) -> Ink {
+        Ink::new(image, |pixel| self.is_ink(pixel))
     }
 
     /// How each character in `image` scores against the learned glyphs:
@@ -509,6 +390,69 @@ impl DigitReader {
             .copied();
         CharacterScore { best, runner_up }
     }
+}
+
+/// Finds the line of `ink` and its characters, writing their spans into
+/// `spans` and returning how many it wrote.
+fn segment(
+    ink: &Ink,
+    spans: &mut [Span; MAX_CHARACTERS],
+) -> Result<(Range<u32>, usize), Segmentation> {
+    let Size { width, height } = ink.size();
+    let line = ink
+        .line(&(0..width), 0..height)
+        .ok_or(Segmentation::NoInk)?;
+
+    let mut count = 0_usize;
+    let mut start = None;
+    // The column past the last ends a character at the right edge.
+    for x in 0..=width {
+        let inked = line.clone().any(|y| ink.at(x, y));
+        match (start, inked) {
+            (None, true) => start = Some(x),
+            (Some(left), false) => {
+                let slot = spans.get_mut(count).ok_or(Segmentation::TooMany)?;
+                *slot = Span { left, right: x };
+                count = count.saturating_add(1);
+                start = None;
+            },
+            _ => {},
+        }
+    }
+    Ok((line, count))
+}
+
+/// Samples the character in `span` of `line` onto the grid, scaled by the
+/// line's height.
+fn shape(ink: &Ink, line: &Range<u32>, span: Span) -> Shape {
+    let height = line.end.saturating_sub(line.start);
+    // The start of grid cell `index`, in pixels from the cell grid's origin.
+    let edge = |index: u32| index.saturating_mul(height) / GRID_ROWS;
+    let mut shape = Shape::default();
+    for (row, cells) in (0..GRID_ROWS).zip(shape.iter_mut()) {
+        let y0 = line.start.saturating_add(edge(row));
+        let y1 = line
+            .start
+            .saturating_add(edge(row.saturating_add(1)))
+            .max(y0.saturating_add(1));
+        for column in 0..GRID_COLUMNS {
+            let x0 = span.left.saturating_add(edge(column));
+            if x0 >= span.right {
+                break;
+            }
+            let x1 = span
+                .left
+                .saturating_add(edge(column.saturating_add(1)))
+                .max(x0.saturating_add(1))
+                .min(span.right);
+            let inked: usize = (y0..y1).map(|y| ink.count(x0..x1, y)).sum();
+            let area = (y0..y1).len().saturating_mul((x0..x1).len());
+            if inked.saturating_mul(2) >= area {
+                *cells |= 1 << column;
+            }
+        }
+    }
+    shape
 }
 
 /// The glyph of `glyphs` closest to `shape`, the earliest learned of equals,
@@ -606,6 +550,15 @@ fn cells(a: &Shape, b: &Shape, combine: impl Fn(u32, u32) -> u32) -> u32 {
 enum Segmentation {
     NoInk,
     TooMany,
+}
+
+impl From<Segmentation> for ReadError {
+    fn from(failure: Segmentation) -> Self {
+        match failure {
+            Segmentation::NoInk => Self::NoInk,
+            Segmentation::TooMany => Self::TooManyCharacters,
+        }
+    }
 }
 
 /// The characters of a number as a read finds them, held on the stack.
@@ -1800,12 +1753,12 @@ mod tests {
     fn a_cell_is_set_when_at_least_half_its_pixels_are_ink() {
         let reader = DigitReader::new(WHITE, 0);
         // A line 32 pixels tall makes each grid cell 2 by 2 pixels.
-        let line = Line { top: 0, bottom: 32 };
+        let line = 0..32;
         let span = Span { left: 0, right: 2 };
         let first_cell = |top: [&'static str; 2]| {
             let mut rows = vec![".."; 32];
             rows[..2].copy_from_slice(&top);
-            reader.shape(&draw(&rows), line, span)[0] & 1
+            shape(&reader.ink(&draw(&rows)), &line, span)[0] & 1
         };
         assert_eq!(first_cell(["#.", "#."]), 1, "half the cell is ink");
         assert_eq!(first_cell(["#.", ".."]), 0, "a quarter of the cell is ink");
