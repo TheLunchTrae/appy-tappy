@@ -85,16 +85,12 @@ pub(crate) enum Live {
 
 /// What a frame of the watched value's window showed.
 #[derive(Debug)]
-pub(crate) enum Seen {
-    /// The value's region, on a window of `window_size`.
-    Region {
-        /// The window's size.
-        window_size: Size,
-        /// The region's pixels.
-        image: Image,
-    },
-    /// A window of this size, which the region lies outside.
-    Outside(Size),
+pub(crate) struct Seen {
+    /// The window's size.
+    pub(crate) window_size: Size,
+    /// The pixels of the region the capture copies, or `None` when the
+    /// region lies outside a window of this size.
+    pub(crate) image: Option<Image>,
 }
 
 /// A value to save, as the UI describes it.

@@ -79,12 +79,12 @@ pub struct AtSize {
     /// The region of the window's content it reads.
     pub region: Region,
     /// Which check reads it.
-    check: Drawing,
+    pub(super) check: Drawing,
 }
 
 /// The check a value reads with at one size.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Drawing {
+pub(super) enum Drawing {
     /// The first drawing's.
     First,
     /// The fix at this position's own.
@@ -137,6 +137,16 @@ impl SavedValue {
     /// [`Unread::TooSmall`].
     pub fn region_at(&self, size: Size) -> Result<Region, Unread> {
         self.placed(size).map(|(region, _)| region)
+    }
+
+    /// Where it reads on a window of the size it was first drawn at, where
+    /// it always reads.
+    #[must_use]
+    pub const fn first(&self) -> AtSize {
+        AtSize {
+            region: self.drawn.region,
+            check: Drawing::First,
+        }
     }
 
     /// Where and with what it reads on a window of `size`: the drawing made

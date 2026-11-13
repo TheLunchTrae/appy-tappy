@@ -344,7 +344,8 @@ The thread can also panic in any state, which ends it.
   (`crates/sources/src/screen/settle.rs`) waits for it to hold for `SETTLE`,
   250 ms, starting again at each other size. The wait runs on this thread's
   timer, so a window that stops drawing once it is dragged still settles.
-  The settled size is resolved once with `Placed::new`. When a value reads
+  The settled size is resolved once, as a `Placed`
+  (`crates/sources/src/screen/placed.rs`). When a value reads
   there, the capture ends with `Resized`, which carries where each value reads,
   and starts again at those regions, once for each settled size. When none
   does, the capture goes on and this thread says why each value is not read
@@ -391,9 +392,12 @@ The thread can also panic in any state, which ends it.
 
 ### Frame handler
 
-`FrameReader::handle` runs once per frame and decides what each frame means.
-Its state is `placed` (the window size whose values it reads, and where
-each value reads at it, resolved once), `told` (the other size it last told
+`FrameReader::handle` runs once per frame and acts on what the frame means,
+which `Placed::shown` decides for every reader of saved values, as
+[Window sizes](Screen-regions.md#window-sizes) describes: the window at the
+capture's size, at another size, or at the capture's size with a region
+outside it. Its state is `placed` (the window size whose values it reads,
+and where each value reads at it, resolved once), `told` (the other size it last told
 the reader frames show), `last` (each value's last reading), `problems`
 (the problems said for each value since it was last read, handed to the reader while frames show
 another size), `heard` (where the reader gives it back), `seen` (whether
@@ -419,8 +423,8 @@ stateDiagram-v2
   last reading.
 - A frame error is logged once until another problem or a good frame replaces
   it. A good frame starts the count again. A region that lies outside a window
-  of its own drawn size does not count, because a new capture would fail the
-  same way.
+  of the capture's own size does not count, because a new capture would fail
+  the same way.
 - The capture ends, as when the window closes, the graphics device is lost, or
   the frame pool cannot follow the window to a new size, with a
   `NotConnected` error.
@@ -1244,15 +1248,21 @@ stateDiagram-v2
   again". Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show.
-- **Watching** at another window size waits for the size to settle, as the
-  runtime's reader does: frames show it, and no other, for `SETTLE`, 250 ms.
-  Until then the editor's poll answers that it waits for a reading. Each
-  frame and each poll checks the wait against `Host::now`, so a window that
-  stops drawing still settles at the next poll. Once the size settles, the
-  watch places the value there with `SavedValue::at`, once. When its region
-  there differs from the one copied, the capture starts again under the same
-  watch number, so the editor's poll goes on. A size at which the value does
-  not read keeps the capture and answers why with each poll.
+- **Watching** keeps `reads`, the window size its capture reads the value at
+  and where the value reads there, and each poll asks `Shown::of` what the
+  newest frame means, as the runtime's frame handler does. A frame at that
+  size is read. At another size the watch waits for the size to settle, as
+  the runtime's reader does: frames show it, and no other, for `SETTLE`,
+  250 ms. Until then the editor's poll answers that it waits for a reading.
+  Each frame and each poll checks the wait against `Host::now`, so a window
+  that stops drawing still settles at the next poll. Once the size settles,
+  the watch places the value there with `SavedValue::at`, once. When the
+  value reads there, `reads` is that size, and when its region there differs
+  from the one copied, the capture starts again under the same watch number,
+  so the editor's poll goes on. A size at which the value does not read
+  keeps the capture and `reads`, and is kept as `unread`: the poll answers
+  why while frames show that size, and reads again with the first frame
+  that shows the capture's size.
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
@@ -1878,8 +1888,9 @@ move through the same states but have no window: the page's poll opens one,
 and leaving the page turns them all off. Each value's reading carries the
 value's ID, so the page matches a reading to its row by ID.
 
-At another window size, an entry reads nothing until the size settles for
-`SETTLE`, which the poll checks against `Host::now`, so a window that stops
+Each frame means to an entry what `Placed::shown` says, as it does to the
+runtime's frame handler. At another window size, an entry reads nothing
+until the size settles for `SETTLE`, which the poll checks against `Host::now`, so a window that stops
 drawing still settles. Until then each value shows no reading. Once the size
 settles, the entry places its values there with `SavedValue::at`, once. When
 some value reads there, the capture starts again at their regions, and the

@@ -5,11 +5,13 @@
 //! readings, so no frame is copied here. Like the runtime, it places each
 //! value at the window's size once the size settles, as its saved check
 //! resolves that size, and copies only the regions of the values that read
-//! there, packed by a [`Layout`]. While a new size settles, as when the
+//! there, as a [`Placed`] packs them, and each frame means to it what it
+//! means to the runtime ([`Shown`]). While a new size settles, as when the
 //! user drags the window's corner, it reads nothing, so its capture starts
-//! again once rather than for each size the window passes. Nothing is sent into the application:
-//! the capture is the same one the automation editor uses, and the overlay
-//! is a window of the setup app's own (see [`window`]).
+//! again once rather than for each size the window passes. Nothing is sent
+//! into the application: the capture is the same one the automation editor
+//! uses, and the overlay is a window of the setup app's own (see
+//! [`window`]).
 //!
 //! The Values page reads an application's values the same way, with a
 //! second set of these captures that opens whether the overlay is on or
@@ -26,9 +28,7 @@ use appytappy_config::app_file::{AppFile, OverlayDef, OverlayModeDef, PanelDef, 
 use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::saved::{self, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
-use appytappy_sources::screen::{
-    CaptureSession, Crop, Frame, FrameHandler, Layout, OutsideWindow, Region, Size,
-};
+use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Placed, Shown, Size};
 use appytappy_sources::system::WindowPlace;
 use serde::Serialize;
 
@@ -153,15 +153,6 @@ pub(crate) struct OverlayWindow {
     pub(crate) panel: Option<PanelDef>,
 }
 
-/// A value the overlay reads.
-#[derive(Debug, Clone)]
-struct Readable {
-    /// Where the value sits in the captured image.
-    region: Region,
-    /// The check that reads it.
-    check: Check,
-}
-
 /// One application's overlay.
 #[derive(Debug)]
 struct Overlay<S> {
@@ -204,9 +195,10 @@ struct Overlay<S> {
     prepared: Option<Placing>,
 }
 
-/// What a capture copies for the values that read at one size, and where
-/// each sits in the captured image or why it does not read there.
-type Placing = (Layout, Vec<Result<Readable, Unread>>);
+/// Where the values are placed at one size, and the check that reads each
+/// one there or why it does not read. The capture's handler reads with the
+/// checks on its own thread, so they are copies.
+type Placing = (Placed, Vec<Result<Check, Unread>>);
 
 /// Every open overlay, by application ID.
 #[derive(Debug)]
@@ -501,74 +493,56 @@ fn settled<S: CaptureSession>(overlay: &mut Overlay<S>, now: Instant) {
     if overlay.size == Some(size) {
         return;
     }
-    match crop_for(&overlay.values, size) {
-        Ok(placing) => {
-            overlay.prepared = Some(placing);
-            overlay.size = Some(size);
-            overlay.latest = None;
-            overlay.window = None;
-            overlay.wait = 0;
-            overlay.settle = None;
-            if let Some(session) = overlay.session.take() {
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "a capture that ends badly is replaced at once, which shows any \
-                              problem it had"
-                )]
-                let _ = session.close();
-            }
-        },
-        Err(unread) => {
-            overlay.latest = Some(
-                unread
-                    .into_iter()
-                    .map(|unread| ValueRead::NotRead(size, unread))
-                    .collect(),
-            );
-        },
+    let placing = place(&overlay.values, size);
+    if placing.0.layout().is_none() {
+        overlay.latest = Some(
+            placing
+                .1
+                .into_iter()
+                .filter_map(Result::err)
+                .map(|unread| ValueRead::NotRead(size, unread))
+                .collect(),
+        );
+        return;
+    }
+    overlay.prepared = Some(placing);
+    overlay.size = Some(size);
+    overlay.latest = None;
+    overlay.window = None;
+    overlay.wait = 0;
+    overlay.settle = None;
+    if let Some(session) = overlay.session.take() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a capture that ends badly is replaced at once, which shows any problem it \
+                      had"
+        )]
+        let _ = session.close();
     }
 }
 
-/// What to capture for the values that read at `size`, and where each value
-/// sits in the captured image, or why it does not read there; or, when no
-/// value reads there, why each does not. It resolves each value with
-/// [`SavedValue::at`], as a reader does, so a state check scaled to too few
-/// pixels does not read.
-fn crop_for(
-    values: &[(String, Result<SavedValue, String>)],
-    size: Size,
-) -> Result<Placing, Vec<Unread>> {
-    let placed: Vec<_> = values
+/// Where the values are placed at `size`, and the check that reads each one
+/// there. It resolves each value with [`SavedValue::at`], as the runtime
+/// does, so a state check scaled to too few pixels does not read. A value
+/// whose check could not be built is not placed; its line says why.
+fn place(values: &[(String, Result<SavedValue, String>)], size: Size) -> Placing {
+    let (places, reads): (Vec<_>, Vec<_>) = values
         .iter()
-        .map(|(_, check)| {
-            let check = check.as_ref().map_err(|_broken| Unread::NotDrawn)?;
-            check
-                .at(size)
-                .map(|at| (at.region, check.check(&at).clone()))
+        .map(|(_, value)| {
+            let read = value
+                .as_ref()
+                .map_err(|_broken| Unread::NotDrawn)
+                .and_then(|value| {
+                    let at = value.at(size)?;
+                    Ok((value.check(&at).clone(), at))
+                });
+            match read {
+                Ok((check, at)) => (Ok(at), Ok(check)),
+                Err(unread) => (Err(unread), Err(unread)),
+            }
         })
-        .collect();
-    let Some(layout) = Layout::new(
-        placed
-            .iter()
-            .map(|place| place.as_ref().ok().map(|(region, _)| *region)),
-    ) else {
-        return Err(placed
-            .into_iter()
-            .map(|place| place.err().unwrap_or(Unread::Outside))
-            .collect());
-    };
-    let readables = placed
-        .into_iter()
-        .enumerate()
-        .map(|(position, place)| {
-            let (_, check) = place?;
-            Ok(Readable {
-                region: layout.packed(position).ok_or(Unread::Outside)?,
-                check,
-            })
-        })
-        .collect();
-    Ok((layout, readables))
+        .unzip();
+    (Placed::new(size, places), reads)
 }
 
 /// Finds `overlay`'s window and starts reading it with `generation`.
@@ -590,10 +564,11 @@ fn start<H: Host>(
                 .find_map(|(_, check)| check.as_ref().ok().map(|check| check.drawn.window_size))
         })
         .ok_or_else(no_values)?;
-    let (crop, readables) = match overlay.prepared.take() {
-        Some(placing) => placing,
-        None => crop_for(&overlay.values, size).map_err(|_unread| no_values())?,
-    };
+    let (placed, reads) = overlay
+        .prepared
+        .take()
+        .unwrap_or_else(|| place(&overlay.values, size));
+    let layout = placed.layout().cloned().ok_or_else(no_values)?;
     let processes = host.processes().map_err(|error| error.to_string())?;
     let windows = host.windows().map_err(|error| error.to_string())?;
     let window = host
@@ -612,12 +587,12 @@ fn start<H: Host>(
             purpose,
             app: app.clone(),
             generation,
-            read: read_all(size, &readables, frame),
+            read: read_all(&placed, &reads, frame),
         });
         OVERLAY_INTERVAL
     });
     let session = host
-        .capture(window, Crop::Layout(crop), OVERLAY_INTERVAL, handler)
+        .capture(window, Crop::Layout(layout), OVERLAY_INTERVAL, handler)
         .map_err(|error| error.to_string())?;
     overlay.generation = generation;
     overlay.size = Some(size);
@@ -630,42 +605,36 @@ fn start<H: Host>(
     Ok(())
 }
 
-/// What each value placed at `size` reads on `frame`. A frame of a window of
-/// another size says so, and a value that does not read at `size` says
-/// why.
+/// What each value reads on `frame` as `placed` places it and `reads` reads
+/// it. A frame of a window of another size says so, and a value that does
+/// not read at the size says why.
 fn read_all(
-    size: Size,
-    readables: &[Result<Readable, Unread>],
+    placed: &Placed,
+    reads: &[Result<Check, Unread>],
     frame: io::Result<Frame<'_>>,
 ) -> Result<FrameRead, String> {
-    let frame = match frame {
-        Ok(frame) if frame.window_size != size => return Ok(FrameRead::Resized(frame.window_size)),
-        Ok(frame) => frame,
-        Err(error) => {
-            return match OutsideWindow::in_error(&error) {
-                Some(other) if other != size => Ok(FrameRead::Resized(other)),
-                // The regions do not fit the size they were drawn at.
-                Some(_) => Ok(FrameRead::Values(
-                    readables
-                        .iter()
-                        .map(|_readable| ValueRead::Unreadable(error.to_string()))
-                        .collect(),
-                )),
-                None => Err(error.to_string()),
-            };
-        },
+    let size = placed.size();
+    let frame = match placed.shown(frame).map_err(|error| error.to_string())? {
+        Shown::Resized(other) => return Ok(FrameRead::Resized(other)),
+        Shown::Readable(frame) => Ok(frame),
+        Shown::Unreadable(outside) => Err(outside),
     };
     Ok(FrameRead::Values(
-        readables
+        reads
             .iter()
-            .map(|readable| {
-                let readable = match readable {
-                    Ok(readable) => readable,
+            .enumerate()
+            .map(|(position, check)| {
+                let check = match check {
+                    Ok(check) => check,
                     Err(unread) => return ValueRead::NotRead(size, *unread),
                 };
-                frame.image.crop(readable.region).map_or(
+                let frame = match &frame {
+                    Ok(frame) => frame,
+                    Err(outside) => return ValueRead::Unreadable(outside.to_string()),
+                };
+                placed.cropped(position, frame.image).map_or(
                     ValueRead::NotRead(size, Unread::Outside),
-                    |image| match readable.check.read(&image) {
+                    |image| match check.read(&image) {
                         Ok(value) => ValueRead::Read(value.into()),
                         Err(error) => ValueRead::Unreadable(error.to_string()),
                     },
@@ -758,7 +727,7 @@ mod tests {
     use appytappy_config::app_file::{ScreenDef, SizeChangesDef, WindowDef};
     use appytappy_sources::screen::mask::Mask;
     use appytappy_sources::screen::settle::SETTLE;
-    use appytappy_sources::screen::{Image, NoSession};
+    use appytappy_sources::screen::{Image, NoSession, OutsideWindow, Region};
     use appytappy_sources::system::Bounds;
 
     use super::*;
@@ -830,8 +799,6 @@ mod tests {
             width: 2,
             height: 1,
         };
-        assert_eq!(crop_for(&values, half).err(), Some(vec![Unread::TooSmall]));
-        assert!(crop_for(&values, DRAWN).is_ok());
         let start = Instant::now();
         let later = start.checked_add(SETTLE).expect("in range");
         let mut overlay = reading_at(values, DRAWN);
@@ -864,9 +831,11 @@ mod tests {
         assert_eq!(overlay.size, Some(large));
         assert_eq!((overlay.window, overlay.wait), (None, 0));
         assert!(overlay.settle.is_none());
-        let (layout, _) = overlay.prepared.as_ref().expect("prepared");
+        let (placed, _) = overlay.prepared.as_ref().expect("prepared");
         assert_eq!(
-            layout
+            placed
+                .layout()
+                .expect("the value reads")
                 .copies()
                 .iter()
                 .map(|copy| copy.from)
@@ -895,25 +864,31 @@ mod tests {
 
     #[test]
     fn regions_outside_a_window_of_their_own_size_are_unreadable_and_another_size_is_a_resize() {
-        let size = Size {
-            width: 4,
-            height: 2,
-        };
         let outside = |window_size| Err(OutsideWindow { window_size }.into());
-        let readables = [Err(Unread::NotDrawn)];
+        // The second value's check could not be built, so it is not placed.
+        let values = vec![
+            ("Dot".to_owned(), Ok(sparse())),
+            ("Broken".to_owned(), Err("no picture".to_owned())),
+        ];
+        let (placed, reads) = place(&values, DRAWN);
         assert_eq!(
-            read_all(size, &readables, outside(size)),
-            Ok(FrameRead::Values(vec![ValueRead::Unreadable(
-                "the region lies outside the 4x2 window".to_owned()
-            )]))
+            read_all(&placed, &reads, outside(DRAWN)),
+            Ok(FrameRead::Values(vec![
+                ValueRead::Unreadable("the region lies outside the 4x2 window".to_owned()),
+                ValueRead::NotRead(DRAWN, Unread::NotDrawn),
+            ]))
         );
         let wider = Size {
             width: 6,
             height: 2,
         };
         assert_eq!(
-            read_all(size, &readables, outside(wider)),
+            read_all(&placed, &reads, outside(wider)),
             Ok(FrameRead::Resized(wider))
+        );
+        assert_eq!(
+            read_all(&placed, &reads, Err(io::Error::other("the window closed"))),
+            Err("the window closed".to_owned())
         );
     }
 
