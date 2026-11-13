@@ -64,12 +64,14 @@ interface Props {
   readonly hint: (shortcut: string) => string;
   /** What the screen draws over the picture. */
   readonly children: ComponentProps<typeof ZoomView>['children'];
-  /** What the strip lists and offers; the stage selects what it shows. */
-  readonly strip: Pick<ComponentProps<typeof ScreenshotStrip>, 'removal' | 'note'> & {
-    /** The screenshots listed, or null for all of them. */
-    readonly shots: ComponentProps<typeof ScreenshotStrip>['shots'] | null;
+  /** What the strip offers and says; the stage selects what it shows. */
+  readonly strip: Pick<ComponentProps<typeof ScreenshotStrip>, 'note'> & {
+    /** The screenshots listed, where they are not all of them. */
+    readonly shots?: ComponentProps<typeof ScreenshotStrip>['shots'];
+    /** The way to remove the screenshot shown, where the screen has one. */
+    readonly removal?: ComponentProps<typeof ScreenshotStrip>['removal'];
     /** Hears what the strip showed, after it shows. */
-    readonly onSelect: ((index: number | null) => void) | null;
+    readonly onSelect?: (index: number | null) => void;
   };
   /** What shows under the strip. */
   readonly foot?: ReactNode;
@@ -169,7 +171,7 @@ export function ScreenshotStage({
         selected={selected}
         position={position}
         hidden={sheeted}
-        removal={strip.removal}
+        removal={strip.removal ?? null}
         note={strip.note}
         onSelect={(index) => {
           setSelected(index);
