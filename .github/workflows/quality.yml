@@ -35,7 +35,6 @@ jobs:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       # CI builds once, so incremental data only fills the build cache.
       CARGO_INCREMENTAL: '0'
-      MUTANTS_LANE: diff
       MUTANTS_COPY_TARGET: 'true'
       MUTANTS_BASE_REF: >-
         ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref)

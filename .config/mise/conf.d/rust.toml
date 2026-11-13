@@ -131,8 +131,12 @@ run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 # current one. With the copy on, the lane first brings target/ up to date in
 # place with the build cargo-mutants runs for each mutant, which also covers
 # its baseline's.
+# Member crates hold product code, so the standards gate runs this lane; see
+# wiki/Rust-standards.md#mutation-testing. It waits for the other Cargo tasks,
+# so a copied target/ never holds a build half written.
 [tasks."rust:mutants:diff"]
 description = "Mutation-test changed code; default base prefers origin/main"
+wait_for = ["rust:policy", "rust:package"]
 run = """
 set -eu
 
@@ -213,26 +217,6 @@ run = "cargo deny --workspace --all-features --locked check"
 description = "Run the Rust standards workflow with autofixes"
 depends = ["rust:fmt"]
 
-# Member crates hold product code, so the gate runs a mutation lane; see
-# wiki/Rust-standards.md#mutation-testing. The two lanes share one lock, so the gate runs
-# only one. exec hands the lane mise's process, so a signal that stops the
-# gate reaches the lane's own traps.
-[tasks."rust:mutants:gate"]
-description = "Run the mutation lane MUTANTS_LANE names: full (default) or diff"
-wait_for = ["rust:policy", "rust:package"]
-run = """
-set -eu
-
-case "${MUTANTS_LANE:-full}" in
-  full) exec mise run rust:mutants ;;
-  diff) exec mise run rust:mutants:diff ;;
-  *)
-    echo "MUTANTS_LANE must be full or diff, got '$MUTANTS_LANE'." >&2
-    exit 2
-    ;;
-esac
-"""
-
 [tasks."rust:standards:check"]
 description = "Run the Rust standards CI gate"
 depends = [
@@ -242,7 +226,7 @@ depends = [
   "rust:doc",
   "rust:test",
   "rust:package",
-  "rust:mutants:gate",
+  "rust:mutants:diff",
   "rust:machete",
   "rust:deny",
 ]

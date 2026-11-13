@@ -104,15 +104,14 @@ changed since the merge base with `MUTANTS_BASE_REF`, which defaults to
 fail the lane; stage them with `git add -N`. A diff that selects no mutants
 passes.
 
-`rust:standards:check` runs `rust:mutants:gate`, which picks the lane from
-`MUTANTS_LANE`: `full`, the default, or `diff`. The quality workflow runs the
-`diff` lane for every event, against the base that
-`.github/workflows/quality.yml` sets, so the quality job fits its time limit. A
-pull request diffs against its base branch and a push to main against the
-previous tip, which with squash merges is exactly the merged pull request.
+`rust:standards:check` runs the diff lane, locally and in the quality workflow,
+so the gate fits the quality job's time limit. CI diffs against the base that
+`.github/workflows/quality.yml` sets for each event: a pull request diffs
+against its base branch and a push to main against the previous tip, which with
+squash merges is exactly the merged pull request.
 
-CI runs only the diff lane, so a mutant that survives only once two merged
-changes meet stays until a later change edits its line.
+Nothing runs the full lane unless you start it, so a mutant that survives only
+once two merged changes meet stays until a later change edits its line.
 
 The diff lane mutates only changed source lines, so a pull request that only
 removes or weakens tests, or changes only mutation configuration, selects no
@@ -128,11 +127,12 @@ new modification time, so Cargo would take a stale workspace build in it, such
 as one from a build cache saved at an older commit, for a current one. With the
 copy on, the diff lane therefore first runs, in place, the build that
 cargo-mutants runs for each mutant, which is quick when `target/` is already
-current. The gate starts the lane only after the other Cargo tasks finish, so
-the copy never catches a build half written. Both lanes also run every workspace
-package's tests against each mutant (`--test-workspace=true`), because a mutant
-in one crate can be caught by another crate's tests. Whether testing only the
-mutated package catches the same mutants is still to be measured.
+current. The standards gate starts the lane only after the other Cargo tasks
+finish, so the copy never catches a build half written. Both lanes also run
+every workspace package's tests against each mutant (`--test-workspace=true`),
+because a mutant in one crate can be caught by another crate's tests. Whether
+testing only the mutated package catches the same mutants is still to be
+measured.
 
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. A report in
