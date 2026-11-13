@@ -47,6 +47,12 @@ const LEFTOVER_AGE: Duration = Duration::from_mins(10);
 /// The longest application ID, in bytes.
 const MAX_ID_LEN: usize = 48;
 
+/// How many IDs [`AppStore::create`] tries when each one's folder turns out
+/// to be there already. One stray file or folder takes one try, so this
+/// leaves room for several and still ends when making a folder keeps
+/// failing.
+const NEW_FOLDER_TRIES: usize = 16;
+
 /// One application's folder, as [`AppStore::load`] found it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredApp {
@@ -173,7 +179,7 @@ impl AppStore {
     /// A name can be taken though no application the store lists has it:
     /// by a file, or on Windows by a folder whose name differs only in
     /// case. The user cannot see or settle that, so the next free ID is
-    /// tried.
+    /// tried, a few times.
     ///
     /// # Errors
     ///
@@ -181,22 +187,7 @@ impl AppStore {
     /// error when no folder can be made.
     pub fn create(&self, file: &AppFile, pictures: &[(String, Vec<u8>)]) -> io::Result<String> {
         fs::create_dir_all(&self.root)?;
-        let mut taken: Vec<String> = self.load()?.into_iter().map(|app| app.id).collect();
-        let (id, folder) = loop {
-            let known: Vec<&str> = taken.iter().map(String::as_str).collect();
-            let id = new_app_id(&file.window.executable, &known);
-            if taken.contains(&id) {
-                // No number is left for this name, which takes as many
-                // clashes as an ID has numbers.
-                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
-            }
-            let folder = self.folder(&id);
-            match fs::create_dir(&folder) {
-                Ok(()) => break (id, folder),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => taken.push(id),
-                Err(error) => return Err(error),
-            }
-        };
+        let (id, folder) = self.new_folder(&file.window.executable)?;
         if let Err(error) = self.save(&id, file, pictures) {
             #[expect(
                 clippy::let_underscore_must_use,
@@ -206,6 +197,27 @@ impl AppStore {
             return Err(error);
         }
         Ok(id)
+    }
+
+    /// Makes the folder of a new application for `executable` and answers
+    /// its ID and path. An ID whose folder is there already gives way to
+    /// the next, [`NEW_FOLDER_TRIES`] times at most.
+    fn new_folder(&self, executable: &str) -> io::Result<(String, PathBuf)> {
+        let mut taken: Vec<String> = self.load()?.into_iter().map(|app| app.id).collect();
+        for _try in 0..NEW_FOLDER_TRIES {
+            let known: Vec<&str> = taken.iter().map(String::as_str).collect();
+            let id = new_app_id(executable, &known);
+            let folder = self.folder(&id);
+            match fs::create_dir(&folder) {
+                Ok(()) => return Ok((id, folder)),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => taken.push(id),
+                Err(error) => return Err(error),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("the applications folder has too many files named like {executable}"),
+        ))
     }
 
     /// Removes the application `id`'s folder with everything in it. An
@@ -851,7 +863,41 @@ mod tests {
             fs::read_to_string(root.join("example")).expect("still there"),
             "not a folder"
         );
+        // Past a few such names it gives up, and says what is in the way.
+        let more = store.folder("more");
+        fs::create_dir_all(&more).expect("creates the root");
+        let mut names = vec!["example".to_owned()];
+        names.extend((2..=NEW_FOLDER_TRIES).map(|number| format!("example-{number}")));
+        for name in &names {
+            fs::write(more.join(name), "not a folder").expect("writes");
+        }
+        let crowded = AppStore::new(more.clone());
+        let gave_up = crowded.create(&good, &[]).expect_err("every try is taken");
+        assert_eq!(
+            gave_up.to_string(),
+            "the applications folder has too many files named like Example.exe"
+        );
+        fs::remove_file(more.join("example-2")).expect("frees one");
+        assert_eq!(crowded.create(&good, &[]).expect("creates"), "example-2");
         fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// A folder that lists and takes no new folder stands in for a disk that
+    /// refuses one for another reason than its name. Linux has such a
+    /// folder for each process; a test's own folder takes whatever the test
+    /// may make.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_new_application_whose_folder_cannot_be_made_says_why_and_tries_no_other_id() {
+        let store = AppStore::new(PathBuf::from("/proc/self/task"));
+        let refused = store
+            .create(&file("icon_visible.png"), &[])
+            .expect_err("no folder is made there");
+        assert_ne!(
+            refused.kind(),
+            io::ErrorKind::AlreadyExists,
+            "the folder's own error, not that every ID is taken"
+        );
     }
 
     /// The names of everything in `folder`, sorted.

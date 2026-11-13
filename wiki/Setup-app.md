@@ -975,7 +975,7 @@ generated definitions.
 never writes into one that is there, and removes it again when the save
 fails. When the ID's name is taken by something the store does not list, a
 file or on Windows a folder that differs only in case, it takes the next
-ID. The import refuses a name that a saved application has. It saves the anti-cheat class the user picked, never the
+ID, and gives up after `NEW_FOLDER_TRIES` of them. The import refuses a name that a saved application has. It saves the anti-cheat class the user picked, never the
 file's, and sets `origin` to `imported` with the picked file's name, without
 control characters and the format characters that reorder or hide text,
 which can turn a name around on screen, and at most 60 characters long. The page offers the

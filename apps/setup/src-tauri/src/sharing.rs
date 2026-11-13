@@ -619,6 +619,38 @@ mod tests {
     }
 
     #[test]
+    fn a_file_of_exactly_the_most_an_import_reads_is_read() {
+        let (file, image, picture) = with_status();
+        let json = file.to_json();
+        // An entry the file does not name is not read, so it only makes
+        // the zip file larger: stored, by a byte for each of its own.
+        let sized = |padding: usize| {
+            zip_with(
+                CompressionMethod::Stored,
+                &[
+                    (APP_FILE, json.as_bytes()),
+                    (&image, &picture),
+                    ("padding", &vec![0; padding]),
+                ],
+            )
+        };
+        let rest = MAX_SHARED_BYTES
+            .checked_sub(sized(0).len())
+            .expect("a small file");
+        let most = sized(rest);
+        assert_eq!(most.len(), MAX_SHARED_BYTES);
+        Shared::unpack(&most).expect("the most a file may be");
+        let over = sized(rest.checked_add(1).expect("fits"));
+        assert_eq!(refusal(&over), "it holds more than 16 MB");
+    }
+
+    #[test]
+    fn an_entry_that_cannot_be_read_says_why() {
+        let unread = ShareError::Read(io::Error::other("the disk failed"));
+        assert_eq!(unread.to_string(), "it cannot be read (the disk failed)");
+    }
+
+    #[test]
     fn a_file_that_cannot_be_made_does_not_read_as_one_that_cannot_be_read() {
         let failed = ShareError::Pack(io::Error::other("disk full"));
         assert_eq!(failed.to_string(), "its file cannot be made (disk full)");
