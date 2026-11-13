@@ -46,6 +46,7 @@ import {
   waiting,
 } from './lib/flow.ts';
 import { supersedes } from './lib/reads.ts';
+import { useCaptureHeld } from './lib/capture.ts';
 import { background, useRepeat } from './lib/repeat.ts';
 import { ReferenceFlow } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
@@ -219,8 +220,10 @@ export function App() {
       background(forgetUnsavedClickPictures());
     };
   }, [automating]);
-  // A flow that makes a value or a reference captures a window, so the lists wait until it ends.
-  useRepeat(refresh, REFRESH_MS, flow?.kind !== 'value' && flow?.kind !== 'reference');
+  // A screen that holds the capture previews a window, so the lists wait until it lets go. Each save reads them at
+  // once all the same.
+  const capturing = useCaptureHeld();
+  useRepeat(refresh, REFRESH_MS, !capturing);
 
   const counts: Readonly<Record<Page, number | null>> = {
     values: apps === null ? null : apps.reduce((total, app) => total + (app.file?.values.length ?? 0), 0),

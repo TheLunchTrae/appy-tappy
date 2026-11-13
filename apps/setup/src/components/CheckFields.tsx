@@ -106,15 +106,21 @@ interface ColorProps {
   readonly canPick: boolean;
   /** The matching pixels preview of these colors. */
   readonly preview: ReactNode;
-  readonly onDraft: (update: (draft: Draft) => Draft) => void;
   readonly onPicking: (target: ColorTarget | null) => void;
 }
 
-/** The fields of a bar fill or a color check, whose colors are picked from a screenshot. */
-export function ColorFields({ draft, picking, canPick, preview, onDraft, onPicking }: ColorProps) {
-  const color = (target: ColorTarget, label: string, hint?: string) => (
+/** One of a check's colors, which is picked from a screenshot. */
+function PickedColor({
+  target,
+  label,
+  hint,
+  draft,
+  picking,
+  canPick,
+  onPicking,
+}: Omit<ColorProps, 'preview'> & { readonly target: ColorTarget; readonly label: string; readonly hint?: string }) {
+  return (
     <ColorField
-      key={target}
       label={label}
       hint={hint}
       color={draft[target]}
@@ -125,21 +131,31 @@ export function ColorFields({ draft, picking, canPick, preview, onDraft, onPicki
       }}
     />
   );
-  if (draft.kind === 'barFill') {
-    return (
-      <>
-        {color('filled', 'Filled color', BAR_COLORS_HINT)}
-        {color('empty', 'Empty color')}
-        {preview}
-      </>
-    );
-  }
+}
+
+/** The fields of a bar fill check: its two colors. */
+export function BarColorFields({ preview, ...colors }: ColorProps) {
   return (
     <>
-      {color('color', 'Color to look for')}
+      <PickedColor target="filled" label="Filled color" hint={BAR_COLORS_HINT} {...colors} />
+      <PickedColor target="empty" label="Empty color" {...colors} />
+      {preview}
+    </>
+  );
+}
+
+/** The fields of a color check: its color, and how far the region's may be from it. */
+export function ColorFields({
+  preview,
+  onDraft,
+  ...colors
+}: ColorProps & { readonly onDraft: (update: (draft: Draft) => Draft) => void }) {
+  return (
+    <>
+      <PickedColor target="color" label="Color to look for" {...colors} />
       <ToleranceField
         help="How far the region's average color may be."
-        value={draft.tolerance}
+        value={colors.draft.tolerance}
         onChange={(value) => {
           onDraft((current) => ({ ...current, tolerance: value }));
         }}
