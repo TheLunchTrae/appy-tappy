@@ -204,9 +204,12 @@ export async function lookRecordingState(): Promise<LookRecordingView | null> {
   return invoke<LookRecordingView | null>('look_recording_state');
 }
 
-/** A recorded reading at most `maxWidth` wide, or null for an unknown index. */
-export async function recordedReading(index: number, maxWidth: number): Promise<Picture | null> {
-  return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { index, maxWidth }));
+/**
+ * A reading of recording `recording` at most `maxWidth` wide, or null for an unknown index or a replaced
+ * recording.
+ */
+export async function recordedReading(recording: number, index: number, maxWidth: number): Promise<Picture | null> {
+  return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { recording, index, maxWidth }));
 }
 
 /**

@@ -72,8 +72,9 @@ macro_rules! with_commands {
             commands::start_look_recording(region: RegionSpec, tolerance: u8, screenshot: usize) -> ();
             /// The recording of looks and the screenshots it kept so far, or null without one.
             commands::look_recording_state() -> Option<LookRecordingView>;
-            /// A recorded reading at most `maxWidth` wide, or null for an unknown index.
-            commands::recorded_reading(index: usize, max_width: u32) -> Pixels;
+            /// A reading of recording `recording` at most `maxWidth` wide, or null for an unknown index or a replaced
+            /// recording.
+            commands::recorded_reading(recording: U64AsNumber, index: usize, max_width: u32) -> Pixels;
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
             /// can.
             commands::review_problems(spec: CharactersSpec) -> Vec<Option<String>>;
