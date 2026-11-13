@@ -4,6 +4,7 @@ import { LIMITS } from '../src/lib/bindings.ts';
 import { boxStep } from '../src/lib/boxes.ts';
 import {
   type Draft,
+  type DraftState,
   buildCharacters,
   buildSpec,
   CHECKS,
@@ -19,6 +20,7 @@ import {
   recordedPlace,
   regionScreenshot,
   firstWithPixels,
+  sharedNames,
   reviewSpec,
   settingsDiffer,
   stateOn,
@@ -479,6 +481,19 @@ test('a fix places its region on the first screenshot whose pixels arrived', () 
   ).toEqual({ index: 0, picture: 'zero' });
   // Pixels of a screenshot the strip does not list do not count.
   expect(firstWithPixels(shots, new Map([[1, 'one']]))).toBeNull();
+});
+
+test('state names that differ only in case or in spaces at their ends are one name', () => {
+  const named = (...names: string[]) => names.map((name) => ({ name }));
+  expect([...sharedNames(named('Ready', 'Paused', ' ready '))]).toEqual([0, 2]);
+  expect([...sharedNames(named('Ready', 'Paused'))]).toEqual([]);
+  // A state with no name is not named alike; it has its own message.
+  expect([...sharedNames(named('', ' ', 'Ready'))]).toEqual([]);
+  const ready: DraftState = { name: 'Ready', screenshot: 0, steps: [] };
+  const draft: Draft = { ...EMPTY_DRAFT, kind: 'state', region, drawnOn: 0, states: [ready] };
+  const second = (name: string): Draft => ({ ...draft, states: [ready, { name, screenshot: 1, steps: [] }] });
+  expect(buildSpec(second('ready'), 'example')).toEqual({ ok: false, next: 'Give each state a name of its own.' });
+  expect(buildSpec(second('Paused'), 'example').ok).toBe(true);
 });
 
 test("recording waits for a place to read and the characters' color", () => {

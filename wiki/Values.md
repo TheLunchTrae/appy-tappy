@@ -302,7 +302,9 @@ instant can then be missed.
   behind it, [select it](#select-the-thing-in-a-state).
 
 State names are up to 32 characters, with no space at either end. Two states
-cannot share a name, ignoring case, and none can be named `none`.
+cannot share a name, ignoring case, so `Ready` and `ready` are one name: each
+of them says **Another state has this name, or one that differs from it only
+in capitals** until one changes. No state can be named `none`.
 
 ### Characters a number reads
 

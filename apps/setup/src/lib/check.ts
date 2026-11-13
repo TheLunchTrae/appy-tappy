@@ -199,6 +199,21 @@ export function firstWithPixels<Pixels>(
   return null;
 }
 
+/**
+ * The positions of `states` whose name another of them has too, trimmed and ignoring case, as the owner compares
+ * them when it saves: "Ready" and "ready" are one name. A state with no name shares none.
+ */
+export function sharedNames(states: readonly { readonly name: string }[]): ReadonlySet<number> {
+  const names = states.map((state) => state.name.trim().toLowerCase());
+  const shared = new Set<number>();
+  names.forEach((name, position) => {
+    if (name !== '' && names.indexOf(name) !== names.lastIndexOf(name)) {
+      shared.add(position);
+    }
+  });
+  return shared;
+}
+
 /** Why the reference editor cannot record `draft`'s reading region yet, or null when it can. */
 export function recordBlocked(draft: Draft): string | null {
   const reading = readingOf(draft);
@@ -407,6 +422,9 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
       }
       if (draft.states.some((state) => state.name.trim() === '')) {
         return missing('Name each state.');
+      }
+      if (sharedNames(draft.states).size > 0) {
+        return missing('Give each state a name of its own.');
       }
       const states = draft.states.map((state): StateSpec => {
         const spec = { name: state.name.trim(), screenshot: state.screenshot };
