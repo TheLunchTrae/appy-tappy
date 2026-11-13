@@ -180,7 +180,7 @@ Each thread below is a plain `std::thread`, and each channel is a
   lost or the capture's own code panicked, and after `RESTART_AFTER`
   frames in a row fail, it sends `Unseen` and looks for the window again.
   After a capture ends that way it waits
-  first, from `FIND_AGAIN`, doubling up to `RESTART_WAIT_MAX` while each
+  first, from `RESTART_WAIT_MIN`, doubling up to `RESTART_WAIT_MAX` while each
   new capture ends before reading a frame, and it logs why once until the
   reason changes.
   Every `CHECK_AGAIN` it checks that the window still shows and that no other
