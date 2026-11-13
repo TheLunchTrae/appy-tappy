@@ -327,6 +327,29 @@ impl DigitReader {
         ))
     }
 
+    /// The columns of `image` each of its characters covers, left to right,
+    /// as a read splits them: one range for each shape that
+    /// [`DigitReader::shapes`] gives, so a picture can show which part of
+    /// the image a shape came from.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`DigitReader::shapes`].
+    pub fn columns(&self, image: &Image) -> Result<Vec<Range<u32>>, ReadError> {
+        let mut spans = [Span::default(); MAX_CHARACTERS];
+        let (_, count) = self
+            .segment(image, &mut spans)
+            .map_err(|failure| match failure {
+                Segmentation::NoInk => ReadError::NoInk,
+                Segmentation::TooMany => ReadError::TooManyCharacters,
+            })?;
+        Ok(spans
+            .iter()
+            .take(count)
+            .map(|span| span.left..span.right)
+            .collect())
+    }
+
     fn is_ink_at(&self, image: &Image, x: u32, y: u32) -> bool {
         let index = u64::from(y)
             .saturating_mul(u64::from(image.size().width))
@@ -1426,6 +1449,21 @@ mod tests {
         let crowded = "#.".repeat(MAX_CHARACTERS + 1);
         assert_eq!(
             reader.shapes(&draw(&[crowded.as_str()])),
+            Err(ReadError::TooManyCharacters)
+        );
+    }
+
+    #[test]
+    fn columns_are_where_each_shape_came_from() {
+        let reader = DigitReader::new(WHITE, 0);
+        // A stray pixel under the line widens no character.
+        let mut noisy = TWELVE.to_vec();
+        noisy.extend([".....", ".#..."]);
+        assert_eq!(reader.columns(&draw(&noisy)), Ok(vec![0..1, 2..5]));
+        assert_eq!(reader.columns(&draw(&["..."])), Err(ReadError::NoInk));
+        let crowded = "#.".repeat(MAX_CHARACTERS + 1);
+        assert_eq!(
+            reader.columns(&draw(&[crowded.as_str()])),
             Err(ReadError::TooManyCharacters)
         );
     }

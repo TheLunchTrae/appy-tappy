@@ -11,6 +11,8 @@ import { Question, useQuestion } from '../Question.tsx';
 type StageStatus =
   | { readonly kind: 'recording'; readonly elapsedMs: number }
   | { readonly kind: 'reviewing'; readonly recording: RecordingView }
+  /** The check of the characters is open, at step `step` of `of`, or past its steps. */
+  | { readonly kind: 'checking'; readonly step: { readonly step: number; readonly of: number } | null }
   | { readonly kind: 'live'; readonly appName: string };
 
 interface BarProps {
@@ -37,6 +39,12 @@ export function StageBar({ path, current, status, size, children }: BarProps) {
           <span className="dot" />
           Recording {clock(status.elapsedMs)}
         </span>
+      ) : status.kind === 'checking' ? (
+        status.step === null ? null : (
+          <span className="pill">
+            Character {status.step.step} of {status.step.of}
+          </span>
+        )
       ) : status.kind === 'reviewing' ? (
         <span className="pill">
           {status.recording.readings.length === 1 ? '1 reading' : `${status.recording.readings.length} readings`} from{' '}

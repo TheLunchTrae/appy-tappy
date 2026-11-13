@@ -2101,6 +2101,68 @@ stateDiagram-v2
   the list. A failed check of which finds the reference can learn flags
   none, since the save learns the text again.
 
+### Character check
+
+The check of a reference's characters one at a time
+(`apps/setup/src/lib/confirm.ts`, held by `useCharacterCheck.ts`) is closed, or
+a `Guide`: the answers given so far, by shape, and a cursor. `turn` is its
+pure `(state, event)` transition, and it answers with the next guide and the
+edits of the places' texts and ticks.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Closed
+    Closed --> Character: Check characters, and a step still asks
+    Closed --> Unfitted: Check characters, and only text that fits no step is left
+    Closed --> Done: Check characters, and nothing is left to ask
+    Character --> Character: Yes, Skip, or Back to another step
+    Character --> Character: a shape is retyped or is no character, and the step has shapes left
+    Character --> Unfitted: Yes or Skip on the last step, while text fits no step
+    Character --> Done: Yes or Skip on the last step
+    Unfitted --> Character: Back
+    Unfitted --> Done: Next
+    Done --> Unfitted: Back, while text fits no step
+    Done --> Character: Back
+    Character --> Closed: Back to the screenshot, or Back to review
+    Unfitted --> Closed: Back to the screenshot, or Back to review
+    Done --> Closed: Done
+```
+
+- The places are every [found text](#found-text) the list holds, ticked or
+  not, and every [recording](#recording) reading that review keeps
+  (`checkPlaces`). Each carries where its characters are in its picture and a
+  name for each one's shape (`recording/character.rs`), which is the same for
+  the same shape in a find and in a reading.
+- The steps follow from the places' texts and the answers (`steps`); the
+  guide holds neither. A place whose text has one character for each of its
+  shapes gives each shape that character. A shape goes with its answer, or
+  else with the character most places give it. The characters the reference
+  needs come first.
+- **Yes** answers each unanswered shape of the step with the step's
+  character and goes on. Typing another character under a shape answers that
+  shape with it, and **Not a character** answers that it is none; both stay
+  on the step while it has shapes left. **Skip** and **Back** move without
+  answering and stop at the ends.
+- Each answer edits the places through the same edits the list of finds and
+  review make (`changes`): every place that shows an answered shape gets the
+  answer in its text. A place that shows a shape answered this turn is
+  ticked or kept once all its shapes have answers, and left out when one is
+  no character. A tick the user changes afterward stays.
+- **Text that fits no step.** A place whose text has another number of
+  characters than its picture has shapes joins no step. Once every one of
+  its shapes has an answer, the answers are its text. One still left is the
+  `Unfitted` stop, where the user types its text or leaves it out.
+- **Places that change underneath.** A find's text arrives, a search or a
+  recording is replaced or forgotten, or the user edits a text by hand while
+  the check is open. `settle` runs on every render: a cursor on a character
+  that has no step anymore, or on `Unfitted` when no such place is left,
+  moves to the first step that still asks, or to `Done`. With no places at
+  all the check is `Done` and says there is nothing to check. The answers
+  stay, and the next turn, or closing, writes them to a text that arrived
+  late.
+- Closing forgets the answers. The texts and ticks they wrote stay with the
+  finds and with review.
+
 ### Bar detection
 
 Detecting a bar's colors (`apps/setup/src/lib/detect.ts`, driven by

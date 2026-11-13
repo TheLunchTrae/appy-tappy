@@ -195,6 +195,39 @@ count. Text of another size is skipped, and the list says how much. One search
 lists at most 12 finds; add those, then select **Find more like it** again, and
 it lists the rest, leaving out what you added.
 
+## Check characters one at a time
+
+AppyTappy tends to misread a character the same way wherever it shows, such
+as every `7` as a `1`. **Check characters** lets you fix that once instead of
+in each text. It shows above the list of finds and in a recording's review,
+and goes through the characters of the listed finds and the kept readings
+together.
+
+1. **Answer for each character.** Each step shows one character, drawn
+   large, and every place that shows it, with the character outlined. When
+   the text has it drawn more than one way, each way has its own tile. If
+   they are all that character, select **Yes, it is 7**, or
+   **Yes, they are all 7**. The characters the reference
+   [needs](#choose-what-it-needs) come first.
+2. **Fix one that is something else.** Type the right character in
+   **It is** under its tile. Every place that shows it gets that character,
+   and the tile moves to that character's step. **Not a character** is for
+   something that is no text, such as part of an icon: every place that
+   shows it is left out.
+3. **Type what does not fit.** A last step, **Type what these show**, lists
+   any place whose text has another number of characters than its picture
+   shows, so its characters could not be checked one at a time. Type what it
+   shows, or leave it out. A place like that gets its text by itself when
+   your answers cover all its characters.
+4. **Finish.** **Done**, **Back to the screenshot**, or **Back to review**
+   closes the check. The texts it fixed stay in the list of finds and in
+   review, where you add or keep them as before.
+
+**Skip** goes on without answering, and **Back** returns to the step before.
+A find whose characters you all answered for is ticked, and you can clear
+the tick afterward. You can still change any text by hand; while the check is
+open, an answer you gave for a character wins over text typed against it.
+
 ## What a reference can't learn
 
 A box's text has one character for each character the box shows, and

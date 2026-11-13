@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::check_spec::{CharactersSpec, ColorSpec, Label, RegionSpec};
 use crate::pixels;
+use crate::recording::character::{self, CharacterView};
 use crate::recording::{Line, Text, find, ocr};
 
 use super::Owner;
@@ -40,6 +41,9 @@ struct Item {
     /// The characters' color and tolerance its ink was last cut with for
     /// the text reader.
     read_with: (ColorSpec, u8),
+    /// Where each of its characters is in its pixels, as that color and
+    /// tolerance split them.
+    characters: Vec<CharacterView>,
 }
 
 /// A search as the UI shows it.
@@ -74,6 +78,10 @@ pub(crate) struct FindView {
     pub(crate) ink: ColorSpec,
     /// The tolerance its ink was last cut with.
     pub(crate) tolerance: u8,
+    /// Where each of its characters is in its region, left to right, as
+    /// that color and tolerance split them, with a name for its shape that
+    /// a recorded reading's character of the same shape shares.
+    pub(crate) characters: Vec<CharacterView>,
 }
 
 impl Found {
@@ -89,6 +97,7 @@ impl Found {
                     text: item.text.clone(),
                     ink: item.read_with.0,
                     tolerance: item.read_with.1,
+                    characters: item.characters.clone(),
                 })
                 .collect(),
             more: self.more,
@@ -144,6 +153,7 @@ impl<H: Host> Owner<H> {
             let text = self.read(id, items.len(), found.line);
             items.push(Item {
                 region: found.region,
+                characters: character::of(&cropped, &reader),
                 image: cropped,
                 text,
                 read_with: (ink, tolerance),
@@ -215,6 +225,7 @@ impl<H: Host> Owner<H> {
             {
                 item.text = text;
                 item.read_with = (ink, tolerance);
+                item.characters = character::of(&item.image, &reader);
             }
         }
         self.found_state()
@@ -344,6 +355,21 @@ mod tests {
             "top to bottom then left to right, each with a margin"
         );
         assert!(found.finds.iter().all(|find| find.text == Text::Pending));
+        // Each find is one mark, two columns wide after its margin of one,
+        // and both marks have one shape.
+        let characters: Vec<&[CharacterView]> = found
+            .finds
+            .iter()
+            .map(|find| find.characters.as_slice())
+            .collect();
+        assert_eq!(characters[0], characters[1]);
+        assert_eq!(
+            characters[0]
+                .iter()
+                .map(|character| (character.left, character.right))
+                .collect::<Vec<_>>(),
+            [(1, 3)]
+        );
         let jobs: Vec<(ocr::Source, usize)> = harness
             .jobs
             .try_iter()
@@ -520,6 +546,12 @@ mod tests {
         let view = harness
             .ask(move |owner: &mut Owner<FakeHost>| owner.reread_found(1, &[1], green, 9))
             .expect("kept");
+        assert_eq!(view.finds[0].characters.len(), 1);
+        assert_eq!(
+            view.finds[1].characters,
+            [],
+            "split again with the color it was read with, which shows none"
+        );
         let read_with: Vec<(ColorSpec, u8)> = view
             .finds
             .iter()

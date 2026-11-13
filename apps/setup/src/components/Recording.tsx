@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import type { RecordedReading, RecordingScope, RecordingView } from '../lib/bindings.ts';
-import { RECORD_SCOPE_HINT } from '../lib/hints.ts';
+import { CHECK_CHARACTERS_HINT, RECORD_SCOPE_HINT } from '../lib/hints.ts';
 import type { Size } from '../lib/region.ts';
 import { Hint } from './Hint.tsx';
 import { PictureCanvas } from './canvas.tsx';
@@ -400,12 +400,14 @@ interface SheetProps {
   readonly error: string | null;
   readonly onEntry: (index: number, entry: ReviewEntry) => void;
   readonly onKeepAll: (keep: boolean) => void;
+  /** Opens the check of the kept readings' characters, or null when there is nothing to check. */
+  readonly onCheck: (() => void) | null;
 }
 
 /** Every reading of a stopped recording, to keep or leave out and to correct. */
 export function ReviewSheet(props: SheetProps) {
   const { view, found, needs, adds, entries, problems, clashes, untaught, crops, blocked, error } = props;
-  const { onEntry, onKeepAll } = props;
+  const { onEntry, onKeepAll, onCheck } = props;
   // Opening review removes the button that had focus, so focus moves here.
   const head = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -479,6 +481,16 @@ export function ReviewSheet(props: SheetProps) {
           >
             Keep none
           </button>
+          {onCheck === null ? null : (
+            <span className="with-hint">
+              <button type="button" className="btn small" aria-describedby="hint-check-readings" onClick={onCheck}>
+                Check characters
+              </button>
+              <Hint topic="Check characters" id="hint-check-readings">
+                {CHECK_CHARACTERS_HINT}
+              </Hint>
+            </span>
+          )}
         </div>
       </div>
       {view.readings.length === 0 ? (

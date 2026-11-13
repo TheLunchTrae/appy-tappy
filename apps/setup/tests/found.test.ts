@@ -21,7 +21,7 @@ import {
 const at = (x: number) => ({ x, y: 10, width: 30, height: 12 });
 // What the search read every find with.
 const white = { red: 255, green: 255, blue: 255 };
-const readWith = { ink: white, tolerance: 40 };
+const readWith = { ink: white, tolerance: 40, characters: [] };
 
 const view: FoundView = {
   id: 1,
