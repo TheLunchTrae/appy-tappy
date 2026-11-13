@@ -46,7 +46,9 @@ describe('the characters a number reads', () => {
     expect(forReference(['1', '%', 'L'], known, other)).toEqual(['1', 'L']);
     // A saved set that was the digits and symbols before the reference learned another is a chosen set.
     expect(readChoice([...digits, '%'], known)).toBe('choose');
-    expect(forReference([...digits, '%'], known, known)).toEqual(['0', '1', '2', '%']);
+    // It loses only what the old reference knew and the new one does not: not the digits neither has learned.
+    expect(forReference([...digits, '%'], known, known)).toEqual([...digits, '%']);
+    expect(forReference([...digits, '%'], known, other)).toEqual(['1', '3', '4', '5', '6', '7', '8', '9']);
   });
 
   test('digits and symbols is offered only for a reference that knows a symbol', () => {

@@ -72,7 +72,8 @@ type for it. A reference learns from every box that has text. Draw as many as
 you like, on any screenshot, and several on one screenshot too.
 
 - **Draw.** Drag on a screenshot, away from the boxes there. The new box is
-  selected, and its row under **Boxes** takes what it shows.
+  selected, and the keyboard moves to its row under **Boxes**, so you can
+  type what it shows straight away.
 - **Select.** Press a box on the screenshot, or its number under **Boxes**,
   which also shows the screenshot the box is on. Each row says which
   screenshot that is, such as **On screenshot 2**.
@@ -83,6 +84,11 @@ you like, on any screenshot, and several on one screenshot too.
   with no text teaches nothing.
 - **Delete.** Select **Delete** in the box's row, or press Delete while the
   box is selected on the screenshot.
+
+A reference you teach by itself reads the window, and
+[records](#record-readings), at its first box, whose row says
+**Reads here**. While you teach a reference for a value, it reads at the
+value's region instead, and no box says so.
 
 Every box goes on a screenshot of one window size, the size the reference
 reads at: the size of the screenshot its first box is on, or, while you teach
@@ -151,10 +157,13 @@ The list holds only the finds that may show the characters the reference
 [needs](#choose-what-it-needs). A letter that is often read in place of a
 digit counts as that digit, so a reference that needs digits still lists a
 find read as `12O5`, whose `O` may be a `0`. The list says how many finds it
-skipped. A reference with no list of what it needs lists every find.
+skipped. A find you ticked before its text was read is skipped the same way
+once the text shows other characters, so it leaves the list and is not
+added. A reference with no list of what it needs lists every find.
 
-1. **Tick the ones to add.** Each find shows numbered on the screenshot and in
-   the list, with the text AppyTappy read. A find starts unticked: tick the
+1. **Tick the ones to add.** Each find in the list shows outlined on the
+   screenshot under the same number, with the text AppyTappy read. A skipped
+   find keeps its number, so the numbers can have gaps. A find starts unticked: tick the
    ones to add, or **Select all**, which also clears every tick. Fix any text
    it got wrong; typing a find's text ticks it.
 2. **Deal with the flagged ones.** A ticked find is flagged when it can't be
@@ -167,8 +176,10 @@ skipped. A reference with no list of what it needs lists every find.
    not read a find, or while a flagged find still has the text AppyTappy read.
    It reads those finds again with the **Characters' color** and
    **Tolerance** as they are set now, and keeps your ticks and the text you
-   typed. The same color and tolerance read the same text, so change one of
-   them first, such as a tolerance that left parts of the characters out.
+   typed. The same color and tolerance read the same text, so **Reread**
+   waits, and says so, until you change one of them, such as a tolerance
+   that left parts of the characters out. A find AppyTappy could not read at
+   all is read again whenever you select **Reread**.
 4. **Add them.** Select the button that says how many you add, such as
    **Add 3 to the reference**. Each becomes a [box](#boxes), which you can
    move, retype, or delete like one you drew. Until you add them,
@@ -297,9 +308,12 @@ stray shape and draw a box around it instead.
    do. **Review recording** opens them again with your choices, and
    **Record more** goes on with the same recording. **Back** leaves review
    without keeping, and your changes stay for next time. To record more, keep
-   the region, the characters' color, and the tolerance as they were, on a
-   screenshot of the same window size: if you changed them, **Use its
-   settings** puts them back. Or **Discard** the recording to start a new one.
+   the place it reads, the characters' color, and the tolerance as they
+   were, on a screenshot of the same window size: if you changed them,
+   **Use its settings** puts them back. In a reference you teach by itself,
+   that moves the box it recorded at back to where it was and to the top of
+   the list, or adds an empty box there if you deleted it. Or **Discard**
+   the recording to start a new one.
    Changing window also discards it.
 
 A digit, a sign such as `%` or `.`, and a letter are collected the same way.

@@ -1,7 +1,7 @@
 // Text found like a box a reference learns from: which finds to add, as what, and what stops them.
 
-import type { FoundView, Label } from './bindings.ts';
-import type { Box } from './boxes.ts';
+import type { ColorSpec, FoundView, Label } from './bindings.ts';
+import type { NewBox } from './boxes.ts';
 import type { Rect } from './region.ts';
 
 /** The user's choice for one find: whether to add it, and the text the user typed, which `typed` says is theirs. */
@@ -23,6 +23,8 @@ export interface FoundRow {
   readonly reading: boolean;
   /** Whether the text reader could not read it and the user typed nothing. */
   readonly failed: boolean;
+  /** The characters' color and tolerance the text reader last read it with. */
+  readonly readWith: { readonly ink: ColorSpec; readonly tolerance: number };
   /** Why it cannot be added as it is, found without asking the reference, or null. */
   readonly flag: string | null;
   /**
@@ -116,6 +118,7 @@ export function foundRows(
       typed,
       reading,
       failed,
+      readWith: { ink: find.ink, tolerance: find.tolerance },
       flag: fits ? flag : null,
       fits,
     };
@@ -185,24 +188,27 @@ export function addBlocked(
 }
 
 /** The kept rows as the boxes the draft adds, on screenshot `screenshot`. */
-export function keptFound(screenshot: number, rows: readonly FoundRow[]): readonly Omit<Box, 'id'>[] {
+export function keptFound(screenshot: number, rows: readonly FoundRow[]): readonly NewBox[] {
   return rows
     .filter((row) => row.keep && row.text.trim() !== '')
     .map((row) => ({ screenshot, region: row.region, text: row.text.trim() }));
 }
 
+/** The rows of `rows` the panel lists and the screenshot outlines: those that may show only characters the reference needs. */
+export function listed(rows: readonly FoundRow[]): readonly FoundRow[] {
+  return rows.filter((row) => row.fits);
+}
+
 /** The edits that keep every listed row of `rows`, or with `keep` false leave each out, each with its own text. */
 export function keepAll(rows: readonly FoundRow[], keep: boolean): ReadonlyMap<number, FoundEntry> {
-  return new Map(
-    rows.filter((row) => row.fits).map((row) => [row.index, { keep, text: row.text, typed: row.typed }] as const),
-  );
+  return new Map(listed(rows).map((row) => [row.index, { keep, text: row.text, typed: row.typed }] as const));
 }
 
 /** Whether the listed rows of `rows` are all kept, some, or none, for the box that keeps or leaves out them all. */
 export function keptState(rows: readonly FoundRow[]): 'all' | 'some' | 'none' {
-  const listed = rows.filter((row) => row.fits);
-  const kept = listed.filter((row) => row.keep).length;
-  return kept === 0 ? 'none' : kept === listed.length ? 'all' : 'some';
+  const shown = listed(rows);
+  const kept = shown.filter((row) => row.keep).length;
+  return kept === 0 ? 'none' : kept === shown.length ? 'all' : 'some';
 }
 
 /** The edits that leave out every kept row of `rows` that `flags` flags, each with its own text. */
@@ -217,10 +223,35 @@ export function withoutFlagged(
   );
 }
 
+/** Why Reread waits while every find it would read again was last read with the color and tolerance set now. */
+export const REREAD_SAME = "Change the characters' color or tolerance to read them differently.";
+
 /**
- * The listed rows of `rows` the text reader reads again, by index: those it could not read, and those `flags` flags
- * whose text is its guess. Text the user typed is theirs.
+ * What Reread would do with `rows`, or null when it has nothing to offer. It is for the listed finds the text reader
+ * could not read and the ones `flags` flags whose text is its guess; text the user typed is theirs. Of those it
+ * reads again, by index, each one whose read failed, since a failure may pass, and each one last read with another
+ * characters' color or tolerance than `ink` and `tolerance`, the ones set now. The same color and tolerance read the
+ * same text, so when it would read none again, `blocked` says what to change.
  */
-export function rereadable(rows: readonly FoundRow[], flags: ReadonlyMap<number, string>): readonly number[] {
-  return rows.filter((row) => row.fits && !row.typed && (row.failed || flags.has(row.index))).map((row) => row.index);
+export function rereadOffer(
+  rows: readonly FoundRow[],
+  flags: ReadonlyMap<number, string>,
+  ink: ColorSpec | null,
+  tolerance: number,
+): { readonly indexes: readonly number[]; readonly blocked: string | null } | null {
+  const offered = listed(rows).filter((row) => !row.typed && (row.failed || flags.has(row.index)));
+  if (offered.length === 0 || ink === null) {
+    return null;
+  }
+  const indexes = offered
+    .filter(
+      (row) =>
+        row.failed ||
+        row.readWith.tolerance !== tolerance ||
+        row.readWith.ink.red !== ink.red ||
+        row.readWith.ink.green !== ink.green ||
+        row.readWith.ink.blue !== ink.blue,
+    )
+    .map((row) => row.index);
+  return { indexes, blocked: indexes.length === 0 ? REREAD_SAME : null };
 }

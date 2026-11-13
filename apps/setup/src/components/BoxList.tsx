@@ -15,9 +15,16 @@ interface Props {
   readonly position: (screenshot: number) => number;
   /** Why no box can be drawn on the screenshot shown, or null when one can. */
   readonly blocked: string | null;
+  /** The box the reference reads and records at, or null when it reads elsewhere, such as at a value's region. */
+  readonly readsAt: number | null;
   readonly onSelect: (id: number) => void;
   readonly onText: (id: number, text: string) => void;
   readonly onDelete: (id: number) => void;
+}
+
+/** The id of the field that holds what box `id` shows, which takes focus once the box is drawn. */
+export function boxTextId(id: number): string {
+  return `box-${id}-text`;
 }
 
 /** A box's pixels, or an empty space until its screenshot's pixels arrive. */
@@ -28,7 +35,7 @@ function Crop({ box, full }: { readonly box: Box; readonly full: ReadonlyMap<num
 }
 
 /** The boxes a reference learns from: each one's pixels, what it shows, and a way to select or delete it. */
-export function BoxList({ boxes, selected, full, position, blocked, onSelect, onText, onDelete }: Props) {
+export function BoxList({ boxes, selected, full, position, blocked, readsAt, onSelect, onText, onDelete }: Props) {
   return (
     <div className="field">
       <span className="name">
@@ -58,6 +65,7 @@ export function BoxList({ boxes, selected, full, position, blocked, onSelect, on
                 </button>
                 <Crop box={box} full={full} />
                 <input
+                  id={boxTextId(box.id)}
                   className="input"
                   placeholder="87%"
                   aria-label={`What box ${number} shows`}
@@ -80,7 +88,10 @@ export function BoxList({ boxes, selected, full, position, blocked, onSelect, on
                 >
                   Delete
                 </button>
-                <span className="where">On screenshot {position(box.screenshot)}</span>
+                <span className="where">
+                  On screenshot {position(box.screenshot)}
+                  {box.id === readsAt ? <span className="reads-here">Reads here</span> : null}
+                </span>
               </li>
             );
           })}

@@ -492,15 +492,18 @@ fn a_number_reads_and_saves_the_characters_it_is_told_to() {
         })
     );
     // Nothing is saved that would read nothing.
-    for none in ["2%", ""] {
-        let error = to_saved(&reading(Some(none)), font, "app", "progress")
-            .expect_err("it knows none of them");
+    assert_eq!(
+        to_saved(&reading(Some("2%")), font, "app", "progress"),
+        Err(SpecError::NoCharacters {
+            reference: "Digits".to_owned(),
+            characters: "2%".to_owned(),
+        })
+    );
+    for none in ["", " \t"] {
         assert_eq!(
-            error,
-            SpecError::NoCharacters {
-                reference: "Digits".to_owned(),
-                characters: none.to_owned(),
-            }
+            to_saved(&reading(Some(none)), font, "app", "progress"),
+            Err(SpecError::Check(CheckDefError::NoCharacters)),
+            "{none:?}"
         );
     }
     assert_eq!(
@@ -627,15 +630,15 @@ fn what_a_check_cuts_at_its_region_has_the_size_it_was_drawn_at() {
     let error = build(&labeled_both, session(&screenshots, None)).expect_err("two sizes");
     assert_eq!(
         error.to_string(),
-        "Screenshot 2 is 2x2, but the region was drawn on screenshot 1, which is 4x2. Clear \
-         its label, or draw the region on it instead."
+        "Screenshot 2, which a box is on, is 2x2, but the reference reads on screenshot 1, \
+         which is 4x2. Delete its boxes, or draw them on a screenshot of that size."
     );
     let recorded_elsewhere = characters(left(), None, one(0), kept.clone());
     assert_eq!(
         build(&recorded_elsewhere, session(&screenshots, Some(&recording)))
             .expect_err("recorded at another size")
             .to_string(),
-        "The recording is of a window of 2x2, but the region was drawn on screenshot 1, \
+        "The recording is of a window of 2x2, but the reference reads on screenshot 1, \
          which is 4x2. Use its settings, or discard the recording."
     );
     let mut drawn_on_small = characters(left(), None, one(1), kept);
@@ -948,7 +951,8 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
     assert_eq!(error, SpecError::RecordedElsewhere);
     assert_eq!(
         error.to_string(),
-        "The region changed since it was recorded. Put it back, or record it again."
+        "The reference reads another place than the recording recorded. Use its settings, or record \
+         again."
     );
 }
 

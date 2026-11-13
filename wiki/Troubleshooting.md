@@ -59,8 +59,9 @@ they were meanwhile. Include both log lines when you report the problem.
 ## A number reads in setup but the automation does nothing
 
 What you see while you make a reference isn't all the reference's reading.
-**Characters it knows** lists the characters you labeled, and the text in a
-recording's review comes from a separate text reader that fills in labels.
+**Characters it knows** lists the characters your boxes and kept readings
+show, and the text in a recording's review comes from a separate text reader
+that fills in each reading's text.
 Only the box that shows a reading **on the live window** is what the
 reference reads, and the automation reads the same way.
 
@@ -105,7 +106,7 @@ The reasons a number has no reading:
   the region until it reads. If it is another character, the reference hasn't
   learned the one shown: draw a box around a reading with it.
   [What a reference can't learn](References.md#what-a-reference-cant-learn)
-  lists the characters no label teaches.
+  lists the characters no box teaches.
 - **The characters hold no number.** The message shows what it read, such as
   `%`. The region shows no digit now, or the region cuts the digits off.
 

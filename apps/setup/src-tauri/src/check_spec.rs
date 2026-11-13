@@ -105,7 +105,7 @@ impl From<ColorSpec> for Rgb {
 pub(crate) struct Label {
     pub(crate) screenshot: usize,
     /// Where on the screenshot the text shows, when it is not the spec's
-    /// region, as for text found like a sample elsewhere on it.
+    /// region: the box the user drew around it, or kept from found text.
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
     pub(crate) region: Option<RegionSpec>,
@@ -113,7 +113,7 @@ pub(crate) struct Label {
 }
 
 /// What one recorded reading shows, as the user confirmed it in review, so
-/// a reference learns its characters like a labeled screenshot's.
+/// a reference learns its characters like a box's.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct RecordedLabel {
@@ -156,8 +156,8 @@ pub(crate) enum CheckSpec {
     /// editor builds it; a value names a saved reference instead.
     Characters {
         region: RegionSpec,
-        /// The screenshot the region was drawn on. Every labeled screenshot
-        /// and the recording must have its window size, since the region
+        /// The screenshot the region was drawn on. Every screenshot with a
+        /// box and the recording must have its window size, since the region
         /// means another spot on a window of another size.
         screenshot: usize,
         #[serde(default)]
@@ -556,6 +556,13 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
             characters,
             ..
         } => {
+            // The file refuses a check that names characters and reads none.
+            if characters
+                .as_deref()
+                .is_some_and(|characters| !characters.chars().any(is_label_character))
+            {
+                return Err(SpecError::Check(CheckDefError::NoCharacters));
+            }
             let saved = (session.references)(reference).map_err(SpecError::Reference)?;
             // The glyphs the runtime reads the saved value with, as
             // `saved::build` chooses them.

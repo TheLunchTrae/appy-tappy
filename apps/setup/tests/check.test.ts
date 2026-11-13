@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import { LIMITS } from '../src/lib/bindings.ts';
+import { boxStep } from '../src/lib/boxes.ts';
 import {
+  type Draft,
   buildCharacters,
   buildSpec,
   DEFAULT_TOLERANCE,
@@ -13,12 +15,14 @@ import {
   onPicture,
   newestOfSize,
   recordBlocked,
+  recordedPlace,
   regionScreenshot,
   reviewSpec,
   settingsDiffer,
   stateOn,
   toReference,
   withFixRegion,
+  withRecordedInk,
   withKind,
   withReference,
   withoutState,
@@ -352,6 +356,62 @@ describe('a stopped recording', () => {
     expect(newestOfSize(screenshots, { ...big })).toBe(2);
     expect(newestOfSize(screenshots, { width: 800, height: 600 })).toBeNull();
   });
+
+  // A reference taught by itself: no value's region, and it reads at its first box.
+  const first = { id: 0, screenshot: 0, region, text: '87%' };
+  const other = { id: 1, screenshot: 0, region: { ...region, y: 40 }, text: '12' };
+  const alone = { ...EMPTY_DRAFT, ink: red, tolerance: 40, boxes: [first, other] };
+  const sizes = [
+    [0, big],
+    [1, small],
+    [2, big],
+  ] as const;
+
+  /** `draft` after Use settings, with `boxId` the box the recording read at. */
+  function usedSettings(draft: Draft, boxId: number | null): Draft {
+    const on = draft.boxes.find((box) => box.id === boxId)?.screenshot ?? null;
+    const place = recordedPlace(draft, settings, on, sizes);
+    const { boxes } =
+      place === null
+        ? draft
+        : boxStep(
+            { boxes: draft.boxes, selectedId: null, recordedId: boxId },
+            { type: 'restore', screenshot: place, region: settings.region },
+          );
+    return withRecordedInk({ ...draft, boxes }, settings);
+  }
+
+  test('using its settings in a reference taught by itself moves the reading box back and sets no region', () => {
+    // The reading box was moved, then deleted, and the color and tolerance changed.
+    const moved = { ...alone, ink: gray, tolerance: 12, boxes: [{ ...first, region: { ...region, x: 9 } }, other] };
+    const deleted = { ...alone, boxes: [other] };
+    for (const changed of [moved, deleted]) {
+      expect(settingsDiffer(changed, settings, big)).toBe(true);
+      const back = usedSettings(changed, 0);
+      expect(back.region).toBeNull();
+      expect(back.drawnOn).toBeNull();
+      expect(settingsDiffer(back, settings, big)).toBe(false);
+      expect(back.boxes).toHaveLength(2);
+    }
+    // The box keeps its text and the other box stays; a deleted box comes back with none.
+    expect(usedSettings(moved, 0).boxes).toEqual([first, other]);
+    // It goes on the newest screenshot of the size recorded at.
+    expect(usedSettings(deleted, 0).boxes).toEqual([{ id: 2, screenshot: 2, region, text: '' }, other]);
+  });
+
+  test('the reading box goes back on a screenshot of the size recorded at', () => {
+    // Its own screenshot when that has the size, or else the newest that has, or nowhere when none has.
+    expect(recordedPlace(alone, settings, 0, sizes)).toBe(0);
+    expect(recordedPlace(alone, settings, 1, sizes)).toBe(2);
+    expect(recordedPlace(alone, settings, null, sizes)).toBe(2);
+    expect(recordedPlace(alone, settings, 1, [[1, small]])).toBeNull();
+  });
+
+  test("using its settings in a reference taught from a value leaves the value's region and the boxes", () => {
+    const taughtFrom = { ...recorded, ink: gray, tolerance: 12, boxes: [other] };
+    expect(recordedPlace(taughtFrom, settings, null, sizes)).toBeNull();
+    expect(usedSettings(taughtFrom, null)).toEqual({ ...taughtFrom, ink: red, tolerance: 40 });
+  });
 });
 
 test('the region shows over the screenshot shown, else the one it was drawn on, else the newest', () => {
@@ -404,6 +464,8 @@ test("a new screenshot carries the value's region when it fits, and clears it wh
   // A saved value's region waits, on no screenshot, for one of the size it was drawn at.
   const saved = { ...EMPTY_DRAFT, region };
   expect(onPicture(saved, 1, false)).toBe(saved);
+  // While a size is unknown, such as before the screenshot's pixels arrive, the region stays where it is drawn.
+  expect(onPicture(drawn, 1, null)).toBe(drawn);
 });
 
 test('withReference keeps the choice of characters that was picked, for the new reference', () => {
@@ -429,9 +491,15 @@ test('withReference keeps the choice of characters that was picked, for the new 
     reference: 'gone',
     characters: ['1', 'L'],
   });
-  // One taught more in place keeps a chosen set.
+  // The value's own reference taught a `.` in place: the choice was made against what it knew before.
   const taught = [reference('percent', '10%L.')];
-  expect(withReference({ ...number, characters: ['1', '%'] }, 'percent', taught).characters).toEqual(['1', '%']);
+  const inPlace = (characters: readonly string[]) =>
+    withReference({ ...number, characters }, 'percent', taught, references).characters;
+  // The digits and symbols take the new symbol, and keep the digits it has yet to learn.
+  expect(inPlace([...digits, '%'])).toEqual([...digits, '%', '.']);
+  expect(inPlace(digits)).toEqual(digits);
+  // A chosen set loses nothing, even a character the reference never knew.
+  expect(inPlace(['1', '7', '%'])).toEqual(['1', '7', '%']);
   // A first reference has no choice to carry over but the one the draft holds.
   expect(withReference({ ...EMPTY_DRAFT, characters: digits }, 'clock', references).characters).toEqual(digits);
 });

@@ -11,6 +11,7 @@ import {
   keptSetup,
   labeledCharacters,
   restoreSetup,
+  shownOnStep,
   storeSetup,
 } from '../src/lib/captureDraft.ts';
 import { type Draft, EMPTY_DRAFT, fixDraft } from '../src/lib/check.ts';
@@ -415,4 +416,14 @@ describe('a draft and what it belongs to', () => {
     expect(removalLoses(1, 1)).toBe('Its value and draft go with it, and this cannot be undone.');
     expect(removalLoses(2, 3)).toBe('Its 2 values and 3 drafts go with it, and this cannot be undone.');
   });
+});
+
+test("entering Where to read shows the screenshot the value's region is drawn on, which is the one it lists", () => {
+  // Screenshot 5 was selected in a later step; the region is drawn on 2.
+  expect(shownOnStep('where', 2, 5)).toBe(2);
+  expect(shownOnStep('where', 2, null)).toBe(2);
+  // With no region drawn, and in the other steps, what shows stays.
+  expect(shownOnStep('where', null, 5)).toBe(5);
+  expect(shownOnStep('how', 2, 5)).toBe(5);
+  expect(shownOnStep('check', 2, null)).toBeNull();
 });
