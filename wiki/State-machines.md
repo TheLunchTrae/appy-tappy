@@ -1396,6 +1396,7 @@ stateDiagram-v2
     Watching --> Previewing: a window is picked
     Watching --> Watching: the window settles at another size, which starts the capture again at the value's region there
     Watching --> WatchFailed: the watch reports an error
+    Watching --> WatchFailed: the capture cannot start again at the value's region there
     WatchFailed --> Closed: stop
     WatchFailed --> Watching: the editor watches again
     WatchFailed --> Previewing: a window is picked
@@ -1450,10 +1451,12 @@ stateDiagram-v2
   the watch places the value there with `SavedValue::at`, once. When the
   value reads there, `reads` is that size, and when its region there differs
   from the one copied, the capture starts again under the same watch number,
-  so the editor's poll goes on. A size at which the value does not read
-  keeps the capture and `reads`, and is kept as `unread` until the value is
-  placed at another size: the poll answers why while frames show that size,
-  and reads again with the first frame that shows the capture's size.
+  so the editor's poll goes on. When the capture cannot start there, the
+  watch shows why, like any other lost watch. A size at which the value does
+  not read keeps the capture and `reads`, and is kept as `unread` until the
+  value is placed at another size: the poll answers why while frames show
+  that size, and reads again with the first frame that shows the capture's
+  size.
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
@@ -1626,7 +1629,7 @@ by itself.
 A recording of readings keeps a reading for each shape a region shows, for
 the user to review. Its `Sightings` hold `full`, which says why it takes no
 more once a frame did not fit. A reading's picture is answered only for its
-own recording's ID, one of the
+own recording's ticket, one of the
 [stale-message guards](#how-to-read-this-page).
 
 ```mermaid
