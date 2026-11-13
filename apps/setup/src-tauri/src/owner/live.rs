@@ -394,8 +394,8 @@ mod tests {
         "reference":{"app":"example","id":"percent"},"whole":false}"#;
 
     /// What the live box says of `379%` read without the `7`.
-    const NO_SEVEN: &str = "Not read on the live window now: the value does not read a digit its \
-        reference knows: it read `3 7 9 %`, and its characters lack the `7`.";
+    const NO_SEVEN: &str = "Not read on the live window now: the value leaves out a character \
+        its number holds: it read `3 7 9 %`.";
 
     /// A harness whose application `example` changes size as `size_changes`
     /// say, with a window that shows `379%` at [`DRAWN`] on screenshot 0 and
