@@ -1432,9 +1432,9 @@ which `api.ts` sends as the request's raw body with a `T` about it, as
 
 The file also holds what the page checks a draft against before it saves:
 `LIMITS`, such as the longest app name a media or volume action names, the
-longest path or link, the most states, the highest tolerance, and the most
-pixels a click's search area holds; `KEY_NAMES`, the keys a key press action
-can name; `SHORTCUT_KEYS`, the keys the screenshot shortcut can name;
+longest path or link, the most states, the longest state name, the highest
+tolerance, and the most pixels a click's search area holds; `KEY_NAMES`, the
+keys a key press action can name; `SHORTCUT_KEYS`, the keys the screenshot shortcut can name;
 `ACTIONS`, whether each kind of action sends input and whether undo can put
 it back; `TRACE_CATEGORIES`; `NO_STATE`; and `DEFAULT_SETTINGS`. The test
 reads them from `appytappy-config`, so the page and the save agree, and the

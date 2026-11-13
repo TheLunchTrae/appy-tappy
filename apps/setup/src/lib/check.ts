@@ -10,6 +10,7 @@ import {
   type ReferenceDef,
   type ReferenceRef,
   type SelectStep,
+  NO_STATE,
   type StateSpec,
 } from './bindings.ts';
 import { type Box, boxLabels } from './boxes.ts';
@@ -199,19 +200,52 @@ export function firstWithPixels<Pixels>(
   return null;
 }
 
+/** Why a state's `name`, trimmed, breaks a rule of its own, or null when it breaks none. */
+function nameProblem(name: string): string | null {
+  if (name === '') {
+    return 'Name this state.';
+  }
+  if (/\p{Cc}/u.test(name)) {
+    return 'A state name cannot hold a control character, such as a tab.';
+  }
+  // The saved file counts code points, as `Array.from` splits a string.
+  if (Array.from(name).length > LIMITS.maxStateNameChars) {
+    return `A state name can be at most ${LIMITS.maxStateNameChars} characters long.`;
+  }
+  // The saved file ignores only ASCII capitals here.
+  if (name.replace(/[A-Z]/gu, (capital) => capital.toLowerCase()) === NO_STATE) {
+    return `The value reads "${NO_STATE}" when no state shows, so a state cannot have that name.`;
+  }
+  return null;
+}
+
 /**
- * The positions of `states` whose name another of them has too, trimmed and ignoring case, as the owner compares
- * them when it saves: "Ready" and "ready" are one name. A state with no name shares none.
+ * Why each of a state check's state `names`, as typed, cannot be saved, by its position; a name that can be saved has
+ * no entry. The page saves a name trimmed, so these are the saved file's rules for a trimmed name, in the order it
+ * checks them: a name has at least one character, no control character such as a tab, and at most
+ * `LIMITS.maxStateNameChars` characters; it is not `NO_STATE`, which stands for no state, in any capitals; and no two
+ * states share a name, ignoring case, since "Ready" and "ready" read alike.
  */
-export function sharedNames(states: readonly { readonly name: string }[]): ReadonlySet<number> {
-  const names = states.map((state) => state.name.trim().toLowerCase());
-  const shared = new Set<number>();
-  names.forEach((name, position) => {
-    if (name !== '' && names.indexOf(name) !== names.lastIndexOf(name)) {
-      shared.add(position);
+export function stateNameProblems(names: readonly string[]): ReadonlyMap<number, string> {
+  const trimmed = names.map((name) => name.trim());
+  const folded = trimmed.map((name) => name.toLowerCase());
+  const problems = new Map<number, string>();
+  trimmed.forEach((name, position) => {
+    const own = nameProblem(name);
+    const fold = name.toLowerCase();
+    const shared = folded.indexOf(fold) !== folded.lastIndexOf(fold);
+    const problem =
+      own ?? (shared ? 'Another state has this name, or one that differs from it only in capitals.' : null);
+    if (problem !== null) {
+      problems.set(position, problem);
     }
   });
-  return shared;
+  return problems;
+}
+
+/** What a state check with the state `names` needs before it can be saved, as {@link stateNameProblems} says, or null. */
+export function stateNamesNext(names: readonly string[]): string | null {
+  return stateNameProblems(names).size === 0 ? null : 'Fix each state name that has a message under it.';
 }
 
 /** Why the reference editor cannot record `draft`'s reading region yet, or null when it can. */
@@ -420,11 +454,9 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
       if (draft.drawnOn === null) {
         return missing('Draw a region on a screenshot.');
       }
-      if (draft.states.some((state) => state.name.trim() === '')) {
-        return missing('Name each state.');
-      }
-      if (sharedNames(draft.states).size > 0) {
-        return missing('Give each state a name of its own.');
+      const names = stateNamesNext(draft.states.map((state) => state.name));
+      if (names !== null) {
+        return missing(names);
       }
       const states = draft.states.map((state): StateSpec => {
         const spec = { name: state.name.trim(), screenshot: state.screenshot };
