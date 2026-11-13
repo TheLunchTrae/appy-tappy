@@ -2496,8 +2496,8 @@ stateDiagram-v2
   answers. A reading that nothing would learn, since review leaves it out
   and the draft does not keep it, gets the text and keeps its keep. A place
   whose text the user typed keeps that text and is only left out. A place
-  joins once, so a text or a tick the user changes afterward stays. One that is gone, or being read again, leaves `seen` and joins
-  anew.
+  joins once, so a text or a tick the user changes afterward stays. One
+  that is gone, or being read again, leaves `seen` and joins anew.
 - **Text that fits no step.** A place whose text has another number of
   characters than its picture has shapes joins no step. Once every one of
   its shapes has an answer, the answers are its text. One still left is the
