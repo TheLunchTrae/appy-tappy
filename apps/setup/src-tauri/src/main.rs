@@ -75,7 +75,7 @@ fn main() -> ExitCode {
     let look_messages = sender.clone();
     let Ok(look_thread) = thread::Builder::new()
         .name("window look".to_owned())
-        .spawn(move || look::run(&look_inbox, &look_messages))
+        .spawn(move || look::run(&look_inbox, &look_messages, look::look))
     else {
         return ExitCode::FAILURE;
     };

@@ -561,6 +561,36 @@ mod tests {
     }
 
     #[test]
+    fn a_whole_window_recording_stops_with_a_reason_when_the_look_thread_is_gone() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        harness
+            .ask(start_window_recording(0, false))
+            .expect("records");
+        // The look thread ended, so nothing takes the frames.
+        drop(std::mem::replace(&mut harness.looks, mpsc::channel().1));
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        let view = harness.recording().expect("a recording");
+        assert!(!view.recording);
+        assert_eq!(
+            view.problem.as_deref(),
+            Some(
+                "Recording stopped: the window could not be looked over. Record more to try \
+                 again."
+            )
+        );
+        // Record more sends a frame again, and stops the same way.
+        harness
+            .ask(start_window_recording(0, true))
+            .expect("goes on");
+        assert!(harness.recording().expect("a recording").recording);
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        assert!(!harness.recording().expect("a recording").recording);
+    }
+
+    #[test]
     fn recording_goes_on_after_a_stop_and_starts_over_for_other_ink() {
         let mut harness = harness(false);
         let mut handler = harness.pick();

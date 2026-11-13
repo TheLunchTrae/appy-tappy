@@ -195,6 +195,10 @@ enum Gate {
     Idle(Option<Instant>),
     /// A look is out, and every frame is skipped until it is answered.
     Out,
+    /// A look is out whose answer is dropped: its frame is from before the
+    /// user recorded more, or from before the window changed size. Every
+    /// frame is skipped until it is answered.
+    Abandoned,
 }
 
 /// A recording of the readings one region shows.
@@ -313,7 +317,8 @@ impl Recording {
     /// this one. The look is then out until [`Self::looked`] answers it, so
     /// a look that takes long holds one frame and not a queue of them. A
     /// frame of another size than the window had is a problem and is not
-    /// looked over.
+    /// looked over, and the answer to a look that is out then is dropped,
+    /// since the places it found text are not where the window shows it.
     pub(crate) fn look(&mut self, frame: &Image, at: Instant) -> Option<look::Job> {
         if !self.life.is_recording() {
             return None;
@@ -324,12 +329,15 @@ impl Recording {
         let size = frame.size();
         if size != self.window_size {
             scan.spots.clear();
+            if scan.gate == Gate::Out {
+                scan.gate = Gate::Abandoned;
+            }
             self.life.set_problem(Some(resized(self.window_size, size)));
             return None;
         }
         self.life.set_problem(None);
         match scan.gate {
-            Gate::Out => return None,
+            Gate::Out | Gate::Abandoned => return None,
             Gate::Idle(Some(last)) if at.saturating_duration_since(last) < SCAN_EVERY => {
                 return None;
             },
@@ -350,8 +358,10 @@ impl Recording {
     /// counts each run of text it `seen`, and answers each reading to read
     /// as text, as [`Self::offer`] does for the region. The next look may go
     /// out [`SCAN_EVERY`] after `at`. An answer that comes once it stopped
-    /// is dropped. `None` is a look that failed, which stops the recording
-    /// at `now` with a reason.
+    /// is dropped, and so is the answer to a look from before the user
+    /// recorded more or the window changed size, after which the next look
+    /// may go out at once. `None` is a look that failed, which stops the
+    /// recording at `now` with a reason.
     pub(crate) fn looked(
         &mut self,
         at: Instant,
@@ -361,6 +371,10 @@ impl Recording {
         let Looking::Window(scan) = &mut self.looking else {
             return Vec::new();
         };
+        if scan.gate == Gate::Abandoned {
+            scan.gate = Gate::Idle(None);
+            return Vec::new();
+        }
         scan.gate = Gate::Idle(Some(at));
         if !self.life.is_recording() {
             return Vec::new();
@@ -399,11 +413,18 @@ impl Recording {
         self.forget_spots();
     }
 
-    /// Goes on recording at `at` after a stop.
+    /// Goes on recording at `at` after a stop. A look that is still out
+    /// is of a frame from before the stop, so its answer is dropped.
     pub(crate) fn resume(&mut self, at: Instant) {
         self.life.resume(at);
-        // A stop by a failure left them, and they are from before it.
-        self.forget_spots();
+        if let Looking::Window(scan) = &mut self.looking {
+            // A stop by a failure left the spots, and they are from before
+            // it.
+            scan.spots.clear();
+            if scan.gate == Gate::Out {
+                scan.gate = Gate::Abandoned;
+            }
+        }
     }
 
     fn forget_spots(&mut self) {
@@ -1320,6 +1341,51 @@ mod tests {
         assert_eq!(
             looked_over(&mut recording, &blocks(&[STROKE, BLOCK]), late),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn a_look_from_before_record_more_is_dropped_when_it_answers_after() {
+        let start = Instant::now();
+        let mut recording = window_recording(start);
+        let job = recording
+            .look(&blocks(&[STROKE]), start)
+            .expect("the first frame goes out");
+        recording.stop(start);
+        let more = start + SCAN_EVERY;
+        recording.resume(more);
+        assert!(
+            recording.look(&blocks(&[BLOCK]), more).is_none(),
+            "one look is out still"
+        );
+        assert_eq!(recording.looked(job.at, Some(look::look(&job)), more), []);
+        assert_eq!(recording.readings().len(), 0, "what it saw is not kept");
+        assert_eq!(recording.view(more).spots, []);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[BLOCK]), more),
+            Some(1),
+            "and the next frame goes out at once"
+        );
+    }
+
+    #[test]
+    fn a_look_out_when_the_window_changes_size_is_dropped() {
+        let start = Instant::now();
+        let mut recording = window_recording(start);
+        let job = recording
+            .look(&blocks(&[STROKE]), start)
+            .expect("the first frame goes out");
+        let wider = frame(61, 40, |x, y| x < 3 && y < 8);
+        assert!(recording.look(&wider, start).is_none());
+        assert_eq!(recording.looked(job.at, Some(look::look(&job)), start), []);
+        let view = recording.view(start);
+        assert_eq!(view.spots, [], "no places from the other size are shown");
+        assert!(view.problem.is_some(), "and the problem stands");
+        assert_eq!(recording.readings().len(), 0);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[BLOCK]), start),
+            Some(1),
+            "back at its size it looks at once"
         );
     }
 
