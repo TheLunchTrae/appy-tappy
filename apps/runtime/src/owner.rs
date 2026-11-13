@@ -23,7 +23,7 @@ use appytappy_sources::schedule::ReadInterval;
 use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
-use crate::model::{Model, Order, Owner, SessionId};
+use crate::model::{Model, Order, Owner, ReaderNumber, SessionId};
 use crate::trace::switch::Switch;
 use crate::trace::writer::TraceReport;
 use crate::trace::{Detail, Record, Trace, What};
@@ -43,7 +43,7 @@ enum Event {
     DetectionEnded,
     /// The setup app saved, so the settings and automations are read again.
     Reload,
-    /// A reader read a value or met a problem.
+    /// A reader read a value, met a problem, or ended.
     Reading(Reading),
     /// The action thread noted something for the log, or said whether
     /// actions can run.
@@ -267,18 +267,56 @@ impl Crew {
         let _ = self.events.send(Event::DetectionEnded);
     }
 
+    /// Keeps the reader `started` for `session`, its reader number `number`.
+    /// When its thread could not start, the log says so for the application
+    /// named `name`, and the owner hears that the reader ended, as a reader
+    /// that ran tells it itself, so the session starts its next reader after
+    /// a wait.
+    fn read(
+        &mut self,
+        session: SessionId,
+        number: ReaderNumber,
+        started: io::Result<Reader>,
+        name: &str,
+        log: &mut Log,
+    ) {
+        match started {
+            Ok(reader) => {
+                self.readers.insert(session, reader);
+                self.trace.record(What::Reading, |record| Record {
+                    session: Some(session),
+                    ..record
+                });
+            },
+            Err(error) => {
+                note(log, &format!("{name}: its reader cannot start: {error}"));
+                let ended = Reading::Ended {
+                    session,
+                    reader: number,
+                };
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the owner holds the receiver while it runs, so the send cannot fail"
+                )]
+                let _ = self.events.send(Event::Reading(ended));
+            },
+        }
+    }
+
     /// The job that starts `session`'s reader, and the trace the reader
     /// starts with: the owner's own, so the reader records from its first
     /// frame whenever the trace is on.
     fn reader_job(
         &self,
         session: SessionId,
+        reader: ReaderNumber,
         plan: Arc<plan::AppPlan>,
         watched: Watched,
         interval: ReadInterval,
     ) -> (reader::Job, Trace) {
         let job = reader::Job {
             session,
+            reader,
             plan,
             watched,
             interval,
@@ -834,7 +872,7 @@ fn read_saved(
             },
         }
     }
-    orders.extend(model.restart_readers());
+    orders.extend(model.restart_readers(now));
     for (id, plan) in model.sessions() {
         tracing.name(id, plan);
     }
@@ -874,6 +912,7 @@ fn receive(trace: &mut Trace, event: &Event) {
         position,
         value,
         at,
+        ..
     }) = event
     {
         trace.record(What::Received, |record| Record {
@@ -968,24 +1007,17 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
         match order {
             Order::Read {
                 session,
+                reader,
                 plan,
                 watched,
                 interval,
             } => {
                 let name = plan.labels.name.clone();
                 crew.tracing.name(session, &plan);
-                let (job, trace) = crew.reader_job(session, plan, watched, interval);
+                let (job, trace) = crew.reader_job(session, reader, plan, watched, interval);
                 let system = Arc::clone(&crew.system);
-                match Reader::start(system, job, trace, crew.events.clone()) {
-                    Ok(reader) => {
-                        crew.readers.insert(session, reader);
-                        crew.trace.record(What::Reading, |record| Record {
-                            session: Some(session),
-                            ..record
-                        });
-                    },
-                    Err(error) => note(log, &format!("{name} cannot be read: {error}")),
-                }
+                let started = Reader::start(system, job, trace, crew.events.clone());
+                crew.read(session, reader, started, &name, log);
             },
             Order::StopReading(id, name) => {
                 if let Some(Err(error)) = crew.readers.remove(&id).map(Reader::stop) {
@@ -1124,10 +1156,11 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
         },
         Event::Reading(Reading::Sample {
             session,
+            reader,
             position,
             value,
             at,
-        }) => Step::Carry(model.sample(session, position, value, at)),
+        }) => Step::Carry(model.sample(session, reader, position, value, at)),
         Event::Reading(Reading::Problem { session, problem }) => {
             if let Some(name) = model.app_name(session) {
                 note(log, &format!("{name}: {problem}"));
@@ -1145,8 +1178,10 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
             }
             Step::Carry(Vec::new())
         },
-        Event::Reading(Reading::Unseen { session }) => {
-            if let Some(name) = model.app_name(session) {
+        Event::Reading(Reading::Unseen { session, reader }) => {
+            if model.forget(session, reader)
+                && let Some(name) = model.app_name(session)
+            {
                 note(
                     log,
                     &format!(
@@ -1155,8 +1190,21 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
                     ),
                 );
             }
-            model.forget(session);
             Step::Carry(Vec::new())
+        },
+        Event::Reading(Reading::Ended { session, reader }) => {
+            let orders = model.reader_ended(session, reader, Instant::now());
+            // No order means the session stopped that reader itself.
+            if let Some(name) = model.app_name(session).filter(|_| !orders.is_empty()) {
+                note(
+                    log,
+                    &format!(
+                        "{name}: its reader ended, so nothing reads its values until a new \
+                         reader starts after a wait"
+                    ),
+                );
+            }
+            Step::Carry(orders)
         },
         Event::Actions(ActionReport::Note(message)) => {
             note(log, &message);
@@ -1532,6 +1580,75 @@ mod tests {
                 .get(1)
                 .is_some_and(|line| line.ends_with("Renamed: Health cannot be read: too dark")),
             "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn only_the_reader_that_reads_a_session_is_logged_as_unseeing_or_ended() {
+        let folder = env::temp_dir().join(format!("appytappy-reader-ended-{}", process::id()));
+        let mut log = Log::open(&folder, "runtime", LOG_LIMIT).expect("open");
+        let enabled = EnabledStore::new(folder.join("enabled.txt"));
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "example".to_owned(),
+            app_plan("Example App", &["Pause"]),
+        )]));
+        let started = Event::from(Change::Started {
+            app: "example".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
+        handle(&mut model, &mut log, &enabled, started);
+        let session = SessionId(0);
+        let unseen = |reader| Event::from(Reading::Unseen { session, reader });
+        let ended = |reader| Event::from(Reading::Ended { session, reader });
+        // The log's lines about the session's reader, without their times.
+        let said = || -> Vec<String> {
+            fs::read_to_string(folder.join("runtime.log"))
+                .expect("read")
+                .lines()
+                .filter_map(|line| line.split_once("Example App: its "))
+                .map(|(_, about)| about.to_owned())
+                .collect()
+        };
+        let (stale, reads) = (ReaderNumber(4), ReaderNumber(0));
+        let nothing = || Step::Carry(Vec::new());
+
+        assert_eq!(
+            handle(&mut model, &mut log, &enabled, unseen(stale)),
+            nothing()
+        );
+        assert_eq!(
+            handle(&mut model, &mut log, &enabled, ended(stale)),
+            nothing()
+        );
+        assert_eq!(
+            said(),
+            [""; 0],
+            "the session still runs, but another reader reads it"
+        );
+        assert_eq!(model.next_due(), None, "and no reader starts for it");
+
+        assert_eq!(
+            handle(&mut model, &mut log, &enabled, unseen(reads)),
+            nothing()
+        );
+        assert_eq!(
+            handle(&mut model, &mut log, &enabled, ended(reads)),
+            Step::Carry(vec![Order::StopReading(session, "Example App".to_owned())]),
+            "the reader that ended is joined, which logs why it ended"
+        );
+        assert!(model.next_due().is_some(), "a reader starts after a wait");
+        let lines = said();
+        fs::remove_dir_all(&folder).expect("clean up");
+        assert_eq!(
+            lines,
+            [
+                "values can no longer be seen, so they are read again before any automation \
+                 runs or is undone",
+                "reader ended, so nothing reads its values until a new reader starts after a \
+                 wait",
+            ]
         );
     }
 
@@ -1911,7 +2028,13 @@ mod tests {
         });
         let at = Instant::now();
         for progress in [95.0, 10.0, 95.0] {
-            model.sample(SessionId(0), 0, plan::examples::number(progress), at);
+            model.sample(
+                SessionId(0),
+                ReaderNumber(0),
+                0,
+                plan::examples::number(progress),
+                at,
+            );
         }
         let held = model.next_due();
         assert!(held.is_some(), "held back by its cooldown");
@@ -2040,18 +2163,79 @@ mod tests {
             executable: "Example.exe".to_owned(),
         };
         let interval = ReadInterval::default();
-        let (job, started) =
-            crew.reader_job(SessionId(3), Arc::clone(&plan), watched.clone(), interval);
+        let (job, started) = crew.reader_job(
+            SessionId(3),
+            ReaderNumber(1),
+            Arc::clone(&plan),
+            watched.clone(),
+            interval,
+        );
         assert_eq!(started, trace);
         assert_eq!(
             job,
             reader::Job {
                 session: SessionId(3),
+                reader: ReaderNumber(1),
                 plan,
                 watched,
                 interval,
             }
         );
+    }
+
+    #[test]
+    fn a_reader_that_cannot_start_tells_the_owner_it_ended() {
+        let (mut crew, _controls, _received, heard) = crew();
+        let mut scratch = Scratch::new("reader-cannot-start");
+        let no_thread = Err(io::Error::other("no more threads"));
+        let (session, reader) = (SessionId(3), ReaderNumber(1));
+        crew.read(session, reader, no_thread, "Example App", &mut scratch.log);
+        assert!(
+            matches!(
+                heard.try_recv(),
+                Ok(Event::Reading(Reading::Ended { session: of, reader: number }))
+                    if of == session && number == reader
+            ),
+            "so the session starts its next reader after a wait"
+        );
+        assert!(crew.readers.is_empty());
+        assert!(
+            scratch
+                .log()
+                .trim_end()
+                .ends_with("Example App: its reader cannot start: no more threads"),
+            "{:?}",
+            scratch.log()
+        );
+    }
+
+    #[test]
+    fn a_reader_that_started_is_kept_for_its_session_and_traced() {
+        let (mut crew, _controls, _received, heard) = crew();
+        let mut scratch = Scratch::new("reader-started");
+        let (trace, entries) = Trace::for_test(1, &[TraceCategory::Lifecycle]);
+        crew.trace = trace;
+        let (reader, _told) = Reader::stand_in();
+        let session = SessionId(3);
+        crew.read(
+            session,
+            ReaderNumber(1),
+            Ok(reader),
+            "Example App",
+            &mut scratch.log,
+        );
+        assert_eq!(
+            crew.readers.keys().collect::<Vec<_>>(),
+            [&session],
+            "the owner stops it with its session"
+        );
+        let sent: Vec<(What, Option<SessionId>)> = crate::trace::sent(&entries)
+            .into_iter()
+            .map(|record| (record.what, record.session))
+            .collect();
+        assert_eq!(sent, [(What::Reading, Some(session))]);
+        assert!(heard.try_recv().is_err(), "nothing ended");
+        assert_eq!(scratch.log(), "", "and nothing is logged");
     }
 
     #[test]
@@ -2178,6 +2362,7 @@ mod tests {
         let at = Instant::now();
         let sample = Event::from(Reading::Sample {
             session: SessionId(0),
+            reader: ReaderNumber(0),
             position: 0,
             value: plan::examples::number(95.0),
             at,
@@ -2200,6 +2385,7 @@ mod tests {
             &mut trace,
             &Event::from(Reading::Sample {
                 session: SessionId(0),
+                reader: ReaderNumber(0),
                 position: 2,
                 value: value.clone(),
                 at,
@@ -2396,6 +2582,7 @@ mod tests {
         let orders = [
             Order::Read {
                 session: SessionId(1),
+                reader: ReaderNumber(0),
                 plan,
                 watched: watched.clone(),
                 interval: ReadInterval::DEFAULT,
