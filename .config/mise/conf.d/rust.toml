@@ -105,26 +105,10 @@ run = "cargo package --workspace --allow-dirty --locked --list > /dev/null"
 
 # Both mutation lanes test two mutants at once: each mutant's build waits on
 # its linker most of the time, so a second build uses the idle cores.
-# cargo-mutants builds in its own copy of the tree and leaves target/ out of
-# it. MUTANTS_COPY_TARGET=true copies target/ too, so the baseline reuses the
-# builds already there; CI sets it, and a local run leaves it off rather than
-# copy a developer's whole target/ twice. The copy gives every file a new
-# modification time, so Cargo can take a stale workspace build in it for a
-# current one. With the copy on, both lanes first bring target/ up to date in
-# place with the build cargo-mutants runs for each mutant, which also covers
-# its baseline's.
-# MUTANTS_SHARD=k/n runs only shard k of n (counting from 0), so CI can split
-# the sweep across runners; unset, it runs every mutant. Round-robin sharding
-# spreads each crate's mutants across the shards, so they take similar time.
 [tasks."rust:mutants"]
 description = "Run mutation testing; a surviving mutant is a review finding"
 run = """
 set -eu
-
-set --
-if [ -n "${MUTANTS_SHARD:-}" ]; then
-  set -- "--shard=$MUTANTS_SHARD" --sharding=round-robin
-fi
 
 . scripts/mutants-lock.sh
 acquire_mutants_task_lock full
@@ -133,15 +117,20 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
-  run_mutants_task_child cargo test --no-run --workspace --all-features --locked
-fi
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked "$@"
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --cargo-arg=--locked
 run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 """
 
+# cargo-mutants builds in its own copy of the tree and leaves target/ out of
+# it. MUTANTS_COPY_TARGET=true copies target/ too, so the baseline reuses the
+# builds already there; CI sets it, and a local run leaves it off rather than
+# copy a developer's whole target/ twice. The copy gives every file a new
+# modification time, so Cargo can take a stale workspace build in it for a
+# current one. With the copy on, the lane first brings target/ up to date in
+# place with the build cargo-mutants runs for each mutant, which also covers
+# its baseline's.
 [tasks."rust:mutants:diff"]
 description = "Mutation-test changed code; default base prefers origin/main"
 run = """

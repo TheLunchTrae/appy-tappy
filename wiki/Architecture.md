@@ -107,13 +107,13 @@ bounds.
 ### Portable core, thin Windows adapters
 
 `config` and `engine` contain no Windows calls, so the Linux `quality` job
-lints, tests, and mutation-tests them in full. `sources`, `actions`,
-`platform`, and the runtime wrap Windows APIs. Their Windows code sits behind
-`#[cfg(windows)]` and their Windows-only dependencies under
-`[target.'cfg(windows)'.dependencies]`, so those crates still build on Linux,
-where they are nearly empty. The `windows` CI job lints and documents them on
-Windows. Their Windows code can run only there, so that job also runs the
-member crates' tests.
+lints and tests them in full and mutation-tests every change to them.
+`sources`, `actions`, `platform`, and the runtime wrap Windows APIs. Their
+Windows code sits behind `#[cfg(windows)]` and their Windows-only dependencies
+under `[target.'cfg(windows)'.dependencies]`, so those crates still build on
+Linux, where they are nearly empty. The `windows` CI job lints and documents
+them on Windows. Their Windows code can run only there, so that job also runs
+the member crates' tests.
 
 Logic that can be wrong belongs in `config` or `engine`. A Windows adapter turns
 one API call into one typed value or error and holds no decisions of its own.

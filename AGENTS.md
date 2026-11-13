@@ -29,11 +29,9 @@ AppyTappy ships for Windows only. CI runs these jobs from
 Linux and is the required gate. `windows` runs `rust:lint`, `rust:doc`, and
 `rust:test:members` on Windows, and also `rust:bench` on pushes to main and
 manual runs. `footprint` runs `rust:footprint` on Windows.
-`.github/workflows/mutants.yml` runs the full mutation sweep nightly on main,
-split into `mutants` shards, and on demand for any branch.
 `quality`, `windows`, and `footprint` restore a Rust build cache that only
 pushes to main save, once for each set of manifests, `Cargo.lock` and
-toolchain. The mutation sweep reads the `quality` job's cache and saves none.
+toolchain.
 
 - Inline mise tasks are POSIX `sh`. `[task_config] shell` in
   `.config/mise/config.toml` runs them with `sh` on every platform, so tasks
@@ -230,9 +228,9 @@ source changes; add `rust:doc` for public API changes.
 `rust:standards` formats code. Refresh `Cargo.lock` through `rust:lock` after
 dependency changes and commit it.
 
-`rust:mutants` runs the full sweep. `rust:mutants:diff` mutates only changed
-code; its base defaults to `origin/main`, then local `main`, and can be set with
-`MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
+`rust:mutants` mutates the whole workspace. `rust:mutants:diff` mutates only
+changed code; its base defaults to `origin/main`, then local `main`, and can be
+set with `MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
 `rust:standards:check` runs the lane that `MUTANTS_LANE` names, `full` by
 default; [mutation testing](wiki/Rust-standards.md#mutation-testing)
 says which lane CI runs. Before handoff, run `mise run rust:standards:check`;
@@ -372,8 +370,8 @@ regular dependency; remove it when the last skip disappears. Classification and
 coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
-Mutation evidence covers the code each pull request and each push to main
-changes, and the nightly sweep covers the whole workspace.
+Mutation evidence in CI covers the code each pull request and each push to
+main changes; `rust:mutants` covers the whole workspace on demand.
 `.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
 approval, because the Linux gate compiles them out.
 Read [mutation operation](wiki/Rust-standards.md#mutation-testing)

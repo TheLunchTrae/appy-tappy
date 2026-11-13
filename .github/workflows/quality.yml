@@ -19,14 +19,13 @@ concurrency:
 
 jobs:
   # The mandatory gate. It mutation-tests only the code each event changes, so
-  # the checkout is not shallow; .github/workflows/mutants.yml runs the full
-  # sweep nightly. A pull request diffs against the fetched base branch, not
-  # the event's base.sha. That sha can be an older tip than the one the
-  # checked-out merge sits on, and a diff from it would also hold everything
-  # merged to the base branch since then. A push to main diffs against the
-  # previous tip, which with squash merges is exactly the merged pull request;
-  # a push with no previous tip falls back to the parent commit. A manual run
-  # diffs against origin/main.
+  # the checkout is not shallow. A pull request diffs against the fetched base
+  # branch, not the event's base.sha. That sha can be an older tip than the one
+  # the checked-out merge sits on, and a diff from it would also hold
+  # everything merged to the base branch since then. A push to main diffs
+  # against the previous tip, which with squash merges is exactly the merged
+  # pull request; a push with no previous tip falls back to the parent commit.
+  # A manual run diffs against origin/main.
   quality:
     name: quality
     runs-on: ubuntu-26.04
