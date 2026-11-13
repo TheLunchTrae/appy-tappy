@@ -17,13 +17,15 @@ use std::hint::black_box;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
+use appytappy_config::app_file::{PinDef, SizeChangesDef};
 use appytappy_config::settings_file::ReadInterval;
 use appytappy_sources::schedule::{Activity, ReadSchedule};
-use appytappy_sources::screen::check::{BarFill, ColorMatch, ImageMatch};
+use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ImageMatch};
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::find::PictureSearch;
 use appytappy_sources::screen::mask::Mask;
-use appytappy_sources::screen::{Image, Region, Rgb};
+use appytappy_sources::screen::saved::{SavedCheck, SavedValue};
+use appytappy_sources::screen::{Image, Placed, Region, Rgb, Size};
 
 /// Samples per operation; odd, so the median is one sample.
 const SAMPLES: usize = 101;
@@ -95,6 +97,30 @@ fn main() -> BenchResult {
 
     report(&mut out, "crop the bar from a 320x180 frame", || {
         first.crop(bar_region)
+    })?;
+    // A capture of one value copies only its region, so the frame is the
+    // value's pixels already.
+    let alone = Size {
+        width: 400,
+        height: 100,
+    };
+    let frame = Image::new(alone, vec![0; 400 * 100 * 4])?;
+    let placed = Placed::new(
+        alone,
+        [Ok(SavedValue {
+            drawn: SavedCheck {
+                window_size: alone,
+                region: Region::new(0, 0, alone.width, alone.height).ok_or_else(missing)?,
+                check: Check::Color(gold),
+            },
+            fixes: Vec::new(),
+            pin: PinDef::TopLeft,
+            size_changes: SizeChangesDef::Rarely,
+        }
+        .first())],
+    );
+    report(&mut out, "one value alone, 400x100", || {
+        placed.cropped(0, &frame).map(|image| image.pixels().len())
     })?;
     report(&mut out, "bar fill, 202x12", || fill.percent(&bar))?;
     report(&mut out, "number, 100x28", || reader.read(&counter, false))?;
