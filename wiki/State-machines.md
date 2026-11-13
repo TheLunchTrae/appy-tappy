@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Fifteen guards drop such stale messages:
+it was about has gone. Sixteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -92,6 +92,16 @@ it was about has gone. Fifteen guards drop such stale messages:
   automations, and drafts as it starts. An answer older than the newest one taken is
   dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
   started before a save and answers late never puts older lists back.
+- **Newest asks.** Every other answer the setup app's screens wait for goes
+  through `apps/setup/src/lib/request.ts`. `ask` is what an effect returns:
+  it sends a request, after a delay where a run of changes should ask once,
+  and drops the answer once what it asked about changed or its component
+  went. `useNewest` is for asks an event starts: each `begin` makes the
+  asks before it stale, and a poll that `join`s the newest ask is dropped
+  once any command begins another, as a recording's or a search's state
+  read before a start, stop, discard, or reread is. `drop` makes them stale
+  without asking: the click target drops a selection still asked for when
+  the user draws a box by hand or shows another screenshot.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -555,7 +565,10 @@ stateDiagram-v2
 
 Before a digit, a character that does not fit starts the number over. After a
 digit, it ends the number, and the rest of the region is ignored, so `12/50`
-reads as 12 once `/` is learned. A `,` is skipped when it separates groups of
+reads as 12 once `/` is learned. A character the value leaves out is "any
+other character" whatever it is, a `-`, a `.`, or a `,` included
+(`NumberText::push_text`), and a letter left out still counts as a letter
+before a point. A `,` is skipped when it separates groups of
 three digits before the point, so `1,234` reads as 1234. When the digits after
 a `,` are not a group of three, as in `12,5`, the number ends at the `,` and
 reads as 12. A `.` before any digit reads as `0.`, so `.5` reads as 0.5 (or 0 for
@@ -1317,9 +1330,21 @@ stateDiagram-v2
   first; a flow that finishes that draft puts them back into `screenshots`
   after its window is picked (`restore_draft_screenshots`), each under the
   index it had, and changes no other field.
-  The page stops it when a value or reference flow closes, on **Change
-  window**, and when a click's target screen closes or looks for its window
-  again.
+  A screen that previews a window says that it holds the capture
+  (`useCapture` in `apps/setup/src/lib/capture.ts`): a value or reference
+  flow, and a click's target screen. The capture stops when that screen
+  goes, on **Change window**, and when a click's target screen looks for
+  its window again. While one holds it, the pages' lists are read only
+  after a save.
+- The automation editor's watch (`liveWatchStep` in
+  `apps/setup/src/lib/liveWatch.ts`) holds the owner's watch number, the
+  time before which it starts no new watch, and why its last reading was
+  refused, if nothing was read since. A watch that reads **Lost**, or that
+  cannot start, shows why and starts again a second later. The owner
+  refuses to read a watch that another capture replaced: the editor then
+  watches again at once and says nothing. When the watch that follows is
+  refused too, with no reading between, the refusal is a failure: the
+  editor shows it and tries again each second.
 - **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
   error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.

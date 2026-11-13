@@ -3,13 +3,16 @@
 //!
 //! An app draws its counter with one font at one size, so the screenshot's
 //! own glyphs are the best possible templates. Reading is a fixed sequence of
-//! integer passes with no allocation, so it is deterministic and costs
-//! microseconds, where general text recognition costs milliseconds and can
-//! differ between machines.
+//! integer passes, so it is deterministic and costs microseconds, where
+//! general text recognition costs milliseconds and can differ between
+//! machines. Its one allocation is the ink, a byte for each pixel of the
+//! region.
 //!
 //! 1. **Ink.** A pixel is ink when each of its red, green, and blue is within
-//!    the tolerance of the text color the user picked.
-//! 2. **Line.** The rows from the first to the last that hold ink.
+//!    the tolerance of the text color the user picked. [`Ink`] holds which
+//!    pixels are, found once, and the later passes read it.
+//! 2. **Line.** The run of adjacent inked rows that holds the most ink
+//!    ([`Ink::line`]).
 //! 3. **Characters.** Runs of columns that hold ink in the line, left to
 //!    right. Characters must not touch.
 //! 4. **Shapes.** Each character is sampled onto a grid 16 cells tall, scaled
@@ -33,18 +36,21 @@ use std::ops::Range;
 use appytappy_config::app_file::is_label_character;
 use appytappy_config::signal::Number;
 
-use super::Image;
-use crate::system::Rgb;
+use super::{Image, Rgb, Size};
 
 #[cfg(test)]
 pub(crate) mod drawn;
+mod ink;
+
+pub use ink::Ink;
 
 /// Grid rows: each character is scaled to this many cells tall.
 const GRID_ROWS: u32 = 16;
 
 /// Grid columns: twice the rows, so a character up to twice as wide as the
-/// line is tall, such as `%`, fits.
-const GRID_COLUMNS: u32 = 32;
+/// line is tall, such as `%`, fits. A [`Shape`] holds a row's cells in the
+/// bits of one `u32`, so there are as many columns as it has bits.
+const GRID_COLUMNS: u32 = u32::BITS;
 
 /// The most characters one read or one screenshot may hold.
 const MAX_CHARACTERS: usize = 24;
@@ -56,7 +62,7 @@ pub const MAX_GLYPHS: usize = 256;
 const MAX_NUMBER_LEN: usize = 24;
 
 /// A character's shape: one `u32` of cells per grid row.
-pub type Shape = [u32; 16];
+pub type Shape = [u32; GRID_ROWS as usize];
 
 /// The shapes of an image's characters, from [`DigitReader::shapes`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,20 +126,18 @@ struct Span {
     right: u32,
 }
 
-/// Rows `top..bottom` that hold ink.
-#[derive(Debug, Clone, Copy)]
-struct Line {
-    top: u32,
-    bottom: u32,
-}
-
 /// Reads a number drawn in one text color, from glyphs learned from
 /// screenshots of the same counter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DigitReader {
     ink: Rgb,
     tolerance: u8,
+    /// The glyphs a read takes its characters from.
     glyphs: Vec<Glyph>,
+    /// The glyphs of the characters a value leaves out, which
+    /// [`DigitReader::reading`] moves here. A read knows their shapes as
+    /// text that is no part of its number.
+    left_out: Vec<Glyph>,
 }
 
 impl DigitReader {
@@ -146,6 +150,7 @@ impl DigitReader {
             ink,
             tolerance,
             glyphs: Vec::new(),
+            left_out: Vec::new(),
         }
     }
 
@@ -159,13 +164,12 @@ impl DigitReader {
     /// with `text`, when a shape is already learned as another character, or
     /// when the reader is full. On error the reader is unchanged.
     pub fn learn(&mut self, image: &Image, text: &str) -> Result<(), LearnError> {
+        let ink = self.ink(image);
         let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (line, count) = self
-            .segment(image, &mut spans)
-            .map_err(|error| match error {
-                Segmentation::NoInk => LearnError::NoInk,
-                Segmentation::TooMany => LearnError::TooManyCharacters,
-            })?;
+        let (line, count) = segment(&ink, &mut spans).map_err(|error| match error {
+            Segmentation::NoInk => LearnError::NoInk,
+            Segmentation::TooMany => LearnError::TooManyCharacters,
+        })?;
         let expected = text
             .chars()
             .filter(|&character| is_label_character(character));
@@ -188,7 +192,7 @@ impl DigitReader {
         }
         let mut learned = self.glyphs.clone();
         for (character, span) in expected.zip(found) {
-            let shape = self.shape(image, line, *span);
+            let shape = shape(&ink, &line, *span);
             match learned.iter().find(|glyph| glyph.shape == shape) {
                 Some(glyph) if glyph.character == character => {},
                 Some(glyph) => {
@@ -205,27 +209,26 @@ impl DigitReader {
         Ok(())
     }
 
-    /// Whether the reader has learned a glyph for `character`.
-    #[must_use]
-    pub fn knows(&self, character: char) -> bool {
-        self.glyphs.iter().any(|glyph| glyph.character == character)
-    }
-
     /// The reader a number check reads with when it names `characters`, as
-    /// `CheckDef::Number` does: with only its glyphs for them, in the order
-    /// it learned them, or `None` when it has learned none of them. It then
-    /// reads as if it had learned nothing else, so a shape matches the
-    /// closest of those glyphs alone: a reader of digits cannot read a `0`
-    /// as the `O` its font also has, and any other character it sees is
-    /// unknown to it. A check that names no characters reads with the
-    /// reader as it is.
+    /// `CheckDef::Number` does, or `None` when it has learned none of them.
+    /// It takes its number from its glyphs for them alone, in the order it
+    /// learned them: a shape matches the closest of those glyphs first, so
+    /// a reader of digits cannot read a `0` as the `O` its font also has.
+    /// The other characters it learned are still characters to it, which
+    /// [`DigitReader::read`] takes as text and not as shapes it has yet to
+    /// learn. A check that names no characters reads with the reader as it
+    /// is.
     #[must_use]
     pub fn reading(mut self, characters: Option<&str>) -> Option<Self> {
         let Some(characters) = characters else {
             return Some(self);
         };
-        self.glyphs
-            .retain(|glyph| characters.contains(glyph.character));
+        let (read, left_out) = self
+            .glyphs
+            .into_iter()
+            .partition(|glyph| characters.contains(glyph.character));
+        self.glyphs = read;
+        self.left_out = left_out;
         (!self.glyphs.is_empty()).then_some(self)
     }
 
@@ -239,20 +242,23 @@ impl DigitReader {
     /// `whole`, the number ends at the `.`, so the digits after it are
     /// ignored and need no glyphs: `87.5%` reads as 87.
     ///
+    /// A character the reader's value leaves out, as
+    /// [`DigitReader::reading`] describes, is text: it ends the number, or
+    /// comes before it, whatever it is. So a value of digits reads `53%` as
+    /// 53, `87.5` as 87, and `Lv.5` as 5. A digit is the exception, since
+    /// the number beside it would read without it.
+    ///
     /// # Errors
     ///
     /// Returns a [`ReadError`] when the image has no ink, too many
-    /// characters, a character that matches no learned glyph, or no digits.
-    /// The last two carry the characters the read made out, so a number is
-    /// never made of only the characters that matched.
+    /// characters, a character that matches no learned glyph, a digit the
+    /// value leaves out, or no digits. The last three carry the characters
+    /// the read made out, so a number is never made of only the characters
+    /// that matched.
     pub fn read(&self, image: &Image, whole: bool) -> Result<Number, ReadError> {
+        let ink = self.ink(image);
         let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (line, count) = self
-            .segment(image, &mut spans)
-            .map_err(|error| match error {
-                Segmentation::NoInk => ReadError::NoInk,
-                Segmentation::TooMany => ReadError::TooManyCharacters,
-            })?;
+        let (line, count) = segment(&ink, &mut spans)?;
         let mut number = NumberText {
             point: Point::for_whole(whole),
             ..NumberText::default()
@@ -263,22 +269,33 @@ impl DigitReader {
         // characters after it are still matched, for the error, up to
         // where a number among them ends.
         let mut unknown = None;
+        // The first digit the value leaves out, which fails the read too.
+        let mut digit_left_out = None;
         for (position, span) in spans.iter().take(count).enumerate() {
-            let closest = self.closest(&self.shape(image, line, *span));
-            match closest.filter(|closest| closest.matches) {
-                Some(closest) => {
-                    read.push(closest.character);
-                    number.push(closest.character);
-                },
-                // Text after a finished number, such as the "HP" in "37% HP",
-                // needs no glyphs.
-                None if number.ended => break,
-                None => {
-                    read.push(ReadText::UNKNOWN);
-                    if unknown.is_none() {
-                        unknown = Some((position, closest.map(|closest| closest.character)));
-                    }
-                },
+            let shape = shape(&ink, &line, *span);
+            let closest = closest(&self.glyphs, &shape);
+            if let Some(closest) = closest.filter(|closest| closest.matches) {
+                read.push(closest.character);
+                number.push(closest.character);
+                continue;
+            }
+            // Text after a finished number, such as the "HP" in "37% HP",
+            // needs no glyphs.
+            if number.ended {
+                break;
+            }
+            let left_out = self::closest(&self.left_out, &shape);
+            if let Some(Closest { character, .. }) = left_out.filter(|closest| closest.matches) {
+                read.push(character);
+                number.push_text(character);
+                if character.is_ascii_digit() {
+                    digit_left_out.get_or_insert(character);
+                }
+                continue;
+            }
+            read.push(ReadText::UNKNOWN);
+            if unknown.is_none() {
+                unknown = Some((position, closest.map(|closest| closest.character)));
             }
         }
         if let Some((position, closest)) = unknown {
@@ -288,6 +305,9 @@ impl DigitReader {
                 read,
             });
         }
+        if let Some(digit) = digit_left_out {
+            return Err(ReadError::DigitLeftOut { digit, read });
+        }
         number.parse().ok_or(ReadError::NoNumber { read })
     }
 
@@ -295,10 +315,8 @@ impl DigitReader {
     /// [`Image::pixels`] holds it, is ink: each of its red, green, and blue
     /// within the tolerance of the text color.
     #[must_use]
-    pub fn is_ink(&self, [blue, green, red, _]: [u8; 4]) -> bool {
-        blue.abs_diff(self.ink.blue) <= self.tolerance
-            && green.abs_diff(self.ink.green) <= self.tolerance
-            && red.abs_diff(self.ink.red) <= self.tolerance
+    pub fn is_ink(&self, pixel: [u8; 4]) -> bool {
+        Rgb::of_pixel(pixel).near(self.ink, self.tolerance)
     }
 
     /// The shapes of the characters in `image`, left to right, as a read
@@ -311,19 +329,9 @@ impl DigitReader {
     /// [`ReadError::TooManyCharacters`] when it has more characters than a
     /// read takes.
     pub fn shapes(&self, image: &Image) -> Result<Shapes, ReadError> {
-        let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (line, count) = self
-            .segment(image, &mut spans)
-            .map_err(|failure| match failure {
-                Segmentation::NoInk => ReadError::NoInk,
-                Segmentation::TooMany => ReadError::TooManyCharacters,
-            })?;
+        let placed = self.placed(image)?;
         Ok(Shapes(
-            spans
-                .iter()
-                .take(count)
-                .map(|span| self.shape(image, line, *span))
-                .collect(),
+            placed.into_iter().map(|(shape, _columns)| shape).collect(),
         ))
     }
 
@@ -336,139 +344,21 @@ impl DigitReader {
     ///
     /// The errors of [`DigitReader::shapes`].
     pub fn placed(&self, image: &Image) -> Result<Vec<(Shape, Range<u32>)>, ReadError> {
+        let ink = self.ink(image);
         let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (line, count) = self
-            .segment(image, &mut spans)
-            .map_err(|failure| match failure {
-                Segmentation::NoInk => ReadError::NoInk,
-                Segmentation::TooMany => ReadError::TooManyCharacters,
-            })?;
+        let (line, count) = segment(&ink, &mut spans)?;
         Ok(spans
             .iter()
             .take(count)
-            .map(|span| (self.shape(image, line, *span), span.left..span.right))
+            .map(|span| (shape(&ink, &line, *span), span.left..span.right))
             .collect())
     }
 
-    fn is_ink_at(&self, image: &Image, x: u32, y: u32) -> bool {
-        let index = u64::from(y)
-            .saturating_mul(u64::from(image.size().width))
-            .saturating_add(u64::from(x));
-        usize::try_from(index)
-            .ok()
-            .and_then(|index| image.pixels().get(index))
-            .is_some_and(|&pixel| self.is_ink(pixel))
-    }
-
-    /// Counts the ink pixels in a rectangle, and all its pixels.
-    fn ink_in(&self, image: &Image, columns: Range<u32>, rows: Range<u32>) -> (u32, u32) {
-        let mut ink = 0_u32;
-        let mut area = 0_u32;
-        for y in rows {
-            for x in columns.clone() {
-                ink = ink.saturating_add(u32::from(self.is_ink_at(image, x, y)));
-                area = area.saturating_add(1);
-            }
-        }
-        (ink, area)
-    }
-
-    /// Finds the line and its characters, writing their spans into `spans`
-    /// and returning how many it wrote.
-    fn segment(
-        &self,
-        image: &Image,
-        spans: &mut [Span; MAX_CHARACTERS],
-    ) -> Result<(Line, usize), Segmentation> {
-        let line = self.line(image).ok_or(Segmentation::NoInk)?;
-
-        let mut count = 0_usize;
-        let mut start = None;
-        for x in 0..=image.size().width {
-            let inked = x < image.size().width
-                && (line.top..line.bottom).any(|y| self.is_ink_at(image, x, y));
-            match (start, inked) {
-                (None, true) => start = Some(x),
-                (Some(left), false) => {
-                    let slot = spans.get_mut(count).ok_or(Segmentation::TooMany)?;
-                    *slot = Span { left, right: x };
-                    count = count.saturating_add(1);
-                    start = None;
-                },
-                _ => {},
-            }
-        }
-        Ok((line, count))
-    }
-
-    /// The run of adjacent inked rows that holds the most ink, so a stray
-    /// pixel elsewhere in the region does not stretch the line.
-    fn line(&self, image: &Image) -> Option<Line> {
-        let rows = image
-            .rows()
-            .map(|row| row.iter().filter(|&&pixel| self.is_ink(pixel)).count());
-        let mut best: Option<(Line, usize)> = None;
-        let mut run: Option<(Line, usize)> = None;
-        // The trailing zero ends a run that reaches the bottom edge.
-        for (ink, y) in rows.chain([0]).zip(0_u32..) {
-            if ink > 0 {
-                let (line, total) = run.get_or_insert((Line { top: y, bottom: y }, 0));
-                line.bottom = y.saturating_add(1);
-                *total = total.saturating_add(ink);
-            } else if let Some(ended) = run.take()
-                && best.is_none_or(|(_, most)| ended.1 > most)
-            {
-                best = Some(ended);
-            }
-        }
-        best.map(|(line, _)| line)
-    }
-
-    /// Samples the character in `span` onto the grid, scaled by the line's
-    /// height.
-    fn shape(&self, image: &Image, line: Line, span: Span) -> Shape {
-        let height = line.bottom.saturating_sub(line.top);
-        // The start of grid cell `index`, in pixels from the cell grid's origin.
-        let edge = |index: u32| index.saturating_mul(height) / GRID_ROWS;
-        let mut shape = Shape::default();
-        for (row, cells) in (0..GRID_ROWS).zip(shape.iter_mut()) {
-            let y0 = line.top.saturating_add(edge(row));
-            let y1 = line
-                .top
-                .saturating_add(edge(row.saturating_add(1)))
-                .max(y0.saturating_add(1));
-            for column in 0..GRID_COLUMNS {
-                let x0 = span.left.saturating_add(edge(column));
-                if x0 >= span.right {
-                    break;
-                }
-                let x1 = span
-                    .left
-                    .saturating_add(edge(column.saturating_add(1)))
-                    .max(x0.saturating_add(1))
-                    .min(span.right);
-                let (ink, area) = self.ink_in(image, x0..x1, y0..y1);
-                if ink.saturating_mul(2) >= area {
-                    *cells |= 1 << column;
-                }
-            }
-        }
-        shape
-    }
-
-    /// The learned glyph closest to `shape`, the earliest learned of equals,
-    /// or `None` before the reader learned any.
-    fn closest(&self, shape: &Shape) -> Option<Closest> {
-        let around = grown(shape);
-        let score = self
-            .glyphs
-            .iter()
-            .map(|glyph| GlyphScore::of(shape, &around, glyph))
-            .min_by_key(|score| score.distance())?;
-        Some(Closest {
-            character: score.character,
-            matches: score.matches(),
-        })
+    /// Which pixels of `image` are ink. A read, a lesson, and
+    /// [`DigitReader::shapes`] each find them once and work from them.
+    #[must_use]
+    pub fn ink(&self, image: &Image) -> Ink {
+        Ink::new(image, |pixel| self.is_ink(pixel))
     }
 
     /// How each character in `image` scores against the learned glyphs:
@@ -500,6 +390,83 @@ impl DigitReader {
             .copied();
         CharacterScore { best, runner_up }
     }
+}
+
+/// Finds the line of `ink` and its characters, writing their spans into
+/// `spans` and returning how many it wrote.
+fn segment(
+    ink: &Ink,
+    spans: &mut [Span; MAX_CHARACTERS],
+) -> Result<(Range<u32>, usize), Segmentation> {
+    let Size { width, height } = ink.size();
+    let line = ink
+        .line(&(0..width), 0..height)
+        .ok_or(Segmentation::NoInk)?;
+
+    let mut count = 0_usize;
+    let mut start = None;
+    // The column past the last ends a character at the right edge.
+    for x in 0..=width {
+        let inked = line.clone().any(|y| ink.at(x, y));
+        match (start, inked) {
+            (None, true) => start = Some(x),
+            (Some(left), false) => {
+                let slot = spans.get_mut(count).ok_or(Segmentation::TooMany)?;
+                *slot = Span { left, right: x };
+                count = count.saturating_add(1);
+                start = None;
+            },
+            _ => {},
+        }
+    }
+    Ok((line, count))
+}
+
+/// Samples the character in `span` of `line` onto the grid, scaled by the
+/// line's height.
+fn shape(ink: &Ink, line: &Range<u32>, span: Span) -> Shape {
+    let height = line.end.saturating_sub(line.start);
+    // The start of grid cell `index`, in pixels from the cell grid's origin.
+    let edge = |index: u32| index.saturating_mul(height) / GRID_ROWS;
+    let mut shape = Shape::default();
+    for (row, cells) in (0..GRID_ROWS).zip(shape.iter_mut()) {
+        let y0 = line.start.saturating_add(edge(row));
+        let y1 = line
+            .start
+            .saturating_add(edge(row.saturating_add(1)))
+            .max(y0.saturating_add(1));
+        for column in 0..GRID_COLUMNS {
+            let x0 = span.left.saturating_add(edge(column));
+            if x0 >= span.right {
+                break;
+            }
+            let x1 = span
+                .left
+                .saturating_add(edge(column.saturating_add(1)))
+                .max(x0.saturating_add(1))
+                .min(span.right);
+            let inked: usize = (y0..y1).map(|y| ink.count(x0..x1, y)).sum();
+            let area = (y0..y1).len().saturating_mul((x0..x1).len());
+            if inked.saturating_mul(2) >= area {
+                *cells |= 1 << column;
+            }
+        }
+    }
+    shape
+}
+
+/// The glyph of `glyphs` closest to `shape`, the earliest learned of equals,
+/// or `None` when there are none.
+fn closest(glyphs: &[Glyph], shape: &Shape) -> Option<Closest> {
+    let around = grown(shape);
+    let score = glyphs
+        .iter()
+        .map(|glyph| GlyphScore::of(shape, &around, glyph))
+        .min_by_key(|score| score.distance())?;
+    Some(Closest {
+        character: score.character,
+        matches: score.matches(),
+    })
 }
 
 /// How one character in a region scores, from [`DigitReader::explain`].
@@ -585,6 +552,15 @@ enum Segmentation {
     TooMany,
 }
 
+impl From<Segmentation> for ReadError {
+    fn from(failure: Segmentation) -> Self {
+        match failure {
+            Segmentation::NoInk => Self::NoInk,
+            Segmentation::TooMany => Self::TooManyCharacters,
+        }
+    }
+}
+
 /// The characters of a number as a read finds them, held on the stack.
 #[derive(Debug, Default)]
 struct NumberText {
@@ -633,6 +609,17 @@ impl Point {
 }
 
 impl NumberText {
+    /// Takes `character` as text that is no part of a number, whatever it
+    /// is: a character the value leaves out. A letter still tells a `.`
+    /// after it that it is not the number's, as in `Lv.5`.
+    fn push_text(&mut self, character: char) {
+        self.push(if character.is_alphabetic() {
+            character
+        } else {
+            ' '
+        });
+    }
+
     fn push(&mut self, character: char) {
         if self.ended {
             return;
@@ -870,6 +857,13 @@ pub enum ReadError {
         /// Every character the read made out.
         read: ReadText,
     },
+    /// A digit matched a glyph of a character the value does not read.
+    DigitLeftOut {
+        /// The digit. It is the first such digit.
+        digit: char,
+        /// Every character the read made out.
+        read: ReadText,
+    },
     /// Every character matched a learned glyph, but they held no number.
     NoNumber {
         /// The characters.
@@ -889,6 +883,7 @@ impl ReadError {
             Self::UnknownCharacter { .. } => {
                 "a character has a shape the reference has not learned"
             },
+            Self::DigitLeftOut { .. } => "the value does not read a digit its reference knows",
             Self::NoNumber { .. } => "the characters hold no number",
         }
     }
@@ -915,6 +910,10 @@ impl fmt::Display for ReadError {
                     None => formatter.write_str("unlike any, since it has learned none"),
                 }
             },
+            Self::DigitLeftOut { digit, read } => write!(
+                formatter,
+                ": it read `{read}`, and its characters lack the `{digit}`"
+            ),
             Self::NoNumber { read } => write!(formatter, ": it read `{read}`"),
         }
     }
@@ -929,6 +928,14 @@ mod tests {
     use super::drawn::{Pen, Percent, draw as draw_text};
     use super::*;
     use crate::screen::Size;
+
+    /// Whether `reader` has learned a glyph for `character`.
+    fn knows(reader: &DigitReader, character: char) -> bool {
+        reader
+            .glyphs
+            .iter()
+            .any(|glyph| glyph.character == character)
+    }
 
     /// The characters of `text` as a read made them out.
     fn read_text(text: &str) -> ReadText {
@@ -1004,6 +1011,14 @@ mod tests {
                 },
                 "a character has a shape the reference has not learned",
                 ": it read `?`, and character 1 is unlike any, since it has learned none",
+            ),
+            (
+                ReadError::DigitLeftOut {
+                    digit: '7',
+                    read: read_text("17"),
+                },
+                "the value does not read a digit its reference knows",
+                ": it read `1 7`, and its characters lack the `7`",
             ),
             (
                 ReadError::NoNumber {
@@ -1210,8 +1225,8 @@ mod tests {
         ]);
         let mut reader = DigitReader::new(WHITE, 0);
         reader.learn(&digits, "1 2 3").unwrap();
-        assert!(reader.knows('2'));
-        assert!(!reader.knows('4'));
+        assert!(knows(&reader, '2'));
+        assert!(!knows(&reader, '4'));
         let swapped = draw(&[
             "###.#.###", //
             "..#.#...#",
@@ -1250,7 +1265,7 @@ mod tests {
                 new: '2'
             })
         );
-        assert!(!reader.knows('1'));
+        assert!(!knows(&reader, '1'));
         assert_eq!(reader.learn(&draw(&["..."]), "1"), Err(LearnError::NoInk));
         reader.learn(&draw(&["#"]), "1").unwrap();
         reader.learn(&draw(&["#"]), "1").unwrap();
@@ -1325,8 +1340,8 @@ mod tests {
             })
         );
         let digits = reader.clone().reading(Some("0123456789")).unwrap();
-        assert!(digits.knows('0'));
-        assert!(!digits.knows('O'));
+        assert!(knows(&digits, '0'));
+        assert!(!knows(&digits, 'O'));
         assert_eq!(digits.read(&letter, false), Ok(Number::new(0.0).unwrap()));
         // The glyphs kept stay in the order they were learned.
         assert_eq!(reader.clone().reading(Some("0 O")), Some(reader.clone()));
@@ -1561,9 +1576,7 @@ mod tests {
     fn a_shape_whose_edges_moved_a_cell_matches() {
         let reader = reader_of(&[('7', shape_of(&BLOCK))]);
         let matches = |rows: &[&str]| {
-            reader
-                .closest(&shape_of(rows))
-                .is_some_and(|closest| closest.matches)
+            closest(&reader.glyphs, &shape_of(rows)).is_some_and(|closest| closest.matches)
         };
         // A column wider, which no rule on differing cells alone lets
         // through next to a missing stroke of the same size.
@@ -1580,9 +1593,7 @@ mod tests {
         let with = |extra: &str| {
             let mut rows = BLOCK.to_vec();
             rows.extend(["........", extra]);
-            reader
-                .closest(&shape_of(&rows))
-                .is_some_and(|closest| closest.matches)
+            closest(&reader.glyphs, &shape_of(&rows)).is_some_and(|closest| closest.matches)
         };
         // Cells two rows below the block are beside none of its cells.
         // Two apart of 66 set match; three of 67 do not.
@@ -1594,9 +1605,7 @@ mod tests {
         let mut narrower = vec![".#######"; 8];
         narrower.extend(["........", "#.#....."]);
         assert!(
-            reader
-                .closest(&shape_of(&narrower))
-                .is_some_and(|closest| closest.matches)
+            closest(&reader.glyphs, &shape_of(&narrower)).is_some_and(|closest| closest.matches)
         );
         // Exactly 1 in 32: two apart of the 64 that a block of 62 and they
         // set.
@@ -1605,7 +1614,7 @@ mod tests {
         let exact = reader_of(&[('7', shape_of(&smaller))]);
         smaller.extend(["........", "#.#....."]);
         assert_eq!(
-            exact.closest(&shape_of(&smaller)),
+            closest(&exact.glyphs, &shape_of(&smaller)),
             Some(Closest {
                 character: '7',
                 matches: true
@@ -1616,7 +1625,7 @@ mod tests {
         rows.extend(["........", "#.#.#..."]);
         let larger = reader_of(&[('7', shape_of(&rows))]);
         assert_eq!(
-            larger.closest(&shape_of(&BLOCK)),
+            closest(&larger.glyphs, &shape_of(&BLOCK)),
             Some(Closest {
                 character: '7',
                 matches: false
@@ -1636,9 +1645,7 @@ mod tests {
         shifted.extend(["........", "#........"]);
         let reader = reader_of(&[('1', shape_of(&BLOCK)), ('2', shape_of(&shifted))]);
         assert_eq!(
-            reader
-                .closest(&shape_of(&far))
-                .map(|closest| closest.character),
+            closest(&reader.glyphs, &shape_of(&far)).map(|closest| closest.character),
             Some('2')
         );
         // With no cell apart, the glyph that differs least is closest,
@@ -1648,8 +1655,7 @@ mod tests {
             [('2', shape_of(&BLOCK)), ('1', shape_of(&wide))],
         ] {
             assert_eq!(
-                reader_of(&glyphs)
-                    .closest(&shape_of(&BLOCK))
+                closest(&reader_of(&glyphs).glyphs, &shape_of(&BLOCK))
                     .map(|closest| closest.character),
                 Some('2')
             );
@@ -1664,8 +1670,7 @@ mod tests {
             [('2', shape_of(&wide)), ('1', shape_of(&smaller))],
         ] {
             assert_eq!(
-                reader_of(&glyphs)
-                    .closest(&shape_of(&BLOCK))
+                closest(&reader_of(&glyphs).glyphs, &shape_of(&BLOCK))
                     .map(|closest| closest.character),
                 Some('2')
             );
@@ -1673,9 +1678,7 @@ mod tests {
         // Of two equally close, the one learned first.
         let twins = reader_of(&[('1', shape_of(&BLOCK)), ('2', shape_of(&BLOCK))]);
         assert_eq!(
-            twins
-                .closest(&shape_of(&wide))
-                .map(|closest| closest.character),
+            closest(&twins.glyphs, &shape_of(&wide)).map(|closest| closest.character),
             Some('1')
         );
     }
@@ -1698,7 +1701,7 @@ mod tests {
         assert_eq!(score.best, Some(best));
         assert!(!best.matches());
         assert_eq!(
-            reader.closest(&far),
+            closest(&reader.glyphs, &far),
             Some(Closest {
                 character: '7',
                 matches: false
@@ -1750,12 +1753,12 @@ mod tests {
     fn a_cell_is_set_when_at_least_half_its_pixels_are_ink() {
         let reader = DigitReader::new(WHITE, 0);
         // A line 32 pixels tall makes each grid cell 2 by 2 pixels.
-        let line = Line { top: 0, bottom: 32 };
+        let line = 0..32;
         let span = Span { left: 0, right: 2 };
         let first_cell = |top: [&'static str; 2]| {
             let mut rows = vec![".."; 32];
             rows[..2].copy_from_slice(&top);
-            reader.shape(&draw(&rows), line, span)[0] & 1
+            shape(&reader.ink(&draw(&rows)), &line, span)[0] & 1
         };
         assert_eq!(first_cell(["#.", "#."]), 1, "half the cell is ink");
         assert_eq!(first_cell(["#.", ".."]), 0, "a quarter of the cell is ink");
@@ -1889,6 +1892,81 @@ mod tests {
                 "{read:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_character_the_value_leaves_out_ends_the_number() {
+        let digits = taught(28, &LABELS).reading(Some("0123456789")).unwrap();
+        let read = |text, whole| digits.read(&drawn(text, 28, 3.3), whole);
+        assert_eq!(read("53%", false), Ok(Number::new(53.0).unwrap()));
+        assert_eq!(read("87.5%", true), Ok(Number::new(87.0).unwrap()));
+        // The point is not the value's, so it ends the number as the
+        // percent sign does.
+        assert_eq!(read("87.5%", false), Ok(Number::new(87.0).unwrap()));
+        assert_eq!(
+            read("%", false),
+            Err(ReadError::NoNumber {
+                read: read_text("%")
+            })
+        );
+    }
+
+    #[test]
+    fn a_character_the_value_leaves_out_is_text_before_the_number() {
+        // "L", a "." at the baseline, and "5".
+        let label = draw(&["#.....###", "#.....#..", "###.#.###"]);
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&label, "L.5").unwrap();
+        let five = Ok(Number::new(5.0).unwrap());
+        assert_eq!(reader.read(&label, false), five);
+        // The letter still says that the point is not the number's.
+        let point = reader.clone().reading(Some("5.")).unwrap();
+        assert_eq!(point.read(&label, false), five);
+        let digit = reader.clone().reading(Some("5")).unwrap();
+        assert_eq!(digit.read(&label, false), five);
+        // A point the value leaves out starts no number: ".5" reads as 5.
+        let pointed = draw(&["..###", "..#..", "#.###"]);
+        assert_eq!(reader.read(&pointed, false), Ok(Number::new(0.5).unwrap()));
+        assert_eq!(digit.read(&pointed, false), five);
+    }
+
+    #[test]
+    fn a_digit_the_value_leaves_out_fails_the_read() {
+        // "1", a "." at the baseline, and "5".
+        let label = draw(&["#...###", "#...#..", "#.#.###"]);
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&label, "1.5").unwrap();
+        let ones = reader.reading(Some("1.")).unwrap();
+        assert_eq!(
+            ones.read(&label, false),
+            Err(ReadError::DigitLeftOut {
+                digit: '5',
+                read: read_text("1.5"),
+            })
+        );
+        // A whole number ends at its point, and what follows is not read.
+        assert_eq!(ones.read(&label, true), Ok(Number::new(1.0).unwrap()));
+        // "5", a blank, "1": the digit before the number fails it too, and
+        // the first one left out is the one named.
+        let led = draw(&["###.#.###", "#...#.#..", "###.#.###"]);
+        assert_eq!(
+            ones.read(&led, false),
+            Err(ReadError::DigitLeftOut {
+                digit: '5',
+                read: read_text("515"),
+            })
+        );
+        // A shape no glyph matches comes first: the reference has to learn
+        // it before the value can leave it out.
+        let unknown = draw(&["###.#.#", "#...###", "###.#.#"]);
+        assert_eq!(
+            ones.read(&unknown, false),
+            Err(ReadError::UnknownCharacter {
+                position: 1,
+                closest: Some('1'),
+                read: read_text("5?"),
+            })
+        );
     }
 
     #[test]

@@ -136,11 +136,10 @@ mod tests {
 
     use appytappy_config::app_file::{PinDef, SizeChangesDef};
 
-    use super::super::Region;
     use super::super::check::{Check, ColorMatch};
     use super::super::saved::{SavedCheck, SavedValue};
+    use super::super::{Region, Rgb};
     use super::*;
-    use crate::system::Rgb;
 
     const WINDOW: Size = Size {
         width: 16,

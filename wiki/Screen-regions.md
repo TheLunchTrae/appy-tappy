@@ -4,14 +4,16 @@ A screen region source reads a signal from part of an application's window, such
 as a progress bar, a number counter, or whether an icon is showing. The setup
 app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
-`screen/image.rs` holds images and regions, `screen/layout.rs` where a
+`screen/image.rs` holds images, regions, sizes, and colors, with their
+conversions from and to the saved types, `screen/layout.rs` where a
 capture packs the regions it copies, `screen/placed.rs` values placed at
 one window size and what a frame means to their capture,
 `screen/capture.rs` the capture trait
 and where a window's content lies in its frame,
 `screen/check.rs` and `screen/digits.rs` the checks, `screen/detect.rs` the
-proposal of a bar's colors, `screen/mask.rs` and
-`screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
+proposal of a bar's colors, `screen/masked.rs` the comparison of a region
+with a saved picture, which a state check and a click's picture search
+share, `screen/mask.rs` a state picture's mask, `screen/saved.rs`
 the saved checks, `screen/scale.rs` and `screen/resample.rs` how a value
 reads at another window size, and `schedule.rs` the read schedule.
 Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
@@ -19,8 +21,9 @@ Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
 ## Checks
 
 Each check reads a cropped region and produces a signal value. All four are
-plain Rust over the region's pixels: they call no operating system API, give
-the same answer on every system, and allocate nothing per read.
+plain Rust over the region's pixels: they call no operating system API and
+give the same answer on every system. Only a number allocates as it reads: a
+byte for each pixel of its region, for which of them are ink.
 
 - **Number** reads digits, a decimal point, and a minus sign, with a reference
   of the application's: the characters' color and tolerance, and pictures
@@ -35,8 +38,9 @@ the same answer on every system, and allocate nothing per read.
   other character ends the number, so `12/50` reads as 12, and so does a `,`
   that is not followed by exactly three digits, so `12,5` reads as 12 rather
   than guessing that the `,` is a decimal point. A read finds the ink (pixels
-  near the text color), splits it into characters at blank columns, and
-  scales each one to a fixed grid by the height of the text line. The text
+  near the text color) once, as `digits::Ink`, splits it into characters at
+  blank columns, and scales each one to a fixed grid by the height of the
+  text line. The text
   line is the band of rows with the most ink, so a stray speck elsewhere in
   the region does not throw it off. Each character takes the closest learned
   shape, if the two are the same but for their edges, as
@@ -48,12 +52,18 @@ the same answer on every system, and allocate nothing per read.
   text's color; those need a different check. A character drawn as marks
   with blank columns between them, as some fonts draw `%`, is one character
   for each mark. A value may name the characters it reads, `characters` in
-  its check, and then reads with only its reference's glyphs for them, as if
-  the reference had learned nothing else: a shape takes the closest of those
-  glyphs, so a value of digits cannot read a `0` as the `O` its font also
-  has, and any other character counts as not learned. `DigitReader::reading`
-  drops the other glyphs once, when `saved::build` builds the check, so a
-  read matches against fewer glyphs and does nothing more. Characters the
+  its check, and then takes its number from its reference's glyphs for them
+  alone: a shape takes the closest of those glyphs first, so a value of
+  digits cannot read a `0` as the `O` its font also has. A shape that
+  matches none of them is matched against the reference's other glyphs, the
+  ones the value leaves out, and one that matches is text: it ends the
+  number or comes before it, as an unnamed character of a kind no number
+  holds would, so a value of digits reads `53%` as 53 and `87.5` as 87. A
+  letter left out still keeps a `.` after it out of the number, as in
+  `Lv.5`. A digit left out fails the read, since the number beside it would
+  read without it. `DigitReader::reading` sorts the glyphs once, when
+  `saved::build` builds the check, so a read matches a character the value
+  reads against those glyphs alone. Characters the
   reference has yet to learn are passed over, and a value whose reference
   knows none of its characters is not read (`SavedError::NoCharacters`).
 - **Bar fill** returns how full a bar is, from 0 to 100. The user clicks one
@@ -103,7 +113,7 @@ digits again from pictures that show it.
 
 ### Why a number is not read
 
-A read fails at one of four stages, `ReadError` in `screen/digits.rs`, and
+A read fails at one of five stages, `ReadError` in `screen/digits.rs`, and
 its message says which, in the same words in the setup app and in the
 runtime's log:
 
@@ -113,8 +123,10 @@ runtime's log:
   shows every character the read made out, with a `?` for each unlearned
   one, such as `8 7 ?`, and names the learned character the first of them is
   closest to. No number is made of the characters that did match.
-- **No number.** Every character matched, and they hold no digits, such as
-  `%` alone. The message shows them.
+- **A digit left out.** A digit matched a glyph the reference knows and the
+  value does not read. The message shows the characters and names the digit.
+- **No number.** Every character matched, and those the value reads hold no
+  digits, such as `%` alone. The message shows them.
 
 The runtime logs each stage a value fails at (`ReadError::stage`) once
 until the value reads again, so a counter that stays unreadable while it
@@ -285,7 +297,8 @@ drawn larger than the content, a reading area, covers every place it shows:
   left to right, so other ink of the text's color beside the number is read
   with it. A shape the reference has not learned fails the read when it
   comes before the number or right after its digits; once a learned
-  character such as `%` has ended the number, a shape after it is skipped.
+  character such as `%` has ended the number, whether the value reads it or
+  leaves it out, a shape after it is skipped.
   The line read is the run of inked rows that holds the most ink, so ink
   above or below the number, with a blank row between, is skipped unless it
   holds more.
@@ -306,7 +319,10 @@ with and without it (`saved::build`).
 
 ## Selection
 
-`screen::select` finds the thing to compare on a screenshot, without a model:
+The setup app's `selection/select.rs` finds the thing to compare on a
+screenshot, without a model. Only the setup app selects, so the code lives
+there and not in `appytappy-sources`; the runtime reads the mask the
+selection saved:
 
 - **Snap** takes a rough box drawn around the thing. The colors along the
   box's edge are the background, the first 256 different ones. Every pixel
@@ -319,7 +335,8 @@ with and without it (`saved::build`).
   then fills the holes: unselected pixels that cannot reach the edge of the
   box through other unselected pixels.
 
-Colors are alike when each channel is within the tolerance, as for the color
+Colors are alike when each channel is within the tolerance. `Rgb::near` is
+the one place that says so, for a selection, a number's ink, and the color
 check. Selections combine with union and difference, and `mask_in` gives the
 mask of any region, as after the user adjusts the box by hand.
 

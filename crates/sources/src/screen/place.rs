@@ -156,7 +156,7 @@ mod tests {
 
     use super::*;
     use crate::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Region};
-    use crate::system::{ProcessEntry, Rgb, WindowEntry, WindowPlace};
+    use crate::system::{ProcessEntry, WindowEntry, WindowPlace};
 
     /// The window rules of `Target.exe`, which take any of its windows.
     fn any_window() -> WindowDef {
@@ -278,10 +278,6 @@ mod tests {
         }
 
         fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
     }
@@ -482,9 +478,6 @@ mod tests {
                 Ok(None)
             }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
-                Err(io::Error::from(io::ErrorKind::Unsupported))
-            }
-            fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
                 Err(io::Error::from(io::ErrorKind::Unsupported))
             }
         }

@@ -11,7 +11,7 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::window_match::{WindowFacts, WindowMatch};
 
-use crate::screen::Size;
+use crate::screen::{Rgb, Size};
 
 /// A running process, as a system-wide snapshot reports it without opening
 /// the process.
@@ -69,15 +69,16 @@ pub struct Bounds {
     pub bottom: i32,
 }
 
-/// A pixel's color.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rgb {
-    /// Red.
-    pub red: u8,
-    /// Green.
-    pub green: u8,
-    /// Blue.
-    pub blue: u8,
+impl Bounds {
+    /// The width and height, or `None` when an edge lies before its
+    /// opposite one.
+    #[must_use]
+    pub fn size(self) -> Option<Size> {
+        (self.right >= self.left && self.bottom >= self.top).then(|| Size {
+            width: self.right.abs_diff(self.left),
+            height: self.bottom.abs_diff(self.top),
+        })
+    }
 }
 
 /// The operating system services that read processes, windows, and the
@@ -130,14 +131,19 @@ pub trait System {
     }
 
     /// The build of `process`'s executable, read from the file without
-    /// opening the process: see [`crate::build`].
+    /// opening the process: its file version, its size, and when it was
+    /// written.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error, such as for a process that
     /// exited or a file it cannot read.
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef>;
+}
 
+/// Reading the screen itself, which only the MCP server does. It is apart
+/// from [`System`] so that nothing else carries it.
+pub trait ScreenPixels {
     /// Reads one pixel of the screen.
     ///
     /// # Errors
@@ -178,7 +184,9 @@ impl System for Unsupported {
     fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
         unsupported()
     }
+}
 
+impl ScreenPixels for Unsupported {
     fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
         unsupported()
     }
@@ -519,6 +527,58 @@ mod tests {
     }
 
     #[test]
+    fn bounds_have_a_size_unless_an_edge_is_before_its_opposite() {
+        let bounds = Bounds {
+            left: -10,
+            top: 5,
+            right: 30,
+            bottom: 25,
+        };
+        assert_eq!(
+            bounds.size(),
+            Some(Size {
+                width: 40,
+                height: 20
+            })
+        );
+        let empty = Bounds {
+            right: -10,
+            bottom: 5,
+            ..bounds
+        };
+        assert_eq!(
+            empty.size(),
+            Some(Size {
+                width: 0,
+                height: 0
+            })
+        );
+        assert_eq!(
+            Bounds {
+                right: -11,
+                ..bounds
+            }
+            .size(),
+            None
+        );
+        assert_eq!(
+            Bounds {
+                bottom: 4,
+                ..bounds
+            }
+            .size(),
+            None
+        );
+        // Two edges may be farther apart than an `i32` holds.
+        let widest = Bounds {
+            left: i32::MIN,
+            right: i32::MAX,
+            ..bounds
+        };
+        assert_eq!(widest.size().map(|size| size.width), Some(u32::MAX));
+    }
+
+    #[test]
     fn a_frame_s_bounds_default_to_the_window_s() {
         struct OneWindow;
         impl System for OneWindow {
@@ -544,9 +604,6 @@ mod tests {
                 unsupported()
             }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
-                unsupported()
-            }
-            fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
                 unsupported()
             }
         }

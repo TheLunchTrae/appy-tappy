@@ -14,7 +14,8 @@ import {
 } from '../lib/bindings.ts';
 import { closeTrace, errorText, traceFiles, traceMetrics, traceRows } from '../lib/api.ts';
 import { durationText, elapsedText, sizeText } from '../lib/debug.ts';
-import { background, useNewest, useOnChange, useRepeat } from '../lib/repeat.ts';
+import { background, useOnChange, useRepeat } from '../lib/repeat.ts';
+import { useNewest } from '../lib/request.ts';
 import {
   CATEGORIES,
   RANGES,
@@ -328,7 +329,7 @@ function Progress({ progress }: { readonly progress: ReadProgress }) {
 export function TraceMetricsTab({ file, range }: { readonly file: string; readonly range: TraceRange }) {
   const [metrics, setMetrics] = useState<TraceMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const begin = useNewest();
+  const { begin } = useNewest();
   const read = useCallback(async (): Promise<void> => {
     const current = begin();
     try {
@@ -385,7 +386,7 @@ export function TraceRowsTab({ file, range }: { readonly file: string; readonly 
     () => ({ range, categories: [...categories], app, tookOverNs: tookOverNs(took), search }),
     [range, categories, app, took, search],
   );
-  const begin = useNewest();
+  const { begin } = useNewest();
   const read = useCallback(async (): Promise<void> => {
     const current = begin();
     try {
