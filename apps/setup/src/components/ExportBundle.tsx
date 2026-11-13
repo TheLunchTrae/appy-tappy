@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
 import type { TraceSummary } from '../lib/bindings.ts';
 import { debugBundle, errorText } from '../lib/api.ts';
-import { bundleName, pickZipFile, sizeText } from '../lib/debug.ts';
+import { Dialog } from './Dialog.tsx';
+import { bundleName, sizeText } from '../lib/debug.ts';
 import { background } from '../lib/repeat.ts';
+import { pickZipFile } from '../lib/zipFile.ts';
 
 interface Props {
   /** The newest trace file, which the bundle can hold, or null without one. */
@@ -16,21 +18,10 @@ interface Props {
  * can show, and that nothing is sent anywhere.
  */
 export function ExportBundle({ trace, onClose }: Props) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const [pictures, setPictures] = useState(false);
   const [withTrace, setWithTrace] = useState(trace !== null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const element = dialog.current;
-    // Focus goes back to whatever opened the dialog, such as its button, once it closes.
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    element?.showModal();
-    return () => {
-      element?.close();
-      opener?.focus();
-    };
-  }, []);
   const save = async (): Promise<void> => {
     setBusy(true);
     try {
@@ -47,28 +38,7 @@ export function ExportBundle({ trace, onClose }: Props) {
     }
   };
   return (
-    <dialog
-      ref={dialog}
-      className="card dialog"
-      aria-labelledby="bundle-title"
-      aria-describedby="bundle-what"
-      onCancel={(event) => {
-        // Escape closes the dialog unless the bundle is being made.
-        event.preventDefault();
-        if (!busy) {
-          onClose();
-        }
-      }}
-      onClose={() => {
-        // The window can close a dialog without asking, such as on a second Escape. While the bundle is being made
-        // it opens again, so the save's outcome still shows; otherwise the page follows.
-        if (busy) {
-          dialog.current?.showModal();
-        } else {
-          onClose();
-        }
-      }}
-    >
+    <Dialog titleId="bundle-title" describedBy="bundle-what" busy={busy} onClose={onClose}>
       <h2 id="bundle-title">Export debug bundle</h2>
       <p id="bundle-what">
         Saves one zip file with your settings, automations, applications and both logs, to share when something goes
@@ -132,6 +102,6 @@ export function ExportBundle({ trace, onClose }: Props) {
           {busy ? 'Saving…' : 'Save bundle'}
         </button>
       </div>
-    </dialog>
+    </Dialog>
   );
 }

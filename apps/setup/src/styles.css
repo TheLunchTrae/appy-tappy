@@ -3007,6 +3007,40 @@ tr.draft-row > td:not(.end):not(.row-actions) {
   color: var(--muted);
 }
 
+/* What a dialog says of a file, as names and what each is. */
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 5px 14px;
+  font-size: 12px;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  overflow-wrap: anywhere;
+}
+
+/* The one thing a dialog has the user settle, set apart from what it only shows. */
+.dialog .decide {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--base);
+}
+
+.dialog .decide .input {
+  background: var(--panel);
+}
+
+/* Where an application in the list came from, under its name. */
+.table .origin {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;

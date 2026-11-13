@@ -9,11 +9,14 @@
 //! argument and answer types, and the test the argument names. The doc
 //! comments are the page's; they become the page functions' docs.
 //!
-//! An argument or answer is its Rust type, except for four the page reads
-//! differently from their ts-rs type: `Pixels`, the raw bytes of a picture
-//! that the page decodes, `Bytes`, the raw bytes of a file, `U64AsNumber`, a `u64` the page takes as a number
-//! because it stays far below 2^53, and `OptionalU64AsNumber`, one that can
-//! be missing.
+//! An argument or answer is its Rust type, except for five the page reads
+//! or sends differently from their ts-rs type: `Pixels`, the raw bytes of a
+//! picture that the page decodes, `Bytes`, the raw bytes of a file,
+//! `U64AsNumber`, a `u64` the page takes as a number because it stays far
+//! below 2^53, `OptionalU64AsNumber`, one that can be missing, and
+//! `Upload<T>`, a command's only argument: a file the page sends as the
+//! request's raw body, with a `T` about it, as `commands/upload.rs` reads
+//! them. The page's function takes the two as `file` and `about`.
 
 /// Hands the table to `$then`, a macro that takes its entries.
 macro_rules! with_commands {
@@ -139,6 +142,15 @@ macro_rules! with_commands {
             /// The removal worked when this resolves; the answer is why an overlay window could not open or close, or
             /// null.
             commands::remove_app(application: String) -> Option<String>;
+            /// The saved application `application` as the bytes of a zip file to share: its file and the pictures it
+            /// names, without its overlay. Rejects when a picture is missing or a value cannot be read.
+            commands::export_app(application: String) -> Bytes;
+            /// What the shared file `file` holds, and a name for it that no saved application has. `about` is the
+            /// file's name. Nothing is saved. Rejects with why the file cannot be imported.
+            commands::read_shared_app(upload: Upload<String>) -> SharedView;
+            /// Saves the shared file `file` as a new application with the name and the anti-cheat class `about`
+            /// gives, whatever class the file holds; returns its ID. It never replaces an application.
+            commands::import_app(upload: Upload<ImportSpec>) -> String;
             commands::save_value(spec: SaveSpec) -> SavedValue;
             /// Reads the live frame with a saved value as `spec` edits it, as it would be read at the window's size
             /// now, and answers what saving the edit would do. Nothing is saved. Rejects with what to fix first.

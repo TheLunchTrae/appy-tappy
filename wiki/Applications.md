@@ -7,6 +7,8 @@ belongs to one, so add it here first, or while you
 The **Applications** page in AppyTappy Setup lists each saved application:
 how AppyTappy finds its window, its anti-cheat setting, its
 [overlay](#overlay), and how many of its windows are open now.
+You can also [export an application and import one](#share-an-application)
+that someone else set up.
 
 ## Add, change, or remove an application
 
@@ -25,6 +27,52 @@ how AppyTappy finds its window, its anti-cheat setting, its
 If AppyTappy can't read a saved application, such as one saved by an older
 version, its row says so and AppyTappy never finds its window. Remove it and
 add it again.
+
+## Share an application
+
+You can give someone an application you set up, with its values, so they
+don't have to draw them again.
+
+- **Export.** Select **Export** on the application's row, then **Save file**,
+  and pick where to save it. The file is one zip file with how AppyTappy
+  finds the application, its values and references, and the pictures they
+  use. It says which build of the application the values were
+  [checked against](Values.md#when-an-application-updates) and how they
+  were made. Your automations and
+  the application's overlay setting stay out of it, and nothing is sent
+  anywhere.
+
+  > [!NOTE]
+  > The pictures show parts of the application's window, and the file holds
+  > the window title AppyTappy looks for. Look at both before you share a
+  > file made on a window that shows something private.
+
+- **Import.** Select **Import** and pick a file that someone exported.
+  AppyTappy Setup shows what the file holds: how the window is found, the
+  values and references, the build the values were checked against, and how
+  they were made. Give the application a name, set its
+  [anti-cheat](#anti-cheat), and select **Import**.
+
+An import always adds an application. It never replaces one you have, even
+one for the same program. Nothing uses the imported values until you make an
+[automation](Automations.md) with them. The application's row says which file
+it was imported from.
+
+The file never sets the anti-cheat for you, because a file from someone else
+could say **None** for an application that has anti-cheat. The menu starts on
+what the file says, or on **Not set** when the file says **None**, and
+**None** applies only when you pick it yourself.
+
+The values were drawn on someone else's copy of the application. If you run
+another build, the **Values** page
+[says so](Values.md#when-an-application-updates), and you can check there
+that each value still reads right on your screen.
+
+AppyTappy imports a file only when it can read all of it: a file made by a
+newer AppyTappy, a file that lacks one of its pictures, or one with a value
+that can't be read is refused with the reason, and nothing is imported. A file
+can be up to 16 MB, and **Export** refuses an application whose pictures
+would make a larger one.
 
 ## How AppyTappy finds the window
 

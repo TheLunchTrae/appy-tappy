@@ -9,17 +9,16 @@
 //! applications' windows, a draft's whole screenshots among them, and the
 //! newest trace file.
 
-use std::fs::{self, File};
-use std::io::{self, Cursor, Write as _};
+use std::fs;
+use std::io;
 use std::path::Path;
 
 use appytappy_platform::LocalTime;
 use serde::Deserialize;
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, DateTime, ZipWriter};
 
 use crate::debug::trace_file;
 use crate::stores::Stores;
+use crate::zip_pack::{ZipPack, is_picture};
 
 /// What goes in the bundle beyond the files it always holds.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -73,15 +72,16 @@ impl BundleJob {
 ///
 /// Returns the error from reading a file that is there, or from packing.
 pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
-    let mut bundle = Bundle::new();
-    bundle.text(
+    let mut bundle = ZipPack::new();
+    bundle.add(
         "about.txt",
-        &format!(
+        format!(
             "AppyTappy Setup {}\nMade {}\n",
             env!("CARGO_PKG_VERSION"),
             LocalTime::now()
                 .map_or_else(|| "at an unknown time".to_owned(), |time| time.to_string())
-        ),
+        )
+        .as_bytes(),
     )?;
     let locations = &stores.locations;
     bundle.file_if_there("settings.json", &locations.settings())?;
@@ -124,13 +124,6 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
     bundle.finish()
 }
 
-/// Whether `name` names a picture, which the bundle holds only when asked.
-fn is_picture(name: &str) -> bool {
-    Path::new(name)
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
-}
-
 /// The folders in `parent`, or none when it is not there.
 fn folders(parent: &Path) -> io::Result<Vec<std::path::PathBuf>> {
     let entries = match fs::read_dir(parent) {
@@ -147,109 +140,6 @@ fn folders(parent: &Path) -> io::Result<Vec<std::path::PathBuf>> {
     }
     found.sort();
     Ok(found)
-}
-
-/// A zip file being packed in memory.
-struct Bundle {
-    zip: ZipWriter<Cursor<Vec<u8>>>,
-    /// When the entries were made, as zip records it.
-    made: DateTime,
-}
-
-impl Bundle {
-    fn new() -> Self {
-        let made = LocalTime::now()
-            .and_then(|time| {
-                let small = |part: u16| u8::try_from(part).ok();
-                DateTime::from_date_and_time(
-                    time.year,
-                    small(time.month)?,
-                    small(time.day)?,
-                    small(time.hour)?,
-                    small(time.minute)?,
-                    small(time.second)?,
-                )
-                .ok()
-            })
-            .unwrap_or_default();
-        Self {
-            zip: ZipWriter::new(Cursor::new(Vec::new())),
-            made,
-        }
-    }
-
-    /// Adds `bytes` as `name`.
-    fn add(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
-        self.start(name)?;
-        self.zip.write_all(bytes)
-    }
-
-    /// Starts the entry `name`. A picture is already compressed, so it is
-    /// stored as it is.
-    fn start(&mut self, name: &str) -> io::Result<()> {
-        let picture = Path::new(name)
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("png"));
-        let method = if picture {
-            CompressionMethod::Stored
-        } else {
-            CompressionMethod::Deflated
-        };
-        let options = SimpleFileOptions::default()
-            .compression_method(method)
-            .last_modified_time(self.made);
-        self.zip.start_file(name, options).map_err(io::Error::other)
-    }
-
-    fn text(&mut self, name: &str, text: &str) -> io::Result<()> {
-        self.add(name, text.as_bytes())
-    }
-
-    /// Adds the file at `path` as `name`, when there is one. It is copied
-    /// into the zip a piece at a time, so only its packed bytes are held.
-    fn file_if_there(&mut self, name: &str, path: &Path) -> io::Result<()> {
-        let mut file = match File::open(path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-        };
-        self.start(name)?;
-        io::copy(&mut file, &mut self.zip).map(drop)
-    }
-
-    /// Adds each file in `folder` whose name `wanted` takes, under `name`.
-    fn folder(
-        &mut self,
-        name: &str,
-        folder: &Path,
-        wanted: impl Fn(&str) -> bool,
-    ) -> io::Result<()> {
-        let entries = match fs::read_dir(folder) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-        };
-        let mut files = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            let file = entry.file_name().to_string_lossy().into_owned();
-            if entry.file_type()?.is_file() && wanted(&file) {
-                files.push((file, entry.path()));
-            }
-        }
-        files.sort();
-        for (file, path) in files {
-            self.file_if_there(&format!("{name}/{file}"), &path)?;
-        }
-        Ok(())
-    }
-
-    fn finish(self) -> io::Result<Vec<u8>> {
-        self.zip
-            .finish()
-            .map(Cursor::into_inner)
-            .map_err(io::Error::other)
-    }
 }
 
 #[cfg(test)]
@@ -274,7 +164,7 @@ mod tests {
         fs::write(&file, "x").expect("write");
         assert_eq!(folders(&missing).expect("missing is fine").len(), 0);
         assert!(folders(&file).is_err());
-        let mut bundle = Bundle::new();
+        let mut bundle = ZipPack::new();
         bundle
             .file_if_there("a", &missing)
             .expect("missing is fine");

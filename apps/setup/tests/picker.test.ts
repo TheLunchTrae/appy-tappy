@@ -40,6 +40,7 @@ function summary(id: string, name: string | null): AppSummary {
             window: exactWindow({ title: name, class: 'ExampleWindow', executable: `${id}.exe` }),
             sizeChanges: 'often',
             antiCheat: 'unknown',
+            origin: { kind: 'byHand' },
             values: [],
             references: [],
           },

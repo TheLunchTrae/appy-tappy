@@ -31,6 +31,7 @@ mod references;
 #[cfg(test)]
 mod retention;
 mod settings;
+mod sharing;
 #[cfg(test)]
 mod test_support;
 mod update;
@@ -67,6 +68,7 @@ pub(crate) use self::messages::{
     ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
     at_size,
 };
+pub(crate) use self::sharing::{ImportSpec, SharedView};
 use self::watch::Watched;
 
 /// The shortest time between two frames the preview takes: about 30 a

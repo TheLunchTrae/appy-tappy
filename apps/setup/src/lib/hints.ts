@@ -109,3 +109,15 @@ export const MARK_CHECKED_HINT =
 /** Saving an unfinished item as a draft. */
 export const DRAFT_HINT =
   "A draft keeps what you set up so you can finish it later. It never runs and isn't part of what AppyTappy reads until you finish and save it.";
+
+/** The build a shared file's values were checked against. */
+export const SHARED_CHECKED_HINT =
+  'The build of the application that whoever made this file checked its values against. An update can move or restyle what a value reads, so the Values page warns while you run another build.';
+
+/** How a shared file's definition was made. */
+export const ORIGIN_HINT =
+  'How whoever made this file got its values: drawn and labeled by hand, taught with a recording, or imported from a file of someone else.';
+
+/** Confirming the anti-cheat setting of an imported application. */
+export const IMPORT_ANTI_CHEAT_HINT =
+  'AppyTappy presses keys only into an application set to None, and anti-cheat can treat those keys as cheating. A file from someone else could say None for an application that has anti-cheat, so the file never sets this: you do. You can change it later on this page.';

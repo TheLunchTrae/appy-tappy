@@ -23,9 +23,11 @@ mod recording;
 mod screenshots;
 mod selection;
 mod settings;
+mod sharing;
 mod stores;
 mod updates;
 mod window_list;
+mod zip_pack;
 
 use std::env;
 use std::process::{self, ExitCode};

@@ -1221,6 +1221,43 @@ app's own end would. While the question to leave a flow has the nav's place,
 the notice is hidden and keeps its state. An event that does not fit the
 state, such as a late check during the download, changes nothing.
 
+### Application import
+
+**Import** on the Applications page (`apps/setup/src/lib/sharing.ts`, drawn by
+`apps/setup/src/components/ImportApp.tsx`) reads a
+[shared file](Setup-app.md#sharing) and saves it as a new application. Its
+dialog is modal, so the page under it waits. The owner thread keeps nothing
+between the read and the import: the dialog holds the file's bytes and sends
+them with both.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Closed
+    Closed --> Reading: the user picks a file
+    Closed --> Refused: the picked file is larger than an import reads
+    Reading --> Asking: the file was read, the dialog shows what it holds
+    Reading --> Refused: the file cannot be imported, the dialog shows why
+    Asking --> Asking: the name or the anti-cheat class changes
+    Asking --> Importing: Import
+    Importing --> Closed: the application is saved and listed
+    Importing --> Asking: the save fails, the dialog shows why
+    Asking --> Closed: Cancel or Escape
+    Refused --> Closed: Close or Escape
+```
+
+**Asking** starts on the name the read offers and on the file's anti-cheat
+class, or on not set when the file says none (`classToConfirm`). **Reading**
+and **Importing** are busy: Cancel, Escape, the name, and the class wait
+until the answer comes, so no answer can arrive for a dialog that was closed
+or changed. A failed read ends in **Refused**, which only closes, and picking
+the file again reads it again. A failed save, such as for a name that is
+taken, goes back to **Asking** with what the user entered and the reason, and
+**Import** tries again. An event that does not fit the state, such as a late
+read while the dialog asks, changes nothing.
+
+The export dialog (`ExportApp.tsx`) has no states beyond busy while the file
+is made and saved; a failure shows in it and **Save file** tries again.
+
 ### Capture slot
 
 The setup app's owner thread (`apps/setup/src-tauri/src/owner.rs`) has one
@@ -2370,7 +2407,7 @@ or the settings goes through `Owner::update_runtime`. After a save that works,
 they tell who reads what it changed, as its `Changed` kind says:
 
 - **The runtime and the overlays:** an application, its values, or the
-  references they read with.
+  references they read with, and an imported application.
 - **The runtime only:** the automations, the settings, an application's
   anti-cheat class, and the build its values were checked against.
 - **The overlays and their windows:** turning an overlay on or off and

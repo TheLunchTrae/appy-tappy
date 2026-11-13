@@ -28,6 +28,7 @@ import type {
   FixSpec,
   FoundClick,
   FoundView,
+  ImportSpec,
   Label,
   Live,
   LogName,
@@ -51,6 +52,7 @@ import type {
   SelectionView,
   SettingsFile,
   SettingsView,
+  SharedView,
   SizeDef,
   TraceFile,
   TraceMetrics,
@@ -65,6 +67,7 @@ import type {
   WindowScore,
 } from './bindings.ts';
 import { type Picture, decodePicture } from './pixels.ts';
+import { aboutHeader } from './upload.ts';
 
 /** The message of a failed command, which the Rust side writes for the user. */
 export function errorText(error: unknown): string {
@@ -361,6 +364,30 @@ export async function saveApp(existing: string | null, spec: AppSpec): Promise<s
  */
 export async function removeApp(application: string): Promise<string | null> {
   return invoke<string | null>('remove_app', { application });
+}
+
+/**
+ * The saved application `application` as the bytes of a zip file to share: its file and the pictures it
+ * names, without its overlay. Rejects when a picture is missing or a value cannot be read.
+ */
+export async function exportApp(application: string): Promise<Blob> {
+  return new Blob([await invoke<ArrayBuffer>('export_app', { application })]);
+}
+
+/**
+ * What the shared file `file` holds, and a name for it that no saved application has. `about` is the
+ * file's name. Nothing is saved. Rejects with why the file cannot be imported.
+ */
+export async function readSharedApp(file: Uint8Array, about: string): Promise<SharedView> {
+  return invoke<SharedView>('read_shared_app', file, { headers: { about: aboutHeader(about) } });
+}
+
+/**
+ * Saves the shared file `file` as a new application with the name and the anti-cheat class `about`
+ * gives, whatever class the file holds; returns its ID. It never replaces an application.
+ */
+export async function importApp(file: Uint8Array, about: ImportSpec): Promise<string> {
+  return invoke<string>('import_app', file, { headers: { about: aboutHeader(about) } });
 }
 
 export async function saveValue(spec: SaveSpec): Promise<SavedValue> {

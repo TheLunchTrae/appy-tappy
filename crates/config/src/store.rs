@@ -47,6 +47,12 @@ const LEFTOVER_AGE: Duration = Duration::from_mins(10);
 /// The longest application ID, in bytes.
 const MAX_ID_LEN: usize = 48;
 
+/// How many IDs [`AppStore::create`] tries when each one's folder turns out
+/// to be there already. One stray file or folder takes one try, so this
+/// leaves room for several and still ends when making a folder keeps
+/// failing.
+const NEW_FOLDER_TRIES: usize = 16;
+
 /// One application's folder, as [`AppStore::load`] found it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredApp {
@@ -162,6 +168,58 @@ impl AppStore {
         write_atomic(&folder.join(APP_FILE), file.to_json().as_bytes())?;
         remove_leftovers(&folder);
         Ok(())
+    }
+
+    /// Saves a new application as [`AppStore::save`] does, in a folder this
+    /// call makes, and answers its ID, which [`new_app_id`] makes from the
+    /// executable its window match names. It never writes into a folder
+    /// that is there, and it removes its folder again when the save fails,
+    /// so a failed save leaves no folder of pictures without a file.
+    ///
+    /// A name can be taken though no application the store lists has it:
+    /// by a file, or on Windows by a folder whose name differs only in
+    /// case. The user cannot see or settle that, so the next free ID is
+    /// tried, a few times.
+    ///
+    /// # Errors
+    ///
+    /// Returns what [`AppStore::save`] and [`AppStore::load`] do, and an
+    /// error when no folder can be made.
+    pub fn create(&self, file: &AppFile, pictures: &[(String, Vec<u8>)]) -> io::Result<String> {
+        fs::create_dir_all(&self.root)?;
+        let (id, folder) = self.new_folder(&file.window.executable)?;
+        if let Err(error) = self.save(&id, file, pictures) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the save's own error is the one to report; the folder is only cleanup"
+            )]
+            let _ = fs::remove_dir_all(&folder);
+            return Err(error);
+        }
+        Ok(id)
+    }
+
+    /// Makes the folder of a new application for `executable` and answers
+    /// its ID and path. An ID whose folder is there already gives way to
+    /// the next, [`NEW_FOLDER_TRIES`] times at most.
+    fn new_folder(&self, executable: &str) -> io::Result<(String, PathBuf)> {
+        let mut taken: Vec<String> = self.load()?.into_iter().map(|app| app.id).collect();
+        for _try in 0..NEW_FOLDER_TRIES {
+            let known: Vec<&str> = taken.iter().map(String::as_str).collect();
+            let id = new_app_id(executable, &known);
+            let folder = self.folder(&id);
+            match fs::create_dir(&folder) {
+                Ok(()) => return Ok((id, folder)),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => taken.push(id),
+                Err(error) => return Err(error),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "the {NEW_FOLDER_TRIES} names it tries for the folder of {executable} are taken"
+            ),
+        ))
     }
 
     /// Removes the application `id`'s folder with everything in it. An
@@ -595,8 +653,8 @@ mod tests {
 
     use super::*;
     use crate::app_file::{
-        AntiCheatDef, CheckDef, FORMAT, RegionDef, ScreenDef, SizeChangesDef, SizeDef, StateDef,
-        ValueDef, WindowDef,
+        AntiCheatDef, CheckDef, FORMAT, OriginDef, RegionDef, ScreenDef, SizeChangesDef, SizeDef,
+        StateDef, ValueDef, WindowDef,
     };
     use crate::window_match::WindowFacts;
 
@@ -624,6 +682,7 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             values: vec![ValueDef {
                 id: "icon_visible".to_owned(),
                 name: "Icon visible".to_owned(),
@@ -758,6 +817,89 @@ mod tests {
         assert!(bad_file.to_string().contains("no name"));
         assert!(!store.folder("app").join(APP_FILE).exists());
         fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_new_application_whose_save_fails_leaves_no_folder_and_replaces_none() {
+        let root = scratch("create");
+        let store = AppStore::new(root.clone());
+        let good = file("icon_visible.png");
+        let pictures = [
+            ("icon_visible.png".to_owned(), vec![1]),
+            ("../x.png".to_owned(), Vec::new()),
+        ];
+        // The first picture is written before the second is refused.
+        let failed = store.create(&good, &pictures).expect_err("refused");
+        assert!(failed.to_string().contains("not a valid picture name"));
+        assert_eq!(names_in(&root), [""; 0], "nothing of it stays");
+        assert_eq!(
+            store.create(&good, &pictures[..1]).expect("creates"),
+            "example"
+        );
+        let first = [APP_FILE, "icon_visible.png"];
+        assert_eq!(names_in(&store.folder("example")), first);
+        assert_eq!(store.create(&good, &[]).expect("creates"), "example-2");
+        assert_eq!(
+            names_in(&store.folder("example")),
+            first,
+            "the application that was there stays"
+        );
+        store.create(&good, &pictures).expect_err("refused again");
+        assert_eq!(names_in(&root), ["example", "example-2"]);
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_new_application_takes_the_next_id_when_something_unlisted_has_its_name() {
+        let root = scratch("create-clash");
+        let store = AppStore::new(root.clone());
+        let good = file("icon_visible.png");
+        // Neither is an application the store lists: a file, and a folder
+        // that holds a file where the next ID's folder would be.
+        fs::create_dir_all(&root).expect("creates the root");
+        fs::write(root.join("example"), "not a folder").expect("writes");
+        fs::write(root.join("example-2"), "nor this").expect("writes");
+        assert_eq!(store.load().expect("lists"), []);
+        assert_eq!(store.create(&good, &[]).expect("creates"), "example-3");
+        assert_eq!(
+            fs::read_to_string(root.join("example")).expect("still there"),
+            "not a folder"
+        );
+        // Past a few such names it gives up, and says what is in the way.
+        let more = store.folder("more");
+        fs::create_dir_all(&more).expect("creates the root");
+        let mut names = vec!["example".to_owned()];
+        names.extend((2..=NEW_FOLDER_TRIES).map(|number| format!("example-{number}")));
+        for name in &names {
+            fs::write(more.join(name), "not a folder").expect("writes");
+        }
+        let crowded = AppStore::new(more.clone());
+        let gave_up = crowded.create(&good, &[]).expect_err("every try is taken");
+        assert_eq!(
+            gave_up.to_string(),
+            "the 16 names it tries for the folder of Example.exe are taken"
+        );
+        fs::remove_file(more.join("example-2")).expect("frees one");
+        assert_eq!(crowded.create(&good, &[]).expect("creates"), "example-2");
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// A folder that lists and takes no new folder stands in for a disk that
+    /// refuses one for another reason than its name. Linux has such a
+    /// folder for each process; a test's own folder takes whatever the test
+    /// may make.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_new_application_whose_folder_cannot_be_made_says_why_and_tries_no_other_id() {
+        let store = AppStore::new(PathBuf::from("/proc/self/task"));
+        let refused = store
+            .create(&file("icon_visible.png"), &[])
+            .expect_err("no folder is made there");
+        assert_ne!(
+            refused.kind(),
+            io::ErrorKind::AlreadyExists,
+            "the folder's own error, not that every ID is taken"
+        );
     }
 
     /// The names of everything in `folder`, sorted.

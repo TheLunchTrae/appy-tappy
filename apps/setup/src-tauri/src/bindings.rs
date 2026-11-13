@@ -65,6 +65,7 @@ use crate::check_spec::characters::expected_characters;
 use crate::check_spec::{
     CharactersSpec, CheckSpec, ColorSpec, Label, MAX_EXPECTED_CHARACTERS, RegionSpec,
 };
+use crate::commands::Upload;
 use crate::debug::bundle::BundleSpec;
 use crate::debug::outline::CaptureOutline;
 use crate::debug::trace_file::TraceFile;
@@ -77,14 +78,15 @@ use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
-    FoundClick, FoundView, Live, Reading, RecordSpec, ReferenceSaveSpec, ReferenceTrial, SaveSpec,
-    SavedReferenceId, SavedValue, TrialSpec,
+    FoundClick, FoundView, ImportSpec, Live, Reading, RecordSpec, ReferenceSaveSpec,
+    ReferenceTrial, SaveSpec, SavedReferenceId, SavedValue, SharedView, TrialSpec,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;
 use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
+use crate::sharing::MAX_SHARED_BYTES;
 use crate::updates::UpdateOffer;
 use crate::window_list::{WindowFit, WindowList, WindowScore};
 use crate::{commands, updates};
@@ -143,6 +145,22 @@ impl Wire for Bytes {
     }
     fn visit(_found: &mut Declarations<'_>) {}
 }
+
+/// A file that the page sends as a command's raw body, with a `T` about it
+/// in a header, rather than as JSON.
+impl<T: TS + 'static> Wire for Upload<T> {
+    type Rust = Self;
+    fn ts(cfg: &Config) -> String {
+        format!("{UPLOAD}{}>", T::ts(cfg))
+    }
+    fn visit(found: &mut Declarations<'_>) {
+        found.visit::<T>();
+    }
+}
+
+/// How the TypeScript type of an [`Upload`] starts, before what is said
+/// about the file.
+const UPLOAD: &str = "Upload<";
 
 /// A `u64` that the page sends and reads as a number, such as a window's
 /// handle or a watch's number, which stay far below 2^53.
@@ -332,18 +350,34 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
                     .filter(|word| declared.contains(*word)),
             );
         }
-        let parameters = command
-            .args
-            .iter()
-            .map(|(name, ts)| format!("{}: {ts}", camel(name)))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let upload = match command.args.as_slice() {
+            [(_name, ts)] => ts
+                .strip_prefix(UPLOAD)
+                .and_then(|about| about.strip_suffix('>')),
+            _ => None,
+        };
+        let parameters = upload.map_or_else(
+            || {
+                command
+                    .args
+                    .iter()
+                    .map(|(name, ts)| format!("{}: {ts}", camel(name)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
+            |about| format!("file: Uint8Array, about: {about}"),
+        );
         let keys = command
             .args
             .iter()
             .map(|(name, _ts)| camel(name))
             .collect::<Vec<_>>();
-        let call = if keys.is_empty() {
+        let call = if upload.is_some() {
+            format!(
+                "'{}', file, {{ headers: {{ about: aboutHeader(about) }} }}",
+                command.name
+            )
+        } else if keys.is_empty() {
             format!("'{}'", command.name)
         } else {
             format!("'{}', {{ {} }}", command.name, keys.join(", "))
@@ -377,6 +411,7 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
          \n\
          import type {{\n{}\n}} from './bindings.ts';\n\
          import {{ type Picture, decodePicture }} from './pixels.ts';\n\
+         import {{ aboutHeader }} from './upload.ts';\n\
          \n\
          /** The message of a failed command, which the Rust side writes for the user. */\n\
          export function errorText(error: unknown): string {{\n  \
@@ -926,6 +961,7 @@ fn constants() -> String {
         "slowestReadMs": SLOWEST_READ_MS,
         "maxTolerance": max_tolerance(),
         "maxSearchPixels": MAX_SEARCH_PIXELS,
+        "maxSharedBytes": MAX_SHARED_BYTES,
     });
     let shortcut = json!({
         "modifiers": SHORTCUT_MODIFIERS,

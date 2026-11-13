@@ -23,8 +23,8 @@ appytappy-config.workspace = true
 # Tells the runtime to read the automations again after each save.
 appytappy-platform.workspace = true
 appytappy-sources.workspace = true
-# Picks the pure-Rust backend for zip's compression, so the debug bundle
-# builds the same on every system. Nothing calls it directly.
+# Picks the pure-Rust backend for zip's compression, so the zip files
+# build the same on every system. Nothing calls it directly.
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 # Provides `#[mutants::skip]` for functions no test can reach; it expands to
 # nothing.
@@ -61,8 +61,9 @@ tauri-plugin-single-instance = "2.5.5"
 # Each command awaits the owner thread's answer on a oneshot channel, so a
 # slow request never freezes the window; Tauri does not re-export it.
 tokio = { version = "1.54.1", features = ["sync"] }
-# Packs the debug bundle into one zip file, compressed with deflate, the
-# method every zip tool reads. Only writing, with no other method.
+# Packs the debug bundle and an exported application into one zip file each,
+# compressed with deflate, the method every zip tool reads, and reads an
+# imported application's file. No other method.
 zip = { version = "9.5.1", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]

@@ -175,7 +175,7 @@ impl Error for Problem {
 mod tests {
     use appytappy_config::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
-        RegionDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
+        OriginDef, RegionDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
         ActionDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, ComparisonDef, CornerDef,
@@ -203,6 +203,7 @@ mod tests {
             anti_cheat: AntiCheatDef::None,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             values: vec![ValueDef {
                 id: "progress".to_owned(),
                 name: "The progress".to_owned(),
