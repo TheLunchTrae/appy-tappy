@@ -164,8 +164,8 @@ pub struct ClickPicture {
     /// The window's height when the picture was taken.
     pub window_height: u32,
     /// The area of the window the picture is looked for in, in pixels from
-    /// its top-left corner. [`ClickPicture::new`] checked that it is not
-    /// empty and fits the window.
+    /// its top-left corner. [`ClickPicture::new`] refuses an area that is
+    /// empty or does not fit the window.
     pub search: RegionDef,
     /// Where on the picture to press, from its top-left corner.
     pub press: (u32, u32),

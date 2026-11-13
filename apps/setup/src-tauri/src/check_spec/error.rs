@@ -118,8 +118,8 @@ impl fmt::Display for SpecError {
                 formatter,
                 "A value can tell apart at most {MAX_STATES} states. Remove one."
             ),
-            Self::Check(CheckDefError::StateName(invalid)) => {
-                formatter.write_str(&sentence(&invalid.to_string()))
+            Self::Check(CheckDefError::StateName { position, error }) => {
+                formatter.write_str(&sentence(&format!("{error} (state {position})")))
             },
             Self::Check(CheckDefError::SameStateName(name)) => write!(
                 formatter,

@@ -46,7 +46,8 @@ pub enum NextFrame {
     After(Duration),
     /// No more frames, as a one-frame grab asks once it has its frame: the
     /// frame loop ends, the handler is handed nothing more, not even the
-    /// capture's end, and the capture waits to be closed.
+    /// capture's end, and the capture's thread ends, so closing the session
+    /// only waits for it.
     Never,
 }
 

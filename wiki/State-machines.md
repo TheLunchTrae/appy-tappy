@@ -563,6 +563,7 @@ stateDiagram-v2
     Empty --> [*]: Stop
     Holding --> [*]: Stop, the frame is given back
     Holding --> [*]: the frame is read, and the handler wants no more frames
+    Empty --> [*]: a frame arrives after the wait is read, and the handler wants no more frames
     Ended --> [*]
 ```
 
@@ -581,10 +582,12 @@ stateDiagram-v2
   describes. A handler that returns `NextFrame::Never`, as a one-frame grab's
   does once it has its frame, ends the loop, which gives back any frame it
   holds and returns. The handler hears nothing more, not even a panic in
-  the loop after it, and the capture waits for its owner to close it.
+  the loop after it. The capture's thread then ends; on Windows it stops the
+  system capture first, and closing the session waits for that thread.
 - **A frame that fails.** A region that lies outside the window's content, or
   a copy the system fails, reaches the handler as that frame's error, and the
-  loop goes on with the wait the handler returns. The
+  loop goes on with the wait the handler returns, or ends if the handler wants
+  no more frames, as the runtime's does after frames keep failing. The
   [frame handler](#frame-handler) counts such frames.
 - **Ended.** Every `HEALTH_CHECK`, 2 seconds, whatever arrives meanwhile, the
   loop asks whether the window is gone and whether the graphics device is
