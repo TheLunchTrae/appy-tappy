@@ -1,6 +1,6 @@
 //! The runtime's Windows host services: the window events that drive app
 //! detection, the tray icon and its menu, the single-instance guard, the
-//! reload requests the setup app sends, autostart at sign-in, the local
+//! requests the setup app sends, autostart at sign-in, the local
 //! clock, a background thread's priority, and showing the setup app's overlay windows without the focus.
 //!
 //! Each service turns Windows API calls into a typed value or an error and
@@ -27,7 +27,7 @@ mod autostart;
 mod clock;
 mod instance;
 mod log;
-mod reload;
+mod request;
 mod tray;
 mod window_watch;
 
@@ -35,7 +35,7 @@ pub use autostart::{AUTOSTART_VALUE, autostart_enabled, disable_autostart, enabl
 pub use clock::LocalTime;
 pub use instance::InstanceGuard;
 pub use log::{LOG_LIMIT, Log};
-pub use reload::{RELOAD, ReloadRequest, ReloadWatch, request_reload};
+pub use request::{REQUESTS, Request, RequestWatch, request};
 pub use tray::{MenuItem, Tray, TrayEvent, TrayMenu};
 pub use window_watch::{WindowEvent, WindowWatch};
 

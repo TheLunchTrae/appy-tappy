@@ -551,6 +551,15 @@ export async function deleteAutomation(id: string): Promise<void> {
   await invoke('delete_automation', { id });
 }
 
+/**
+ * Asks AppyTappy's background part to run the actions of the saved automation `id` once, as if its
+ * condition had just become true. Resolves once the background part heard the request, which says nothing
+ * of whether the actions ran: its log does. Rejects with why nothing was asked.
+ */
+export async function runAutomationOnce(id: string): Promise<void> {
+  await invoke('run_automation_once', { id });
+}
+
 /** Opens a window for each overlay that is on, and closes the rest. */
 export async function syncOverlays(): Promise<void> {
   await invoke('sync_overlays');

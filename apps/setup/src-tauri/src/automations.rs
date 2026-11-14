@@ -229,6 +229,31 @@ pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<()
     write(stores, &file)
 }
 
+/// Checks that the runtime runs the saved automation `id`, so its actions
+/// can run once on request: it is turned on and can run as saved.
+///
+/// # Errors
+///
+/// Returns why it does not, for the user.
+pub(crate) fn runs(stores: &Stores, id: &str) -> Result<(), String> {
+    let file = load(stores)?;
+    let automation = file
+        .automations
+        .iter()
+        .find(|automation| automation.id == id)
+        .ok_or_else(|| "That automation is no longer saved.".to_owned())?;
+    let name = &automation.name;
+    if !automation.enabled {
+        return Err(format!(
+            "{name} is turned off, so nothing ran. Turn it on in the list of automations first."
+        ));
+    }
+    match problem(automation, &apps(stores)?, stores, &mut AppReaders::new()) {
+        Some(problem) => Err(format!("{name} cannot run until it is fixed. {problem}")),
+        None => Ok(()),
+    }
+}
+
 /// Removes the automation `id`. One that is already gone is fine.
 pub(crate) fn delete(stores: &Stores, id: &str) -> Result<(), String> {
     let mut file = load(stores)?;

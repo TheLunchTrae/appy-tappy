@@ -1,5 +1,5 @@
-//! Reading and writing the authoring files, and the one file the runtime
-//! writes.
+//! Reading and writing the authoring files, the one file the runtime
+//! writes, and the request the setup app leaves the runtime.
 //!
 //! Each application has a folder under [`crate::paths::Locations::apps`]
 //! named by its ID, holding `app.json` and the pictures its values name.
@@ -7,7 +7,9 @@
 //! [`crate::paths::Locations::automations`], with the pictures their clicks
 //! look for in the [`CLICK_PICTURES`] folder beside it, and the settings in
 //! another file, at [`crate::paths::Locations::settings`]. The runtime keeps
-//! whether automations are enabled at [`crate::paths::Locations::enabled`].
+//! whether automations are enabled at [`crate::paths::Locations::enabled`],
+//! and the setup app leaves its request to run an automation once at
+//! [`crate::paths::Locations::run_once`].
 //! Every write goes to a temporary file first and then replaces the old file
 //! in one step, so a reader never sees half a file.
 
@@ -446,6 +448,94 @@ impl EnabledStore {
     pub fn save(&self, enabled: bool) -> io::Result<()> {
         let line = if enabled { "on\n" } else { "off\n" };
         replace_file(&self.path, line.as_bytes())
+    }
+}
+
+/// A request to run one saved automation's actions once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOnce {
+    /// The automation's ID.
+    pub automation: String,
+    /// When the setup app asked, in milliseconds since 1970, so a request
+    /// that waited too long is told apart and dropped.
+    pub asked_ms: u64,
+}
+
+impl RunOnce {
+    /// A request, made now, to run the automation with the ID `automation`.
+    #[must_use]
+    pub fn now(automation: String) -> Self {
+        let asked_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| {
+                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+            });
+        Self {
+            automation,
+            asked_ms,
+        }
+    }
+
+    /// The request that `text` holds: when it was asked on the first line
+    /// and the automation's ID on the second, and nothing else.
+    fn parse(text: &str) -> Option<Self> {
+        let mut lines = text.lines();
+        let asked_ms = lines.next()?.parse().ok()?;
+        let automation = lines.next().filter(|id| !id.is_empty())?.to_owned();
+        lines.next().is_none().then_some(Self {
+            automation,
+            asked_ms,
+        })
+    }
+}
+
+/// The file where the setup app leaves its request to run one automation's
+/// actions once.
+///
+/// The setup app saves it and then sends the runtime the request, and the
+/// runtime takes it, so each request is answered at most once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOnceStore {
+    path: PathBuf,
+}
+
+impl RunOnceStore {
+    /// The store at `path`, such as [`crate::paths::Locations::run_once`].
+    #[must_use]
+    pub const fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// Leaves `request` for the runtime, in place of one it has not taken,
+    /// creating the folder it lives in.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from a write.
+    pub fn save(&self, request: &RunOnce) -> io::Result<()> {
+        let text = format!("{}\n{}\n", request.asked_ms, request.automation);
+        replace_file(&self.path, text.as_bytes())
+    }
+
+    /// Takes the request away and returns it, or `None` when none waits.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from reading or removing the file, or an
+    /// invalid-data error for a file that holds no request. A request that
+    /// cannot be removed is not returned, so none is ever taken twice.
+    pub fn take(&self) -> io::Result<Option<RunOnce>> {
+        let text = match fs::read_to_string(&self.path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            text => text?,
+        };
+        fs::remove_file(&self.path)?;
+        RunOnce::parse(&text).map(Some).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "the request to run an automation once is not valid",
+            )
+        })
     }
 }
 
@@ -1044,6 +1134,46 @@ mod tests {
         fs::create_dir(&path).expect("a folder in its place");
         assert!(store.load(), "a file that cannot be read is enabled");
         assert!(store.save(false).is_err(), "a folder cannot be replaced");
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_request_to_run_once_is_taken_once_and_a_broken_one_is_refused() {
+        let root = scratch("run-once");
+        let path = root.join("local").join("run-once.txt");
+        let store = RunOnceStore::new(path.clone());
+        assert_eq!(store.take().expect("a missing file"), None);
+        let request = RunOnce {
+            automation: "pause_music".to_owned(),
+            asked_ms: 1_700_000_000_123,
+        };
+        store.save(&request).expect("saves, creating the folder");
+        assert_eq!(
+            fs::read_to_string(&path).expect("reads"),
+            "1700000000123\npause_music\n"
+        );
+        let newer = RunOnce {
+            automation: "ding".to_owned(),
+            ..request
+        };
+        store.save(&newer).expect("replaces");
+        assert_eq!(store.take().expect("reads"), Some(newer), "the newest");
+        assert_eq!(store.take().expect("gone"), None, "taken only once");
+        for broken in [
+            "",
+            "pause_music\n",
+            "soon\npause_music\n",
+            "1\n\n",
+            "1\npause_music\nding\n",
+        ] {
+            fs::write(&path, broken).expect("write");
+            let error = store.take().expect_err(broken);
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{broken:?}");
+            assert!(!path.exists(), "{broken:?} is gone all the same");
+        }
+        fs::create_dir(&path).expect("a folder in its place");
+        assert!(store.take().is_err(), "a folder cannot be read");
+        assert!(RunOnce::now("ding".to_owned()).asked_ms > request.asked_ms);
         fs::remove_dir_all(root).expect("clean up");
     }
 

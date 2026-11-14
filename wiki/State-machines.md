@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Fourteen guards drop such stale messages:
+it was about has gone. Fifteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -113,6 +113,12 @@ it was about has gone. Fourteen guards drop such stale messages:
   on leaves the next flow alone. The draft saves of leaving with
   **Save as draft** carry the flow they are for in the same way, and
   `keepStep` drops an answer for any other flow than the open one.
+- **Request times.** The setup app's request to run an automation's actions
+  once carries the time it was made. The runtime drops one that is more than
+  10 seconds from its clock (`RUN_ONCE_LIMIT` in `apps/runtime/src/owner.rs`),
+  such as one left while no runtime ran, and takes the request's file as it
+  answers, so a second signal for the same request finds nothing
+  ([Run once](#run-once)).
 - **List reads.** The setup app numbers each read of the saved applications,
   automations, and drafts, and of whether the runtime runs, as it starts. An
   answer older than the newest one taken is dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
@@ -143,7 +149,7 @@ stateDiagram-v2
     [*] --> Starting
     Starting --> Running: threads started, first plan carried out
     Starting --> [*]: the window events hook, detection, or the action thread cannot start
-    Running --> Running: Carry orders, Reload, Due, or a read of the saved files again
+    Running --> Running: Carry orders, Reload, RunOnce, Due, or a read of the saved files again
     Running --> Running: a send to the action thread fails, so it starts again
     Running --> Undoing: Quit, CloseRequested, DetectionEnded, or a send to detection fails
     Undoing --> Undoing: an undo cannot reach the action thread, so it starts again
@@ -152,19 +158,20 @@ stateDiagram-v2
 ```
 
 - **Starting.** The window events hook starts first, and the runtime exits if
-  it cannot. Then the tray and the reload watch start, and the saved files are
+  it cannot. Then the tray and the request watch start, and the saved files are
   read. The tray gets a fresh menu after that read, so its check mark shows
-  whether automations start enabled. The reload watch and the tray are
+  whether automations start enabled. The request watch and the tray are
   optional: the runtime logs why it cannot make one and runs without it. A
   pick from the tray during the first read waits for the owner and applies
   after it. Then the lifecycle and action threads start. If either cannot
   start, the runtime stops what it started and exits with the error. A first
   read that fails starts with an empty plan and reads again, as
-  [Reload watch](#reload-watch) describes.
+  [Reloads](#reloads) describes.
 - **Running.** Each event becomes a `Step`: `Carry` some orders, `Picked`
   when the user picked Enable or Disable from the tray, which carries its
-  orders too and sets `picked` (see [Reload watch](#reload-watch)), `Reload`
-  the saved files, `TraceFailed`, or `Stop`. The owner waits for its next
+  orders too and sets `picked` (see [Reloads](#reloads)), `Reload`
+  the saved files, `RunOnce`, which answers the setup app's request
+  ([Run once](#run-once)), `TraceFailed`, or `Stop`. The owner waits for its next
   event only until the first of two times (`wake`): when a rule that its
   cooldown held back is due, and when it reads the saved files again after a
   read failed. Either time sends it `Due`, whose step rechecks the held rules
@@ -193,7 +200,7 @@ stateDiagram-v2
   it ends.
 - **Stopping.** The tray stops only after the undo, because at the end of the
   session it holds Windows back until `Tray::stop` (see
-  [Tray thread](#tray-thread)). Then the reload watch and the window watch
+  [Tray thread](#tray-thread)). Then the request watch and the window watch
   stop, and dropping the inputs ends detection. Each reader is stopped, and
   every thread is joined.
 
@@ -741,7 +748,7 @@ one audio session's volume, the entries form a stack:
   release puts back the state from before the first change.
 - **Perform, not restoring.** Every entry for that target is removed, so no
   release undoes the permanent change. A pending restore of that target is
-  dropped too.
+  dropped too. A [run once](#run-once) is always such a change.
 - **Release.** The rule's entries are taken newest first. If a later entry on
   the same target exists, it inherits the older state. Otherwise the change is
   undone. A pending restore of the same target came from a newer rule, so the
@@ -793,11 +800,11 @@ while the menu is open, but it still calls the procedure, so neither is lost.
 - With no tray window, nothing hears the end of the session, and Windows ends
   the runtime without an undo.
 
-### Reload watch
+### Reloads
 
-The reload watch waits on the auto-reset named event `Local\AppyTappy.Reload`
+The request watch waits on the auto-reset named event `Local\AppyTappy.Reload`
 and sends `Reload` each time the setup app sets it. Several saves before the
-reload watch wakes become one reload. `read_saved` reads the settings first,
+request watch wakes become one reload. `read_saved` reads the settings first,
 gives the model their read interval, and starts, keeps, or stops the trace as
 [Runtime trace](#runtime-trace) describes, so the readers that `replan` starts
 read at the new interval. It then reads the saved applications and
@@ -838,6 +845,60 @@ most 5 tries (`RETRIES`) follow one failed read. A try runs when the owner
 wakes at its time, or with the first event after it. One automation that
 cannot run, such as one that breaks a rule after a hand edit, does not fail
 the read: it is logged and left out of the plan.
+
+### Run once
+
+The setup app's **Run actions now** leaves a request in `run-once.txt` and
+sets the auto-reset named event `Local\AppyTappy.RunOnce`
+([Running once](Architecture.md#running-once)). The request watch, the thread
+that waits on the reload event too, sends `RunOnce`, and when both events
+wait it sends `Reload` first. The request is a file that is there or not, and
+the owner's `RunOnce` step takes it: `answer_once` in
+`apps/runtime/src/owner.rs` decides, and `Model::run_once` is the pure part
+that reads the model and changes nothing in it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Waiting: the setup app writes the file and sets the event
+    Waiting --> Waiting: the setup app asks again, and the newer request replaces the file
+    Waiting --> None: RunOnce takes the file, and its actions run once
+    Waiting --> None: RunOnce takes the file and drops the request
+    Waiting --> None: no runtime heard the event, so the setup app takes the file away
+    None --> None: RunOnce finds no file
+```
+
+- **Runs.** The owner sends the action thread one `Run` job for the
+  automation, with the session's watched window, `Restore::Never` and no
+  cause. The rule's state, its cooldown and the session do not change, so the
+  rule still fires when its condition becomes true. Nothing releases the run,
+  and the journal handles it as a change that is not restored
+  ([Action thread and restore journal](#action-thread-and-restore-journal)).
+- **Dropped.** Each drop logs its reason and runs nothing:
+  - The file cannot be read, or holds no time and ID. It is removed before it
+    is read, so a broken request never stays.
+  - Its time and the clock are more than 10 seconds apart (`RUN_ONCE_LIMIT`),
+    either way: a request left while no runtime ran, or one written under
+    another clock.
+  - The last read of the saved applications and automations failed
+    (`Reloads::failing`), so the plan may be older than what the setup app
+    checked. The [reload](#reloads) tries go on; the user asks again.
+  - The model refuses (`Refused`): no plan holds the automation, because it
+    was deleted, is turned off or cannot run as saved; automations are
+    disabled from the tray; or the application is not running.
+- **No file.** Two asks before the owner wakes set the event once or twice
+  over one file. The first `RunOnce` takes it, and a second finds none and
+  logs that.
+- **A runtime that is not there.** With no request watch, such as before the
+  runtime starts or when the watch could not start, the event does not
+  exist. The setup app's signal says so, and it takes its file away. If that
+  fails, the time guard drops the request when a runtime starts later.
+- **The owner is stopping.** A `RunOnce` that arrives after the owner left
+  its loop is never read. The file stays and its time guard drops it in the
+  next run, or the next ask replaces it.
+
+The outcome goes to the log only. The request's path brings nothing back to
+the setup app.
 
 ### Runtime trace
 
@@ -1307,6 +1368,47 @@ stateDiagram-v2
   which clicks nothing. An answer whose attempt number is not that of the
   try under way is dropped, so where an earlier target would land never
   shows for the target as it is set up now.
+
+### Run actions now
+
+The automation editor's **Run actions now** asks the runtime to run the saved
+automation's actions once (`apps/setup/src/pages/AutomationEditor.tsx`).
+`RunAsk` in `apps/setup/src/lib/runNow.ts` names the states of an ask,
+`runStep` there is the transition, and `runNowView` decides whether the button
+can be pressed and what the note under it says.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Asking: Run actions now
+    Asked --> Asking: Run actions now
+    Failed --> Asking: Run actions now
+    Asking --> Asked: the runtime heard the request
+    Asking --> Failed: why nothing was asked
+```
+
+- **When the button can be pressed.** Only while the editor shows the
+  automation as it is saved, the automation is turned on, the
+  [runtime warning](#runtime-warning) is not **Stopped**, and no ask or save
+  is under way. Otherwise the button is disabled and the note says which of
+  these holds, in that order. A change in the editor is not saved first,
+  because **Save automation** closes the editor, and a save and a run
+  together would depend on the order the runtime reads them in.
+- **Asking.** The button waits. The command ends by itself: the owner thread
+  checks the saved automation, writes the request and sets the event, and
+  waits for nothing from the runtime. One ask is under way at a time, so no
+  number tells asks apart, and `runStep` ends only an ask that is under way.
+- **Asked.** The runtime heard the request. Whether the actions ran is in its
+  log, which the note names: [Run once](#run-once) lists why the runtime
+  drops a request.
+- **Failed.** The note warns why nothing was asked: the automation is no
+  longer saved, is turned off or cannot run as saved, such as under the
+  application's anti-cheat setting; the request cannot be written; or no
+  runtime heard it, which the setup app learns here even while the
+  [runtime warning](#runtime-warning) is **Unknown** or still says **Runs**.
+  The next press leaves the state.
+- **Leaving the editor.** The state lives in the editor, so closing it
+  forgets the ask. The request goes on to the runtime all the same.
 
 ### Update notice
 

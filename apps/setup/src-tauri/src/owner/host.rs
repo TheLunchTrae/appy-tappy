@@ -11,6 +11,7 @@ use appytappy_config::app_file::BuildDef;
 use appytappy_config::click::{ClickButton, ClickDelivery};
 use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
+use appytappy_platform::{REQUESTS, Request};
 use appytappy_sources::HostSystem;
 use appytappy_sources::screen::place::{Target, place};
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler};
@@ -52,8 +53,8 @@ pub(crate) struct ClickedWindow {
 
 /// What the setup app needs from the operating system: its windows and
 /// processes, a capture of one window, a click sent on request, a way to
-/// tell the runtime that a save changed what it reads, and the overlays'
-/// windows. It lives as long as the owner, which sends itself work that
+/// tell the runtime that a save changed what it reads or that a request to
+/// run an automation once waits, and the overlays' windows. It lives as long as the owner, which sends itself work that
 /// names it.
 pub(crate) trait Host: 'static {
     /// A running capture.
@@ -134,6 +135,15 @@ pub(crate) trait Host: 'static {
     /// running reads them when it starts, and one that cannot be reached
     /// keeps what it read, so the save stands either way.
     fn reload_runtime(&self);
+
+    /// Tells the runtime that a request to run an automation once waits in
+    /// its file, and answers whether a runtime heard it: one that is not
+    /// running hears nothing, so the request has to be taken away again.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn run_once(&self) -> io::Result<bool>;
 
     /// Whether the runtime is running, as the list of running processes
     /// tells by its program's name. The check opens neither the runtime nor
@@ -225,7 +235,12 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
             clippy::let_underscore_must_use,
             reason = "the save already happened, and a runtime that missed the signal reads it when it starts; the main pages ask whether it runs"
         )]
-        let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
+        let _ = appytappy_platform::request(REQUESTS, Request::Reload);
+    }
+
+    #[mutants::skip] // Sets a named Windows event, which no test can observe.
+    fn run_once(&self) -> io::Result<bool> {
+        appytappy_platform::request(REQUESTS, Request::RunOnce)
     }
 
     fn runtime_runs(&self) -> io::Result<bool> {
@@ -268,6 +283,7 @@ mod tests {
         assert!(desktop.window_place(7).is_err());
         assert!(desktop.executable_build(ProcessId::new(7)).is_err());
         assert!(desktop.runtime_runs().is_err());
+        assert!(desktop.run_once().is_err());
         let handler: FrameHandler = Box::new(|_frame| NextFrame::After(Duration::ZERO));
         assert!(
             desktop

@@ -15,15 +15,17 @@ use appytappy_actions::Watched;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::paths::Locations;
 use appytappy_config::settings_file::{ReadInterval, SettingsFile, TraceCategory};
-use appytappy_config::store::{AppStore, AutomationStore, EnabledStore, SettingsStore};
+use appytappy_config::store::{
+    AppStore, AutomationStore, EnabledStore, RunOnce, RunOnceStore, SettingsStore,
+};
 use appytappy_platform::{
-    Log, RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, TrayMenu, WindowWatch,
+    Log, REQUESTS, Request, RequestWatch, Tray, TrayEvent, TrayMenu, WindowWatch,
 };
 use appytappy_sources::HostSystem;
 use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
-use crate::model::{Model, Order, Owner, ReaderNumber, SessionId};
+use crate::model::{Model, Order, Owner, ReaderNumber, Refused, SessionId};
 use crate::trace::switch::Switch;
 use crate::trace::writer::TraceReport;
 use crate::trace::{Detail, Record, Trace, What};
@@ -43,6 +45,8 @@ enum Event {
     DetectionEnded,
     /// The setup app saved, so the settings and automations are read again.
     Reload,
+    /// The setup app asked to run one automation's actions once.
+    RunOnce,
     /// A reader read a value, met a problem, or ended.
     Reading(Reading),
     /// The action thread noted something for the log, or said whether
@@ -64,6 +68,7 @@ impl Event {
             Self::Tray(_) => "tray",
             Self::DetectionEnded => "detection ended",
             Self::Reload => "reload",
+            Self::RunOnce => "run once",
             Self::Reading(Reading::Sample { .. }) => "sample",
             Self::Reading(_) => "reader",
             Self::Actions(_) => "actions",
@@ -93,9 +98,12 @@ impl From<TrayEvent> for Event {
     }
 }
 
-impl From<ReloadRequest> for Event {
-    fn from(_request: ReloadRequest) -> Self {
-        Self::Reload
+impl From<Request> for Event {
+    fn from(request: Request) -> Self {
+        match request {
+            Request::Reload => Self::Reload,
+            Request::RunOnce => Self::RunOnce,
+        }
     }
 }
 
@@ -128,19 +136,24 @@ enum Step {
     Picked(Vec<Order>),
     /// Read the saved automations again.
     Reload,
+    /// Take the setup app's request to run one automation once, and answer
+    /// it.
+    RunOnce,
     /// Trace `0` stopped, as its writer reported.
     TraceFailed(u64),
     /// Stop the runtime.
     Stop,
 }
 
-/// Where the saved applications, automations, and settings are, and where
-/// the runtime keeps whether automations are enabled.
+/// Where the saved applications, automations, and settings are, where the
+/// runtime keeps whether automations are enabled, and where the setup app
+/// leaves its request to run an automation once.
 struct Stores {
     apps: AppStore,
     automations: AutomationStore,
     settings: SettingsStore,
     enabled: EnabledStore,
+    run_once: RunOnceStore,
 }
 
 /// The action thread and the channel that brings it jobs.
@@ -325,7 +338,7 @@ impl Crew {
     }
 }
 
-/// The owner loop: detection, the tray, the reload watch, each reader, and
+/// The owner loop: detection, the tray, the request watch, each reader, and
 /// the actions run on their own threads and send events here, where the
 /// root model applies them. It ends on Quit from the tray, when Windows asks
 /// it to close, or when detection ends.
@@ -336,6 +349,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         automations: AutomationStore::new(locations.automations()),
         settings: SettingsStore::new(locations.settings()),
         enabled: EnabledStore::new(locations.enabled()),
+        run_once: RunOnceStore::new(locations.run_once()),
     };
     // The host system sets the process's DPI awareness, which Windows
     // requires before any window exists, so it comes before the tray window.
@@ -349,12 +363,16 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let tray = Tray::start(sender.clone(), shown.clone())
         .inspect_err(|error| note(log, &format!("no tray icon: {error}")))
         .ok();
-    // Without the reload event the runtime still runs what it read at start.
-    let reload = ReloadWatch::start(RELOAD, sender.clone())
+    // Without the request events the runtime still runs what it read at
+    // start.
+    let requests = RequestWatch::start(REQUESTS, sender.clone())
         .inspect_err(|error| {
             note(
                 log,
-                &format!("saving in the setup app cannot reach the runtime: {error}"),
+                &format!(
+                    "saving in the setup app, and its request to run an automation once, \
+                     cannot reach the runtime: {error}"
+                ),
             );
         })
         .ok();
@@ -398,7 +416,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             )]
             let _ = (
                 tray.map(Tray::stop),
-                reload.map(ReloadWatch::stop),
+                requests.map(RequestWatch::stop),
                 windows.stop(),
             );
             return Err(detector
@@ -439,6 +457,12 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
                 reloads.due(Instant::now())
             },
             Step::Reload => Some(Stale::BOTH),
+            Step::RunOnce => {
+                let asked = stores.run_once.take();
+                let orders = run_once(&model, &reloads, asked, unix_ms(), log);
+                carry(orders, &mut crew, log);
+                reloads.due(Instant::now())
+            },
             Step::TraceFailed(id) => {
                 if let Some(trace) = crew.tracing.failed(id, log) {
                     crew.set_trace(trace, log);
@@ -501,7 +525,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let acted = actor.stop();
     let tray_stopped = tray.map_or(Ok(()), Tray::stop);
     // Dropping the inputs ends detection, so its join below returns.
-    let reload_stopped = reload.map_or(Ok(()), ReloadWatch::stop);
+    let requests_stopped = requests.map_or(Ok(()), RequestWatch::stop);
     let windows_stopped = windows.stop();
     drop(inputs);
     // Every reader is stopped, and the first that stopped badly says how.
@@ -516,7 +540,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         .and(acted)
         .and(read)
         .and(tray_stopped)
-        .and(reload_stopped)
+        .and(requests_stopped)
         .and(windows_stopped)
         .and(traced)
 }
@@ -638,7 +662,7 @@ impl Reloads {
         match step {
             Step::Picked(_) => self.picked = true,
             Step::Reload => self.retry = None,
-            Step::Carry(_) | Step::TraceFailed(_) | Step::Stop => {},
+            Step::Carry(_) | Step::RunOnce | Step::TraceFailed(_) | Step::Stop => {},
         }
     }
 
@@ -918,6 +942,118 @@ fn loaded_line(plan: &plan::Plan) -> String {
     }
 }
 
+/// How far apart the clock and the time of a request to run an automation
+/// once may be. A request that is older waited too long to still be what
+/// the user expects, such as one the setup app left before the runtime
+/// started.
+const RUN_ONCE_LIMIT: Duration = Duration::from_secs(10);
+
+/// Why the runtime drops the setup app's request to run an automation once,
+/// before the model is asked.
+#[derive(Debug, PartialEq, Eq)]
+enum Dropped {
+    /// No request waits: requests that waited together are one, and the
+    /// answer to the first took it.
+    Gone,
+    /// The request cannot be read or removed, for the reason it holds.
+    Unreadable(String),
+    /// The request was made this many milliseconds from now, more than
+    /// [`RUN_ONCE_LIMIT`].
+    Stale(u64),
+    /// The saved applications and automations did not read, so the plan
+    /// the runtime keeps may not be what the setup app saved.
+    Unread,
+    /// The model refuses the automation named here by its ID.
+    Refused(String, Refused),
+}
+
+impl fmt::Display for Dropped {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let asked = "the setup app asked to run an automation once, but nothing runs";
+        match self {
+            Self::Gone => write!(
+                formatter,
+                "{asked}: no request waits, as after two requests that one run answered"
+            ),
+            Self::Unreadable(error) => {
+                write!(formatter, "{asked}: its request cannot be read: {error}")
+            },
+            Self::Stale(apart) => write!(
+                formatter,
+                "{asked}: its request and the clock are {} seconds apart, and it waits {} at most",
+                apart / 1000,
+                RUN_ONCE_LIMIT.as_secs()
+            ),
+            Self::Unread => write!(
+                formatter,
+                "{asked}: the saved files cannot be read, so what was saved cannot be told from \
+                 what the runtime keeps running"
+            ),
+            Self::Refused(id, refused) => write!(
+                formatter,
+                "the setup app asked to run the automation {id} once, but nothing runs: {refused}"
+            ),
+        }
+    }
+}
+
+/// The order that answers the setup app's request to run one automation's
+/// actions once. `asked` is the request as taken from its file, and
+/// `now_ms` the time in milliseconds since 1970.
+///
+/// # Errors
+///
+/// Returns why nothing runs: no request waits or it cannot be read, it is
+/// more than [`RUN_ONCE_LIMIT`] from `now_ms`, the saved applications and
+/// automations did not read at the last try, or the model refuses.
+fn answer_once(
+    model: &Model,
+    reloads: &Reloads,
+    asked: io::Result<Option<RunOnce>>,
+    now_ms: u64,
+) -> Result<Order, Dropped> {
+    let request = asked
+        .map_err(|error| Dropped::Unreadable(error.to_string()))?
+        .ok_or(Dropped::Gone)?;
+    let apart = now_ms.abs_diff(request.asked_ms);
+    if u128::from(apart) > RUN_ONCE_LIMIT.as_millis() {
+        return Err(Dropped::Stale(apart));
+    }
+    if reloads.failing.files {
+        return Err(Dropped::Unread);
+    }
+    model
+        .run_once(&request.automation)
+        .map_err(|refused| Dropped::Refused(request.automation, refused))
+}
+
+/// Answers the setup app's request to run one automation's actions once,
+/// as [`answer_once`] decides: the order that runs them, or none. The log
+/// says that it was asked, before the order's own line names the
+/// automation, or why nothing runs.
+fn run_once(
+    model: &Model,
+    reloads: &Reloads,
+    asked: io::Result<Option<RunOnce>>,
+    now_ms: u64,
+    log: &mut Log,
+) -> Vec<Order> {
+    match answer_once(model, reloads, asked, now_ms) {
+        Ok(order) => {
+            note(
+                log,
+                "the setup app asked to run an automation once, as if its condition had just \
+                 become true",
+            );
+            vec![order]
+        },
+        Err(dropped) => {
+            note(log, &dropped.to_string());
+            Vec::new()
+        },
+    }
+}
+
 /// Carries out `orders`: starts and stops readers and hands actions to the
 /// action thread.
 #[mutants::skip]
@@ -1076,6 +1212,7 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
             );
             Step::Reload
         },
+        Event::RunOnce => Step::RunOnce,
         Event::Reading(Reading::Sample {
             session,
             reader,
@@ -1247,7 +1384,8 @@ mod tests {
         let could_run = model.actions_can_run();
         let ends = [
             Event::from(TrayEvent::Picked(tray::ENABLE)),
-            Event::from(ReloadRequest),
+            Event::from(Request::Reload),
+            Event::from(Request::RunOnce),
             Event::from(TrayEvent::Picked(tray::QUIT)),
             Event::from(TrayEvent::CloseRequested),
             Event::DetectionEnded,
@@ -1272,6 +1410,7 @@ mod tests {
                 carry(),
                 picked(),
                 Step::Reload,
+                Step::RunOnce,
                 Step::Stop,
                 Step::Stop,
                 Step::Stop,
@@ -1625,6 +1764,7 @@ mod tests {
                 automations: AutomationStore::new(folder.join("automations.json")),
                 settings: SettingsStore::new(folder.join("settings.json")),
                 enabled: EnabledStore::new(folder.join("enabled.txt")),
+                run_once: RunOnceStore::new(folder.join("run-once.txt")),
             };
             let log = Log::open(&folder.join("logs"), "runtime", LOG_LIMIT).expect("open");
             let tracing = Switch::new(folder.join("traces"));
@@ -2480,6 +2620,159 @@ mod tests {
         assert!(!retry(soon).due(now), "not yet");
         assert!(retry(soon).due(soon), "right on time");
         assert!(retry(now).due(soon), "late");
+    }
+
+    /// A model that runs the automation Mute, with the ID `mute`, of an
+    /// attached application.
+    fn muting() -> Model {
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "a".to_owned(),
+            app_plan("Example App", &["Mute"]),
+        )]));
+        model.apply(Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
+        model
+    }
+
+    /// A request to run the automation `automation`, asked at `asked_ms`.
+    fn asked(automation: &str, asked_ms: u64) -> RunOnce {
+        RunOnce {
+            automation: automation.to_owned(),
+            asked_ms,
+        }
+    }
+
+    #[test]
+    fn a_request_to_run_once_that_waited_too_long_is_dropped() {
+        let model = muting();
+        let reloads = Reloads::default();
+        let now = 1_700_000_000_000;
+        let answer =
+            |asked_ms| answer_once(&model, &reloads, Ok(Some(asked("mute", asked_ms))), now);
+        for fresh in [now, now - 10_000, now + 10_000] {
+            assert!(
+                matches!(answer(fresh), Ok(Order::Run { ref automation, .. }) if automation == "Mute"),
+                "{fresh} runs"
+            );
+        }
+        assert_eq!(answer(now - 10_001), Err(Dropped::Stale(10_001)));
+        assert_eq!(
+            answer(now + 60_000),
+            Err(Dropped::Stale(60_000)),
+            "one from after now too, as when the clock was set back"
+        );
+        assert_eq!(answer(0), Err(Dropped::Stale(now)), "a leftover");
+    }
+
+    #[test]
+    fn a_request_to_run_once_is_dropped_unless_it_reads_and_the_plan_is_what_was_saved() {
+        let model = muting();
+        let now = 1_700_000_000_000;
+        let reloads = Reloads::default();
+        assert_eq!(
+            answer_once(&model, &reloads, Ok(None), now),
+            Err(Dropped::Gone)
+        );
+        assert_eq!(
+            answer_once(&model, &reloads, Err(io::Error::other("held")), now),
+            Err(Dropped::Unreadable("held".to_owned()))
+        );
+        assert_eq!(
+            answer_once(&model, &reloads, Ok(Some(asked("pause", now))), now),
+            Err(Dropped::Refused("pause".to_owned(), Refused::NotPlanned))
+        );
+        let unread = Reloads {
+            failing: Stale {
+                files: true,
+                settings: false,
+            },
+            ..reloads
+        };
+        assert_eq!(
+            answer_once(&model, &unread, Ok(Some(asked("mute", now))), now),
+            Err(Dropped::Unread),
+            "the plan it keeps may be older than the save"
+        );
+        let settings_only = Reloads {
+            failing: SETTINGS_ONLY,
+            ..reloads
+        };
+        assert!(
+            answer_once(&model, &settings_only, Ok(Some(asked("mute", now))), now).is_ok(),
+            "settings that do not read change no automation"
+        );
+    }
+
+    #[test]
+    fn the_log_says_a_run_was_asked_for_or_why_nothing_runs() {
+        let mut scratch = Scratch::new("run-once");
+        let model = muting();
+        let reloads = Reloads::default();
+        let now = 1_700_000_000_000;
+        let request = RunOnce {
+            automation: "mute".to_owned(),
+            asked_ms: now,
+        };
+        scratch.stores.run_once.save(&request).expect("save");
+        let taken = scratch.stores.run_once.take();
+        let ran = run_once(&model, &reloads, taken, now, &mut scratch.log);
+        assert!(
+            matches!(ran.as_slice(), [Order::Run { automation, .. }] if automation == "Mute"),
+            "{ran:?}"
+        );
+        let again = scratch.stores.run_once.take();
+        assert_eq!(
+            run_once(&model, &reloads, again, now, &mut scratch.log),
+            [],
+            "a second request that waited with it finds it taken"
+        );
+        for (asked, at) in [
+            (Ok(Some(asked("pause", now))), now),
+            (Ok(Some(asked("mute", now))), now + 61_000),
+            (Err(io::Error::other("held")), now),
+        ] {
+            assert_eq!(run_once(&model, &reloads, asked, at, &mut scratch.log), []);
+        }
+        let unread = Reloads {
+            failing: Stale::BOTH,
+            ..reloads
+        };
+        let while_unread = Ok(Some(asked("mute", now)));
+        assert_eq!(
+            run_once(&model, &unread, while_unread, now, &mut scratch.log),
+            []
+        );
+        let nothing = "the setup app asked to run an automation once, but nothing runs: ";
+        let expected = [
+            "the setup app asked to run an automation once, as if its condition had just become \
+             true"
+                .to_owned(),
+            format!("{nothing}no request waits, as after two requests that one run answered"),
+            "the setup app asked to run the automation pause once, but nothing runs: it is not \
+             saved, is turned off, or cannot run as saved"
+                .to_owned(),
+            format!(
+                "{nothing}its request and the clock are 61 seconds apart, and it waits 10 at most"
+            ),
+            format!("{nothing}its request cannot be read: held"),
+            format!(
+                "{nothing}the saved files cannot be read, so what was saved cannot be told from \
+                 what the runtime keeps running"
+            ),
+        ];
+        let written = scratch.log();
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(lines.len(), expected.len(), "{written:?}");
+        for (line, message) in lines.iter().zip(expected) {
+            assert!(
+                line.ends_with(&message),
+                "{line:?} should end with {message:?}"
+            );
+        }
     }
 
     #[test]

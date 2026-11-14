@@ -217,6 +217,10 @@ macro_rules! with_commands {
             commands::save_automation(existing: Option<String>, automation: AutomationDef) -> String;
             commands::set_automation_enabled(id: String, enabled: bool) -> ();
             commands::delete_automation(id: String) -> ();
+            /// Asks AppyTappy's background part to run the actions of the saved automation `id` once, as if its
+            /// condition had just become true. Resolves once the background part heard the request, which says nothing
+            /// of whether the actions ran: its log does. Rejects with why nothing was asked.
+            commands::run_automation_once(id: String) -> ();
             /// Opens a window for each overlay that is on, and closes the rest.
             commands::sync_overlays() -> ();
             /// Turns an application's overlay on or off and sets where it shows. The setting is saved when this

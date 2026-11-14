@@ -8,6 +8,8 @@
 //! automation's actions. The owner turns each order into a message for the
 //! thread that carries it out. An app's automations run while it is
 //! attached, automations are enabled, and the plan has automations for it.
+//! Only an automation that runs can be run once on request, which changes
+//! nothing the model holds.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -120,6 +122,31 @@ pub(crate) enum Order {
     /// Nothing runs: an automation's cooldown held it back. The trace
     /// records it, with when the frame arrived whose reading it was.
     Held(Owner, Option<Instant>),
+}
+
+/// Why an automation that the setup app asked to run once does not run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// No automation of the plan has the ID it asked for: that automation
+    /// is not saved, is turned off, or cannot run.
+    NotPlanned,
+    /// Automations are disabled from the tray.
+    Disabled,
+    /// The automation's application, named here, is not running, so
+    /// nothing runs its automations.
+    Closed(String),
+}
+
+impl fmt::Display for Refused {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotPlanned => {
+                formatter.write_str("it is not saved, is turned off, or cannot run as saved")
+            },
+            Self::Disabled => formatter.write_str("automations are disabled from the tray"),
+            Self::Closed(app) => write!(formatter, "{app} is not running"),
+        }
+    }
 }
 
 /// An app whose automations run.
@@ -473,6 +500,48 @@ impl Model {
             .collect()
     }
 
+    /// The order that runs the actions of the automation with the ID
+    /// `automation` once, as the setup app asked, as if its condition had
+    /// just become true. Only an automation that runs now gets one: every
+    /// guard on a real run holds, and a key press still presses keys only
+    /// while its application's window is in front.
+    ///
+    /// The run changes nothing here: the automation's rule keeps its state
+    /// and its cooldown. Nothing would release it, so its changes are not
+    /// undone, as for an automation that never restores, whatever its rule
+    /// says.
+    ///
+    /// # Errors
+    ///
+    /// Returns why the automation does not run now.
+    pub(crate) fn run_once(&self, automation: &str) -> Result<Order, Refused> {
+        let planned = self.plan.iter().find_map(|(app, plan)| {
+            let rules = plan.runs.rules.iter().zip(0_usize..);
+            let (rule, index) = rules.into_iter().find(|(rule, _)| rule.id == automation)?;
+            Some((app, plan, rule, RuleIndex(index)))
+        });
+        let (app, plan, rule, index) = planned.ok_or(Refused::NotPlanned)?;
+        if !self.enabled {
+            return Err(Refused::Disabled);
+        }
+        // An attached application whose automations are planned and enabled
+        // runs them, so without a session it is not attached.
+        let (session, running) = self
+            .running
+            .iter()
+            .find(|(_, running)| running.app == *app)
+            .ok_or_else(|| Refused::Closed(plan.labels.name.clone()))?;
+        Ok(Order::Run {
+            owner: (*session, index),
+            automation: rule.automation.clone(),
+            watched: running.watched.clone(),
+            actions: rule.rule.actions().into(),
+            clicks: Arc::clone(&plan.runs.clicks),
+            restore: Restore::Never,
+            cause: None,
+        })
+    }
+
     /// Forgets the values that `reader`, which reads session `id`'s
     /// values, can no longer see, and returns whether it did: not for any
     /// other reader. Each rule keeps its state, so an automation that ran
@@ -569,7 +638,9 @@ fn acts(
             // The session started with the rules of this plan, or of one
             // that a reload swapped in because its rules are the same, so
             // each index it gives names a rule here.
-            let RulePlan { automation, rule } = plan.runs.rules.get(index.0)?;
+            let RulePlan {
+                automation, rule, ..
+            } = plan.runs.rules.get(index.0)?;
             Some(match effect {
                 Effect::Fire(_) => Order::Run {
                     owner,
@@ -729,6 +800,7 @@ mod tests {
                 window: base.runs.window.clone(),
                 values: vec![value(signal()), value(flag)],
                 rules: vec![RulePlan {
+                    id: "pause_a".to_owned(),
                     automation: "Pause A".to_owned(),
                     rule,
                 }],
@@ -780,6 +852,7 @@ mod tests {
                 window: base.runs.window.clone(),
                 values: vec![value(signal())],
                 rules: vec![RulePlan {
+                    id: "pause_a".to_owned(),
                     automation: "Pause A".to_owned(),
                     rule,
                 }],
@@ -1267,6 +1340,84 @@ mod tests {
                 .plan("a")
                 .and_then(|plan| plan.labels.checked.as_ref()),
             Some(&build)
+        );
+    }
+
+    #[test]
+    fn only_an_automation_that_runs_is_run_once_and_its_rule_keeps_its_state() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        let a = plan_with_cooldown("A", Duration::from_secs(60));
+        model.replan(plans(&[("a", &a), ("b", &plan("B", 90.0))]));
+        assert_eq!(model.run_once("pause_c"), Err(Refused::NotPlanned));
+        assert_eq!(
+            model.run_once("pause_a"),
+            Err(Refused::Closed("A".to_owned())),
+            "its application is not attached"
+        );
+        model.apply(started("a", 7));
+        let once = Order::Run {
+            owner: (SessionId(0), RuleIndex(0)),
+            automation: "Pause A".to_owned(),
+            watched: Watched {
+                process: ProcessId::new(7),
+                executable: "Example.exe".to_owned(),
+            },
+            actions: pause(),
+            clicks: Arc::default(),
+            restore: Restore::Never,
+            cause: None,
+        };
+        assert_eq!(
+            model.run_once("pause_a"),
+            Ok(once.clone()),
+            "nothing undoes it, though its rule restores"
+        );
+        assert_eq!(
+            model.run_once("pause_b"),
+            Err(Refused::Closed("B".to_owned())),
+            "another application's session is not its own"
+        );
+        // The run started no cooldown and fired no rule.
+        assert_eq!(model.next_due(), None);
+        let fired = model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
+        assert_eq!(
+            kinds(&fired),
+            ["run 0 Pause A"],
+            "its condition still fires it"
+        );
+        assert_eq!(model.run_once("pause_a"), Ok(once), "while it is fired too");
+        model.set_enabled(false);
+        assert_eq!(model.run_once("pause_a"), Err(Refused::Disabled));
+        assert_eq!(
+            model.run_once("pause_c"),
+            Err(Refused::NotPlanned),
+            "an automation that is not planned is named first"
+        );
+        model.set_enabled(true);
+        model.replan(plans(&[("b", &plan("B", 90.0))]));
+        assert_eq!(
+            model.run_once("pause_a"),
+            Err(Refused::NotPlanned),
+            "a reload dropped it"
+        );
+    }
+
+    #[test]
+    fn a_refusal_says_why_in_the_logs_words() {
+        let reasons = [
+            Refused::NotPlanned,
+            Refused::Disabled,
+            Refused::Closed("Example App".to_owned()),
+        ]
+        .map(|refused| refused.to_string());
+        assert_eq!(
+            reasons,
+            [
+                "it is not saved, is turned off, or cannot run as saved",
+                "automations are disabled from the tray",
+                "Example App is not running",
+            ]
         );
     }
 

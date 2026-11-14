@@ -5,6 +5,7 @@ import {
   errorText,
   explainWatched,
   listWindows,
+  runAutomationOnce,
   saveAutomation,
   stopWatching,
   watchValue,
@@ -40,6 +41,7 @@ import { ACTIONS_HINT, COOLDOWN_HINT, DRAFT_HINT, UNDO_HINT, WHEN_HINT } from '.
 import { editorLanding, useLanding } from '../lib/landing.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ask, useMounted } from '../lib/request.ts';
+import { NOT_ASKED, RUN_NOW_HINT, type RunAsk, runNowView, runStep } from '../lib/runNow.ts';
 import { type LiveWatchEvent, NOT_WATCHING, liveWatchStep } from '../lib/liveWatch.ts';
 import { type LiveState, liveAnnouncement, liveText } from '../lib/reading.ts';
 import { ClickPictureThumb } from '../components/ClickPictureThumb.tsx';
@@ -525,6 +527,8 @@ export function AutomationEditor({
   const [executables, setExecutables] = useState<readonly string[]>([]);
   // The click action whose target is being set up, by its key, or null while the editor shows.
   const [targeting, setTargeting] = useState<number | null>(null);
+  // The newest ask to run the saved automation's actions once.
+  const [runAsk, setRunAsk] = useState<RunAsk>(NOT_ASKED);
 
   // The running applications' executables, offered as the applications an action can target.
   useEffect(
@@ -580,6 +584,17 @@ export function AutomationEditor({
   ];
   const clickedNames = clickedBy('cursor');
   const sentNames = clickedBy('message');
+  // A draft of a saved automation holds changes to it, as an edit here does.
+  const unchanged = resumed === null && held(false, start, draft) === 'nothing';
+  const run = runNowView({
+    saved: existing === null ? 'new' : unchanged ? 'saved' : 'changed',
+    on: existing?.enabled === true,
+    runtime,
+    busy,
+    app: choice?.appName ?? null,
+    needsFront: pressesKeys || clickedNames.length > 0,
+    ask: runAsk,
+  });
 
   const update = (change: Partial<Draft>): void => {
     setDraft((current) => ({ ...current, ...change }));
@@ -602,6 +617,17 @@ export function AutomationEditor({
     } catch (error: unknown) {
       setSaveError(errorText(error));
       setSaving(false);
+    }
+  };
+
+  // Asks the background part to run the saved automation's actions once. It runs them, never this app.
+  const runNow = async (id: string): Promise<void> => {
+    setRunAsk((now) => runStep(now, { kind: 'pressed' }));
+    try {
+      await runAutomationOnce(id);
+      setRunAsk((now) => runStep(now, { kind: 'heard' }));
+    } catch (error: unknown) {
+      setRunAsk((now) => runStep(now, { kind: 'refused', message: errorText(error) }));
     }
   };
 
@@ -930,6 +956,26 @@ export function AutomationEditor({
               <option key={executable} value={executable} />
             ))}
           </datalist>
+          <div className="with-hint">
+            <button
+              type="button"
+              className="btn"
+              disabled={run.disabled}
+              aria-describedby="run-now-note"
+              onClick={() => {
+                if (existing !== null) {
+                  background(runNow(existing.id));
+                }
+              }}
+            >
+              Run actions now
+            </button>
+            <Hint topic="Run actions now">{RUN_NOW_HINT}</Hint>
+          </div>
+          {/* Stays mounted, so a screen reader announces why it cannot be pressed and what an ask came to. */}
+          <p id="run-now-note" className={run.warn ? 'warn run-note' : 'note run-note'} role="status">
+            {run.note}
+          </p>
         </section>
 
         <section className="card" aria-labelledby="after-heading">

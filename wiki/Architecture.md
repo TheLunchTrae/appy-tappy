@@ -22,15 +22,15 @@ defines the domain terms.
   │ React UI ── Tauri commands ── owner thread              │
   │             windows, capture, values, automations       │
   └───────────────┬──────────────────────────┬──────────────┘
-    reads, writes │                          │ sets after saves the runtime uses
-     saved files  ▼                          ▼
-   applications, automations, settings Reload event
+    reads, writes │                          │ sets after saves the runtime uses,
+     saved files  ▼                          ▼ and to run an automation once
+   applications, automations, settings Reload and RunOnce events
                   │ read at start          │
                   │ and on each reload     │
                   ▼                        ▼
                 runtime (plain Rust, always on)
   ┌─────────────────────────────────────────────────────────┐
-  │ reload watch ─ reload ──────────┐                       │
+  │ request watch ─ reload, run once┐                       │
   │ lifecycle ─ started, exited ────┤                       │
   │ readers ─ samples, problems ────┼─► owner thread:       │
   │ action thread ─ notes, can run ─┤   model + engine      │
@@ -44,13 +44,15 @@ defines the domain terms.
    [Setup app](Setup-app.md#saved-files) describes them.
 2. After each save that changes what the runtime runs, it sets the named event
    `Local\AppyTappy.Reload`, as [Files and handoff](#files-and-handoff) lists.
+   To run one automation's actions once, it leaves a request file and sets
+   `Local\AppyTappy.RunOnce`, as [Running once](#running-once) describes.
 3. The runtime reads the saved files when it starts and again on each reload,
    checks them, and logs any automation that cannot run. The rest run.
 4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`, and
    keeps the tray's last Enabled choice in
    `%LOCALAPPDATA%\AppyTappy\enabled.txt`.
 
-Apart from that one event, the two programs share only files: no sockets,
+Apart from those two events, the two programs share only files: no sockets,
 pipes, or shared memory. The runtime reads the same files the setup app saves;
 [Files and handoff](#files-and-handoff) describes how each side writes and
 reads them.
@@ -208,9 +210,12 @@ Each thread below is a plain `std::thread`, and each channel is a
   It places each click just before it runs, finding the target's window and,
   for a picture, grabbing one frame of its area (see
   [Actions](Actions.md#clicks)).
-- **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
-  the setup app sets after each save that changes what the runtime runs, and
-  sends `Reload`. The owner reads the settings, then the saved applications
+- **Request watch.** One thread waits on the setup app's two named events
+  (`crates/platform/src/request.rs`). `Local\AppyTappy.RunOnce` sends
+  `RunOnce`, which [Running once](#running-once) describes.
+  `Local\AppyTappy.Reload`, which the setup app sets after each save that
+  changes what the runtime runs, sends `Reload`. When both wait, the reload
+  is sent first, so a run answers what was saved. The owner reads the settings, then the saved applications
   and automations, again. A new read interval restarts each reader the new
   plan keeps, in its session, so automations keep their state and nothing is
   undone; settings that cannot be read are logged, and the runtime keeps the
@@ -617,7 +622,8 @@ changing.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
     describes, the runtime's log in `logs\`, the
-    [runtime trace](Trace.md)'s files in `traces\`, `enabled.txt`, and the
+    [runtime trace](Trace.md)'s files in `traces\`, `enabled.txt`,
+    `run-once.txt`, and the
     setup app's [drafts](Setup-app.md#drafts) in `drafts\`, which the
     runtime never reads.
 - **Writing.** Only the setup app writes the saved files, through
@@ -648,7 +654,7 @@ changing.
   anti-cheat class, a checked build, an automation, or the settings that
   works, the setup app sets the named event `Local\AppyTappy.Reload`, and the
   runtime reads `settings.json`, every `app.json`, and `automations.json`
-  again, as the [reload watch](#the-runtime) describes. A save of an
+  again, as the [request watch](#the-runtime) describes. A save of an
   application's file goes through `Owner::update_app` in
   `apps/setup/src-tauri/src/owner.rs`, and a save of the automations or the
   settings through `Owner::update_runtime`, each with what it changed; both
@@ -690,6 +696,57 @@ changing.
   its application. `app.json` records the build its values were checked
   against, and both programs warn when another build runs, as [Build
   detection](#build-detection) describes.
+
+### Running once
+
+**Run actions now** in the automation editor asks the runtime to run one saved
+automation's actions once, as if its condition had just become true
+([Automations](Automations.md#run-the-actions-now) describes what the user
+sees). Only the runtime runs actions: the setup app has no code path that
+performs one, apart from [trying a click](Actions.md#trying-a-click).
+
+- **The request.** A named event carries no data, so the automation's ID
+  travels in a file. `Owner::run_automation_once` in
+  `apps/setup/src-tauri/src/owner/automations.rs` writes
+  `%LOCALAPPDATA%\AppyTappy\run-once.txt` through `RunOnceStore` in
+  `crates/config/src/store.rs`, the way every saved file is written, and then
+  sets `Local\AppyTappy.RunOnce`. The file holds two lines: when the request
+  was made, in milliseconds since 1970, and the automation's ID. The event is
+  opened, never created, so setting it tells the setup app whether a runtime
+  listens; when none does, the setup app takes the file away again and says
+  that nothing ran.
+- **What the setup app checks first.** The automation is saved, is turned on,
+  and can run as saved, with the same check that marks it on the Automations
+  page, so one that [anti-cheat](#anti-cheat-enforcement) blocks is refused
+  with its reason before anything is asked. The editor offers the button only
+  while it shows the automation as saved, because the runtime runs the saved
+  one.
+- **What the runtime does.** The owner takes the file, which reads and
+  removes it, and drops the request unless all of this holds: the file reads;
+  its time is within 10 seconds of the clock (`RUN_ONCE_LIMIT`), so a request
+  that waited for a runtime to start never runs late; the last read of the
+  saved applications and automations worked, so the plan is what was saved;
+  and `Model::run_once` finds the automation in the plan of an application
+  that is running, with automations enabled. The run is the same `Order::Run`
+  a fired rule sends, with the session's watched window, so every guard on
+  the action thread applies: keys and cursor clicks only while the watched
+  application is in front, and the anti-cheat classes, which already kept a
+  blocked automation out of the plan.
+- **No restore, no rule state.** The run uses `Restore::Never`, whatever the
+  automation says: no release follows a run that no condition started, so
+  nothing would ever undo it. The journal treats it as any change that is not
+  restored, as [Actions](Actions.md#restoring) describes, so a pending undo
+  of the same target is forgotten. The rule's state and its cooldown do not
+  change: the engine never hears of the run.
+- **The outcome.** The request's path brings nothing back, and the setup app
+  learns only that a runtime heard the event. The runtime logs each request:
+  that it runs, with the automation's own line, or why nothing runs, and any
+  action that fails logs as it does for a fired rule. The editor points to
+  that log. The [trace](Trace.md) records the run as it records a rule that
+  fired.
+- **Order with a reload.** The request watch sends a reload that waits
+  together with a run first, and the owner handles one event at a time, so a
+  run never uses a plan older than a save that came before it.
 
 ## Anti-cheat enforcement
 
