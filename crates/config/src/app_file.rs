@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::anti_cheat::AntiCheatClass;
 use crate::names::is_image_name;
-use crate::signal::{SignalName, StateName};
+use crate::signal::{InvalidStateName, SignalName, StateName};
 use crate::window_match::{MustMatch, Pattern, WindowFacts, WindowMatch};
 
 /// The format version this build writes and reads.
@@ -783,10 +783,11 @@ impl CheckDef {
                 || self.states().iter().any(|state| state.name == name))
     }
 
-    /// Checks the rules the check's own settings can break: a state check's
-    /// states, as [`check_states`] says, that a bar's two colors differ, and
-    /// that a number check told which characters to read reads at least
-    /// one.
+    /// Checks the rules the check's own settings can break: that a state
+    /// check has at least one and at most [`MAX_STATES`] states, each named
+    /// as [`StateName::new`] allows and no two alike, that a bar's two
+    /// colors differ, and that a number check told which characters to read
+    /// reads at least one.
     ///
     /// # Errors
     ///
@@ -808,13 +809,9 @@ impl CheckDef {
 }
 
 /// Checks a state check's state `names`: at least one and at most
-/// [`MAX_STATES`], and no name twice. Names that differ only in case count
-/// as the same, since they read alike.
-///
-/// # Errors
-///
-/// Returns a [`CheckDefError`] naming the first problem.
-pub fn check_states(names: &[&str]) -> Result<(), CheckDefError> {
+/// [`MAX_STATES`], each a valid [`StateName`], and no name twice. Names that
+/// differ only in case count as the same, since they read alike.
+fn check_states(names: &[&str]) -> Result<(), CheckDefError> {
     if names.is_empty() {
         return Err(CheckDefError::NoStates);
     }
@@ -822,7 +819,11 @@ pub fn check_states(names: &[&str]) -> Result<(), CheckDefError> {
         return Err(CheckDefError::TooManyStates);
     }
     let mut seen = BTreeSet::new();
-    for name in names {
+    for (index, name) in names.iter().enumerate() {
+        StateName::new(name).map_err(|error| CheckDefError::StateName {
+            position: index.saturating_add(1),
+            error,
+        })?;
         if !seen.insert(name.to_lowercase()) {
             return Err(CheckDefError::SameStateName((*name).to_owned()));
         }
@@ -847,6 +848,13 @@ pub enum CheckDefError {
     NoStates,
     /// A state check has more than [`MAX_STATES`] states.
     TooManyStates,
+    /// A state's name breaks the rules of [`StateName::new`].
+    StateName {
+        /// Which state, counted from 1, so two names alike say which.
+        position: usize,
+        /// What is wrong with its name.
+        error: InvalidStateName,
+    },
     /// Two states have this name, or names that differ only in case.
     SameStateName(String),
     /// The bar's filled and empty colors are the same.
@@ -863,6 +871,9 @@ impl fmt::Display for CheckDefError {
                 formatter,
                 "its state check has more than {MAX_STATES} states"
             ),
+            Self::StateName { position, error } => {
+                write!(formatter, "its {error} (state {position})")
+            },
             Self::SameStateName(name) => {
                 write!(formatter, "two of its states are named {name:?}")
             },
@@ -1104,6 +1115,7 @@ impl Error for AppFileError {}
 mod tests {
     use super::*;
     use crate::names::sample_name;
+    use crate::signal::MAX_STATE_NAME_LEN;
 
     const RED: ColorDef = ColorDef {
         red: 255,
@@ -1778,6 +1790,17 @@ mod tests {
             Err(CheckDefError::SameStateName("paused".to_owned()))
         );
         assert_eq!(check_states(&["Paused"]), Ok(()));
+        let long = "a".repeat(MAX_STATE_NAME_LEN.checked_add(1).expect("small"));
+        for name in ["", " Live", "Li\u{7}ve", &long, "NONE"] {
+            let invalid = StateName::new(name).expect_err(name);
+            assert_eq!(
+                check_states(&["Paused", name]),
+                Err(CheckDefError::StateName {
+                    position: 2,
+                    error: invalid
+                })
+            );
+        }
         let gray = ColorDef {
             red: 40,
             green: 40,
@@ -1792,6 +1815,13 @@ mod tests {
                 "its state check has more than 16 states",
             ),
             (
+                CheckDefError::StateName {
+                    position: 3,
+                    error: StateName::new("None").expect_err("reserved"),
+                },
+                "its state name \"None\" is \"none\", which stands for no state (state 3)",
+            ),
+            (
                 CheckDefError::SameStateName("Live".to_owned()),
                 "two of its states are named \"Live\"",
             ),
@@ -1803,6 +1833,17 @@ mod tests {
         for (error, message) in cases {
             assert_eq!(error.to_string(), message);
         }
+    }
+
+    #[test]
+    fn a_file_refuses_a_state_name_its_value_could_not_read() {
+        let mut file = dash();
+        file.values[0].screen.check = states(&[("Paused ", "status-1.png")]);
+        let error = AppFile::parse(&file.to_json()).expect_err("a spaced state name");
+        assert_eq!(
+            error.to_string(),
+            "value \"progress\": its state name \"Paused \" starts or ends with a space (state 1)"
+        );
     }
 
     #[test]

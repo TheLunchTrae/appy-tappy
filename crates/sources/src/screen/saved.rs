@@ -18,7 +18,7 @@ use appytappy_config::app_file::{
     CheckDef, CheckDefError, FixDef, MAX_FIXES, PinDef, ReferenceDef, RegionDef, ScreenDef,
     SizeChangesDef, SizeDef, StateDef,
 };
-use appytappy_config::signal::{InvalidStateName, StateName};
+use appytappy_config::signal::StateName;
 
 use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
 use super::digits::{DigitReader, LearnError};
@@ -303,11 +303,11 @@ impl<'app> Readers<'app> {
 /// Returns a [`SavedError`] when the check breaks a rule of
 /// [`CheckDef::check`], a region is empty or does not fit the window size it
 /// was drawn at, a picture cannot be read or decoded or a state's picture is
-/// not its region's size, a state's name is invalid or two states share a
-/// picture, a number's reference is missing or cannot learn from one of its
-/// pictures or knows none of the characters the number reads, or the value
-/// has too many fixes, two drawings at one size, or a fix whose pictures or
-/// reference do not suit its check.
+/// not its region's size, two states share a picture, a number's reference
+/// is missing or cannot learn from one of its pictures or knows none of the
+/// characters the number reads, or the value has too many fixes, two
+/// drawings at one size, or a fix whose pictures or reference do not suit
+/// its check.
 pub fn build(
     screen: &ScreenDef,
     readers: &mut Readers<'_>,
@@ -473,8 +473,15 @@ fn state_match(
     let states = states
         .iter()
         .zip(images)
-        .map(|(state, image)| {
-            let name = StateName::new(&state.name).map_err(SavedError::StateName)?;
+        .enumerate()
+        .map(|(index, (state, image))| {
+            // `CheckDef::check` refused the names `StateName::new` refuses.
+            let name = StateName::new(&state.name).map_err(|error| {
+                SavedError::Check(CheckDefError::StateName {
+                    position: index.saturating_add(1),
+                    error,
+                })
+            })?;
             Ok((name, state_picture(image, size, tolerance, picture)?))
         })
         .collect::<Result<_, SavedError>>()?;
@@ -628,8 +635,6 @@ pub enum SavedError {
     },
     /// Two states use this picture.
     SamePicture(String),
-    /// A state's name breaks the naming rules.
-    StateName(InvalidStateName),
     /// A number reads with a reference the application does not have.
     NoReference {
         /// The reference's ID.
@@ -698,7 +703,6 @@ impl fmt::Display for SavedError {
             Self::SamePicture(name) => {
                 write!(formatter, "two of its states use the picture {name}")
             },
-            Self::StateName(error) => write!(formatter, "its {error}"),
             Self::NoReference { id } => {
                 write!(formatter, "its reference {id} is not saved")
             },
@@ -732,7 +736,6 @@ impl Error for SavedError {
             | Self::FixPictures { .. }
             | Self::FixReference
             | Self::SamePicture(_)
-            | Self::StateName(_)
             | Self::NoReference { .. }
             | Self::NoCharacters { .. } => None,
         }
@@ -963,7 +966,7 @@ mod tests {
         .expect_err("reserved name");
         assert_eq!(
             error.to_string(),
-            "its state name \"none\" is \"none\", which stands for no state"
+            "its state name \"none\" is \"none\", which stands for no state (state 1)"
         );
         assert!(error.source().is_none());
     }
