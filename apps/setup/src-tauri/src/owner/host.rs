@@ -283,6 +283,9 @@ mod tests {
         assert!(desktop.window_place(7).is_err());
         assert!(desktop.executable_build(ProcessId::new(7)).is_err());
         assert!(desktop.runtime_runs().is_err());
+        // Run requests go through the platform's own named event, which
+        // works on Windows whatever `system` says.
+        #[cfg(not(windows))]
         assert!(desktop.run_once().is_err());
         let handler: FrameHandler = Box::new(|_frame| NextFrame::After(Duration::ZERO));
         assert!(
