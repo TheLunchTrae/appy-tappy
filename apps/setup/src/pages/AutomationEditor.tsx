@@ -41,7 +41,7 @@ import { ACTIONS_HINT, COOLDOWN_HINT, DRAFT_HINT, UNDO_HINT, WHEN_HINT } from '.
 import { editorLanding, useLanding } from '../lib/landing.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ask, useMounted } from '../lib/request.ts';
-import { NOT_ASKED, RUN_NOW_HINT, type RunAsk, runNowView, runStep } from '../lib/runNow.ts';
+import { frontOf, NOT_ASKED, RUN_NOW_HINT, type RunAsk, runNowView, runStep } from '../lib/runNow.ts';
 import { type LiveWatchEvent, NOT_WATCHING, liveWatchStep } from '../lib/liveWatch.ts';
 import { type LiveState, liveAnnouncement, liveText } from '../lib/reading.ts';
 import { ClickPictureThumb } from '../components/ClickPictureThumb.tsx';
@@ -592,7 +592,11 @@ export function AutomationEditor({
     runtime,
     busy,
     app: choice?.appName ?? null,
-    needsFront: pressesKeys || clickedNames.length > 0,
+    front: frontOf(
+      draft.actions.map(
+        (action) => action.kind === 'keys' || (action.kind === 'click' && action.delivery === 'cursor'),
+      ),
+    ),
     ask: runAsk,
   });
 

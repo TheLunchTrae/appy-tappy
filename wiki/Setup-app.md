@@ -377,7 +377,7 @@ This page covers what the user guide leaves out.
 - **Run actions now.** The automation editor's button calls
   `run_automation_once` with the saved automation's ID. The owner thread
   checks that the runtime runs that automation, leaves the request, and sets
-  the run-once event; the runtime runs the actions, never the setup app.
+  the reload event; the runtime runs the actions, never the setup app.
   [Running once](Architecture.md#running-once) describes the request, and
   [Run actions now](State-machines.md#run-actions-now) the button's states.
 

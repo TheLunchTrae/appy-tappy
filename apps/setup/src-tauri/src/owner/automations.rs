@@ -4,7 +4,6 @@
 //! actions once.
 
 use appytappy_config::automation_file::AutomationDef;
-use appytappy_config::store::RunOnce;
 
 use crate::automations::{self, AutomationSummary};
 
@@ -62,15 +61,12 @@ impl<H: Host> Owner<H> {
     pub(crate) fn run_automation_once(&self, id: &str) -> Result<(), String> {
         let stores = self.stores()?;
         automations::runs(stores, id)?;
-        stores
-            .run_once
-            .save(&RunOnce::now(id.to_owned()))
-            .map_err(|error| {
-                format!(
-                    "AppyTappy cannot ask its background part to run the actions, so nothing \
+        stores.run_once.save(id).map_err(|error| {
+            format!(
+                "AppyTappy cannot ask its background part to run the actions, so nothing \
                      ran: {error}."
-                )
-            })?;
+            )
+        })?;
         let unheard = match self.host.run_once() {
             Ok(true) => return Ok(()),
             Ok(false) => "AppyTappy's background part isn't running, so nothing ran.".to_owned(),
@@ -80,7 +76,7 @@ impl<H: Host> Owner<H> {
         };
         #[expect(
             clippy::let_underscore_must_use,
-            reason = "the answer already says nothing ran, and a runtime drops a request that waited too long"
+            reason = "the answer already says nothing ran, and a runtime reads a request only when it hears one"
         )]
         let _ = stores.run_once.take();
         Err(unheard)
@@ -177,17 +173,10 @@ mod tests {
             let id = id.to_owned();
             harness.ask(move |owner| owner.run_automation_once(&id))
         };
-        harness.forget_reloads();
 
         assert_eq!(ask(&mut harness, &id), Ok(()));
         let left = waiting(&mut harness).expect("the request waits for the runtime");
-        assert_eq!(left.automation, id);
-        assert!(left.asked_ms > 0, "it says when it was asked");
-        assert_eq!(
-            harness.reloads(),
-            0,
-            "nothing was saved, so nothing is read again"
-        );
+        assert_eq!(left, id);
 
         assert_eq!(
             ask(&mut harness, "missing"),

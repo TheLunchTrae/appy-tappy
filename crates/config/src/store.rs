@@ -451,44 +451,6 @@ impl EnabledStore {
     }
 }
 
-/// A request to run one saved automation's actions once.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunOnce {
-    /// The automation's ID.
-    pub automation: String,
-    /// When the setup app asked, in milliseconds since 1970, so a request
-    /// that waited too long is told apart and dropped.
-    pub asked_ms: u64,
-}
-
-impl RunOnce {
-    /// A request, made now, to run the automation with the ID `automation`.
-    #[must_use]
-    pub fn now(automation: String) -> Self {
-        let asked_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |since| {
-                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
-            });
-        Self {
-            automation,
-            asked_ms,
-        }
-    }
-
-    /// The request that `text` holds: when it was asked on the first line
-    /// and the automation's ID on the second, and nothing else.
-    fn parse(text: &str) -> Option<Self> {
-        let mut lines = text.lines();
-        let asked_ms = lines.next()?.parse().ok()?;
-        let automation = lines.next().filter(|id| !id.is_empty())?.to_owned();
-        lines.next().is_none().then_some(Self {
-            automation,
-            asked_ms,
-        })
-    }
-}
-
 /// The file where the setup app leaves its request to run one automation's
 /// actions once.
 ///
@@ -506,36 +468,40 @@ impl RunOnceStore {
         Self { path }
     }
 
-    /// Leaves `request` for the runtime, in place of one it has not taken,
-    /// creating the folder it lives in.
+    /// Leaves a request to run the automation with the ID `automation` for
+    /// the runtime, in place of one it has not taken, creating the folder
+    /// it lives in.
     ///
     /// # Errors
     ///
     /// Returns the error from a write.
-    pub fn save(&self, request: &RunOnce) -> io::Result<()> {
-        let text = format!("{}\n{}\n", request.asked_ms, request.automation);
-        replace_file(&self.path, text.as_bytes())
+    pub fn save(&self, automation: &str) -> io::Result<()> {
+        replace_file(&self.path, automation.as_bytes())
     }
 
-    /// Takes the request away and returns it, or `None` when none waits.
+    /// Takes the request away and returns the ID it names, or `None` when
+    /// none waits.
+    ///
+    /// The file is first renamed to a name of the taker's own, in one step,
+    /// and that copy is read and removed. A request that
+    /// [`RunOnceStore::save`] leaves meanwhile is therefore a file of its
+    /// own, which the next take finds, and no request is taken twice.
     ///
     /// # Errors
     ///
-    /// Returns the error from reading or removing the file, or an
-    /// invalid-data error for a file that holds no request. A request that
-    /// cannot be removed is not returned, so none is ever taken twice.
-    pub fn take(&self) -> io::Result<Option<RunOnce>> {
-        let text = match fs::read_to_string(&self.path) {
+    /// Returns the error from renaming, reading or removing the file. The
+    /// copy is removed whether or not it reads.
+    pub fn take(&self) -> io::Result<Option<String>> {
+        let mut taken = self.path.clone().into_os_string();
+        taken.push(".taken");
+        let taken = PathBuf::from(taken);
+        match fs::rename(&self.path, &taken) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            text => text?,
-        };
-        fs::remove_file(&self.path)?;
-        RunOnce::parse(&text).map(Some).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "the request to run an automation once is not valid",
-            )
-        })
+            renamed => renamed?,
+        }
+        let automation = fs::read_to_string(&taken);
+        fs::remove_file(&taken)?;
+        automation.map(Some)
     }
 }
 
@@ -1138,42 +1104,44 @@ mod tests {
     }
 
     #[test]
-    fn a_request_to_run_once_is_taken_once_and_a_broken_one_is_refused() {
+    fn a_request_to_run_once_is_taken_once_and_what_cannot_be_read_is_gone() {
         let root = scratch("run-once");
         let path = root.join("local").join("run-once.txt");
         let store = RunOnceStore::new(path.clone());
         assert_eq!(store.take().expect("a missing file"), None);
-        let request = RunOnce {
-            automation: "pause_music".to_owned(),
-            asked_ms: 1_700_000_000_123,
-        };
-        store.save(&request).expect("saves, creating the folder");
+        store
+            .save("pause_music")
+            .expect("saves, creating the folder");
+        store.save("ding").expect("replaces");
         assert_eq!(
-            fs::read_to_string(&path).expect("reads"),
-            "1700000000123\npause_music\n"
+            store.take().expect("reads"),
+            Some("ding".to_owned()),
+            "the newest"
         );
-        let newer = RunOnce {
-            automation: "ding".to_owned(),
-            ..request
-        };
-        store.save(&newer).expect("replaces");
-        assert_eq!(store.take().expect("reads"), Some(newer), "the newest");
         assert_eq!(store.take().expect("gone"), None, "taken only once");
-        for broken in [
-            "",
-            "pause_music\n",
-            "soon\npause_music\n",
-            "1\n\n",
-            "1\npause_music\nding\n",
-        ] {
-            fs::write(&path, broken).expect("write");
-            let error = store.take().expect_err(broken);
-            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{broken:?}");
-            assert!(!path.exists(), "{broken:?} is gone all the same");
-        }
-        fs::create_dir(&path).expect("a folder in its place");
-        assert!(store.take().is_err(), "a folder cannot be read");
-        assert!(RunOnce::now("ding".to_owned()).asked_ms > request.asked_ms);
+        fs::write(&path, [0xff]).expect("write");
+        assert!(
+            store.take().is_err(),
+            "text that is not UTF-8 cannot be read"
+        );
+        assert_eq!(
+            store.take().expect("gone"),
+            None,
+            "what cannot be read is gone all the same"
+        );
+        // A copy that an earlier take could not remove does not stand in
+        // the way, and is never taken for a request.
+        let copy = root.join("local").join("run-once.txt.taken");
+        fs::write(&copy, "old").expect("write");
+        assert_eq!(store.take().expect("no request"), None);
+        store.save("ding").expect("saves");
+        assert_eq!(store.take().expect("reads"), Some("ding".to_owned()));
+        assert!(!copy.exists(), "the copy is removed");
+        // A request that cannot be taken is an error, and waits.
+        fs::create_dir(&copy).expect("a folder in the copy's place");
+        store.save("ding").expect("saves");
+        assert!(store.take().is_err(), "a file cannot replace a folder");
+        assert!(path.exists(), "the request still waits");
         fs::remove_dir_all(root).expect("clean up");
     }
 

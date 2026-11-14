@@ -25,10 +25,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use appytappy_actions::{ActionError, Actions, Backoff, Controls, PlacedClick, Watched};
+use appytappy_actions::{ActionError, Actions, Backoff, Controls, Keeps, PlacedClick, Watched};
 use appytappy_config::action::Action;
 use appytappy_config::click::{Click, ClickDelivery};
-use appytappy_config::rule::Restore;
 use appytappy_sources::screen::Capture;
 use appytappy_sources::system::System;
 
@@ -55,8 +54,9 @@ pub(crate) enum Job {
         actions: Box<[Action]>,
         /// What placing its clicks needs.
         clicks: Arc<ClickTargets>,
-        /// Whether its changes are undone when it is released.
-        restore: Restore,
+        /// What the journal keeps of its changes: whether they are undone
+        /// when it is released.
+        keeps: Keeps,
         /// When the frame arrived whose reading fired it, for the trace.
         cause: Option<Instant>,
     },
@@ -261,7 +261,7 @@ where
                 watched,
                 actions: steps,
                 clicks,
-                restore,
+                keeps,
                 ..
             } => {
                 let mut failed = false;
@@ -271,7 +271,7 @@ where
                             click_now(actions, screen, wanted, &clicks, &watched)
                         },
                         step => actions
-                            .perform(owner, step, restore, &watched)
+                            .perform(owner, step, keeps, &watched)
                             .map(|()| None)
                             .map_err(|error| error.to_string()),
                     };
@@ -650,7 +650,7 @@ mod tests {
             },
             actions,
             clicks: Arc::default(),
-            restore: Restore::OnRelease,
+            keeps: Keeps::ForRelease,
             cause: None,
         }
     }
@@ -940,7 +940,7 @@ mod tests {
                 },
                 actions: mute,
                 clicks: Arc::default(),
-                restore: Restore::OnRelease,
+                keeps: Keeps::ForRelease,
                 cause: None,
             },
             &Unsupported,

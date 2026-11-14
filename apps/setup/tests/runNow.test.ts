@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  frontOf,
   NOT_ASKED,
   RUN_ASKED,
   type RunAsk,
@@ -20,7 +21,7 @@ const ready: RunNowFacts = {
   runtime: true,
   busy: false,
   app: 'Example App',
-  needsFront: false,
+  front: 'none',
   ask: NOT_ASKED,
 };
 
@@ -92,8 +93,25 @@ describe('Run actions now', () => {
   test('says that keys and clicks with the cursor are skipped from here', () => {
     const skipped =
       'Keys are pressed, and clicks with the cursor made, only while Example App is the window in front, so from here they are skipped.';
-    expect(runNowView({ ...ready, needsFront: true }).note).toBe(skipped);
-    expect(runNowView({ ...ready, needsFront: true, ask: { kind: 'asked' } }).note).toBe(`${RUN_ASKED} ${skipped}`);
-    expect(runNowView({ ...ready, needsFront: true, app: null }).note).toContain('only while the application is');
+    expect(runNowView({ ...ready, front: 'some' }).note).toBe(skipped);
+    expect(runNowView({ ...ready, front: 'some', ask: { kind: 'asked' } }).note).toBe(`${RUN_ASKED} ${skipped}`);
+    expect(runNowView({ ...ready, front: 'some', app: null }).note).toContain('only while the application is');
+  });
+
+  test('cannot be pressed when every action would be skipped, and says why', () => {
+    const view = runNowView({ ...ready, front: 'all', ask: { kind: 'asked' } });
+    expect(view.disabled).toBe(true);
+    expect(view.warn).toBe(false);
+    expect(view.note).toBe(
+      'Every action here presses keys or clicks with the cursor, which happens only while Example App is the window in front. AppyTappy Setup is in front when you select this, so nothing would run.',
+    );
+    expect(runNowView({ ...ready, front: 'all', runtime: false }).note).toContain("isn't running");
+  });
+
+  test('counts the actions that need the application in front', () => {
+    expect(frontOf([])).toBe('none');
+    expect(frontOf([false, false])).toBe('none');
+    expect(frontOf([false, true])).toBe('some');
+    expect(frontOf([true, true])).toBe('all');
   });
 });

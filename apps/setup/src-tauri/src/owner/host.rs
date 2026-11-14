@@ -11,7 +11,6 @@ use appytappy_config::app_file::BuildDef;
 use appytappy_config::click::{ClickButton, ClickDelivery};
 use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
-use appytappy_platform::{REQUESTS, Request};
 use appytappy_sources::HostSystem;
 use appytappy_sources::screen::place::{Target, place};
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler};
@@ -54,8 +53,8 @@ pub(crate) struct ClickedWindow {
 /// What the setup app needs from the operating system: its windows and
 /// processes, a capture of one window, a click sent on request, a way to
 /// tell the runtime that a save changed what it reads or that a request to
-/// run an automation once waits, and the overlays' windows. It lives as long as the owner, which sends itself work that
-/// names it.
+/// run an automation once waits, and the overlays' windows. It lives as
+/// long as the owner, which sends itself work that names it.
 pub(crate) trait Host: 'static {
     /// A running capture.
     type Session: CaptureSession;
@@ -137,8 +136,9 @@ pub(crate) trait Host: 'static {
     fn reload_runtime(&self);
 
     /// Tells the runtime that a request to run an automation once waits in
-    /// its file, and answers whether a runtime heard it: one that is not
-    /// running hears nothing, so the request has to be taken away again.
+    /// its file, with the signal that has it read the saved files again,
+    /// and answers whether a runtime heard it: one that is not running
+    /// hears nothing, so the request has to be taken away again.
     ///
     /// # Errors
     ///
@@ -235,12 +235,11 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
             clippy::let_underscore_must_use,
             reason = "the save already happened, and a runtime that missed the signal reads it when it starts; the main pages ask whether it runs"
         )]
-        let _ = appytappy_platform::request(REQUESTS, Request::Reload);
+        let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
     }
 
-    #[mutants::skip] // Sets a named Windows event, which no test can observe.
     fn run_once(&self) -> io::Result<bool> {
-        appytappy_platform::request(REQUESTS, Request::RunOnce)
+        appytappy_platform::request_reload(appytappy_platform::RELOAD)
     }
 
     fn runtime_runs(&self) -> io::Result<bool> {

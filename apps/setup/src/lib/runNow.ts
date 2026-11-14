@@ -37,7 +37,21 @@ export const RUN_NOW_HINT =
 
 /** What the editor says once the background part heard an ask. */
 export const RUN_ASKED =
-  "Asked AppyTappy's background part to run the actions. If nothing happens, its log says why: runtime.log in %LOCALAPPDATA%\\AppyTappy\\logs, which the Debug page shows too.";
+  "Asked AppyTappy's background part to run the actions. If nothing happens, its log says why: runtime.log in %LOCALAPPDATA%\\AppyTappy\\logs.";
+
+/**
+ * How many of an automation's actions run only while its application is the window in front: a key press and a
+ * click with the cursor do. AppyTappy Setup is in front when the button is pressed, so those are skipped.
+ */
+export type Front = 'none' | 'some' | 'all';
+
+/** How many of the actions need the application in front, from whether each one does. */
+export function frontOf(needs: readonly boolean[]): Front {
+  if (!needs.includes(true)) {
+    return 'none';
+  }
+  return needs.includes(false) ? 'some' : 'all';
+}
 
 /** What the editor knows when it shows Run actions now. */
 export interface RunNowFacts {
@@ -54,8 +68,8 @@ export interface RunNowFacts {
   readonly busy: boolean;
   /** The name of the application the automation watches, or null before one is picked. */
   readonly app: string | null;
-  /** Whether an action presses keys or clicks with the cursor, which happens only while that application is in front. */
-  readonly needsFront: boolean;
+  /** How many of the actions run only while that application is the window in front. */
+  readonly front: Front;
   readonly ask: RunAsk;
 }
 
@@ -87,14 +101,21 @@ export function runNowView(facts: RunNowFacts): RunNowView {
   if (facts.runtime === false) {
     return off("AppyTappy's background part isn't running, so nothing can run the actions.");
   }
+  const app = facts.app ?? 'the application';
+  if (facts.front === 'all') {
+    return off(
+      `Every action here presses keys or clicks with the cursor, which happens only while ${app} is the window in front. AppyTappy Setup is in front when you select this, so nothing would run.`,
+    );
+  }
   if (facts.ask.kind === 'asking') {
     return off("Asking AppyTappy's background part…");
   }
   if (facts.ask.kind === 'failed') {
     return { disabled: facts.busy, note: facts.ask.message, warn: true };
   }
-  const front = facts.needsFront
-    ? ` Keys are pressed, and clicks with the cursor made, only while ${facts.app ?? 'the application'} is the window in front, so from here they are skipped.`
-    : '';
+  const front =
+    facts.front === 'some'
+      ? ` Keys are pressed, and clicks with the cursor made, only while ${app} is the window in front, so from here they are skipped.`
+      : '';
   return { disabled: facts.busy, note: `${facts.ask.kind === 'asked' ? RUN_ASKED : ''}${front}`.trim(), warn: false };
 }

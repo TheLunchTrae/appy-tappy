@@ -20,14 +20,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
 mod autostart;
 mod clock;
 mod instance;
-mod request;
+mod reload;
 mod tray;
 mod window_watch;
 
 pub(crate) use autostart::{autostart_enabled, disable_autostart, enable_autostart};
 pub(crate) use clock::local_time;
 pub(crate) use instance::InstanceGuard;
-pub(crate) use request::{RequestWatch, request};
+pub(crate) use reload::{ReloadWatch, request_reload};
 pub(crate) use tray::Tray;
 pub(crate) use window_watch::WindowWatch;
 

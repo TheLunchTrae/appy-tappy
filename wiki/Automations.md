@@ -326,14 +326,15 @@ The actions run under the same rules as when the condition becomes true:
   application is the window in front. AppyTappy Setup is in front when you
   select the button, so those actions are skipped, and the note under the
   button says so. Media, volume, opening, sounds, and clicks sent to the
-  window run.
+  window run. When every action presses keys or clicks with the cursor,
+  nothing would run, so the button is unavailable and the note says why.
 
 What the run changes stays changed: AppyTappy does not undo it, even with
-**Undo these when the condition stops being true** on. If the automation, or
-another one, was waiting to undo a change to the same thing, such as the same
-player's volume, that undo no longer happens. The run doesn't start the wait
-before the automation can run again, and the automation still runs when its
-condition becomes true.
+**Undo these when the condition stops being true** on. An automation that ran
+because its condition became true still undoes its own changes afterwards, and
+puts back what it found before it ran. The run doesn't start the wait before
+the automation can run again, and the automation still runs when its condition
+becomes true.
 
 After you select the button, the note says that the background part was
 asked. Its answer doesn't come back to the editor. If nothing happens, the
