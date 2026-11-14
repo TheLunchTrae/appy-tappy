@@ -366,7 +366,8 @@ a second, in the owner thread, and share when they record and why they stop
 region was drawn on is skipped, a capture failure stops the recording with the
 failure as its problem, and a closed window ends it. Starting one kind
 replaces a recording of the other. Recordings of both kinds are numbered from
-one counter.
+one counter, and the page stops a recording by the number its start answered
+([Recording](State-machines.md#recording)).
 
 On the page, the two kinds share one hook for the recording's state, its
 errors, and its commands (`useRecorder` in `lib/useRecorder.ts`), under

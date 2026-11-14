@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { errorText, stopRecording } from './api.ts';
 import { background, useRepeat } from './repeat.ts';
 import { useNewest } from './request.ts';
+import { ownTicket } from './ticket.ts';
 
 /** How long a recording's state waits between reads, while it is live. */
 const RECORDING_PAUSE_MS = 250;
@@ -26,11 +27,16 @@ export interface Recorder<View> {
    * and its failure is the command error, which its success clears.
    */
   readonly command: (work: () => Promise<void>) => Promise<boolean>;
+  /** Hears that a start answered `recording`, the recording's number, which the component then stops by. */
+  readonly started: (recording: number) => void;
+  /** Stops the recording the component started, if it started one. */
+  readonly stop: () => Promise<void>;
 }
 
 /**
  * A recording whose state `read` answers, kept current while `live` says its view still changes. Leaving the
- * component that uses it stops the recording, since it samples the window until it stops. Both must stay the same
+ * component that uses it stops the recording it started, since it samples the window until it stops, by the number
+ * its start answered (`ownTicket`), so the stop never stops a recording that took its place. Both must stay the same
  * functions.
  */
 export function useRecorder<View>(read: () => Promise<View | null>, live: (view: View) => boolean): Recorder<View> {
@@ -41,13 +47,18 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
   const [pollError, setPollError] = useState<string | null>(null);
   // Each start, stop, and discard makes the polls sent before it stale.
   const turn = useNewest();
-
-  useEffect(
-    () => () => {
-      background(stopRecording());
-    },
-    [],
+  const [own] = useState(() =>
+    ownTicket((recording) => {
+      background(stopRecording(recording));
+    }),
   );
+
+  useEffect(() => {
+    own.enter();
+    return () => {
+      own.leave();
+    };
+  }, [own]);
 
   const poll = useCallback(async (): Promise<void> => {
     const current = turn.join();
@@ -84,5 +95,21 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
     setView(null);
     setPollError(null);
   }, []);
-  return { view, commandError, pollError, clearCommandError, show: setView, forget, command };
+  const stop = useCallback(async (): Promise<void> => {
+    const recording = own.held();
+    if (recording !== null) {
+      await stopRecording(recording);
+    }
+  }, [own]);
+  return {
+    view,
+    commandError,
+    pollError,
+    clearCommandError,
+    show: setView,
+    forget,
+    command,
+    started: own.started,
+    stop,
+  };
 }

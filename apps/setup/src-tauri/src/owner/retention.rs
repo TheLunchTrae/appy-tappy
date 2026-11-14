@@ -101,7 +101,7 @@ fn with_everything_saved(name: &str) -> (Harness, FrameHandler, Stores, PathBuf,
         .ask(|owner| owner.start_recording(characters_in(left(), red()), false))
         .expect("records");
     harness.deliver(&mut handler, Ok(&narrow_image()));
-    harness.ask(Owner::stop_recording);
+    harness.stop_recording();
     let digits = ReferenceSaveSpec {
         app: "example".to_owned(),
         reference_name: "Digits".to_owned(),

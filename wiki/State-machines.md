@@ -46,7 +46,9 @@ it was about has gone. Thirteen guards drop such stale messages:
   or replaced capture still sends is dropped, and so is text for a recording
   or a search that was discarded or replaced. A ticket's number names its
   work to the UI: a stop that carries the number of another capture than
-  the picked window's is dropped (`Owner::stop_capture`), the owner answers
+  the picked window's is dropped (`Owner::stop_capture`), and so is a stop
+  that carries the number of another recording than the one the capture
+  records (`Owner::stop_recording`), the owner answers
   nothing for a picture asked of another search than the one it holds and
   rereads nothing for one (`apps/setup/src-tauri/src/owner/found.rs`), and
   an ask about another watch than the one it holds is refused. A reading's
@@ -1415,8 +1417,9 @@ stateDiagram-v2
   flow, and a click's target screen. The capture stops when that screen
   goes, on **Change window**, and when a click's target screen looks for
   its window again. The screen stops the capture it started, by the number
-  its pick answered (`ownCapture`), and the owner drops the stop when
-  another capture took that one's place (`Owner::stop_capture`): a stop
+  its pick answered (`ownTicket` in `apps/setup/src/lib/ticket.ts`), and the
+  owner drops the stop when another capture took that one's place
+  (`Owner::stop_capture`): a stop
   sent as a screen goes can arrive after the next screen's pick or the
   automation editor's watch started. While one holds it, the pages' lists are read only
   after a save.
@@ -1628,6 +1631,16 @@ two never run together, and starting one replaces the other. Both hold a
 `Lifecycle` (`recording/lifecycle.rs`), whose `stopped` field says whether it
 still records, and whose `problem` says why it skips frames or why it stopped
 by itself.
+
+A start answers the recording's number, which **Record more** keeps, and the
+component that started the recording stops it by that number, on **Stop**
+and when it goes (`useRecorder` in `apps/setup/src/lib/useRecorder.ts`). The
+owner drops a stop that carries another recording's number
+(`Owner::stop_recording`), one of the
+[stale-message guards](#how-to-read-this-page): a stop sent as one
+component goes can arrive after the recording that took its place started,
+as when the reference editor's recording of readings replaces a recording of
+looks.
 
 A recording of readings keeps a reading for each shape a region shows, for
 the user to review. Its `Sightings` hold `full`, which says why it takes no
