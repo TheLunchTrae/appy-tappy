@@ -1365,7 +1365,9 @@ taken, goes back to **Asking** with what the user entered and the reason, and
 read while the dialog asks, changes nothing.
 
 The export dialog (`ExportApp.tsx`) has no states beyond busy while the file
-is made and saved; a failure shows in it and **Save file** tries again.
+is made and saved. It asks where to save only once the file is made
+(`saveZip`), since the picker makes the file it picks: a failure leaves no
+file behind, shows in the dialog, and **Save file** tries again.
 
 ### Capture slot
 

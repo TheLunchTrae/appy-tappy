@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { errorText, exportApp } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
 import { exportName } from '../lib/sharing.ts';
-import { pickZipFile } from '../lib/zipFile.ts';
+import { saveZip } from '../lib/zipFile.ts';
 import { Dialog } from './Dialog.tsx';
 
 interface Props {
@@ -14,7 +14,8 @@ interface Props {
 }
 
 /**
- * Says what an exported application's file holds and shows, then makes it and saves it where the user picks.
+ * Says what an exported application's file holds and shows, then makes it and saves it where the user picks, asking
+ * where only once it is made.
  * Nothing is sent anywhere.
  */
 export function ExportApp({ app, name, onClose }: Props) {
@@ -23,12 +24,9 @@ export function ExportApp({ app, name, onClose }: Props) {
   const save = async (): Promise<void> => {
     setBusy(true);
     try {
-      const write = await pickZipFile(exportName(name));
-      if (write === null) {
-        return;
+      if (await saveZip(exportName(name), async () => exportApp(app))) {
+        onClose();
       }
-      await write(await exportApp(app));
-      onClose();
     } catch (failure: unknown) {
       setError(`${errorText(failure)} The file was not saved.`);
     } finally {
