@@ -325,8 +325,7 @@ chooses them:
 - **All it knows** reads every character the reference knows, and any it
   learns later. A new value starts with it.
 - **Digits** reads `0` to `9` and nothing else. A digit the reference learns
-  later is read too. A sign after the digits ends the number, so `87%` reads
-  as 87, but the reference still has to know the sign.
+  later is read too.
 - **Digits and symbols** reads the digits and each character the reference
   knows that is neither a digit nor a letter, such as `%`, `.`, `,`, `:`,
   `/`, `-`, and `+`. It shows while the reference knows such a character. A

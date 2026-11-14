@@ -82,8 +82,9 @@ export function CharactersRead({ reference, characters, onCharacters }: Props) {
       )}
       {choice === 'digits' ? (
         <span className="note">
-          For a number of digits alone. A sign after them ends the number, so 87% reads as 87, but {reference.name}{' '}
-          still has to know the sign.
+          For a number of digits alone. A sign after them, such as the % in 87%, ends the number, but {reference.name}{' '}
+          still has to know it. A minus, decimal point, or thousands comma is part of the number: read it too with
+          Choose…, or for a decimal point, turn on Whole number only.
         </span>
       ) : null}
       {choice === 'choose' && characters !== null && read.length > 0 && read.length < characters.length ? (

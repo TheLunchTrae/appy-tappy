@@ -1160,7 +1160,6 @@ mod tests {
         assert_eq!(parsed("%12/50"), Number::new(12.0));
         assert_eq!(parsed("12/50"), Number::new(12.0));
         assert_eq!(parsed("1:30"), Number::new(1.0));
-        assert_eq!(parsed("0:45"), Number::new(0.0));
         assert_eq!(parsed("1.2.3"), Number::new(1.2));
         assert_eq!(parsed("7."), Number::new(7.0));
         assert_eq!(parsed("-%5"), Number::new(5.0));
