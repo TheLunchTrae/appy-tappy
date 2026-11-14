@@ -245,10 +245,10 @@ impl DigitReader {
     /// reads as `0.`, so `-.5` reads as -0.5, unless letters came before,
     /// so `Lv.5` reads as 5; a `.` with no digit after it is no number. A
     /// `,` between groups of three digits is skipped, so `1,234` reads as
-    /// 1234; any other `,`, and other learned characters such as `%` or
-    /// `/`, separate numbers, so `12,5` and `12/50` read as 12. With
-    /// `whole`, the number ends at the `.`, so the digits after it are
-    /// ignored and need no glyphs: `87.5%` reads as 87.
+    /// 1234; any other `,`, and other learned characters such as `%`, `:`,
+    /// or `/`, separate numbers, so `12,5`, `12:30`, and `12/50` read as
+    /// 12. With `whole`, the number ends at the `.`, so the digits after it
+    /// are ignored and need no glyphs: `87.5%` reads as 87.
     ///
     /// A character the reader's value leaves out, as
     /// [`DigitReader::reading`] describes, is text: it ends the number, or
@@ -1159,6 +1159,7 @@ mod tests {
         assert_eq!(parsed("-12"), Number::new(-12.0));
         assert_eq!(parsed("%12/50"), Number::new(12.0));
         assert_eq!(parsed("12/50"), Number::new(12.0));
+        assert_eq!(parsed("1:30"), Number::new(1.0));
         assert_eq!(parsed("1.2.3"), Number::new(1.2));
         assert_eq!(parsed("7."), Number::new(7.0));
         assert_eq!(parsed("-%5"), Number::new(5.0));

@@ -264,7 +264,7 @@ sent to the window, the log says that it was sent.
 Clicks work only when both the watched application and the one clicked in
 have anti-cheat set to **None** on the Applications page, because anti-cheat
 can see clicks that AppyTappy makes, whichever way they are sent. A click
-cannot be undone, so turn undo off for an automation that clicks.
+cannot be undone, so an automation that only clicks needs undo turned off.
 
 Windows does not let AppyTappy click in a program that runs as administrator.
 With **Move the cursor**, it gives no sign that it dropped the click. With

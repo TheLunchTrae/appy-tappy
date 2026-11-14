@@ -25,7 +25,9 @@ the application the reference belongs to, or select **Add application**, then
 select **Capture this window**, as the first step of
 [making a value](Values.md#make-a-value) describes.
 
-1. **Name it,** such as `Percent font`.
+1. **Name it,** such as `Percent font`, with a name no other reference of
+   the application has. Capitals of the letters A to Z don't count:
+   `Percent font` and `percent font` are one name.
 2. **Pick the color.** Next to **Characters' color**, select **Pick**, then
    click the characters on a screenshot. **Tolerance** says how far a pixel's
    color may be from it and still count: drag the slider or type a number.
@@ -112,7 +114,8 @@ reference reads can show:
 
 - **Digits** is `0` to `9`.
 - **Decimal point**, **Comma**, **Percent**, **Minus**, **Plus**, and
-  **Colon** are each one sign. Turn on the ones the application draws.
+  **Colon** are each one sign. Turn on the ones the application draws. For
+  how a number reads around a `:` or `/`, see [Checks](Values.md#checks).
 - **Uppercase** and **Lowercase** are the English letters `A` to `Z` and `a`
   to `z`, each case on its own, and **Question mark** and
   **Exclamation mark** are the punctuation that goes with them. Only

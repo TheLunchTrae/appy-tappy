@@ -609,11 +609,14 @@ test('charactersOnceTaught keeps the choice that was picked, for the reference a
   expect(charactersOnceTaught(number, [percent], taught('percent'))).toEqual([...digits, '%', '/']);
   // A new reference knows only what it is taught.
   expect(charactersOnceTaught(number, [percent], taught(null))).toEqual([...digits, '/']);
-  // A chosen set loses only what the reference knew and the taught one does not, and every character stays every
-  // character.
-  expect(charactersOnceTaught({ ...number, characters: ['1', '7', 'L'] }, [percent], taught(null))).toEqual(['7', 'L']);
+  // A chosen set stays as it is, and every character stays every character.
+  expect(charactersOnceTaught({ ...number, characters: ['1', '7', 'L'] }, [percent], taught(null))).toEqual([
+    '1',
+    '7',
+    'L',
+  ]);
   expect(charactersOnceTaught({ ...number, characters: null }, [percent], taught(null))).toBeNull();
-  expect(readsOf(charactersOnceTaught({ ...number, characters: ['1'] }, [percent], taught(null)))).toBeNull();
+  expect(readsOf([])).toBeNull();
   expect(readsOf(['1', '%'])).toBe('1%');
 });
 
@@ -634,7 +637,7 @@ test('withReference keeps the choice of characters that was picked, for the new 
     ...digits,
     ':',
   ]);
-  expect(withReference({ ...number, characters: ['1', 'L'] }, 'clock', references).characters).toEqual(['1']);
+  expect(withReference({ ...number, characters: ['1', 'L'] }, 'clock', references).characters).toEqual(['1', 'L']);
   // A reference that is not among them, such as while its file cannot be read, changes nothing that is read.
   expect(withReference({ ...number, characters: ['1', 'L'] }, 'gone', references)).toEqual({
     ...number,

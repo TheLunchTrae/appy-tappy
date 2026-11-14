@@ -60,8 +60,8 @@ export function readChoice(characters: readonly string[] | null, known: readonly
 /**
  * The set a value reads once `choice` is picked, or null for every character its reference knows. Digits is all ten,
  * learned or not, so a digit the reference learns later is read too. Digits and symbols adds the symbols the
- * reference knows now. Choose starts from the characters of `current`, what the value reads so far, that the
- * reference knows, to change one by one.
+ * reference knows now. Choose starts from `current`, what the value reads so far, learned or not, to change one by
+ * one, so a digit that Digits reads stays read once the reference learns it.
  */
 export function withReadChoice(
   choice: ReadChoice,
@@ -76,26 +76,23 @@ export function withReadChoice(
     case 'digitsAndSymbols':
       return digitsAndSymbols(known);
     case 'choose':
-      return current === null ? known : known.filter((character) => current.includes(character));
+      return current ?? known;
   }
 }
 
 /**
  * What a value that read `characters` of a reference that knows `from` reads once it reads with one that knows `to`
  * instead, so its choice stays the one that was picked: all of it and the digits as they are, or the digits and the
- * new reference's symbols. A chosen set loses only the characters that the old reference knew and the new one does
- * not, so a reference that was taught more in place takes nothing from it. `from` is what the reference knew when the
- * choice was made, since the set is a preset's only against that.
+ * new reference's symbols. A chosen set stays as it is, since a character the new reference has yet to learn shows
+ * outlined to turn off, and is read once it is learned. `from` is what the reference knew when the choice was made,
+ * since the set is a preset's only against that.
  */
 export function forReference(
   characters: readonly string[] | null,
   from: readonly string[],
   to: readonly string[],
 ): readonly string[] | null {
-  const choice = readChoice(characters, from);
-  return characters !== null && choice === 'choose'
-    ? characters.filter((character) => to.includes(character) || !from.includes(character))
-    : withReadChoice(choice, to, characters);
+  return withReadChoice(readChoice(characters, from), to, characters);
 }
 
 /** `characters` with `character` when `on`, or without it. */

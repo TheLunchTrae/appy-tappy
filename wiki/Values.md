@@ -24,9 +24,10 @@ back to the automation with the value picked.
    window the way it does when it runs your automations, and names it. Select
    **Capture this window**. [When the window isn't found](#when-the-window-isnt-found)
    says what to do when it has no window to capture.
-2. **Where to read.** Type a **Value name**, such as `Progress`, and choose
-   the **Check**, one of the four [checks](#checks) below. Then show
-   AppyTappy where the value is, in one of two ways:
+2. **Where to read.** Type a **Value name**, such as `Progress`, that no
+   other value of the application has. Capitals of the letters A to Z don't
+   count: `Progress` and `progress` are one name. Choose the **Check**, one of the four [checks](#checks) below.
+   Then show AppyTappy where the value is, in one of two ways:
    - **Drag over the live window.** While the window shows what to read, drag
      a box around it. The drag takes the screenshot as it starts, the
      picture holds still while you drag and gives way to the screenshot once
@@ -275,7 +276,11 @@ instant can then be missed.
   is left to teach: it does not change how a number reads. A `.` is always
   the decimal point, and a `,` only
   separates thousands: it counts only between groups of three digits, so
-  `12,5` reads as 12. A number written with its point first, such as `.5`,
+  `12,5` reads as 12. Any other character after the digits ends the number,
+  so a time such as `12:30` and a count such as `12/50` each read as 12, the
+  number before the colon or slash. The reference still has to know the `:`
+  or `/`, since a shape it has not learned fails the read. A number written
+  with its point first, such as `.5`,
   reads as 0.5, and a `.` with no digit after it, such as `...`, is not a
   number.
 - **Bar fill** reads how full a bar is, from 0 to 100. Draw the region
@@ -331,13 +336,16 @@ chooses them:
   **Digits and symbols** again adds the new symbol.
 - **Choose…** shows each character the reference knows with a box, with the
   ones the value reads so far turned on. Turn on the ones the value shows, at
-  least one. A character the value reads that the reference has yet to learn
-  shows too, outlined: it reads once the reference learns it, and you can
-  turn it off.
+  least one. Choosing it keeps every character the value reads so far,
+  learned or not, so choosing it after **Digits** keeps all ten digits. A
+  character the value reads that the reference has yet to learn shows too,
+  outlined, and a note under the list says the reference has yet to learn
+  it: it reads once the reference learns it, and you can turn it off.
 
 Picking another reference keeps **All it knows** and **Digits**, takes
-**Digits and symbols** from the new reference's symbols, and takes out of a
-**Choose…** set the characters that only the old reference knows. Teaching
+**Digits and symbols** from the new reference's symbols, and keeps a
+**Choose…** set as it is: a character the new reference has yet to learn
+shows outlined, so you can turn it off. Teaching
 the reference from this value, with **Edit** or **Record readings**, adds a
 new symbol to **Digits and symbols** and changes no other choice.
 
