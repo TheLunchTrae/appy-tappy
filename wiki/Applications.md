@@ -145,25 +145,31 @@ watches for other programs that interfere with them. AppyTappy reads only
 what the window shows, the way a screen recorder does, and changes media and
 volume through Windows, so those work for every application.
 
-Pressing keys is different. Anti-cheat can see keys that another program
-presses and treat them as cheating, so AppyTappy presses keys only into an
-application whose anti-cheat is set to **None**.
+Pressing keys and clicking are different. Anti-cheat can see keys that
+another program presses and clicks that it makes, and treat them as cheating,
+so AppyTappy presses keys only into an application whose anti-cheat is set to
+**None**, and clicks only when the watched application and the one it clicks
+in are both set to **None**.
 
 Set it in the **Anti-cheat** menu on the Applications page:
 
-- **Not set.** Every new application starts here. Key presses are blocked.
+- **Not set.** Every new application starts here. Key presses and clicks are
+  blocked.
 - **User-mode anti-cheat** or **Kernel-level anti-cheat.** The application
-  has anti-cheat. Key presses are blocked.
-- **None.** The application has no anti-cheat. Key presses are allowed.
+  has anti-cheat. Key presses and clicks are blocked.
+- **None.** The application has no anti-cheat. Key presses and clicks are
+  allowed.
 
 AppyTappy asks you to confirm before it sets **None**.
 
 > [!WARNING]
 > Only pick **None** if the application has no anti-cheat. Pressing keys into
-> an application with anti-cheat can get your account banned.
+> an application with anti-cheat, or clicking in one, can get your account
+> banned.
 
 Changing the setting takes effect at once: automations that press keys into
-the application stop when you move it away from **None**.
+the application, or click while it runs, stop when you move it away from
+**None**.
 
 ## Overlay
 

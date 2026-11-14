@@ -32,8 +32,8 @@ interface AntiCheatCellProps {
 }
 
 /**
- * An application's anti-cheat, picked from a menu. None lets automations
- * press keys into it, so picking None asks first, in the menu's place.
+ * An application's anti-cheat, picked from a menu. None lets automations press keys into it and click in it, so
+ * picking None asks first, in the menu's place.
  */
 function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet, busy }: AntiCheatCellProps) {
   const { control, refs } = useQuestion<HTMLSelectElement>(confirming);
@@ -52,8 +52,8 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet, busy }: 
           onSet('none');
         }}
       >
-        Only pick None if {name} has no anti-cheat. Pressing keys into an application with anti-cheat can get your
-        account banned.
+        Only pick None if {name} has no anti-cheat. Pressing keys into an application with anti-cheat, or clicking in
+        one, can get your account banned.
       </Question>
     );
   }
