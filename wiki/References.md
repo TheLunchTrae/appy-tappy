@@ -112,7 +112,8 @@ reference reads can show:
 
 - **Digits** is `0` to `9`.
 - **Decimal point**, **Comma**, **Percent**, **Minus**, **Plus**, and
-  **Colon** are each one sign. Turn on the ones the application draws.
+  **Colon** are each one sign. Turn on the ones the application draws. For
+  how a number reads around a `:` or `/`, see [Checks](Values.md#checks).
 - **Uppercase** and **Lowercase** are the English letters `A` to `Z` and `a`
   to `z`, each case on its own, and **Question mark** and
   **Exclamation mark** are the punctuation that goes with them. Only

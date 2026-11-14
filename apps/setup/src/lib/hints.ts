@@ -83,7 +83,7 @@ export const BOXES_HINT =
 
 /** The characters a reference needs. */
 export const EXPECTED_HINT =
-  'Your list of what to teach. AppyTappy shows which of these characters the reference has yet to learn. It only guides you: a character is learned from the boxes you type and the readings you keep, never from this list, and a number reads the same way whatever you turn on.';
+  'Your list of what to teach. AppyTappy shows which of these characters the reference has yet to learn. It only guides you: a character is learned from the boxes you type and the readings you keep, never from this list, and a number reads the same way whatever you turn on. A number ends at a colon or slash, so 12:30 and 12/50 each read as 12.';
 /** Finding more text like the selected box. */
 export const FIND_LIKE_HINT =
   "Looks on the selected box's screenshot for other text in the characters' color and as tall as the text in the box, and reads each as text. It lists only text that shows the characters the reference needs. Each one you tick and add becomes a box. Draw the box tightly around the text and type what it shows first, so the size is right.";
