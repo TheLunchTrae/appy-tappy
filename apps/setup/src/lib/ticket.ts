@@ -8,6 +8,8 @@
 export function ownTicket(stop: (ticket: number) => void): {
   /** The component shows. */
   readonly enter: () => void;
+  /** Whether the component shows. */
+  readonly shows: () => boolean;
   /** Hears that the component's start answered `ticket`, which stops at once when the component went meanwhile. */
   readonly started: (ticket: number) => void;
   /** The number of the component's work, or null without any. */
@@ -29,6 +31,7 @@ export function ownTicket(stop: (ticket: number) => void): {
     enter: () => {
       shows = true;
     },
+    shows: () => shows,
     started: (ticket) => {
       // The owner replaced the component's last work when it started this one, or went on with it under the same
       // number. The newest has the highest number, whichever start answers last.
