@@ -169,10 +169,10 @@ mod tests {
     use std::fs;
     use std::io::{Cursor, Read as _};
 
+    use appytappy_config::action::MediaCommand;
     use appytappy_config::app_file::RegionDef;
-    use appytappy_config::automation_file::{
-        ActionDef, AutomationDef, ComparisonDef, MediaCommandDef, TargetDef, WhenDef,
-    };
+    use appytappy_config::automation_file::{ActionDef, AutomationDef, TargetDef, WhenDef};
+    use appytappy_config::rule::Comparison;
     use zip::ZipArchive;
 
     use crate::debug::trace_file::{HEADER, Spread};
@@ -555,11 +555,11 @@ mod tests {
                         when: WhenDef {
                             app: "example".to_owned(),
                             value,
-                            is: ComparisonDef::AtLeast,
+                            is: Comparison::AtLeast,
                             target: TargetDef::Number(100.0),
                         },
                         actions: vec![ActionDef::Media {
-                            command: MediaCommandDef::Pause,
+                            command: MediaCommand::Pause,
                             app: None,
                         }],
                         undo: false,

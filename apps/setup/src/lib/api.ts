@@ -4,7 +4,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import type {
-  AntiCheatDef,
+  AntiCheatClass,
   AppFile,
   AppSpec,
   AppSummary,
@@ -20,7 +20,7 @@ import type {
   ClickPictureView,
   ClickSent,
   ClickSpec,
-  ColorSpec,
+  ColorDef,
   DebugOverview,
   DraftDef,
   DraftShot,
@@ -45,7 +45,7 @@ import type {
   RecordingView,
   ReferenceSaveSpec,
   ReferenceTrial,
-  RegionSpec,
+  RegionDef,
   RowFilter,
   SaveSpec,
   SavedReference,
@@ -126,7 +126,7 @@ export async function select(screenshot: number, selection: SelectionSpec): Prom
  * The filled and the empty color of the bar in `region`, which was drawn on screenshot `screenshot`, found
  * on the screenshots of that one's window size; or why none are proposed.
  */
-export async function detectBar(region: RegionSpec, screenshot: number): Promise<BarDetection> {
+export async function detectBar(region: RegionDef, screenshot: number): Promise<BarDetection> {
   return invoke<BarDetection>('detect_bar', { region, screenshot });
 }
 
@@ -134,7 +134,7 @@ export async function detectBar(region: RegionSpec, screenshot: number): Promise
  * What a bar of the colors `filled` and `empty` reads in `region`, drawn on screenshot `screenshot`, on each
  * screenshot of that one's window size.
  */
-export async function measureBar(region: RegionSpec, screenshot: number, filled: ColorSpec, empty: ColorSpec): Promise<BarMeasure> {
+export async function measureBar(region: RegionDef, screenshot: number, filled: ColorDef, empty: ColorDef): Promise<BarMeasure> {
   return invoke<BarMeasure>('measure_bar', { region, screenshot, filled, empty });
 }
 
@@ -142,7 +142,7 @@ export async function measureBar(region: RegionSpec, screenshot: number, filled:
  * The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
  * to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
  */
-export async function matchPixels(screenshot: number, area: RegionSpec, rule: MatchRule): Promise<MatchView> {
+export async function matchPixels(screenshot: number, area: RegionDef, rule: MatchRule): Promise<MatchView> {
   return invoke<MatchView>('match_pixels', { screenshot, area, rule });
 }
 
@@ -205,7 +205,7 @@ export async function recordingState(): Promise<RecordingView | null> {
  * Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
  * Answers the recording's number.
  */
-export async function startLookRecording(region: RegionSpec, tolerance: number, screenshot: number): Promise<number> {
+export async function startLookRecording(region: RegionDef, tolerance: number, screenshot: number): Promise<number> {
   return invoke<number>('start_look_recording', { region, tolerance, screenshot });
 }
 
@@ -243,7 +243,7 @@ export async function captureOutline(application: string, width: number, height:
  * at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
  * earlier search.
  */
-export async function findLike(screenshot: number, region: RegionSpec, added: ReadonlyArray<RegionSpec>, ink: ColorSpec, tolerance: number): Promise<FoundView> {
+export async function findLike(screenshot: number, region: RegionDef, added: ReadonlyArray<RegionDef>, ink: ColorDef, tolerance: number): Promise<FoundView> {
   return invoke<FoundView>('find_like', { screenshot, region, added, ink, tolerance });
 }
 
@@ -261,7 +261,7 @@ export async function foundPicture(search: number, index: number, maxWidth: numb
  * Has the text reader read finds `indexes` of search `search` again, in the color `ink` within `tolerance`,
  * and answers the search, or null when that search was replaced or forgotten.
  */
-export async function rereadFound(search: number, indexes: ReadonlyArray<number>, ink: ColorSpec, tolerance: number): Promise<FoundView | null> {
+export async function rereadFound(search: number, indexes: ReadonlyArray<number>, ink: ColorDef, tolerance: number): Promise<FoundView | null> {
   return invoke<FoundView | null>('reread_found', { search, indexes, ink, tolerance });
 }
 
@@ -275,7 +275,7 @@ export async function forgetFound(): Promise<void> {
  * each with the name a find's or a recorded reading's character of the same shape has. None for an unknown
  * screenshot or a box that does not fit it.
  */
-export async function boxCharacters(screenshot: number, region: RegionSpec, ink: ColorSpec, tolerance: number): Promise<ReadonlyArray<ShownCharacter>> {
+export async function boxCharacters(screenshot: number, region: RegionDef, ink: ColorDef, tolerance: number): Promise<ReadonlyArray<ShownCharacter>> {
   return invoke<ReadonlyArray<ShownCharacter>>('box_characters', { screenshot, region, ink, tolerance });
 }
 
@@ -333,7 +333,7 @@ export async function readWindow(window: WindowDef): Promise<number | null> {
  * when it is given. One that no saved automation names goes the next time automations are saved, or with
  * {@link forgetUnsavedClickPictures}.
  */
-export async function addClickPicture(screenshot: number, region: RegionSpec, selection: SelectionSpec | null): Promise<ClickPictureView> {
+export async function addClickPicture(screenshot: number, region: RegionDef, selection: SelectionSpec | null): Promise<ClickPictureView> {
   return invoke<ClickPictureView>('add_click_picture', { screenshot, region, selection });
 }
 
@@ -454,8 +454,8 @@ export async function windowSize(): Promise<SizeDef | null> {
  * Where the saved value starts on a window of `width` by `height` in the fix flow, or null when it would
  * not fit.
  */
-export async function placeValue(application: string, value: string, width: number, height: number): Promise<RegionSpec | null> {
-  return invoke<RegionSpec | null>('place_value', { application, value, width, height });
+export async function placeValue(application: string, value: string, width: number, height: number): Promise<RegionDef | null> {
+  return invoke<RegionDef | null>('place_value', { application, value, width, height });
 }
 
 /** Saves a fix of a saved value at the size of the screenshot `spec` names. */
@@ -493,7 +493,7 @@ export async function deleteReference(application: string, reference: string): P
 }
 
 /** Sets how the application `application` protects itself from other programs. */
-export async function setAntiCheat(application: string, antiCheat: AntiCheatDef): Promise<void> {
+export async function setAntiCheat(application: string, antiCheat: AntiCheatClass): Promise<void> {
   await invoke('set_anti_cheat', { application, antiCheat });
 }
 

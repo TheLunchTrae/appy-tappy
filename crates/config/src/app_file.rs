@@ -50,7 +50,7 @@ pub struct AppFile {
     #[serde(default)]
     pub size_changes: SizeChangesDef,
     /// How the application protects itself from other programs.
-    pub anti_cheat: AntiCheatDef,
+    pub anti_cheat: AntiCheatClass,
     /// The values read from the application's window.
     pub values: Vec<ValueDef>,
     /// The characters its number values are read with. Always written,
@@ -193,20 +193,9 @@ pub struct WindowDef {
     /// always has to match.
     pub executable: String,
     /// The fields besides the executable a window has to match to qualify.
-    pub must_match: MustMatchDef,
+    pub must_match: MustMatch,
     /// What to take when no window qualifies.
     pub fallback: FallbackDef,
-}
-
-/// [`MustMatch`] as the file spells it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct MustMatchDef {
-    /// The title has to match.
-    pub title: bool,
-    /// The class has to match.
-    pub class: bool,
 }
 
 /// [`WindowMatch::fallback`] as the file spells it.
@@ -231,12 +220,11 @@ impl WindowDef {
     /// The matcher this describes.
     #[must_use]
     pub fn to_match(&self) -> WindowMatch {
-        let MustMatchDef { title, class } = self.must_match;
         WindowMatch {
             title: Pattern::new(&self.title),
             class: Pattern::new(&self.class),
             executable: Pattern::new(&self.executable),
-            must_match: MustMatch { title, class },
+            must_match: self.must_match,
             fallback: self.fallback == FallbackDef::Executable,
         }
     }
@@ -307,12 +295,11 @@ impl Error for WindowDefError {}
 
 impl From<&WindowMatch> for WindowDef {
     fn from(matcher: &WindowMatch) -> Self {
-        let MustMatch { title, class } = matcher.must_match;
         Self {
             title: matcher.title.as_str().to_owned(),
             class: matcher.class.as_str().to_owned(),
             executable: matcher.executable.as_str().to_owned(),
-            must_match: MustMatchDef { title, class },
+            must_match: matcher.must_match,
             fallback: if matcher.fallback {
                 FallbackDef::Executable
             } else {
@@ -334,32 +321,6 @@ pub enum SizeChangesDef {
     /// Rarely: a value reads only at the window sizes it was drawn at, and
     /// nothing is guessed.
     Rarely,
-}
-
-/// [`AntiCheatClass`] as the file spells it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub enum AntiCheatDef {
-    /// [`AntiCheatClass::None`].
-    None,
-    /// [`AntiCheatClass::UserMode`].
-    UserMode,
-    /// [`AntiCheatClass::KernelLevel`].
-    KernelLevel,
-    /// [`AntiCheatClass::Unknown`].
-    Unknown,
-}
-
-impl From<AntiCheatDef> for AntiCheatClass {
-    fn from(class: AntiCheatDef) -> Self {
-        match class {
-            AntiCheatDef::None => Self::None,
-            AntiCheatDef::UserMode => Self::UserMode,
-            AntiCheatDef::KernelLevel => Self::KernelLevel,
-            AntiCheatDef::Unknown => Self::Unknown,
-        }
-    }
 }
 
 /// One value read from the application's window.
@@ -1146,7 +1107,7 @@ mod tests {
                 executable: "Example.exe",
             }),
             size_changes: SizeChangesDef::Often,
-            anti_cheat: AntiCheatDef::Unknown,
+            anti_cheat: AntiCheatClass::Unknown,
             overlay: None,
             checked: None,
             values: vec![ValueDef {
@@ -1644,7 +1605,7 @@ mod tests {
         assert_eq!(def.title, "Example App");
         assert_eq!(
             def.must_match,
-            MustMatchDef {
+            MustMatch {
                 title: false,
                 class: false
             }
@@ -1653,7 +1614,7 @@ mod tests {
         for (fallback, takes_any) in [(FallbackDef::None, false), (FallbackDef::Executable, true)] {
             for (title, class) in [(true, false), (false, true)] {
                 let def = WindowDef {
-                    must_match: MustMatchDef { title, class },
+                    must_match: MustMatch { title, class },
                     fallback,
                     ..def.clone()
                 };
@@ -1665,17 +1626,34 @@ mod tests {
         }
     }
 
+    /// The file spells each with no copy of its own between them, so the
+    /// derived spelling is the file's.
     #[test]
-    fn anti_cheat_classes_map_one_to_one() {
-        let pairs = [
-            (AntiCheatDef::None, AntiCheatClass::None),
-            (AntiCheatDef::UserMode, AntiCheatClass::UserMode),
-            (AntiCheatDef::KernelLevel, AntiCheatClass::KernelLevel),
-            (AntiCheatDef::Unknown, AntiCheatClass::Unknown),
-        ];
-        for (def, class) in pairs {
-            assert_eq!(AntiCheatClass::from(def), class);
+    fn anti_cheat_classes_and_what_must_match_keep_their_file_spelling() {
+        for (class, text) in [
+            (AntiCheatClass::None, "\"none\""),
+            (AntiCheatClass::UserMode, "\"userMode\""),
+            (AntiCheatClass::KernelLevel, "\"kernelLevel\""),
+            (AntiCheatClass::Unknown, "\"unknown\""),
+        ] {
+            assert_eq!(serde_json::to_string(&class).expect("writes"), text);
+            assert_eq!(
+                serde_json::from_str::<AntiCheatClass>(text).expect("reads"),
+                class
+            );
         }
+        let must_match = MustMatch {
+            title: true,
+            class: false,
+        };
+        let text = r#"{"title":true,"class":false}"#;
+        assert_eq!(serde_json::to_string(&must_match).expect("writes"), text);
+        assert_eq!(
+            serde_json::from_str::<MustMatch>(text).expect("reads"),
+            must_match
+        );
+        serde_json::from_str::<MustMatch>(r#"{"title":true,"class":false,"executable":true}"#)
+            .expect_err("a field the file does not have");
     }
 
     #[test]

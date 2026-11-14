@@ -147,8 +147,9 @@ mod tests {
     use std::time::Instant;
 
     use appytappy_config::app_file::RegionDef;
-    use appytappy_config::app_file::{BuildDef, FallbackDef, MustMatchDef, WindowDef};
+    use appytappy_config::app_file::{BuildDef, FallbackDef, WindowDef};
     use appytappy_config::click::{ClickPicture, Corner};
+    use appytappy_config::window_match::MustMatch;
 
     use super::*;
     use crate::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Region};
@@ -160,7 +161,7 @@ mod tests {
             title: "*".to_owned(),
             class: "*".to_owned(),
             executable: "Target.exe".to_owned(),
-            must_match: MustMatchDef {
+            must_match: MustMatch {
                 title: false,
                 class: false,
             },

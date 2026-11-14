@@ -101,9 +101,10 @@ pub(crate) fn outline(
 
 #[cfg(test)]
 mod tests {
+    use appytappy_config::anti_cheat::AntiCheatClass;
     use appytappy_config::app_file::{
-        AntiCheatDef, CheckDef, ColorDef, FORMAT, OriginDef, ScreenDef, SizeChangesDef, SizeDef,
-        ValueDef, WindowDef,
+        CheckDef, ColorDef, FORMAT, OriginDef, ScreenDef, SizeChangesDef, SizeDef, ValueDef,
+        WindowDef,
     };
     use appytappy_config::window_match::WindowFacts;
 
@@ -159,7 +160,7 @@ mod tests {
                 executable: "Example.exe",
             }),
             size_changes,
-            anti_cheat: AntiCheatDef::Unknown,
+            anti_cheat: AntiCheatClass::Unknown,
             overlay: None,
             checked: None,
             references: Vec::new(),

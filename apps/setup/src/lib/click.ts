@@ -2,7 +2,7 @@
 // target screen sets it up and the automation editor shows it.
 
 import {
-  type AntiCheatDef,
+  type AntiCheatClass,
   type AppSummary,
   type ClickAtDef,
   type ClickButtonDef,
@@ -159,14 +159,14 @@ export function targetSummary(button: ClickButtonDef, at: ClickAtDef | null, del
 /** The saved applications a click can click in: those whose files read fine. */
 export function clickApps(
   apps: readonly AppSummary[],
-): readonly { readonly id: string; readonly name: string; readonly antiCheat: AntiCheatDef }[] {
+): readonly { readonly id: string; readonly name: string; readonly antiCheat: AntiCheatClass }[] {
   return apps.flatMap((app) =>
     app.file === null ? [] : [{ id: app.id, name: app.file.name, antiCheat: app.file.antiCheat }],
   );
 }
 
 /** What each anti-cheat class is called in a sentence. */
-const ANTI_CHEAT_WORDS: Readonly<Record<AntiCheatDef, string>> = {
+const ANTI_CHEAT_WORDS: Readonly<Record<AntiCheatClass, string>> = {
   none: 'none',
   userMode: 'user-mode',
   kernelLevel: 'kernel-level',
@@ -178,8 +178,8 @@ const ANTI_CHEAT_WORDS: Readonly<Record<AntiCheatDef, string>> = {
  * can see a click, so both must have none, as the runtime also checks.
  */
 export function clickBlocked(
-  watched: { readonly name: string; readonly antiCheat: AntiCheatDef },
-  clicked: { readonly name: string; readonly antiCheat: AntiCheatDef } | null,
+  watched: { readonly name: string; readonly antiCheat: AntiCheatClass },
+  clicked: { readonly name: string; readonly antiCheat: AntiCheatClass } | null,
 ): string | null {
   const blocking = [watched, clicked].find((app) => app !== null && app.antiCheat !== 'none');
   if (blocking === undefined || blocking === null) {

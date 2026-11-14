@@ -8,14 +8,20 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use crate::action::Action;
 use crate::signal::{SignalName, Value};
 
 /// How deep conditions may nest; a single comparison has depth 1.
 const MAX_CONDITION_DEPTH: usize = 8;
 
-/// How a comparison relates a signal's value to the rule's value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How a comparison relates a signal's value to the rule's value, spelled
+/// in the file as the variant in camel case, such as `atMost`. It has
+/// nothing to check, so the file reads it as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub enum Comparison {
     /// The signal is less than the value.
     Below,

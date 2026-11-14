@@ -4,9 +4,9 @@
 
 use std::time::Instant;
 
-use crate::check_spec::RegionSpec;
 use crate::recording::Recorder;
 use crate::recording::looks::{LookRecording, LookRecordingView};
+use appytappy_config::app_file::RegionDef;
 
 use super::Owner;
 use super::host::Host;
@@ -18,7 +18,7 @@ impl<H: Host> Owner<H> {
     /// recording in place of any recording, and answers its number.
     pub(crate) fn start_look_recording(
         &mut self,
-        region: RegionSpec,
+        region: RegionDef,
         tolerance: u8,
         screenshot: usize,
     ) -> Result<u64, String> {
@@ -53,7 +53,6 @@ mod tests {
 
     use appytappy_sources::screen::{FrameHandler, Image, Size};
 
-    use crate::check_spec::ColorSpec;
     use crate::owner::test_support::{
         FakeHost, Harness, capturing, characters_in, frame_image, harness, recognized, trial,
     };
@@ -62,6 +61,7 @@ mod tests {
     use crate::recording::looks::MAX_LOOKS;
     use crate::recording::ocr;
     use crate::ticket::Ticket;
+    use appytappy_config::app_file::ColorDef;
 
     use super::*;
 
@@ -87,7 +87,7 @@ mod tests {
     /// Records the looks of the whole 4 by 2 frame, drawn on screenshot 0,
     /// where shades at most 10 apart are one look.
     fn start_looks(owner: &mut Owner<FakeHost>) -> Result<u64, String> {
-        let region: RegionSpec =
+        let region: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         owner.start_look_recording(region, 10, 0)
     }
@@ -95,9 +95,9 @@ mod tests {
     /// Records the readings of the whole 4 by 2 frame, drawn on screenshot
     /// 0, with red as ink: a new recording, or with `more` the stopped one.
     fn start_readings(more: bool) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
-        let region: RegionSpec =
+        let region: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
-        let ink: ColorSpec =
+        let ink: ColorDef =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region, ink), more)
     }
@@ -358,7 +358,7 @@ mod tests {
         let (mut harness, mut handler) = Harness::with_screenshot();
         assert_eq!(
             harness.ask(|owner| {
-                let region: RegionSpec =
+                let region: RegionDef =
                     serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#)
                         .expect("valid JSON");
                 owner.start_look_recording(region, 10, 1)

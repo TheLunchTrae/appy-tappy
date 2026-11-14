@@ -15,8 +15,8 @@
 
 use appytappy_config::app_file::{CheckDef, ColorDef, OriginDef, RegionDef, StateDef};
 use appytappy_config::names::state_image_name;
-use appytappy_sources::screen::{EmptyRegion, Image, Region, Rgb, Size};
-use serde::{Deserialize, Serialize};
+use appytappy_sources::screen::{EmptyRegion, Image, Region, Size};
+use serde::Deserialize;
 
 use crate::screenshots::Shots;
 use crate::selection::{self, SelectionSpec};
@@ -29,86 +29,6 @@ pub(crate) use characters::{
     CharactersSpec, Label, MAX_EXPECTED_CHARACTERS, SavedReference, Session, sample_problem_of,
 };
 pub(crate) use error::{Cut, SpecError};
-
-/// A rectangle of the window, in pixels from its top-left corner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub(crate) struct RegionSpec {
-    pub(crate) x: u32,
-    pub(crate) y: u32,
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-}
-
-impl From<Region> for RegionSpec {
-    fn from(region: Region) -> Self {
-        RegionDef::from(region).into()
-    }
-}
-
-impl From<RegionDef> for RegionSpec {
-    fn from(region: RegionDef) -> Self {
-        let RegionDef {
-            x,
-            y,
-            width,
-            height,
-        } = region;
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-}
-
-impl TryFrom<RegionSpec> for Region {
-    type Error = EmptyRegion;
-
-    fn try_from(region: RegionSpec) -> Result<Self, EmptyRegion> {
-        let RegionSpec {
-            x,
-            y,
-            width,
-            height,
-        } = region;
-        Self::try_from(RegionDef {
-            x,
-            y,
-            width,
-            height,
-        })
-    }
-}
-
-/// A color of a screenshot: one the user picked on it, one proposed to them,
-/// or one the setup app read from it for the UI to show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub(crate) struct ColorSpec {
-    red: u8,
-    green: u8,
-    blue: u8,
-}
-
-impl From<Rgb> for ColorSpec {
-    fn from(Rgb { red, green, blue }: Rgb) -> Self {
-        Self { red, green, blue }
-    }
-}
-
-impl From<ColorSpec> for Rgb {
-    fn from(ColorSpec { red, green, blue }: ColorSpec) -> Self {
-        Self { red, green, blue }
-    }
-}
-
-impl From<ColorSpec> for ColorDef {
-    fn from(color: ColorSpec) -> Self {
-        Rgb::from(color).into()
-    }
-}
 
 /// A saved reference of a saved application.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -127,7 +47,7 @@ pub(crate) struct ReferenceRef {
 pub(crate) enum CheckSpec {
     /// Reads a number with the characters of a saved reference.
     Number {
-        region: RegionSpec,
+        region: RegionDef,
         reference: ReferenceRef,
         /// Whether digits after the decimal point are ignored.
         whole: bool,
@@ -140,20 +60,20 @@ pub(crate) enum CheckSpec {
     /// Measures how full a bar is from a filled and an empty color.
     #[serde(rename_all = "camelCase")]
     BarFill {
-        region: RegionSpec,
-        filled: ColorSpec,
-        empty: ColorSpec,
+        region: RegionDef,
+        filled: ColorDef,
+        empty: ColorDef,
     },
     /// Whether the region's average color is near `color`.
     Color {
-        region: RegionSpec,
-        color: ColorSpec,
+        region: RegionDef,
+        color: ColorDef,
         tolerance: u8,
     },
     /// Which of a few named looks the region shows, each taken from a
     /// screenshot.
     State {
-        region: RegionSpec,
+        region: RegionDef,
         /// The screenshot the region was drawn on; every state's screenshot
         /// must have its window size.
         #[serde(rename = "drawnOn")]
@@ -196,7 +116,7 @@ pub(crate) struct SavedCheck {
 
 impl CheckSpec {
     /// The region the check reads, as the UI drew it.
-    const fn region(&self) -> RegionSpec {
+    const fn region(&self) -> RegionDef {
         match self {
             Self::Number { region, .. }
             | Self::BarFill { region, .. }
@@ -263,13 +183,13 @@ pub(crate) fn to_saved_fix(
             }
         },
         CheckSpec::BarFill { filled, empty, .. } => CheckDef::BarFill {
-            filled: (*filled).into(),
-            empty: (*empty).into(),
+            filled: *filled,
+            empty: *empty,
         },
         CheckSpec::Color {
             color, tolerance, ..
         } => CheckDef::Color {
-            color: (*color).into(),
+            color: *color,
             tolerance: *tolerance,
         },
         CheckSpec::State {
@@ -396,7 +316,7 @@ fn state_picture(
 }
 
 /// `region` as a [`Region`].
-fn to_region(region: RegionSpec) -> Result<Region, SpecError> {
+fn to_region(region: RegionDef) -> Result<Region, SpecError> {
     Region::try_from(region).map_err(|EmptyRegion| SpecError::EmptyRegion)
 }
 
@@ -409,7 +329,7 @@ fn to_region(region: RegionSpec) -> Result<Region, SpecError> {
 /// [`SpecError::Outside`].
 pub(crate) fn drawn(
     screenshots: &dyn Shots,
-    region: RegionSpec,
+    region: RegionDef,
     screenshot: usize,
 ) -> Result<(Region, Size), SpecError> {
     let region = to_region(region)?;

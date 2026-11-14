@@ -407,10 +407,10 @@ impl Error for ShareError {
 
 #[cfg(test)]
 mod tests {
+    use appytappy_config::anti_cheat::AntiCheatClass;
     use appytappy_config::app_file::{
-        AntiCheatDef, BuildDef, CheckedDef, ColorDef, FORMAT, FixDef, OverlayDef, OverlayModeDef,
-        ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef,
-        WindowDef,
+        BuildDef, CheckedDef, ColorDef, FORMAT, FixDef, OverlayDef, OverlayModeDef, ReferenceDef,
+        RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
     use appytappy_config::window_match::WindowFacts;
     use appytappy_sources::screen::{Image, Size};
@@ -432,7 +432,7 @@ mod tests {
                 executable: "Example.exe",
             }),
             size_changes: SizeChangesDef::Often,
-            anti_cheat: AntiCheatDef::None,
+            anti_cheat: AntiCheatClass::None,
             overlay: None,
             checked: None,
             values: Vec::new(),
@@ -1045,10 +1045,10 @@ mod tests {
                 "[a-z]{0,8}".prop_map(|file| OriginDef::Imported { file }),
             ],
             anti_cheat in prop::sample::select(vec![
-                AntiCheatDef::None,
-                AntiCheatDef::UserMode,
-                AntiCheatDef::KernelLevel,
-                AntiCheatDef::Unknown,
+                AntiCheatClass::None,
+                AntiCheatClass::UserMode,
+                AntiCheatClass::KernelLevel,
+                AntiCheatClass::Unknown,
             ]),
         ) -> (AppFile, BTreeMap<String, Vec<u8>>) {
             let mut file = app(&name);

@@ -186,15 +186,18 @@ impl Error for Problem {
 
 #[cfg(test)]
 mod tests {
+    use appytappy_config::action::MediaCommand;
+    use appytappy_config::anti_cheat::AntiCheatClass;
     use appytappy_config::app_file::{
-        AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
-        OriginDef, ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
-        StateDef, ValueDef, WindowDef,
+        CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, OriginDef, ReferenceDef, RegionDef,
+        SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
-        ActionDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, ComparisonDef, CornerDef,
-        MediaCommandDef, PointDef, TargetDef, WhenDef,
+        ActionDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef, PointDef, TargetDef,
+        WhenDef,
     };
+    use appytappy_config::rule::Comparison;
+    use appytappy_config::window_match::MustMatch;
 
     use super::*;
     use crate::screen::{Image, Size};
@@ -207,14 +210,14 @@ mod tests {
                 title: "*".to_owned(),
                 class: "*".to_owned(),
                 executable: "Example.exe".to_owned(),
-                must_match: MustMatchDef {
+                must_match: MustMatch {
                     title: false,
                     class: false,
                 },
                 fallback: FallbackDef::None,
             },
             size_changes: SizeChangesDef::Often,
-            anti_cheat: AntiCheatDef::None,
+            anti_cheat: AntiCheatClass::None,
             overlay: None,
             checked: None,
             values: vec![ValueDef {
@@ -317,7 +320,7 @@ mod tests {
             when: WhenDef {
                 app: "example".to_owned(),
                 value: "progress".to_owned(),
-                is: ComparisonDef::AtLeast,
+                is: Comparison::AtLeast,
                 target: TargetDef::Number(90.0),
             },
             actions,
@@ -391,10 +394,10 @@ mod tests {
         };
         let example = app("Example App", state);
         let mut watching = automation(vec![ActionDef::Media {
-            command: MediaCommandDef::Pause,
+            command: MediaCommand::Pause,
             app: None,
         }]);
-        watching.when.is = ComparisonDef::Equals;
+        watching.when.is = Comparison::Equals;
         watching.when.target = TargetDef::State("Shown".to_owned());
         let mut asked = Vec::new();
         let runnable = Runnable::new(
@@ -449,7 +452,7 @@ mod tests {
             expects: None,
         }];
         let watching = automation(vec![ActionDef::Media {
-            command: MediaCommandDef::Pause,
+            command: MediaCommand::Pause,
             app: None,
         }]);
         let mut asked = Vec::new();

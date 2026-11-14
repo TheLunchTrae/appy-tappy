@@ -101,12 +101,12 @@ pub(crate) fn place<S: System + Capture>(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use appytappy_config::anti_cheat::AntiCheatClass;
     use appytappy_config::app_file::RegionDef;
-    use appytappy_config::app_file::{
-        AntiCheatDef, BuildDef, FORMAT, FallbackDef, MustMatchDef, SizeChangesDef, WindowDef,
-    };
+    use appytappy_config::app_file::{BuildDef, FORMAT, FallbackDef, SizeChangesDef, WindowDef};
     use appytappy_config::click::{ClickButton, ClickDelivery, Corner, Spot};
     use appytappy_config::process::ProcessId;
+    use appytappy_config::window_match::MustMatch;
     use appytappy_sources::screen::{
         CaptureSession, Crop, Frame, FrameHandler, Image, Region, Size,
     };
@@ -124,13 +124,13 @@ pub(crate) mod tests {
                 title: "*".to_owned(),
                 class: "*".to_owned(),
                 executable: "Target.exe".to_owned(),
-                must_match: MustMatchDef {
+                must_match: MustMatch {
                     title: false,
                     class: false,
                 },
                 fallback: FallbackDef::None,
             },
-            anti_cheat: AntiCheatDef::None,
+            anti_cheat: AntiCheatClass::None,
             overlay: None,
             checked: None,
             values: Vec::new(),

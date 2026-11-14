@@ -4,7 +4,9 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use appytappy_config::app_file::{AntiCheatDef, AppFile, BuildDef, CheckedDef};
+use appytappy_config::app_file::{AppFile, BuildDef, CheckedDef};
+
+use appytappy_config::anti_cheat::AntiCheatClass;
 use appytappy_config::process::ProcessId;
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 use serde::Serialize;
@@ -202,7 +204,11 @@ impl<H: Host> Owner<H> {
     /// Saves `class` as the anti-cheat class of the application `app`. A
     /// class other than none stops its automations that press keys, which
     /// the Automations page then shows as unable to run.
-    pub(crate) fn set_anti_cheat(&mut self, app: &str, class: AntiCheatDef) -> Result<(), String> {
+    pub(crate) fn set_anti_cheat(
+        &mut self,
+        app: &str,
+        class: AntiCheatClass,
+    ) -> Result<(), String> {
         self.update_app(app, Changed::Runtime, |_owner, found| {
             found.file.anti_cheat = class;
             Ok(Edit::Save((), Vec::new()))
@@ -260,8 +266,9 @@ pub(super) fn checked_now(build: BuildDef) -> CheckedDef {
 
 #[cfg(test)]
 mod tests {
+    use appytappy_config::action::MediaCommand;
     use appytappy_config::app_file::{SizeChangesDef, SizeDef, WindowDef};
-    use appytappy_config::automation_file::{ActionDef, AutomationDef, MediaCommandDef};
+    use appytappy_config::automation_file::{ActionDef, AutomationDef};
     use appytappy_sources::screen::{Image, Size};
 
     use crate::owner::SavedValue;
@@ -461,7 +468,7 @@ mod tests {
         assert_eq!(
             listed[0].automation.actions[0],
             ActionDef::Media {
-                command: MediaCommandDef::Pause,
+                command: MediaCommand::Pause,
                 app: Some("Player.exe".to_owned()),
             }
         );
@@ -495,11 +502,11 @@ mod tests {
         let set = |harness: &mut Harness, class| {
             harness.ask(|owner| owner.set_anti_cheat("example", class))
         };
-        set(&mut harness, AntiCheatDef::None).expect("sets");
+        set(&mut harness, AntiCheatClass::None).expect("sets");
         let apps = harness.ask(Owner::apps).expect("lists");
         assert_eq!(
             apps[0].file.as_ref().map(|file| file.anti_cheat),
-            Some(AntiCheatDef::None)
+            Some(AntiCheatClass::None)
         );
         let id = save_press(&mut harness).expect("saves");
         let listed = harness
@@ -513,7 +520,7 @@ mod tests {
             "the file keeps one spelling"
         );
         assert_eq!(listed[0].problem, None);
-        set(&mut harness, AntiCheatDef::KernelLevel).expect("sets");
+        set(&mut harness, AntiCheatClass::KernelLevel).expect("sets");
         let listed = harness
             .ask(|owner| owner.list_automations())
             .expect("lists");
@@ -528,7 +535,7 @@ mod tests {
             .ask(|owner| owner.delete_automation(&id))
             .expect("removes");
         assert_eq!(
-            set(&mut harness, AntiCheatDef::None).map(drop),
+            set(&mut harness, AntiCheatClass::None).map(drop),
             Ok(()),
             "lowering it again is allowed too"
         );
@@ -586,7 +593,7 @@ mod tests {
             Err("That application is no longer saved.".to_owned())
         );
         assert_eq!(
-            harness.ask(|owner| owner.set_anti_cheat("gone", AntiCheatDef::None)),
+            harness.ask(|owner| owner.set_anti_cheat("gone", AntiCheatClass::None)),
             Err("That application is no longer saved.".to_owned())
         );
         std::fs::remove_dir_all(root).expect("clean up");

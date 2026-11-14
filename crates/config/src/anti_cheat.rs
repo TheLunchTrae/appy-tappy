@@ -3,11 +3,17 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// How an app protects itself from other programs.
 ///
 /// Only [`AntiCheatClass::None`] permits input-injection actions: see
-/// [`allows_input`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// [`allows_input`]. An application's file spells it as the variant in
+/// camel case, such as `userMode`, and the policy reads it as it is, since
+/// every class is one the policy handles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub enum AntiCheatClass {
     /// The app has no anti-cheat.
     None,

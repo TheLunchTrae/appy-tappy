@@ -3,7 +3,7 @@
 //! with the runtime's own [`ClickSearch`], and sending one click when the
 //! user asks for it.
 
-use appytappy_config::anti_cheat::{AntiCheatClass, allows_input};
+use appytappy_config::anti_cheat::allows_input;
 use appytappy_config::app_file::AppFile;
 use appytappy_config::automation_file::{ClickAtDef, ClickButtonDef, ClickDeliveryDef};
 use appytappy_config::click::{Click, ClickAt, ClickPicture};
@@ -13,10 +13,10 @@ use appytappy_sources::screen::place::Target;
 use appytappy_sources::screen::{Image, Region};
 use serde::{Deserialize, Serialize};
 
-use crate::check_spec::RegionSpec;
 use crate::pixels;
 use crate::selection::{self, SelectionSpec};
 use crate::words::sentence;
+use appytappy_config::app_file::RegionDef;
 
 use super::Owner;
 use super::host::{ClickNow, ClickedWindow, Host};
@@ -86,7 +86,7 @@ pub(crate) struct ClickSent {
 /// another program however it is delivered, which the anti-cheat policy
 /// allows only for the class none.
 fn allows_clicks(file: &AppFile) -> Result<(), String> {
-    if allows_input(AntiCheatClass::from(file.anti_cheat)) {
+    if allows_input(file.anti_cheat) {
         return Ok(());
     }
     Err(format!(
@@ -171,7 +171,7 @@ impl<H: Host> Owner<H> {
     pub(crate) fn add_click_picture(
         &self,
         screenshot: usize,
-        region: RegionSpec,
+        region: RegionDef,
         selection: Option<&SelectionSpec>,
     ) -> Result<ClickPictureView, String> {
         let image = self
@@ -279,7 +279,8 @@ impl<H: Host> Owner<H> {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::{AntiCheatDef, RegionDef, SizeChangesDef, SizeDef, WindowDef};
+    use appytappy_config::anti_cheat::AntiCheatClass;
+    use appytappy_config::app_file::{RegionDef, SizeChangesDef, SizeDef, WindowDef};
     use appytappy_config::automation_file::{ClickAtDef, CornerDef, PointDef};
     use appytappy_config::click::{ClickButton, ClickDelivery, Corner, Spot};
     use appytappy_config::window_match::WindowFacts;
@@ -292,8 +293,8 @@ mod tests {
     };
     use crate::selection::{Combine, SelectStep};
 
-    fn region(x: u32, y: u32, width: u32, height: u32) -> RegionSpec {
-        RegionSpec {
+    fn region(x: u32, y: u32, width: u32, height: u32) -> RegionDef {
+        RegionDef {
             x,
             y,
             width,
@@ -535,9 +536,9 @@ mod tests {
         ] {
             for app in ["example", "other"] {
                 let class = if Some(app) == allowed {
-                    AntiCheatDef::None
+                    AntiCheatClass::None
                 } else {
-                    AntiCheatDef::Unknown
+                    AntiCheatClass::Unknown
                 };
                 harness
                     .ask(|owner| owner.set_anti_cheat(app, class))
@@ -554,7 +555,7 @@ mod tests {
         }
         for app in ["example", "other"] {
             harness
-                .ask(|owner| owner.set_anti_cheat(app, AntiCheatDef::None))
+                .ask(|owner| owner.set_anti_cheat(app, AntiCheatClass::None))
                 .expect("set");
         }
         let example = ClickSent {
@@ -608,7 +609,7 @@ mod tests {
         let mut harness = harness_with(false, Ok(stores));
         add_example_app(&mut harness);
         harness
-            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatClass::None))
             .expect("set");
         let click = |app: &str| spot_click(None, app, ClickDeliveryDef::Message);
         assert_eq!(
@@ -660,7 +661,7 @@ mod tests {
         let mut harness = harness_with(false, Ok(stores));
         add_example_app(&mut harness);
         harness
-            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatClass::None))
             .expect("set");
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
