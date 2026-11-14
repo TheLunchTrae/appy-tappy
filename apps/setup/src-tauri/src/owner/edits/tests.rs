@@ -359,7 +359,7 @@ fn a_rename_keeps_the_id_the_pictures_and_the_automation_that_watches_it() {
     // value named so takes the ID with a number.
     assert_eq!(
         harness.ask(|owner| owner.save(&spec("example", "icon", BAR))),
-        Err("Example App already has a value named like \"icon\". Pick another name.".to_owned())
+        Err("Example App already has a value named \"Icon\". Pick another name.".to_owned())
     );
     assert_eq!(
         harness.ask(|owner| owner.save(&spec("example", "Icon visible", BAR))),
@@ -372,7 +372,7 @@ fn a_rename_keeps_the_id_the_pictures_and_the_automation_that_watches_it() {
     let files = folder_files(&harness);
     assert_eq!(
         save(&mut harness, &edit("icon_visible_2", "ICON", KEPT_BAR), &[]),
-        Err("Example App already has a value named like \"ICON\". Pick another name.".to_owned())
+        Err("Example App already has a value named \"Icon\". Pick another name.".to_owned())
     );
     assert_eq!(
         folder_files(&harness),

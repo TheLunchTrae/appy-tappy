@@ -2,7 +2,7 @@
 //! application. Saving one learns its samples, as the check that reads with
 //! it would, and deleting one waits until no value reads with it.
 
-use appytappy_config::names::{new_reference_id, reference_id};
+use appytappy_config::names::new_reference_id;
 
 use serde::{Deserialize, Serialize};
 
@@ -138,17 +138,19 @@ impl<H: Host> Owner<H> {
                 },
                 |editing| editing.id.clone(),
             );
-            // Names that make the same ID, such as "Digits" and "digits ",
-            // are one name.
-            let same = reference_id(name);
+            // Names that differ only in spaces at either end or the capitals
+            // of ASCII letters, such as "Digits" and "digits ", are one name,
+            // as automations and applications compare names. The IDs never
+            // clash, since `new_reference_id` numbers a taken one.
             if let Some(other) = file
                 .references
                 .iter()
-                .find(|saved| saved.id != id && reference_id(&saved.name) == same)
+                .find(|saved| saved.id != id && saved.name.trim().eq_ignore_ascii_case(name))
             {
                 return Err(format!(
                     "{} already has a reference named \"{}\". Pick another name.",
-                    file.name, other.name
+                    file.name,
+                    other.name.trim()
                 ));
             }
             let taught = owner
@@ -450,6 +452,47 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["small"],
             "only the deleted reference is gone"
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn names_are_told_apart_by_what_they_say_not_by_the_ids_they_make() {
+        let (stores, root) = scratch_store("reference-names");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let mut save = |name: &str| {
+            harness.ask(|owner| owner.save_reference(&reference("example", name, None)))
+        };
+        let long = "Digits of the currently selected party member, slot";
+        // Names in a script without ASCII letters, and names that differ
+        // only past the ID's length, make one ID, which a number keeps apart.
+        let saved = ["Цифры", "Буквы", &format!("{long} 1"), &format!("{long} 2")]
+            .map(|name| save(name).map(|saved| saved.reference));
+        assert_eq!(
+            saved,
+            [
+                Ok("reference".to_owned()),
+                Ok("reference_2".to_owned()),
+                Ok("digits_of_the_currently_selected_party_m".to_owned()),
+                Ok("digits_of_the_currently_selected_par_2".to_owned()),
+            ]
+        );
+        assert_eq!(
+            save(&format!(" {} 2 ", long.to_uppercase())),
+            Err(format!(
+                "Example App already has a reference named \"{long} 2\". Pick another name."
+            ))
+        );
+        assert_eq!(
+            save(" Буквы "),
+            Err(
+                "Example App already has a reference named \"Буквы\". Pick another name."
+                    .to_owned()
+            )
         );
         std::fs::remove_dir_all(root).expect("clean up");
     }
