@@ -1,9 +1,17 @@
 // A state check's looks: each one's name, the screenshot it is taken from, and how much of it is compared.
 
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 
 import { LIMITS } from '../lib/bindings.ts';
-import { type Draft, type DraftState, stateOn, withoutState, withState, withStateAt } from '../lib/check.ts';
+import {
+  type Draft,
+  type DraftState,
+  sharedNames,
+  stateOn,
+  withoutState,
+  withState,
+  withStateAt,
+} from '../lib/check.ts';
 import type { LiveReads } from '../lib/liveCheck.ts';
 import { type Picture, cropPicture } from '../lib/pixels.ts';
 import { useLiveRead } from '../lib/useLiveCheck.ts';
@@ -51,6 +59,8 @@ interface CardProps {
   readonly shown: boolean;
   /** Whether the live window reads as this state now. */
   readonly matches: boolean;
+  /** Whether another state has its name, ignoring case. */
+  readonly shared: boolean;
   readonly number: number;
   readonly onName: (name: string) => void;
   readonly onClear: () => void;
@@ -69,7 +79,7 @@ function comparedText(state: DraftState, region: Rect | null, masking: Masking |
 }
 
 function StateCard(props: CardProps) {
-  const { state, region, picture, masking, ignoreBackground, shown, matches, number } = props;
+  const { state, region, picture, masking, ignoreBackground, shown, matches, shared, number } = props;
   const crop = useMemo(
     () => (picture === null || region === null ? null : cropPicture(picture, region)),
     [picture, region],
@@ -77,6 +87,7 @@ function StateCard(props: CardProps) {
   const compared = comparedText(state, region, masking, ignoreBackground);
   const lost = state.steps.length > 0 && masking?.found === false;
   const label = state.name.trim() === '' ? `State from screenshot ${number}` : state.name.trim();
+  const sharedId = useId();
   return (
     <li className="state" data-matches={matches} aria-current={shown ? 'true' : undefined}>
       <button
@@ -92,6 +103,8 @@ function StateCard(props: CardProps) {
         <input
           className="input"
           aria-label={`Name of the state from screenshot ${number}`}
+          aria-invalid={shared}
+          aria-describedby={shared ? sharedId : undefined}
           placeholder="Name"
           value={state.name}
           onChange={(event) => {
@@ -108,6 +121,11 @@ function StateCard(props: CardProps) {
             </>
           ) : null}
         </small>
+        {shared ? (
+          <small id={sharedId} className="warn">
+            Another state has this name, or one that differs from it only in capitals.
+          </small>
+        ) : null}
         {lost ? <small className="warn">Nothing stood out there. Try again, or raise Color match.</small> : null}
       </div>
       <div className="state-actions">
@@ -128,6 +146,7 @@ export function StatesField({ draft, full, selected, masks, reads, position, onD
   const { reading } = useLiveRead(reads);
   const blocked = addBlocked(draft, selected);
   const selecting = draft.states.some((state) => state.steps.length > 0);
+  const shared = sharedNames(draft.states);
   return (
     <>
       <div className="field">
@@ -149,6 +168,7 @@ export function StatesField({ draft, full, selected, masks, reads, position, onD
                 ignoreBackground={draft.ignoreBackground}
                 shown={state.screenshot === selected}
                 matches={reading?.kind === 'state' && reading.value === state.name.trim()}
+                shared={shared.has(index)}
                 number={position(state.screenshot)}
                 onName={(name) => {
                   onDraft((current) => withStateAt(current, index, (old) => ({ ...old, name })));
