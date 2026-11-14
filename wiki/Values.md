@@ -276,7 +276,11 @@ instant can then be missed.
   is left to teach: it does not change how a number reads. A `.` is always
   the decimal point, and a `,` only
   separates thousands: it counts only between groups of three digits, so
-  `12,5` reads as 12. A number written with its point first, such as `.5`,
+  `12,5` reads as 12. Any other character after the digits ends the number,
+  so a time such as `12:30` and a count such as `12/50` each read as 12, the
+  number before the colon or slash. The reference still has to know the `:`
+  or `/`, since a shape it has not learned fails the read. A number written
+  with its point first, such as `.5`,
   reads as 0.5, and a `.` with no digit after it, such as `...`, is not a
   number.
 - **Bar fill** reads how full a bar is, from 0 to 100. Draw the region
@@ -322,7 +326,8 @@ chooses them:
 - **All it knows** reads every character the reference knows, and any it
   learns later. A new value starts with it.
 - **Digits** reads `0` to `9` and nothing else. A digit the reference learns
-  later is read too.
+  later is read too. A sign after the digits ends the number, so `87%` reads
+  as 87, but the reference still has to know the sign.
 - **Digits and symbols** reads the digits and each character the reference
   knows that is neither a digit nor a letter, such as `%`, `.`, `,`, `:`,
   `/`, `-`, and `+`. It shows while the reference knows such a character. A
@@ -332,9 +337,11 @@ chooses them:
   **Digits and symbols** again adds the new symbol.
 - **Choose…** shows each character the reference knows with a box, with the
   ones the value reads so far turned on. Turn on the ones the value shows, at
-  least one. A character the value reads that the reference has yet to learn
-  shows too, outlined: it reads once the reference learns it, and you can
-  turn it off.
+  least one. Choosing it keeps every character the value reads so far,
+  learned or not, so choosing it after **Digits** keeps all ten digits. A
+  character the value reads that the reference has yet to learn shows too,
+  outlined, and a note under the list says the reference has yet to learn
+  it: it reads once the reference learns it, and you can turn it off.
 
 Picking another reference keeps **All it knows** and **Digits**, takes
 **Digits and symbols** from the new reference's symbols, and takes out of a
