@@ -343,8 +343,9 @@ chooses them:
   it: it reads once the reference learns it, and you can turn it off.
 
 Picking another reference keeps **All it knows** and **Digits**, takes
-**Digits and symbols** from the new reference's symbols, and takes out of a
-**Choose…** set the characters that only the old reference knows. Teaching
+**Digits and symbols** from the new reference's symbols, and keeps a
+**Choose…** set as it is: a character the new reference has yet to learn
+shows outlined, so you can turn it off. Teaching
 the reference from this value, with **Edit** or **Record readings**, adds a
 new symbol to **Digits and symbols** and changes no other choice.
 
