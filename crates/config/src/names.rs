@@ -109,36 +109,35 @@ pub fn new_app_id(executable: &str, taken: &[&str]) -> String {
     free_id(base.to_owned(), '-', MAX_APP_ID_LEN, taken)
 }
 
-/// A value ID made from a name the user typed, such as `progress` from
-/// `Progress`.
-///
-/// It keeps lowercase ASCII letters and digits, with an underscore for each
-/// run of anything else. A name with no letter or digit, or
-/// one that starts with a digit, gets a `value` prefix so the ID is valid.
-#[must_use]
-pub fn value_id(name: &str) -> String {
+/// The ID [`new_value_id`] makes from `name` before it numbers a taken one.
+fn value_id(name: &str) -> String {
     id_from_name(name, "value", MAX_VALUE_ID_LEN)
 }
 
-/// The ID for a new value named `name` that no ID in `taken` uses yet:
-/// [`value_id`] of the name, or that with `_2`, `_3` and so on when a renamed
-/// value still has it.
+/// The ID for a new value named `name` that no ID in `taken` uses yet, such
+/// as `progress` from `Progress`, or `progress_2` when that is taken.
+///
+/// Another value can have the ID made from the name: a renamed one, or one
+/// whose name makes the same ID, such as a name in a script without ASCII
+/// letters or one that differs only past the ID's length.
+///
+/// The ID keeps lowercase ASCII letters and digits, with an underscore for
+/// each run of anything else. A name with no letter or digit, or one that
+/// starts with a digit, gets a `value` prefix so the ID is valid.
 #[must_use]
 pub fn new_value_id(name: &str, taken: &[&str]) -> String {
     free_id(value_id(name), '_', MAX_VALUE_ID_LEN, taken)
 }
 
-/// A reference ID made from a name the user typed, such as `percent_font`
-/// from `Percent font`, the way [`value_id`] makes one, with a `reference`
-/// prefix where it needs one.
-#[must_use]
-pub fn reference_id(name: &str) -> String {
+/// The ID [`new_reference_id`] makes from `name` before it numbers a taken
+/// one.
+fn reference_id(name: &str) -> String {
     id_from_name(name, "reference", MAX_REFERENCE_ID_LEN)
 }
 
-/// The ID for a new reference named `name` that no ID in `taken` uses yet:
-/// [`reference_id`] of the name, or that with `_2`, `_3` and so on when a
-/// renamed reference still has it.
+/// The ID for a new reference named `name` that no ID in `taken` uses yet,
+/// such as `percent_font` from `Percent font`, made the way
+/// [`new_value_id`] makes one, with a `reference` prefix where it needs one.
 #[must_use]
 pub fn new_reference_id(name: &str, taken: &[&str]) -> String {
     free_id(reference_id(name), '_', MAX_REFERENCE_ID_LEN, taken)
@@ -176,7 +175,7 @@ fn free_id(id: String, separator: char, max_len: usize, taken: &[&str]) -> Strin
         .unwrap_or_else(|| base.to_owned())
 }
 
-/// An ID made from a name the user typed, as [`value_id`] describes, with
+/// An ID made from a name the user typed, as [`new_value_id`] describes, with
 /// `prefix` in front when the name does not start with a letter, and at most
 /// `max_len` bytes long.
 fn id_from_name(name: &str, prefix: &str, max_len: usize) -> String {

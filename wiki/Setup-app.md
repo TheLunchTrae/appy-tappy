@@ -291,8 +291,17 @@ This page covers what the user guide leaves out.
   when it differs from the value's. A fix has no `whole` and no
   `characters` of its own and follows the value's. A value saved without a `pin` keeps none while the
   edit names the side guessed from its region, so an edit that changes
-  nothing writes nothing. A value keeps its ID when renamed, and a new
-  value named like a renamed one's old name gets that ID with a number.
+  nothing writes nothing. Two values of an application cannot share a
+  name: `AppFile::check` refuses a file in which two values, or two
+  references, have names that match with spaces at either end trimmed and
+  ASCII letters' case ignored, as automations and applications compare
+  theirs. Such a file loads neither in the runtime nor in the setup app, and
+  importing it is refused. Saving refuses the name first and quotes the
+  value that has it. The ID never decides: a
+  value keeps its ID when renamed, and a new value whose name makes a taken
+  ID, such as a renamed one's old name, a name with no ASCII letter, or one
+  that differs from another only past the ID's length, gets that ID with a
+  number.
 - **References.** A number value names a reference of its own application
   by ID, and saving refuses one of another application. The reference editor
   sends the characters it teaches as a `characters` check, which names the
@@ -301,8 +310,8 @@ This page covers what the user guide leaves out.
   `set_characters` learns the characters once and reads the number back with
   the reader it learned (`Readers::learned`), not one learned again from the
   same pictures. A
-  reference belongs to a saved application. It keeps its ID when renamed, and
-  a new one named like a renamed one's old name gets that ID with a number.
+  reference belongs to a saved application. Its name and ID follow the
+  rules a value's do, so it keeps its ID when renamed.
   One that a value reads with cannot be deleted.
 - **Expected characters.** A reference may list the characters the user says
   it needs, as [Choose what it needs](References.md#choose-what-it-needs)

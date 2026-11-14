@@ -932,7 +932,9 @@ impl AppFile {
 
     /// Checks the rules JSON alone cannot: the format version, a name for
     /// the application and each value and reference, a window match that
-    /// passes [`WindowDef::check`], valid and unique IDs, picture file names,
+    /// passes [`WindowDef::check`], valid and unique IDs, no two values and
+    /// no two references whose names match with spaces at either end trimmed
+    /// and the capitals of ASCII letters ignored, picture file names,
     /// at least one sample for a reference, checks that pass
     /// [`CheckDef::check`], and a reading area only for a check that reads
     /// anywhere in its region. Whether a value's pictures and region can be
@@ -952,15 +954,20 @@ impl AppFile {
         }
         self.window.check().map_err(AppFileError::Window)?;
         let mut references = BTreeSet::new();
+        let mut reference_names = BTreeSet::new();
         for reference in &self.references {
             let problem = |problem: String| AppFileError::Reference(reference.id.clone(), problem);
             let id = SignalName::new(&reference.id).map_err(|error| problem(error.to_string()))?;
             if !references.insert(id) {
                 return Err(problem("another reference has the same ID".to_owned()));
             }
+            if !reference_names.insert(reference.name.trim().to_ascii_lowercase()) {
+                return Err(problem("another reference has the same name".to_owned()));
+            }
             check_reference(reference).map_err(problem)?;
         }
         let mut ids = BTreeSet::new();
+        let mut value_names = BTreeSet::new();
         for value in &self.values {
             let id = SignalName::new(&value.id)
                 .map_err(|error| AppFileError::Value(value.id.clone(), error.to_string()))?;
@@ -968,6 +975,12 @@ impl AppFile {
                 return Err(AppFileError::Value(
                     value.id.clone(),
                     "another value has the same ID".to_owned(),
+                ));
+            }
+            if !value_names.insert(value.name.trim().to_ascii_lowercase()) {
+                return Err(AppFileError::Value(
+                    value.id.clone(),
+                    "another value has the same name".to_owned(),
                 ));
             }
             check_value(value).map_err(|problem| AppFileError::Value(value.id.clone(), problem))?;
@@ -1327,6 +1340,7 @@ mod tests {
         let mut file = dash();
         let mut status = file.values[0].clone();
         status.id = "status".to_owned();
+        status.name = "Status".to_owned();
         status.screen.check = states(&[("Paused", "status-1.png"), ("Live", "status-2.png")]);
         status.screen.fixes = vec![fix(&["status-1-1.png", "status-1-2.png"])];
         file.values.push(status);
@@ -1666,6 +1680,15 @@ mod tests {
         bad_id.values[0].id = "Score".to_owned();
         let mut twice = dash();
         twice.values.push(twice.values[0].clone());
+        let mut same_name = dash();
+        let mut other = same_name.values[0].clone();
+        other.id = "progress_2".to_owned();
+        other.name = format!(" {} ", other.name.to_uppercase());
+        same_name.values.push(other);
+        let mut same_reference_name = dash();
+        let mut other = same_reference_name.references[0].clone();
+        other.id = "percent_2".to_owned();
+        same_reference_name.references.push(other);
         let mut no_value_name = dash();
         no_value_name.values[0].name = String::new();
         let mut no_samples = dash();
@@ -1706,6 +1729,14 @@ mod tests {
             (unnamed, "the application has no name"),
             (bad_id, "value \"Score\": signal name"),
             (twice, "value \"progress\": another value has the same ID"),
+            (
+                same_name,
+                "value \"progress_2\": another value has the same name",
+            ),
+            (
+                same_reference_name,
+                "reference \"percent_2\": another reference has the same name",
+            ),
             (no_value_name, "value \"progress\": it has no name"),
             (
                 no_samples,

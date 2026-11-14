@@ -2,7 +2,7 @@
 //! as the runtime will.
 
 use appytappy_config::app_file::{AppFile, PinDef, ScreenDef, ValueDef};
-use appytappy_config::names::{new_value_id, value_id};
+use appytappy_config::names::new_value_id;
 use appytappy_sources::screen::saved::{self, SavedError};
 use serde::{Deserialize, Serialize};
 
@@ -145,19 +145,20 @@ impl<H: Host> Owner<H> {
     }
 }
 
-/// Fails when a value of `file` other than `own` has a name like `name`.
-/// Names that make the same ID, such as "Progress" and "progress ", are one
-/// name, whatever ID the value named so has: a renamed value keeps its ID.
+/// Fails when a value of `file` other than `own` already has `name`,
+/// ignoring spaces at either end and the capitals of ASCII letters, as
+/// automations and applications compare names. Two values with one name
+/// could not be told apart where an automation picks one. Their IDs never
+/// clash however alike the names are, since [`new_value_id`] numbers a taken
+/// one.
 pub(super) fn named_apart(file: &AppFile, own: Option<&str>, name: &str) -> Result<(), String> {
-    let same = value_id(name);
-    if file
-        .values
-        .iter()
-        .any(|value| Some(value.id.as_str()) != own && value_id(&value.name) == same)
-    {
+    if let Some(other) = file.values.iter().find(|value| {
+        Some(value.id.as_str()) != own && value.name.trim().eq_ignore_ascii_case(name.trim())
+    }) {
         return Err(format!(
-            "{} already has a value named like \"{name}\". Pick another name.",
-            file.name
+            "{} already has a value named \"{}\". Pick another name.",
+            file.name,
+            other.name.trim()
         ));
     }
     Ok(())
@@ -213,8 +214,8 @@ mod tests {
 
     use crate::drafts::DraftDef;
     use crate::owner::test_support::{
-        BAR, Harness, NO_STORE, add_example_app, frame_image, harness, harness_with, scratch_store,
-        spec,
+        BAR, Harness, NO_STORE, add_example_app, capturing, frame_image, harness, harness_with,
+        scratch_store, spec,
     };
 
     use super::*;
@@ -356,6 +357,48 @@ mod tests {
             "every draft of the application goes, and its draft of changes"
         );
         drop((other_fix, value, changes));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn names_are_told_apart_by_what_they_say_not_by_the_ids_they_make() {
+        let (mut harness, _handler, root) = capturing("value-names");
+        let mut save = |name: &str| harness.ask(|owner| owner.save(&spec("example", name, BAR)));
+        let long = "Mana of the currently selected party member, slot";
+        // Names in a script without ASCII letters, and names that differ
+        // only past the ID's length, make one ID, which a number keeps apart.
+        let saved = [
+            "Здоровье",
+            "Мана",
+            &format!("{long} 1"),
+            &format!("{long} 2"),
+        ]
+        .map(|name| save(name).map(|saved| saved.value));
+        assert_eq!(
+            saved,
+            [
+                Ok("value".to_owned()),
+                Ok("value_2".to_owned()),
+                Ok("mana_of_the_currently_selected_party_member_slot".to_owned()),
+                Ok("mana_of_the_currently_selected_party_member_2".to_owned()),
+            ]
+        );
+        // Only ASCII letters' case is ignored, as automations ignore it.
+        assert_eq!(
+            save(" мана ").map(|saved| saved.value),
+            Ok("value_3".to_owned())
+        );
+        // The refusal names the value that has the name, as it was saved.
+        assert_eq!(
+            save(&format!(" {} 2 ", long.to_uppercase())),
+            Err(format!(
+                "Example App already has a value named \"{long} 2\". Pick another name."
+            ))
+        );
+        assert_eq!(
+            save(" Мана "),
+            Err("Example App already has a value named \"Мана\". Pick another name.".to_owned())
+        );
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
