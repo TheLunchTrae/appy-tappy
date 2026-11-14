@@ -1,7 +1,7 @@
 // The inspector's fields that values and references share.
 
 import { LIMITS } from '../lib/bindings.ts';
-import { readingText } from '../lib/automation.ts';
+import { readingText } from '../lib/reading.ts';
 import type { CheckState } from '../lib/check.ts';
 import { REGION_HINT, TOLERANCE_HINT } from '../lib/hints.ts';
 import type { LiveReads } from '../lib/liveCheck.ts';

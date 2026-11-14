@@ -3,7 +3,7 @@ import { type ChangeEvent, useReducer, useRef } from 'react';
 import { errorText, importApp, readSharedApp } from '../lib/api.ts';
 import type { AntiCheatClass } from '../lib/bindings.ts';
 import { checkedText } from '../lib/build.ts';
-import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/describe.ts';
+import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/antiCheat.ts';
 import { IMPORT_ANTI_CHEAT_HINT, ORIGIN_HINT, SHARED_CHECKED_HINT } from '../lib/hints.ts';
 import { matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';

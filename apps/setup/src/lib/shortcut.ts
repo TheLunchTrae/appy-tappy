@@ -1,8 +1,7 @@
-// The screenshot shortcut, as a global-shortcut accelerator such as `Control+Shift+S`, and the keys of a key press
-// action.
+// The screenshot shortcut, as a global-shortcut accelerator such as `Control+Shift+S`, and the keys a recording hears
+// for a key press action.
 
 import { KEY_NAMES, SHORTCUT_KEYS } from './bindings.ts';
-import { asciiLower, trimmed } from './text.ts';
 
 /** The keys of a key press that a shortcut reads. */
 export interface KeyPress {
@@ -153,44 +152,4 @@ export function actionKeys(press: TypedKeyPress): string | null {
   ]
     .filter((part) => part !== null)
     .join('+');
-}
-
-const MODIFIERS = KEY_NAMES.modifiers;
-
-/** One key's name as an action spells it, or null when an action cannot press it. */
-function keyName(name: string): string | null {
-  if (/^[A-Za-z0-9]$/u.test(name)) {
-    return name.toUpperCase();
-  }
-  const function_ = /^[Ff]([1-9]\d*)$/u.exec(name)?.[1];
-  if (function_ !== undefined) {
-    return Number(function_) <= KEY_NAMES.maxFunctionKey ? `F${function_}` : null;
-  }
-  return KEY_NAMES.named.find((named) => asciiLower(named) === asciiLower(name)) ?? null;
-}
-
-/**
- * `text` in the one spelling a key press action is saved in, such as `Ctrl+Shift+M`, or null when it
- * is not any of Ctrl, Alt, Shift and Win then one key, joined by `+`. It reads the keys as the
- * runtime does: ignoring case and the spaces around each part.
- */
-export function spellKeys(text: string): string | null {
-  const held = new Set<string>();
-  let key: string | null = null;
-  for (const part of text.split('+').map(trimmed)) {
-    const modifier = MODIFIERS.find((name) => asciiLower(name) === asciiLower(part));
-    if (key !== null || (modifier !== undefined && held.has(modifier))) {
-      // The key comes last, and each modifier once.
-      return null;
-    }
-    if (modifier === undefined) {
-      key = keyName(part);
-      if (key === null) {
-        return null;
-      }
-    } else {
-      held.add(modifier);
-    }
-  }
-  return key === null ? null : [...MODIFIERS.filter((name) => held.has(name)), key].join('+');
 }

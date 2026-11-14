@@ -4,7 +4,7 @@ import type { AntiCheatClass, AppSummary, DraftSummary, OverlayModeDef } from '.
 import { Question, useQuestion } from '../components/Question.tsx';
 import { errorText, removeApp, setAntiCheat, setOverlay } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
-import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/describe.ts';
+import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/antiCheat.ts';
 import { ANTI_CHEAT_HINT, OVERLAY_HINT } from '../lib/hints.ts';
 import { type AppKept, matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
@@ -32,8 +32,8 @@ interface AntiCheatCellProps {
 }
 
 /**
- * An application's anti-cheat, picked from a menu. None lets automations
- * press keys into it, so picking None asks first, in the menu's place.
+ * An application's anti-cheat, picked from a menu. None lets automations press keys into it and click in it, so
+ * picking None asks first, in the menu's place.
  */
 function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet, busy }: AntiCheatCellProps) {
   const { control, refs } = useQuestion<HTMLSelectElement>(confirming);
@@ -52,8 +52,8 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet, busy }: 
           onSet('none');
         }}
       >
-        Only pick None if {name} has no anti-cheat. Pressing keys into an application with anti-cheat can get your
-        account banned.
+        Only pick None if {name} has no anti-cheat. Pressing keys into an application with anti-cheat, or clicking in
+        one, can get your account banned.
       </Question>
     );
   }
@@ -297,8 +297,8 @@ export function ApplicationsPage({
           Applications
         </h1>
         <span className="lead">
-          How AppyTappy finds each application&apos;s window, whether automations may press keys into it, and whether
-          its live values show on top of it while this app is open.
+          How AppyTappy finds each application&apos;s window, whether automations may press keys into it or click while
+          it runs, and whether its live values show on top of it while this app is open.
         </span>
         <div className="end">
           <ImportApp onImported={onChanged} />

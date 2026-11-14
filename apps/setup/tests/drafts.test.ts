@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { AppSummary, DraftDef, DraftKind, DraftSummary } from '../src/lib/bindings.ts';
-import { EMPTY_DRAFT as EMPTY_AUTOMATION, newAction, unfinished, valueChoices } from '../src/lib/automation.ts';
+import { newAction } from '../src/lib/actions.ts';
+import { EMPTY_DRAFT as EMPTY_AUTOMATION, unfinished, valueChoices } from '../src/lib/automation.ts';
 import {
   type CaptureSetup,
   captureMissing,

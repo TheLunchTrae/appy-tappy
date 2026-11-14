@@ -1,8 +1,8 @@
 // The automation editor's watch of one saved value: the owner's capture that reads it, and what follows when the
 // watch is lost, replaced, or refused.
 
-import type { LiveState } from './automation.ts';
 import type { Live } from './bindings.ts';
+import type { LiveState } from './reading.ts';
 
 /** How long the live reading waits before it looks for the window again, as the runtime does. */
 export const RETRY_MS = 1000;

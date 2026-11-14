@@ -1010,7 +1010,7 @@ deleted on its own; the next save writes the new IDs. Saving a value reads it
 back with `saved::build`, from its new pictures and those already saved, as the
 runtime will, and refuses it if the runtime could not read it. A new
 application's anti-cheat class starts as `unknown`, which blocks key press
-actions until the user sets it
+and click actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
 
 ## Sharing
@@ -1460,6 +1460,21 @@ kind (`howFields` in `Capture.tsx`). What a kind does about content that
 moves is a switch over the same kinds that must cover each
 (`lib/moving.ts`). A kind the Rust side adds does not compile until it has
 all three.
+
+What the page knows of each kind of action is one entry of `ACTION_KINDS` in
+`apps/setup/src/lib/actions.ts`: its choices in the action menu, what a row
+of a saved one holds, how a row builds it, and how a saved one reads on the
+Automations page. The table's keys are the generated `ActionDef` kinds, and
+so are those of the automation editor's fields for each kind (`fields` in
+`AutomationEditor.tsx`). The page takes the two facts of `ACTIONS` from the
+generated table and does not restate them. A kind that `ACTIONS` says sends
+input must say in its entry what anti-cheat blocks, in the words of
+`lib/antiCheat.ts`, which holds the policy and the menu's names for the
+classes. `UNDO_WORDS` holds a clause for each key of `ACTIONS.undoable`: what
+undo puts back, or why it cannot. A kind the Rust side adds does not compile
+until it has an entry, fields, and a clause, and a row of a saved action is a
+new row of its kind with what the action says, so both start from the same
+defaults.
 
 The page reads a typed path, link, key press, screenshot shortcut, or app name
 itself, so the user sees what to fix as they type, and places a click's spot

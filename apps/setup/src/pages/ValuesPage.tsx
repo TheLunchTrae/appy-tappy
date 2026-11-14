@@ -10,7 +10,8 @@ import {
   type ValueView,
 } from '../lib/bindings.ts';
 import { deleteValue, errorText, markChecked, removeFix } from '../lib/api.ts';
-import { readingText, usedBy } from '../lib/automation.ts';
+import { usedBy } from '../lib/automation.ts';
+import { readingText } from '../lib/reading.ts';
 import { buildState, checkedText } from '../lib/build.ts';
 import { Hint } from '../components/Hint.tsx';
 import { MARK_CHECKED_HINT } from '../lib/hints.ts';

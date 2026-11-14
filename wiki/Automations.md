@@ -262,7 +262,7 @@ sent to the window, the log says that it was sent.
 Clicks work only when both the watched application and the one clicked in
 have anti-cheat set to **None** on the Applications page, because anti-cheat
 can see clicks that AppyTappy makes, whichever way they are sent. A click
-cannot be undone, so turn undo off for an automation that clicks.
+cannot be undone, so an automation that only clicks needs undo turned off.
 
 Windows does not let AppyTappy click in a program that runs as administrator.
 With **Move the cursor**, it gives no sign that it dropped the click. With
@@ -277,8 +277,8 @@ things back when the condition stops being true:
 - Each volume goes back to what it was.
 
 A skipped track cannot be unskipped, pressed keys cannot be unpressed, what
-opened stays open, and a played sound cannot be unplayed, so an automation
-needs a pause, a play, or a volume action to undo. With undo on,
+opened stays open, a played sound cannot be unplayed, and a click cannot be
+undone, so an automation needs a pause, a play, or a volume action to undo. With undo on,
 AppyTappy also puts things back when the application closes, when you turn
 automations off from the [tray icon](The-tray-icon.md), and when AppyTappy
 quits. It quits when you sign out or shut down too, and asks Windows to wait

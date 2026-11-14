@@ -20,7 +20,6 @@ import {
   SEARCH_MARGIN,
   SEARCH_SIDE,
   clickApps,
-  clickBlocked,
   middle,
   placeSpot,
   returnsFocus,
@@ -28,6 +27,7 @@ import {
   sentText,
   spotAt,
 } from '../lib/click.ts';
+import { clickBlocked } from '../lib/antiCheat.ts';
 import { IDLE, tryStep } from '../lib/clickTry.ts';
 import { type Point, type Rect, type Size, contains, pixelAt, toPicture } from '../lib/region.ts';
 import { useCapture } from '../lib/capture.ts';

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { KEY_NAMES, SHORTCUT_KEYS } from '../src/lib/bindings.ts';
-import { accelerator, actionKeys, shortcutLabel, spellKeys } from '../src/lib/shortcut.ts';
+import { accelerator, actionKeys, shortcutLabel } from '../src/lib/shortcut.ts';
 
 const none = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
 
@@ -74,37 +74,4 @@ test('actionKeys takes the letter the layout types, not the one in that place in
   expect(actionKeys({ ...typed, shiftKey: true, key: 'Z', code: 'KeyY' })).toBe('Shift+Z');
   // A layout that types no Latin letter keeps the letter of the key's place.
   expect(actionKeys({ ...typed, key: 'ф', code: 'KeyA' })).toBe('A');
-});
-
-describe('spellKeys', () => {
-  test('spells keys as the file keeps them, reading them as the runtime does', () => {
-    expect(spellKeys('ctrl + shift + m')).toBe('Ctrl+Shift+M');
-    expect(spellKeys('Shift+Ctrl+M')).toBe('Ctrl+Shift+M');
-    expect(spellKeys('win+alt+f24')).toBe('Alt+Win+F24');
-    expect(spellKeys('5')).toBe('5');
-    expect(spellKeys('pagedown')).toBe('PageDown');
-    expect(spellKeys(' Escape ')).toBe('Escape');
-  });
-
-  test('refuses what an action cannot press', () => {
-    for (const text of [
-      '',
-      'Ctrl',
-      'Ctrl+',
-      'Ctrl++M',
-      'M+Ctrl',
-      'Ctrl+Ctrl+M',
-      'M+N',
-      'F0',
-      'F25',
-      'F01',
-      'é',
-      'Numpad1',
-      'ArrowUp',
-      // The Kelvin sign, which a case-insensitive match would read as K.
-      '\u212A',
-    ]) {
-      expect(spellKeys(text)).toBeNull();
-    }
-  });
 });

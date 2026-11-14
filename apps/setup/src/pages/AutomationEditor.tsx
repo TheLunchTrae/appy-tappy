@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { type AppSummary, type MediaCommand, NO_STATE, type ReadingDetails, type WhenDef } from '../lib/bindings.ts';
+import { type AppSummary, NO_STATE, type ReadingDetails, type WhenDef } from '../lib/bindings.ts';
 import {
   errorText,
   explainWatched,
@@ -11,25 +11,26 @@ import {
   watchedReading,
 } from '../lib/api.ts';
 import {
+  ACTION_CHOICES,
   type ActionDraft,
+  type ActionKind,
+  UNDO_PUTS_BACK,
+  inputBlocked,
+  isPicked,
+  newAction,
+  undoText,
+  unusedKey,
+} from '../lib/actions.ts';
+import {
   type Draft,
-  type LiveState,
   COMPARISONS,
   COMPARISON_NAMES,
-  MEDIA_NAMES,
   type ValueChoice,
   buildAutomation,
   buildWhen,
-  clicksBlocked,
-  keysBlocked,
-  liveAnnouncement,
-  liveText,
-  newAction,
   readsState,
   readsText,
-  undoText,
   unfinished,
-  unusedKey,
   valueChoices,
   withSource,
 } from '../lib/automation.ts';
@@ -40,6 +41,7 @@ import { editorLanding, useLanding } from '../lib/landing.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ask, useMounted } from '../lib/request.ts';
 import { type LiveWatchEvent, NOT_WATCHING, liveWatchStep } from '../lib/liveWatch.ts';
+import { type LiveState, liveAnnouncement, liveText } from '../lib/reading.ts';
 import { ClickPictureThumb } from '../components/ClickPictureThumb.tsx';
 import { ClickTarget } from '../components/ClickTarget.tsx';
 import { DeleteDraft } from '../components/Drafts.tsx';
@@ -49,30 +51,6 @@ import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { type ReportDraft, useDraft } from '../lib/drafts.ts';
 import { actionKeys } from '../lib/shortcut.ts';
 import { arrived, readiness, returned, watchApps, watchGuide, watchStep, watching } from '../lib/watch.ts';
-
-/** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
-type ActionChoice = MediaCommand | Exclude<ActionDraft['kind'], 'media'>;
-
-const ACTION_CHOICES: readonly ActionChoice[] = [
-  'pause',
-  'play',
-  'next',
-  'previous',
-  'volume',
-  'keys',
-  'open',
-  'sound',
-  'click',
-];
-
-const ACTION_NAMES: Readonly<Record<ActionChoice, string>> = {
-  ...MEDIA_NAMES,
-  volume: 'Set volume',
-  keys: 'Press keys',
-  open: 'Open a program, file, or link',
-  sound: 'Play a sound',
-  click: 'Click in another application',
-};
 
 interface KeysFieldProps {
   readonly label: string;
@@ -304,67 +282,58 @@ interface ActionRowProps {
 }
 
 function ActionRow({ action, position, count, apps, onTarget, onChange, onMove, onRemove }: ActionRowProps) {
-  const choice: ActionChoice = action.kind === 'media' ? action.command : action.kind;
   const label = `Action ${position}`;
+  const path = (field: 'opens' | 'sound', name: string, placeholder: string): ReactNode => (
+    <input
+      className="input path-field"
+      aria-label={`${label}: ${name}`}
+      placeholder={placeholder}
+      spellCheck={false}
+      value={action[field]}
+      onChange={(event) => {
+        onChange({ ...action, [field]: event.target.value });
+      }}
+    />
+  );
+  const target = (): ReactNode => <ActionTarget action={action} label={label} onChange={onChange} />;
+  // What each kind of action is set up with, keyed by kind, so a new kind does not compile until it has fields.
+  const fields: Readonly<Record<ActionKind, () => ReactNode>> = {
+    media: target,
+    volume: target,
+    keys: () => (
+      <KeysField
+        label={label}
+        keys={action.keys}
+        onChange={(keys) => {
+          onChange({ ...action, keys });
+        }}
+      />
+    ),
+    open: () => path('opens', 'program, file, or link', 'C:\\Tools\\Timer.exe or https://example.com'),
+    sound: () => path('sound', 'WAV file', 'C:\\Sounds\\Ding.wav'),
+    click: () => <ClickFields action={action} label={label} apps={apps} onChange={onChange} onTarget={onTarget} />,
+  };
   return (
     <li className="action-row">
       <span className="step-number">{position}</span>
       <select
         className="input"
         aria-label={`${label}: what to do`}
-        value={choice}
+        value={ACTION_CHOICES.findIndex((choice) => isPicked(choice, action))}
         onChange={(event) => {
-          const picked = ACTION_CHOICES.find((option) => option === event.target.value);
+          const picked = ACTION_CHOICES[Number(event.target.value)];
           if (picked !== undefined) {
-            onChange(
-              picked === 'pause' || picked === 'play' || picked === 'next' || picked === 'previous'
-                ? { ...action, kind: 'media', command: picked }
-                : { ...action, kind: picked },
-            );
+            onChange({ ...action, ...picked.picks });
           }
         }}
       >
-        {ACTION_CHOICES.map((option) => (
-          <option key={option} value={option}>
-            {ACTION_NAMES[option]}
+        {ACTION_CHOICES.map((choice, index) => (
+          <option key={choice.label} value={index}>
+            {choice.label}
           </option>
         ))}
       </select>
-      {action.kind === 'click' ? (
-        <ClickFields action={action} label={label} apps={apps} onChange={onChange} onTarget={onTarget} />
-      ) : action.kind === 'keys' ? (
-        <KeysField
-          label={label}
-          keys={action.keys}
-          onChange={(keys) => {
-            onChange({ ...action, keys });
-          }}
-        />
-      ) : action.kind === 'open' ? (
-        <input
-          className="input path-field"
-          aria-label={`${label}: program, file, or link`}
-          placeholder="C:\Tools\Timer.exe or https://example.com"
-          spellCheck={false}
-          value={action.opens}
-          onChange={(event) => {
-            onChange({ ...action, opens: event.target.value });
-          }}
-        />
-      ) : action.kind === 'sound' ? (
-        <input
-          className="input path-field"
-          aria-label={`${label}: WAV file`}
-          placeholder="C:\Sounds\Ding.wav"
-          spellCheck={false}
-          value={action.sound}
-          onChange={(event) => {
-            onChange({ ...action, sound: event.target.value });
-          }}
-        />
-      ) : (
-        <ActionTarget action={action} label={label} onChange={onChange} />
-      )}
+      {fields[action.kind]()}
       <span className="row-tools">
         <button
           type="button"
@@ -593,11 +562,8 @@ export function AutomationEditor({
   const pressesKeys = draft.actions.some((action) => action.kind === 'keys');
   const usesPaths = draft.actions.some((action) => action.kind === 'open' || action.kind === 'sound');
   const opens = draft.actions.some((action) => action.kind === 'open');
-  const keysWarning = choice === null ? null : keysBlocked(draft.actions, choice.antiCheat, choice.appName);
-  const clickedApps = draft.actions.flatMap((action) =>
-    action.kind === 'click' && action.clickApp !== '' ? [action.clickApp] : [],
-  );
-  const clickWarning = choice === null ? null : clicksBlocked(clickedApps, choice, apps);
+  const blocked =
+    choice === null ? [] : inputBlocked(draft.actions, { name: choice.appName, antiCheat: choice.antiCheat }, apps);
   // The applications clicked in with the cursor, and those a click is sent to, since each note says what its way does.
   const clickedBy = (delivery: ActionDraft['delivery']): readonly string[] => [
     ...new Set(
@@ -672,7 +638,6 @@ export function AutomationEditor({
       />
     );
   }
-  const runningApp = choice === null ? null : apps.find((app) => app.id === choice.app);
 
   return (
     <main className="page">
@@ -865,9 +830,9 @@ export function AutomationEditor({
           )}
           {step.kind === 'no-applications' || step.kind === 'value' || step.kind === 'arriving' ? null : (
             <p className="note">
-              {runningApp === null || runningApp === undefined
+              {choice === null
                 ? 'One value for now. Conditions that combine several values come later.'
-                : `Runs while ${runningApp.file?.name ?? runningApp.id} is open. ${choice === null ? 'The value reads a number.' : readsText(choice)}`}
+                : `Runs while ${choice.appName} is open. ${readsText(choice)}`}
             </p>
           )}
         </section>
@@ -910,8 +875,11 @@ export function AutomationEditor({
               />
             ))}
           </ol>
-          {keysWarning === null ? null : <p className="warn">{keysWarning}</p>}
-          {clickWarning === null ? null : <p className="warn">{clickWarning}</p>}
+          {blocked.map((why) => (
+            <p key={why} className="warn">
+              {why}
+            </p>
+          ))}
           {clickedNames.length === 0 || choice === null ? null : (
             <p className="note">
               The click happens only while{' '}
@@ -981,10 +949,8 @@ export function AutomationEditor({
             </Hint>
           </div>
           <p className="note">
-            {draft.undo
-              ? (undoWords ?? 'Undo puts back paused or started media and changed volumes.')
-              : 'The changes stay until something else changes them.'}{' '}
-            It can run again once the condition has stopped being true.
+            {draft.undo ? (undoWords ?? UNDO_PUTS_BACK) : 'The changes stay until something else changes them.'} It can
+            run again once the condition has stopped being true.
           </p>
           <div className="field narrow">
             <span className="name">

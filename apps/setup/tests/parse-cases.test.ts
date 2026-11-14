@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { appName, openTarget, soundFile } from '../src/lib/automation.ts';
 import { PARSE_CASES } from '../src/lib/bindings.ts';
 import { placeSpot, spotAt } from '../src/lib/click.ts';
 import { expectedSet, tooMany } from '../src/lib/expected.ts';
 import { labelCharacters } from '../src/lib/reference.ts';
-import { type KeyPress, accelerator, spellKeys } from '../src/lib/shortcut.ts';
+import { type KeyPress, accelerator } from '../src/lib/shortcut.ts';
+import { appName, openTarget, soundFile, spellKeys } from '../src/lib/text.ts';
 
 // The bindings test writes what the Rust side makes of each sample. The page reads them itself, for instant
 // feedback, and these tests keep its reading the same as the save's.
