@@ -30,11 +30,18 @@ describe('the characters a number reads', () => {
     expect(readChoice([], known)).toBe('choose');
   });
 
-  test('choosing starts from what is read so far that the reference knows', () => {
+  test('choosing starts from what is read so far, learned or not', () => {
     expect(withReadChoice('choose', known, null)).toEqual(known);
-    // Not the digits it has yet to learn, which would be saved with no box to turn them off.
-    expect(withReadChoice('choose', known, digits)).toEqual(['0', '1', '2']);
-    expect(withReadChoice('choose', known, ['%', '1', 'x'])).toEqual(['1', '%']);
+    // The digits the reference has yet to learn stay, so reading one once it is learned does not fail.
+    expect(withReadChoice('choose', known, digits)).toEqual(digits);
+    expect(withReadChoice('choose', known, [...digits, '%', '.'])).toEqual([...digits, '%', '.']);
+    expect(withReadChoice('choose', known, ['1', '%', 'x'])).toEqual(['1', '%', 'x']);
+  });
+
+  test('a digit turned off from Digits is the only one left out once the reference learns the rest', () => {
+    const chosen = withCharacter(withReadChoice('choose', known, digits) ?? [], '9', false);
+    const taught = [...known, '3', '4', '5', '6', '7', '8', '9'];
+    expect(forReference(chosen, known, taught)).toEqual(digits.filter((digit) => digit !== '9'));
   });
 
   test('another reference keeps the choice that was picked', () => {
