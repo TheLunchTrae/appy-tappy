@@ -30,25 +30,29 @@ describe('the characters a number reads', () => {
     expect(readChoice([], known)).toBe('choose');
   });
 
-  test('choosing starts from what is read so far that the reference knows', () => {
+  test('choosing starts from what is read so far, learned or not', () => {
     expect(withReadChoice('choose', known, null)).toEqual(known);
-    // Not the digits it has yet to learn, which would be saved with no box to turn them off.
-    expect(withReadChoice('choose', known, digits)).toEqual(['0', '1', '2']);
-    expect(withReadChoice('choose', known, ['%', '1', 'x'])).toEqual(['1', '%']);
+    // The digits the reference has yet to learn stay, so reading one once it is learned does not fail.
+    expect(withReadChoice('choose', known, digits)).toEqual(digits);
+  });
+
+  test('a digit turned off from Digits is the only one left out once the reference learns the rest', () => {
+    const chosen = withCharacter(withReadChoice('choose', known, digits) ?? [], '9', false);
+    const taught = [...known, '3', '4', '5', '6', '7', '8', '9'];
+    expect(forReference(chosen, known, taught)).toEqual(digits.filter((digit) => digit !== '9'));
   });
 
   test('another reference keeps the choice that was picked', () => {
     const other = ['1', '5', ':', 'L'];
     expect(forReference(null, known, other)).toBeNull();
     expect(forReference(digits, known, other)).toEqual(digits);
-    // Digits and symbols takes the new reference's symbols, and a chosen set keeps what the new one knows.
+    // Digits and symbols takes the new reference's symbols.
     expect(forReference([...digits, '%', '.'], known, other)).toEqual([...digits, ':']);
-    expect(forReference(['1', '%', 'L'], known, other)).toEqual(['1', 'L']);
     // A saved set that was the digits and symbols before the reference learned another is a chosen set.
     expect(readChoice([...digits, '%'], known)).toBe('choose');
-    // It loses only what the old reference knew and the new one does not: not the digits neither has learned.
-    expect(forReference([...digits, '%'], known, known)).toEqual([...digits, '%']);
-    expect(forReference([...digits, '%'], known, other)).toEqual(['1', '3', '4', '5', '6', '7', '8', '9']);
+    // A chosen set stays whole, so a character the new reference has yet to learn is read once it learns it.
+    expect(forReference([...digits, '%'], known, other)).toEqual([...digits, '%']);
+    expect(forReference(['1', '%', 'L'], known, other)).toEqual(['1', '%', 'L']);
   });
 
   test('digits and symbols is offered only for a reference that knows a symbol', () => {

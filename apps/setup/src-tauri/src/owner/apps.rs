@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(
             harness.ask(save(spec("example", "Progress BAR", BAR))),
             Err(
-                "Example App already has a value named like \"Progress BAR\". Pick another name."
+                "Example App already has a value named \"Progress bar\". Pick another name."
                     .to_owned()
             )
         );
