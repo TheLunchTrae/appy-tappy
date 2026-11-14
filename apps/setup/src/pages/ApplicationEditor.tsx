@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type {
-  AntiCheatClass,
+  AntiCheatPick,
   AppSummary,
   FallbackDef,
   SizeChangesDef,
@@ -30,6 +30,7 @@ import {
   fitCount,
   requires,
   sentence,
+  startAppSetup,
   unfinishedApp,
   withMustMatch,
 } from '../lib/matching.ts';
@@ -38,25 +39,13 @@ import { SIZE_CHANGES, SIZE_CHANGES_HINT, SIZE_CHANGE_TEXT } from '../lib/sizes.
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { ANTI_CHEAT_HINT, DRAFT_HINT } from '../lib/hints.ts';
-import { pickedAntiCheat, shownAntiCheat } from '../lib/antiCheat.ts';
+import { pickAntiCheat, shownAntiCheat } from '../lib/antiCheat.ts';
 import { Trail } from '../components/Trail.tsx';
 import { WindowsPanel, useWindowFits, useWindowScores } from '../components/WindowsPanel.tsx';
 
-/**
- * The setup as `resumed` keeps it, or else as `saved` has it, or a new application's. A class the draft picked that
- * the application has since been set to anyway counts as not picked.
- */
-function startAppSetup(saved: AppSummary['file'], resumed: Resumed | null): AppSetup {
-  if (resumed !== null && isKept<AppKept>(resumed.def.state, 'application')) {
-    const kept = resumed.def.state.state;
-    return { ...kept, antiCheat: pickedAntiCheat(kept.antiCheat, saved?.antiCheat ?? null) };
-  }
-  return {
-    name: saved?.name ?? '',
-    window: saved?.window ?? null,
-    sizeChanges: saved?.sizeChanges ?? 'often',
-    antiCheat: null,
-  };
+/** The setup `resumed` keeps, or null when it keeps none or one of another shape. */
+function keptSetup(resumed: Resumed | null): AppSetup | null {
+  return resumed !== null && isKept<AppKept>(resumed.def.state, 'application') ? resumed.def.state.state : null;
 }
 
 interface Props {
@@ -98,7 +87,7 @@ export function ApplicationEditor({
   onDraft,
 }: Props) {
   const saved = existing?.file ?? null;
-  const [start] = useState<AppSetup>(() => startAppSetup(saved, resumed));
+  const [start] = useState<AppSetup>(() => startAppSetup(saved, keptSetup(resumed)));
   const [list, setList] = useState<WindowList | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [listed, setListed] = useState(0);
@@ -106,7 +95,7 @@ export function ApplicationEditor({
   const [name, setName] = useState(start.name);
   const [window, setWindow] = useState<WindowDef | null>(start.window);
   const [sizeChanges, setSizeChanges] = useState<SizeChangesDef>(start.sizeChanges);
-  const [antiCheat, setAntiCheat] = useState<AntiCheatClass | null>(start.antiCheat);
+  const [antiCheat, setAntiCheat] = useState<AntiCheatPick | null>(start.antiCheat);
   const [confirmingNone, setConfirmingNone] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -347,7 +336,7 @@ export function ApplicationEditor({
                   busy={busy || drafting.saving}
                   onConfirm={setConfirmingNone}
                   onSet={(picked) => {
-                    setAntiCheat(pickedAntiCheat(picked, savedAntiCheat));
+                    setAntiCheat(pickAntiCheat(picked, savedAntiCheat));
                     setConfirmingNone(false);
                   }}
                 />

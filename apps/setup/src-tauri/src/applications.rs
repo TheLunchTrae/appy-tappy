@@ -32,7 +32,20 @@ pub(crate) struct AppSpec {
     /// saved one, which a new application starts at unknown. The editor
     /// sends a class only when it was picked there, so a save leaves a class
     /// set on the Applications page since the editor opened as it is.
-    pub(crate) anti_cheat: Option<AntiCheatClass>,
+    pub(crate) anti_cheat: Option<AntiCheatPick>,
+}
+
+/// An anti-cheat class picked in the editor, with the class it was picked
+/// over, so a pick made before the Applications page set another class
+/// never replaces that class unseen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AntiCheatPick {
+    /// The saved class when it was picked: unknown for a new application.
+    pub(crate) from: AntiCheatClass,
+    /// The class picked.
+    pub(crate) to: AntiCheatClass,
 }
 
 /// The file `spec` makes of the application `existing`, or of a new
@@ -91,8 +104,15 @@ pub(crate) fn apply(
     }
     file.window = spec.window;
     file.size_changes = spec.size_changes;
-    if let Some(class) = spec.anti_cheat {
-        file.anti_cheat = class;
+    if let Some(pick) = spec.anti_cheat {
+        if file.anti_cheat != pick.from {
+            return Err(
+                "The anti-cheat setting changed on the Applications page since you picked it \
+                 here. Pick it again."
+                    .to_owned(),
+            );
+        }
+        file.anti_cheat = pick.to;
     }
     Ok(file)
 }
@@ -240,9 +260,16 @@ mod tests {
                 .find(|app| app.id == id)
                 .map(|app| app.file.expect("readable").anti_cheat)
         };
-        let mut picked = spec("Example App", "Example.exe");
-        picked.anti_cheat = Some(AntiCheatClass::None);
-        let id = save(&stores, None, picked).expect("saves");
+        let picked = |name: &str, from, to| AppSpec {
+            anti_cheat: Some(AntiCheatPick { from, to }),
+            ..spec(name, "Example.exe")
+        };
+        let id = save(
+            &stores,
+            None,
+            picked("Example App", AntiCheatClass::Unknown, AntiCheatClass::None),
+        )
+        .expect("saves");
         assert_eq!(class(&id), Some(AntiCheatClass::None));
 
         // A class set on the Applications page stays when the editor saves
@@ -257,9 +284,38 @@ mod tests {
         );
         assert_eq!(class(&id), Some(AntiCheatClass::KernelLevel));
 
-        let mut picked = spec("Renamed", "Example.exe");
-        picked.anti_cheat = Some(AntiCheatClass::UserMode);
-        assert_eq!(save(&stores, Some(&id), picked), Ok(id.clone()));
+        // A pick made over another class, such as one a draft kept from
+        // before that change, is refused and changes nothing.
+        assert_eq!(
+            save(
+                &stores,
+                Some(&id),
+                picked(
+                    "Renamed again",
+                    AntiCheatClass::Unknown,
+                    AntiCheatClass::None
+                )
+            ),
+            Err(
+                "The anti-cheat setting changed on the Applications page since you picked it \
+                 here. Pick it again."
+                    .to_owned()
+            )
+        );
+        assert_eq!(class(&id), Some(AntiCheatClass::KernelLevel));
+
+        assert_eq!(
+            save(
+                &stores,
+                Some(&id),
+                picked(
+                    "Renamed",
+                    AntiCheatClass::KernelLevel,
+                    AntiCheatClass::UserMode
+                )
+            ),
+            Ok(id.clone())
+        );
         assert_eq!(class(&id), Some(AntiCheatClass::UserMode));
         fs::remove_dir_all(folder).expect("clean up");
     }

@@ -130,9 +130,10 @@ AppyTappy presses keys only into the application the automation watches, and
 only while that application's window is in front. If another window is in
 front, it presses nothing.
 
-Key presses work only for an application whose anti-cheat is set to **None**
-on the Applications page. Every application starts at **Not set**, so set it
-first. [Anti-cheat](Applications.md#anti-cheat) explains why.
+Key presses work only for an application whose anti-cheat is set to **None**,
+on the Applications page or when you add or edit the application. Every
+application starts at **Not set**, so set it first.
+[Anti-cheat](Applications.md#anti-cheat) explains why.
 
 Windows does not let AppyTappy press keys into a program that runs as
 administrator, and it gives no sign that it dropped them.
@@ -262,8 +263,9 @@ it notes why in [its log](Troubleshooting.md#appytappys-log). For each click
 sent to the window, the log says that it was sent.
 
 Clicks work only when both the watched application and the one clicked in
-have anti-cheat set to **None** on the Applications page, because anti-cheat
-can see clicks that AppyTappy makes, whichever way they are sent. A click
+have anti-cheat set to **None**, on the Applications page or when you add or
+edit them ([Anti-cheat](Applications.md#anti-cheat)), because anti-cheat can
+see clicks that AppyTappy makes, whichever way they are sent. A click
 cannot be undone, so an automation that only clicks needs undo turned off.
 
 Windows does not let AppyTappy click in a program that runs as administrator.

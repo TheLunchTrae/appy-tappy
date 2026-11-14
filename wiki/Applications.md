@@ -172,9 +172,11 @@ AppyTappy asks you to confirm before it sets **None**.
 
 On the Applications page, changing the setting takes effect at once. Where
 you add or edit the application, it takes effect when you select
-**Save application**, and **Cancel** leaves it as it was. Automations that
-press keys into the application, or click while it runs, stop when you move
-it away from **None**.
+**Save application**, and **Cancel** leaves it as it was. If a
+[draft](Drafts.md) holds a setting you picked and the setting changed on the
+Applications page since, finishing the draft shows the setting saved now, so
+pick it again. Automations that press keys into the application, or click
+while it runs, stop when you move it away from **None**.
 
 ## Overlay
 

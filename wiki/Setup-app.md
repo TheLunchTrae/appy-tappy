@@ -58,11 +58,14 @@ This page covers what the user guide leaves out.
   no fallback. An application that an automation uses cannot be removed. The
   editor asks the anti-cheat question with the Applications page's menu and
   its **None** question (`components/AntiCheatMenu.tsx`), and sends a class
-  in `AppSpec` only when one was picked there: otherwise `antiCheat` is
-  `null` and the save keeps the saved class, so it never puts back a class
-  set on the Applications page while a draft waited. A draft's class that
-  the application has been set to since counts as not picked
-  (`pickedAntiCheat` in `lib/antiCheat.ts`).
+  in `AppSpec` only when one was picked there, as an `AntiCheatPick` with the
+  class it was picked over: otherwise `antiCheat` is `null` and the save
+  keeps the saved class. A draft's pick made over a class that is no longer
+  saved is dropped when the editor resumes it (`resumedPick` in
+  `lib/antiCheat.ts`), so it shows the class saved now and asks again before
+  **None**. `applications::apply` refuses a pick whose class it was made over
+  is not the saved one, so a pick never replaces a class set on the
+  Applications page unseen.
 - **Screenshots.** The owner thread keeps the session's screenshots, taken or
   [recorded](#recording-looks), in memory until the user removes them or
   their capture stops: on **Change window**, when another window is picked, or

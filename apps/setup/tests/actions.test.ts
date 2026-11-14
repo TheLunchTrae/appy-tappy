@@ -220,9 +220,9 @@ describe('anti-cheat', () => {
   const click = (clickApp: string): ActionDraft => ({ ...newAction(1, 'click'), clickApp });
   const apps = [app('streaming', 'Streaming app', 'userMode'), app('notes', 'Notes', 'none')];
   const noKeys =
-    "Anti-cheat can treat pressed keys as cheating, so keys are pressed only once Example App's anti-cheat is set to None on the Applications page.";
+    "Anti-cheat can treat pressed keys as cheating, so keys are pressed only once Example App's anti-cheat is set to None, on the Applications page or when you add or edit it.";
   const noClick = (what: string): string =>
-    `${what}, so AppyTappy cannot click while it runs: anti-cheat can see clicks that AppyTappy makes. A click needs the watched application and the one it clicks in both set to None on the Applications page.`;
+    `${what}, so AppyTappy cannot click while it runs: anti-cheat can see clicks that AppyTappy makes. A click needs the watched application and the one it clicks in both set to None, on the Applications page or when you add or edit them.`;
 
   test('blocks only the actions that send input', () => {
     const others = (['media', 'volume', 'open', 'sound'] as const).map((kind) => newAction(0, kind));

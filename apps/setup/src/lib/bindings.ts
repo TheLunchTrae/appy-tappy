@@ -73,6 +73,21 @@ at: ClickAtDef, }>;
 export type AntiCheatClass = DeepReadonly<"none" | "userMode" | "kernelLevel" | "unknown">;
 
 /**
+ * An anti-cheat class picked in the editor, with the class it was picked
+ * over, so a pick made before the Applications page set another class
+ * never replaces that class unseen.
+ */
+export type AntiCheatPick = DeepReadonly<{
+/**
+ * The saved class when it was picked: unknown for a new application.
+ */
+from: AntiCheatClass,
+/**
+ * The class picked.
+ */
+to: AntiCheatClass, }>;
+
+/**
  * One application's authoring file.
  */
 export type AppFile = DeepReadonly<{
@@ -156,7 +171,7 @@ sizeChanges: SizeChangesDef,
  * sends a class only when it was picked there, so a save leaves a class
  * set on the Applications page since the editor opened as it is.
  */
-antiCheat: AntiCheatClass | null, }>;
+antiCheat: AntiCheatPick | null, }>;
 
 /**
  * A saved application, as the Values page lists it.
