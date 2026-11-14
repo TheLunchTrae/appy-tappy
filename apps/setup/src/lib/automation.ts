@@ -22,8 +22,17 @@ import {
 } from './bindings.ts';
 import { CHECKS, type ValueKind } from './check.ts';
 import { clickBlocked, clickName } from './click.ts';
-import { spellKeys } from './shortcut.ts';
-import { asciiLower, hasControl, trimmed, utf8Bytes } from './text.ts';
+import {
+  appName,
+  hasControl,
+  openTarget,
+  soundFile,
+  spellKeys,
+  trimmed,
+  typedNumber,
+  typedPath,
+  utf8Bytes,
+} from './text.ts';
 
 /** A saved value an automation can watch. */
 export interface ValueChoice {
@@ -405,43 +414,6 @@ export function readsText(choice: ValueChoice): string {
 /** The longest cooldown, in seconds. */
 const MAX_COOLDOWN_SECONDS = LIMITS.maxCooldownMs / 1000;
 
-/**
- * A plain decimal number, such as `90`, `-3`, `12.5` or `1,234`: as a number
- * check reads one, `.` is the decimal point and `,` only separates groups of
- * three digits.
- */
-const DECIMAL = /^-?(?:\d{1,3}(?:,\d{3})+(?:\.\d*)?|\d+(?:\.\d*)?|\.\d+)$/u;
-
-/** A number typed into a field, or null when it is not a plain decimal number or too large to hold. */
-function typedNumber(text: string): number | null {
-  const typed = text.trim();
-  const number = DECIMAL.test(typed) ? Number(typed.replaceAll(',', '')) : Number.NaN;
-  return Number.isFinite(number) ? number : null;
-}
-
-/**
- * A path or link as typed, without spaces around it or the quotes that File Explorer's Copy as path puts around
- * a path.
- */
-function typedPath(text: string): string {
-  const path = trimmed(text);
-  return path.length >= 2 && path.startsWith('"') && path.endsWith('"') ? trimmed(path.slice(1, -1)) : path;
-}
-
-/**
- * Whether `text` is a full Windows path on a drive, such as `C:\Tools\Timer.exe`. A relative one would depend on a
- * folder the user never sees, and a network path, such as `\\server\share\file`, is refused, as the runtime
- * refuses it.
- */
-function isFullPath(text: string): boolean {
-  return /^[A-Za-z]:[\\/]/u.test(text);
-}
-
-/** Whether `text` fits in an open or sound action: not empty, not too long, and no control characters. */
-function fitsTarget(text: string): boolean {
-  return text !== '' && !hasControl(text) && utf8Bytes(text) <= LIMITS.maxTargetBytes;
-}
-
 /** Why the path or link `text` of action `position` can't be saved whatever its kind, or `null` when it can be. */
 function targetProblem(text: string, position: number): string | null {
   if (hasControl(text)) {
@@ -451,31 +423,6 @@ function targetProblem(text: string, position: number): string | null {
     return `The path or link in action ${position} is too long to save. Shorten it.`;
   }
   return null;
-}
-
-/** Whether `text` is a web link: `http` or `https` only, as the runtime opens no other kind. */
-function isWebLink(text: string): boolean {
-  return /^https?:\/\/\P{White_Space}+$/u.test(asciiLower(text));
-}
-
-/**
- * What an open action keeps of `text`, as the Rust side reads it: a full path or a web link without the spaces
- * around it, or null when it is neither.
- */
-export function openTarget(text: string): string | null {
-  const target = trimmed(text);
-  return fitsTarget(target) && (isFullPath(target) || isWebLink(target)) ? target : null;
-}
-
-/** What a sound action keeps of `text`, as the Rust side reads it: a WAV file's full path, or null. */
-export function soundFile(text: string): string | null {
-  const file = trimmed(text);
-  return fitsTarget(file) && isFullPath(file) && asciiLower(file).endsWith('.wav') ? file : null;
-}
-
-/** `text` as a media or volume action's app name, as the Rust side reads it, or null when it can't be one. */
-export function appName(text: string): string | null {
-  return text !== '' && !hasControl(text) && utf8Bytes(text) <= LIMITS.maxActionAppBytes ? text : null;
 }
 
 function buildAction(draft: ActionDraft, position: number): ActionDef | string {
