@@ -42,7 +42,7 @@ windows = { workspace = true, features = [
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
-windows-future = "0.3.2"
+windows-future = "0.100.0"
 
 # The manual media player test names audio sessions from the same process
 # list the runtime hands the controls. The adapter's click tests compare the
