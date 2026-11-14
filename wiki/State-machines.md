@@ -161,7 +161,8 @@ stateDiagram-v2
   start, the runtime stops what it started and exits with the error. A first
   read that fails starts with an empty plan and reads again, as
   [Reload watch](#reload-watch) describes. A request to
-  [run once](#run-once) that an earlier run left is removed.
+  [run once](#run-once) that an earlier run left is removed before the reload
+  watch starts.
 - **Running.** Each event becomes a `Step`: `Carry` some orders, `Picked`
   when the user picked Enable or Disable from the tray, which carries its
   orders too and sets `picked` (see [Reload watch](#reload-watch)), `Reload`
@@ -894,9 +895,10 @@ stateDiagram-v2
   setup app takes its file away.
 - **Left over.** A file stays when the setup app cannot take it away, or when
   a runtime heard the event and ended before it took the file. The owner
-  removes any file as it starts, before its loop, and takes a request only
-  after a reload in its loop, so a file left over never runs with a later
-  save.
+  removes any file as it starts, before the reload event exists, so a request
+  sent while it starts hears no runtime and the setup app takes it away. It
+  takes a request only after a reload in its loop, so a file left over never
+  runs with a later save.
 
 The outcome goes to the log only. The request's path brings nothing back to
 the setup app.

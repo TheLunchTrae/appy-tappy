@@ -737,9 +737,9 @@ performs one, apart from [trying a click](Actions.md#trying-a-click).
   released. The rule's state and its cooldown do not change, because the
   engine never hears of the run.
 - **A request left over.** The owner takes a request only after a reload in
-  this run, and removes any that waits when it starts. A request that the
-  setup app could not take away, or that a runtime heard and never answered,
-  therefore never runs later.
+  this run, and removes any that waits when it starts, before the reload
+  event exists. A request that the setup app could not take away, or that a
+  runtime heard and never answered, therefore never runs later.
 - **The outcome.** The request's path brings nothing back, and the setup app
   learns only that a runtime heard the event. The runtime logs each request:
   that it was asked, before the automation's own line, or why nothing runs,

@@ -342,6 +342,15 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         enabled: EnabledStore::new(locations.enabled()),
         run_once: RunOnceStore::new(locations.run_once()),
     };
+    // A request that an earlier run did not take runs nothing now: only one
+    // that comes with a reload in this run is answered. This comes before
+    // the reload event exists, so a request sent meanwhile hears no runtime
+    // and the setup app says nothing ran.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the runtime starts whether or not a leftover request can be removed"
+    )]
+    let _ = stores.run_once.take();
     // The host system sets the process's DPI awareness, which Windows
     // requires before any window exists, so it comes before the tray window.
     let system = Arc::new(HostSystem::default());
@@ -427,13 +436,6 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         crew.set_trace(trace, log);
     }
     carry(first.orders, &mut crew, log);
-    // A request that an earlier run did not take runs nothing now: only one
-    // that comes with a reload in this run is answered.
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "the runtime starts whether or not a leftover request can be removed"
-    )]
-    let _ = stores.run_once.take();
     loop {
         let due = wake(model.next_due(), reloads.retry, crew.tracing.until());
         let Some(event) = next(&events, due) else {
