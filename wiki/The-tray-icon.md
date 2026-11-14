@@ -38,8 +38,8 @@ Right-click the icon to open its menu. While actions cannot run, a grayed
 - **Quit** closes the background part, after it undoes what your automations
   changed. It starts again the next time you sign in.
 
-To start it again without signing out, open `%LOCALAPPDATA%\AppyTappy` in
-File Explorer and run `appytappy-runtime.exe`.
+To start it again without signing out, see
+[When AppyTappy's background part isn't running](Automations.md#when-appytappys-background-part-isnt-running).
 
 You don't need to restart AppyTappy after a change in AppyTappy Setup. Each
 change takes effect at once.

@@ -506,6 +506,11 @@ export async function listAutomations(): Promise<ReadonlyArray<AutomationSummary
   return invoke<ReadonlyArray<AutomationSummary>>('list_automations');
 }
 
+/** Whether AppyTappy's background part runs, or null when that cannot be told. */
+export async function runtimeRuns(): Promise<boolean | null> {
+  return invoke<boolean | null>('runtime_runs');
+}
+
 /** Every saved draft, oldest first, including those whose file cannot be read. */
 export async function listDrafts(): Promise<ReadonlyArray<DraftSummary>> {
   return invoke<ReadonlyArray<DraftSummary>>('list_drafts');

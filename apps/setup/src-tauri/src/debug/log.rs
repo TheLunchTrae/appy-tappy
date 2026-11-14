@@ -31,6 +31,7 @@ pub(crate) const REPEATED: &[&str] = &[
     "read_value",
     "recorded_reading",
     "recording_state",
+    "runtime_runs",
     "screenshot",
     "sync_overlays",
     "trace_files",

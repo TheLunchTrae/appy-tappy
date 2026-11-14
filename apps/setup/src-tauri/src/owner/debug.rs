@@ -22,7 +22,7 @@ impl<H: Host> Owner<H> {
     /// from where the last call stopped, so a page that asks every few
     /// seconds reads only the rows added since.
     pub(crate) fn debug_overview(&mut self) -> Result<DebugOverview, String> {
-        let runtime = self.host.runtime_runs().ok();
+        let runtime = self.runtime_runs();
         let traces = self.debug_stores()?.traces.clone();
         // A trace folder that cannot be listed still leaves the runtime's state
         // to show.

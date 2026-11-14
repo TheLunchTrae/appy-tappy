@@ -11,7 +11,6 @@ use appytappy_config::app_file::BuildDef;
 use appytappy_config::click::{ClickButton, ClickDelivery};
 use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
-use appytappy_platform::InstanceGuard;
 use appytappy_sources::HostSystem;
 use appytappy_sources::screen::place::{Target, place};
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler};
@@ -21,6 +20,7 @@ use appytappy_sources::system::{
 use tauri::{AppHandle, Runtime, Wry};
 
 use crate::overlay::{self, OverlayWindow};
+use crate::settings::RUNTIME_PROGRAM;
 
 /// What the setup app calls itself where the runtime names the watched
 /// application, such as in why a click did not click.
@@ -135,8 +135,10 @@ pub(crate) trait Host: 'static {
     /// keeps what it read, so the save stands either way.
     fn reload_runtime(&self);
 
-    /// Whether the runtime is running, which its single-instance guard
-    /// tells without the check taking it.
+    /// Whether the runtime is running, as the list of running processes
+    /// tells by its program's name. The check opens neither the runtime nor
+    /// its single-instance guard, so a runtime that starts meanwhile still
+    /// takes the guard.
     ///
     /// # Errors
     ///
@@ -221,20 +223,30 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
     fn reload_runtime(&self) {
         #[expect(
             clippy::let_underscore_must_use,
-            reason = "the save already happened; the runtime picks it up when it next starts"
+            reason = "the save already happened, and a runtime that missed the signal reads it when it starts; the main pages ask whether it runs"
         )]
         let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
     }
 
-    #[mutants::skip] // Reads a Windows mutex, checked by hand on Windows.
     fn runtime_runs(&self) -> io::Result<bool> {
-        InstanceGuard::is_held(InstanceGuard::RUNTIME)
+        self.system
+            .processes()
+            .map(|processes| runtime_among(&processes))
     }
 
     #[mutants::skip] // Opens and closes windows, which needs a running app.
     fn sync_overlay_windows(&self, wanted: &[OverlayWindow]) -> Result<(), String> {
         overlay::window::sync(&self.app, wanted)
     }
+}
+
+/// Whether the runtime's program is among `processes`. Its name is the
+/// runtime's whoever started it, but the list holds every user's
+/// processes, so another user's runtime on the same PC counts too.
+fn runtime_among(processes: &[ProcessEntry]) -> bool {
+    processes
+        .iter()
+        .any(|process| process.executable.eq_ignore_ascii_case(RUNTIME_PROGRAM))
 }
 
 #[cfg(test)]
@@ -255,6 +267,7 @@ mod tests {
         assert!(desktop.processes().is_err());
         assert!(desktop.window_place(7).is_err());
         assert!(desktop.executable_build(ProcessId::new(7)).is_err());
+        assert!(desktop.runtime_runs().is_err());
         let handler: FrameHandler = Box::new(|_frame| NextFrame::After(Duration::ZERO));
         assert!(
             desktop
@@ -283,5 +296,24 @@ mod tests {
                 .starts_with("Example App's window cannot be found: "),
             "a click is placed before it is sent"
         );
+    }
+
+    #[test]
+    fn the_runtime_runs_while_its_program_is_listed() {
+        let process = |executable: &str| ProcessEntry {
+            id: ProcessId::new(7),
+            parent: ProcessId::new(1),
+            executable: executable.to_owned(),
+            threads: 1,
+        };
+        assert!(!runtime_among(&[]));
+        assert!(!runtime_among(&[
+            process("Example.exe"),
+            process("AppyTappy Setup.exe")
+        ]));
+        assert!(runtime_among(&[
+            process("Example.exe"),
+            process("AppyTappy-Runtime.EXE")
+        ]));
     }
 }

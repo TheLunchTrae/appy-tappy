@@ -200,6 +200,8 @@ macro_rules! with_commands {
             /// Records the build of `application` that runs now as the one its values were checked against.
             commands::mark_checked(application: String) -> ();
             commands::list_automations() -> Vec<AutomationSummary>;
+            /// Whether AppyTappy's background part runs, or null when that cannot be told.
+            commands::runtime_runs() -> Option<bool>;
             /// Every saved draft, oldest first, including those whose file cannot be read.
             commands::list_drafts() -> Vec<DraftSummary>;
             /// Saves `draft` over the draft `id`, or as a new one, and returns its ID. With `screenshots`, it keeps the

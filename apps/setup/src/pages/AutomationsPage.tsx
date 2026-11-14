@@ -5,6 +5,7 @@ import { deleteAutomation, errorText, setAutomationEnabled } from '../lib/api.ts
 import { actionText } from '../lib/actions.ts';
 import { COMPARISON_NAMES, type ValueChoice, findValue, targetText, valueChoices } from '../lib/automation.ts';
 import { Hint } from '../components/Hint.tsx';
+import { RuntimeWarning } from '../components/RuntimeWarning.tsx';
 import { NEEDS_RUNNING_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
 import { type Resumed, draftOfSaved, draftProblem, newDrafts } from '../lib/drafts.ts';
@@ -206,6 +207,8 @@ interface Props {
   readonly apps: readonly AppSummary[] | null;
   readonly automations: readonly AutomationSummary[] | null;
   readonly loadError: string | null;
+  /** Whether the background part runs, or null while that is not known. */
+  readonly runtime: boolean | null;
   readonly onChanged: () => Promise<void>;
   readonly onNew: () => void;
   readonly onEdit: (summary: AutomationSummary) => void;
@@ -221,6 +224,7 @@ export function AutomationsPage({
   apps,
   automations,
   loadError,
+  runtime,
   onChanged,
   onNew,
   onEdit,
@@ -413,6 +417,7 @@ export function AutomationsPage({
   return (
     <main className="page">
       {head}
+      <RuntimeWarning runs={runtime} />
       {loadError === null ? null : (
         <p className="warn" role="alert">
           {loadError}

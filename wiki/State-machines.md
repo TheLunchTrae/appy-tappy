@@ -114,8 +114,8 @@ it was about has gone. Fourteen guards drop such stale messages:
   **Save as draft** carry the flow they are for in the same way, and
   `keepStep` drops an answer for any other flow than the open one.
 - **List reads.** The setup app numbers each read of the saved applications,
-  automations, and drafts as it starts. An answer older than the newest one taken is
-  dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
+  automations, and drafts, and of whether the runtime runs, as it starts. An
+  answer older than the newest one taken is dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
   started before a save and answers late never puts older lists back.
 - **Newest asks.** Every other answer the setup app's screens wait for goes
   through `apps/setup/src/lib/request.ts`. `ask` is what an effect returns:
@@ -1340,6 +1340,41 @@ the process, the owner saves where each panel is and stops the capture, as the
 app's own end would. While the question to leave a flow has the nav's place,
 the notice is hidden and keeps its state. An event that does not fit the
 state, such as a late check during the download, changes nothing.
+
+### Runtime warning
+
+The Automations page and the automation editor warn while the runtime does
+not run (`apps/setup/src/components/RuntimeWarning.tsx`). `App.tsx` holds
+`runtime`, which the [list reads](#how-to-read-this-page) refresh with the
+saved lists: on the `REFRESH_MS` timer while no screen holds the capture, and after
+each save. The owner answers from the running processes
+(`Owner::runtime_runs`), the check the Debug page shows too, which opens
+nothing the runtime needs to start.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unknown
+    Unknown --> Runs: a read finds the runtime's program running
+    Unknown --> Stopped: a read finds it not running
+    Runs --> Stopped: a read finds it not running
+    Stopped --> Runs: a read finds it running
+    Runs --> Unknown: the check or the command fails
+    Stopped --> Unknown: the check or the command fails
+```
+
+Only **Stopped** shows the warning, so a check that fails warns of nothing,
+and the next read that works leaves **Unknown** (`runtimeAfter` in
+`apps/setup/src/lib/runtime.ts`). The reload signal after a save does not
+feed this state: the refresh that follows the save checks the processes
+itself, and a runtime that missed the signal reads the saved files
+when it starts.
+
+#### Open problems
+
+- [#440](https://github.com/TheLunchTrae/appy-tappy/issues/440): the process
+  list holds every signed-in Windows user's processes, so another user's
+  runtime reads as **Runs** and hides the warning while this user's runtime
+  is stopped.
 
 ### Application import
 
