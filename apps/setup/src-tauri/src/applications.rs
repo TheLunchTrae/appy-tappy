@@ -107,8 +107,8 @@ pub(crate) fn apply(
     if let Some(pick) = spec.anti_cheat {
         if file.anti_cheat != pick.from {
             return Err(
-                "The anti-cheat setting changed on the Applications page since you picked it \
-                 here. Pick it again."
+                "The anti-cheat setting changed since you picked it here. Cancel, then edit the \
+                 application again to pick it."
                     .to_owned(),
             );
         }
@@ -297,8 +297,8 @@ mod tests {
                 )
             ),
             Err(
-                "The anti-cheat setting changed on the Applications page since you picked it \
-                 here. Pick it again."
+                "The anti-cheat setting changed since you picked it here. Cancel, then edit the \
+                 application again to pick it."
                     .to_owned()
             )
         );
