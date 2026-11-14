@@ -36,8 +36,8 @@ mutants.workspace = true
 ocrs = { version = "0.13.1", default-features = false, features = ["onnx"] }
 # Loads the text reader's model file, and gives the rectangle of the line
 # it reads.
-rten = { version = "0.26.0", default-features = false, features = ["onnx_format"] }
-rten-imageproc = "0.26.0"
+rten = { version = "0.27.0", default-features = false, features = ["onnx_format"] }
+rten-imageproc = "0.27.0"
 # Command arguments and replies cross into the web UI as JSON.
 serde.workspace = true
 # Keeps a downloaded update's release manifest until the user installs it,
