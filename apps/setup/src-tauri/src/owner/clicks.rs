@@ -510,6 +510,7 @@ mod tests {
                         executable: "Other.exe",
                     }),
                     size_changes: SizeChangesDef::Often,
+                    anti_cheat: None,
                 },
             )
         });

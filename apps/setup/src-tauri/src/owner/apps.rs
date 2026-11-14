@@ -665,6 +665,7 @@ mod tests {
                         executable: "Other.exe",
                     }),
                     size_changes: SizeChangesDef::Often,
+                    anti_cheat: None,
                 },
             )
         });
@@ -767,6 +768,7 @@ mod tests {
                             executable,
                         }),
                         size_changes: SizeChangesDef::Often,
+                        anti_cheat: None,
                     },
                 )
             })

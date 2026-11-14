@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import type { AppSummary, FallbackDef, SizeChangesDef, WindowChoice, WindowDef, WindowList } from '../lib/bindings.ts';
+import type {
+  AntiCheatPick,
+  AppSummary,
+  FallbackDef,
+  SizeChangesDef,
+  WindowChoice,
+  WindowDef,
+  WindowList,
+} from '../lib/bindings.ts';
 import { errorText, listWindows, saveApp } from '../lib/api.ts';
+import { AntiCheatMenu } from '../components/AntiCheatMenu.tsx';
 import { DeleteDraft } from '../components/Drafts.tsx';
 import { Hint } from '../components/Hint.tsx';
 import {
@@ -21,6 +30,7 @@ import {
   fitCount,
   requires,
   sentence,
+  startAppSetup,
   unfinishedApp,
   withMustMatch,
 } from '../lib/matching.ts';
@@ -28,16 +38,14 @@ import { background } from '../lib/repeat.ts';
 import { SIZE_CHANGES, SIZE_CHANGES_HINT, SIZE_CHANGE_TEXT } from '../lib/sizes.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
-import { DRAFT_HINT } from '../lib/hints.ts';
+import { ANTI_CHEAT_HINT, DRAFT_HINT } from '../lib/hints.ts';
+import { pickAntiCheat, shownAntiCheat } from '../lib/antiCheat.ts';
 import { Trail } from '../components/Trail.tsx';
 import { WindowsPanel, useWindowFits, useWindowScores } from '../components/WindowsPanel.tsx';
 
-/** The setup as `resumed` keeps it, or else as `saved` has it, or a new application's. */
-function startAppSetup(saved: AppSummary['file'], resumed: Resumed | null): AppSetup {
-  if (resumed !== null && isKept<AppKept>(resumed.def.state, 'application')) {
-    return resumed.def.state.state;
-  }
-  return { name: saved?.name ?? '', window: saved?.window ?? null, sizeChanges: saved?.sizeChanges ?? 'often' };
+/** The setup `resumed` keeps, or null when it keeps none or one of another shape. */
+function keptSetup(resumed: Resumed | null): AppSetup | null {
+  return resumed !== null && isKept<AppKept>(resumed.def.state, 'application') ? resumed.def.state.state : null;
 }
 
 interface Props {
@@ -64,7 +72,10 @@ function choiceLabel(option: SizeChangesDef): string {
   return note === null ? name : `${name}, ${note.toLowerCase()}`;
 }
 
-/** Adding an application, or changing one's name, how its window is found and how often that window changes size. */
+/**
+ * Adding an application, or changing one's name, how its window is found, how often that window changes size, and
+ * its anti-cheat.
+ */
 export function ApplicationEditor({
   existing,
   draft: resumed,
@@ -76,7 +87,7 @@ export function ApplicationEditor({
   onDraft,
 }: Props) {
   const saved = existing?.file ?? null;
-  const [start] = useState<AppSetup>(() => startAppSetup(saved, resumed));
+  const [start] = useState<AppSetup>(() => startAppSetup(saved, keptSetup(resumed)));
   const [list, setList] = useState<WindowList | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [listed, setListed] = useState(0);
@@ -84,11 +95,14 @@ export function ApplicationEditor({
   const [name, setName] = useState(start.name);
   const [window, setWindow] = useState<WindowDef | null>(start.window);
   const [sizeChanges, setSizeChanges] = useState<SizeChangesDef>(start.sizeChanges);
+  const [antiCheat, setAntiCheat] = useState<AntiCheatPick | null>(start.antiCheat);
+  const [confirmingNone, setConfirmingNone] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { fits, error: fitError } = useWindowFits(window, listed);
   const scores = useWindowScores(window, listed);
-  const setup: AppSetup = { name, window, sizeChanges };
+  const setup: AppSetup = { name, window, sizeChanges, antiCheat };
+  const savedAntiCheat = saved?.antiCheat ?? null;
   const missing = unfinishedApp(setup);
   const drafting = useDraft(
     resumed,
@@ -146,7 +160,7 @@ export function ApplicationEditor({
     }
     setBusy(true);
     try {
-      const id = await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges });
+      const id = await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges, antiCheat });
       await drafting.finished();
       onSaved(id);
     } catch (error: unknown) {
@@ -307,6 +321,26 @@ export function ApplicationEditor({
                   </label>
                 ))}
               </fieldset>
+              <div className="field">
+                <span className="name">
+                  <label htmlFor="anti-cheat">Anti-cheat</label>
+                  <Hint topic="Anti-cheat" id="hint-anti-cheat">
+                    {ANTI_CHEAT_HINT}
+                  </Hint>
+                </span>
+                <AntiCheatMenu
+                  id="anti-cheat"
+                  name={name.trim() === '' ? 'this application' : name.trim()}
+                  antiCheat={shownAntiCheat(antiCheat, savedAntiCheat)}
+                  confirming={confirmingNone}
+                  busy={busy || drafting.saving}
+                  onConfirm={setConfirmingNone}
+                  onSet={(picked) => {
+                    setAntiCheat(pickAntiCheat(picked, savedAntiCheat));
+                    setConfirmingNone(false);
+                  }}
+                />
+              </div>
               <p className={fitError === null ? 'note' : 'warn'} role="status">
                 {fitError === null
                   ? fitCount(fits)

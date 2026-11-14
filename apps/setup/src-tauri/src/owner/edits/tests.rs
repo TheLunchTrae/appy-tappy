@@ -198,6 +198,7 @@ fn set_size_changes(harness: &mut Harness, changes: SizeChangesDef) {
                         executable: "Example.exe",
                     }),
                     size_changes: changes,
+                    anti_cheat: None,
                 },
             )
         })
