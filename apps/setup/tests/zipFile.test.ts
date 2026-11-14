@@ -1,52 +1,110 @@
 import { describe, expect, test } from 'bun:test';
 
-import { saveZip, type ZipSaver } from '../src/lib/zipFile.ts';
+import { fileSaver, type PickedFile, saveZip, type ZipSaver } from '../src/lib/zipFile.ts';
 
-/** A picker that records each name it was asked with and each zip written where it picked. */
-function picker(picks: boolean): {
-  readonly asked: string[];
-  readonly written: Blob[];
-  readonly pick: (name: string) => Promise<ZipSaver | null>;
-} {
-  const asked: string[] = [];
-  const written: Blob[] = [];
-  const pick = async (name: string): Promise<ZipSaver | null> => {
-    asked.push(name);
-    const write: ZipSaver = async (zip) => {
-      written.push(zip);
-      await Promise.resolve();
-    };
-    return Promise.resolve(picks ? write : null);
-  };
-  return { asked, written, pick };
+/**
+ * How a fake file's writes go: as asked, or failing the write or the removal. A removal fails by rejecting, or by
+ * throwing before it returns a promise, as a WebView without `remove` does.
+ */
+interface Faults {
+  readonly write?: boolean;
+  readonly remove?: 'rejects' | 'throws';
 }
 
-describe('saving a zip that is made first', () => {
-  test('writes it where the user picks', async () => {
-    const zip = new Blob(['zip']);
-    const { asked, written, pick } = picker(true);
-    expect(await saveZip('app.zip', async () => Promise.resolve(zip), pick)).toBe(true);
+/**
+ * A folder of files by name, and a picker that makes the file it picks, empty, as the save picker does. Each file
+ * holds the text of the zip written to it.
+ */
+function folder(faults: Faults = {}): {
+  readonly files: Map<string, string>;
+  readonly asked: string[];
+  readonly pick: (name: string) => Promise<ZipSaver | null>;
+} {
+  const files = new Map<string, string>();
+  const asked: string[] = [];
+  const handle = (name: string): PickedFile => ({
+    createWritable: async () => {
+      let written = '';
+      return Promise.resolve({
+        write: async (zip: Blob) => {
+          if (faults.write === true) {
+            throw new Error('The disk is full.');
+          }
+          written = await zip.text();
+        },
+        abort: async () => Promise.resolve(),
+        close: async () => {
+          files.set(name, written);
+          await Promise.resolve();
+        },
+      });
+    },
+    remove:
+      faults.remove === 'throws'
+        ? () => {
+            throw new TypeError('file.remove is not a function');
+          }
+        : async () => {
+            if (faults.remove === 'rejects') {
+              throw new Error('The file is in use.');
+            }
+            files.delete(name);
+            await Promise.resolve();
+          },
+  });
+  const pick = async (name: string): Promise<ZipSaver | null> => {
+    asked.push(name);
+    files.set(name, '');
+    return Promise.resolve(fileSaver(handle(name)));
+  };
+  return { files, asked, pick };
+}
+
+async function failure(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error: unknown) {
+    return error;
+  }
+  return null;
+}
+
+const zip = async (): Promise<Blob> => Promise.resolve(new Blob(['zip']));
+const tooLarge = async (): Promise<Blob> => Promise.reject(new Error('The bundle is too large.'));
+
+describe('saving a zip', () => {
+  test('asks where, then writes it there', async () => {
+    const { files, asked, pick } = folder();
+    expect(await saveZip('app.zip', zip, pick)).toBe(true);
     expect(asked).toEqual(['app.zip']);
-    expect(written).toEqual([zip]);
+    expect([...files]).toEqual([['app.zip', 'zip']]);
   });
 
-  test('says so when the user closes the picker', async () => {
-    const { written, pick } = picker(false);
-    expect(await saveZip('app.zip', async () => Promise.resolve(new Blob(['zip'])), pick)).toBe(false);
-    expect(written).toEqual([]);
+  test('makes nothing when the user closes the picker', async () => {
+    let made = false;
+    const make = async (): Promise<Blob> => {
+      made = true;
+      return zip();
+    };
+    expect(await saveZip('app.zip', make, async () => Promise.resolve(null))).toBe(false);
+    expect(made).toBe(false);
   });
 
-  test('asks nothing and makes no file when the zip fails to be made', async () => {
-    const { asked, pick } = picker(true);
-    const tooLarge = async (): Promise<Blob> => Promise.reject(new Error('The export is too large.'));
-    let failure: unknown = null;
-    try {
-      await saveZip('app.zip', tooLarge, pick);
-    } catch (error: unknown) {
-      failure = error;
-    }
-    expect(failure).toEqual(new Error('The export is too large.'));
-    // The picker makes the file it picks, so a picker never opened leaves none behind.
-    expect(asked).toEqual([]);
+  test('leaves no file when the zip fails to be made, such as a bundle', async () => {
+    const { files, pick } = folder();
+    expect(await failure(saveZip('bundle.zip', tooLarge, pick))).toEqual(new Error('The bundle is too large.'));
+    // The picker made the file when it was picked, and the failure removes it.
+    expect([...files]).toEqual([]);
+  });
+
+  test('leaves no file when the zip fails to be written', async () => {
+    const { files, pick } = folder({ write: true });
+    expect(await failure(saveZip('bundle.zip', zip, pick))).toEqual(new Error('The disk is full.'));
+    expect([...files]).toEqual([]);
+  });
+
+  test.each(['rejects', 'throws'] as const)('says why it failed even when the removal %s', async (remove) => {
+    const { pick } = folder({ remove });
+    expect(await failure(saveZip('bundle.zip', tooLarge, pick))).toEqual(new Error('The bundle is too large.'));
   });
 });

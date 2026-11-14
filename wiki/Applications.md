@@ -40,7 +40,8 @@ don't have to draw them again.
   [checked against](Values.md#when-an-application-updates) and how they
   were made. Your automations and
   the application's overlay setting stay out of it, and nothing is sent
-  anywhere.
+  anywhere. If the export fails, it leaves no file where you picked, not even
+  one you chose to replace.
 
   > [!NOTE]
   > The pictures show parts of the application's window, and the file holds

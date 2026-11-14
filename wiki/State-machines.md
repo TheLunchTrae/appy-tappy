@@ -1364,10 +1364,16 @@ taken, goes back to **Asking** with what the user entered and the reason, and
 **Import** tries again. An event that does not fit the state, such as a late
 read while the dialog asks, changes nothing.
 
-The export dialog (`ExportApp.tsx`) has no states beyond busy while the file
-is made and saved. It asks where to save only once the file is made
-(`saveZip`), since the picker makes the file it picks: a failure leaves no
-file behind, shows in the dialog, and **Save file** tries again.
+The export dialog (`ExportApp.tsx`) and the debug bundle dialog
+(`ExportBundle.tsx`) have no states beyond busy while the file is made and
+saved. Each asks where to save first, then makes the file and writes it
+(`saveZip`): the click lets the page open the picker for only about 5
+seconds, and a slow build would otherwise never reach it. The picker makes
+the file it picks, or empties one that was there, so the old content is gone
+from the pick on. A file that fails to be made or written is removed: a
+failure leaves no file there, not even the one the user picked to replace,
+shows in the dialog, and **Save file** or **Save bundle** tries again. Closing
+the picker makes nothing.
 
 ### Capture slot
 
