@@ -6,7 +6,7 @@ import { LIMITS } from '../lib/bindings.ts';
 import {
   type Draft,
   type DraftState,
-  sharedNames,
+  stateNameProblems,
   stateOn,
   withoutState,
   withState,
@@ -49,6 +49,40 @@ function addBlocked(draft: Draft, selected: number | null): string | null {
   return draft.states.length >= LIMITS.maxStates ? `A value can tell apart at most ${LIMITS.maxStates} states.` : null;
 }
 
+interface NameProps {
+  /** What the input is called for a screen reader. */
+  readonly label: string;
+  readonly name: string;
+  /** Why the name cannot be saved, shown under it, or null when it can. */
+  readonly problem: string | null;
+  readonly onName: (name: string) => void;
+}
+
+/** A state's name as the user types it, and why it cannot be saved when it cannot. */
+export function StateNameInput({ label, name, problem, onName }: NameProps) {
+  const problemId = useId();
+  return (
+    <>
+      <input
+        className="input"
+        aria-label={label}
+        aria-invalid={problem !== null}
+        aria-describedby={problem === null ? undefined : problemId}
+        placeholder="Name"
+        value={name}
+        onChange={(event) => {
+          onName(event.target.value);
+        }}
+      />
+      {problem === null ? null : (
+        <small id={problemId} className="warn">
+          {problem}
+        </small>
+      )}
+    </>
+  );
+}
+
 interface CardProps {
   readonly state: DraftState;
   readonly region: Rect | null;
@@ -59,8 +93,8 @@ interface CardProps {
   readonly shown: boolean;
   /** Whether the live window reads as this state now. */
   readonly matches: boolean;
-  /** Whether another state has its name, ignoring case. */
-  readonly shared: boolean;
+  /** Why its name cannot be saved, or null when it can. */
+  readonly problem: string | null;
   readonly number: number;
   readonly onName: (name: string) => void;
   readonly onClear: () => void;
@@ -79,7 +113,7 @@ function comparedText(state: DraftState, region: Rect | null, masking: Masking |
 }
 
 function StateCard(props: CardProps) {
-  const { state, region, picture, masking, ignoreBackground, shown, matches, shared, number } = props;
+  const { state, region, picture, masking, ignoreBackground, shown, matches, problem, number } = props;
   const crop = useMemo(
     () => (picture === null || region === null ? null : cropPicture(picture, region)),
     [picture, region],
@@ -87,7 +121,6 @@ function StateCard(props: CardProps) {
   const compared = comparedText(state, region, masking, ignoreBackground);
   const lost = state.steps.length > 0 && masking?.found === false;
   const label = state.name.trim() === '' ? `State from screenshot ${number}` : state.name.trim();
-  const sharedId = useId();
   return (
     <li className="state" data-matches={matches} aria-current={shown ? 'true' : undefined}>
       <button
@@ -100,16 +133,11 @@ function StateCard(props: CardProps) {
         {crop === null ? <span className="note">No region</span> : <PictureCanvas picture={crop} label={label} />}
       </button>
       <div className="state-body">
-        <input
-          className="input"
-          aria-label={`Name of the state from screenshot ${number}`}
-          aria-invalid={shared}
-          aria-describedby={shared ? sharedId : undefined}
-          placeholder="Name"
-          value={state.name}
-          onChange={(event) => {
-            props.onName(event.target.value);
-          }}
+        <StateNameInput
+          label={`Name of the state from screenshot ${number}`}
+          name={state.name}
+          problem={problem}
+          onName={props.onName}
         />
         <small>
           Screenshot {number}
@@ -121,11 +149,6 @@ function StateCard(props: CardProps) {
             </>
           ) : null}
         </small>
-        {shared ? (
-          <small id={sharedId} className="warn">
-            Another state has this name, or one that differs from it only in capitals.
-          </small>
-        ) : null}
         {lost ? <small className="warn">Nothing stood out there. Try again, or raise Color match.</small> : null}
       </div>
       <div className="state-actions">
@@ -146,7 +169,7 @@ export function StatesField({ draft, full, selected, masks, reads, position, onD
   const { reading } = useLiveRead(reads);
   const blocked = addBlocked(draft, selected);
   const selecting = draft.states.some((state) => state.steps.length > 0);
-  const shared = sharedNames(draft.states);
+  const problems = stateNameProblems(draft.states.map((state) => state.name));
   return (
     <>
       <div className="field">
@@ -168,7 +191,7 @@ export function StatesField({ draft, full, selected, masks, reads, position, onD
                 ignoreBackground={draft.ignoreBackground}
                 shown={state.screenshot === selected}
                 matches={reading?.kind === 'state' && reading.value === state.name.trim()}
-                shared={shared.has(index)}
+                problem={problems.get(index) ?? null}
                 number={position(state.screenshot)}
                 onName={(name) => {
                   onDraft((current) => withStateAt(current, index, (old) => ({ ...old, name })));

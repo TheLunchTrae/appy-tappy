@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { LIMITS } from '../src/lib/bindings.ts';
+import { LIMITS, NO_STATE } from '../src/lib/bindings.ts';
 import { boxStep } from '../src/lib/boxes.ts';
 import {
   type Draft,
@@ -20,7 +20,8 @@ import {
   recordedPlace,
   regionScreenshot,
   firstWithPixels,
-  sharedNames,
+  stateNameProblems,
+  stateNamesNext,
   reviewSpec,
   settingsDiffer,
   stateOn,
@@ -135,7 +136,7 @@ describe('buildSpec', () => {
       ),
     ).toEqual({
       ok: false,
-      next: 'Name each state.',
+      next: 'Fix each state name that has a message under it.',
     });
     expect(buildSpec({ ...two, drawnOn: null }, 'example')).toEqual({
       ok: false,
@@ -483,17 +484,64 @@ test('a fix places its region on the first screenshot whose pixels arrived', () 
   expect(firstWithPixels(shots, new Map([[1, 'one']]))).toBeNull();
 });
 
-test('state names that differ only in case or in spaces at their ends are one name', () => {
-  const named = (...names: string[]) => names.map((name) => ({ name }));
-  expect([...sharedNames(named('Ready', 'Paused', ' ready '))]).toEqual([0, 2]);
-  expect([...sharedNames(named('Ready', 'Paused'))]).toEqual([]);
-  // A state with no name is not named alike; it has its own message.
-  expect([...sharedNames(named('', ' ', 'Ready'))]).toEqual([]);
-  const ready: DraftState = { name: 'Ready', screenshot: 0, steps: [] };
-  const draft: Draft = { ...EMPTY_DRAFT, kind: 'state', region, drawnOn: 0, states: [ready] };
-  const second = (name: string): Draft => ({ ...draft, states: [ready, { name, screenshot: 1, steps: [] }] });
-  expect(buildSpec(second('ready'), 'example')).toEqual({ ok: false, next: 'Give each state a name of its own.' });
-  expect(buildSpec(second('Paused'), 'example').ok).toBe(true);
+describe('state names', () => {
+  // Each name breaks one rule of the saved file's, and the message says which.
+  const problem = (name: string): string | undefined => stateNameProblems([name]).get(0);
+  const longest = 'é'.repeat(LIMITS.maxStateNameChars);
+
+  test('a name the saved file takes has no message, once trimmed', () => {
+    for (const name of ['Paused', 'a', 'Game over', 'Nonever', ' none of these ', longest, `${longest} `]) {
+      expect(problem(name)).toBeUndefined();
+    }
+  });
+
+  test('a name with no characters but spaces has none', () => {
+    expect(problem('')).toBe('Name this state.');
+    expect(problem('  ')).toBe('Name this state.');
+  });
+
+  test('a name holds no control character', () => {
+    expect(problem('Pau\tsed')).toBe('A state name cannot hold a control character, such as a tab.');
+    // Trimming keeps a control character that is not a space, which the saved file refuses too.
+    expect(problem('Paused\u0085')).toBe('A state name cannot hold a control character, such as a tab.');
+  });
+
+  test('a name is at most the longest the saved file takes, in characters', () => {
+    expect(problem(`${longest}a`)).toBe(`A state name can be at most ${LIMITS.maxStateNameChars} characters long.`);
+  });
+
+  test('a name is not the one that stands for no state, in any capitals', () => {
+    const reserved = `The value reads "${NO_STATE}" when no state shows, so a state cannot have that name.`;
+    expect(problem(NO_STATE)).toBe(reserved);
+    expect(problem(' NONE ')).toBe(reserved);
+    expect(problem('NoNe')).toBe(reserved);
+  });
+
+  test('names that differ only in case or in spaces at their ends are one name', () => {
+    const shared = 'Another state has this name, or one that differs from it only in capitals.';
+    expect([...stateNameProblems(['Ready', 'Paused', ' ready '])]).toEqual([
+      [0, shared],
+      [2, shared],
+    ]);
+    // A name's own problem comes first, so two empty names each say to name them.
+    expect([...stateNameProblems(['', ' ', 'Ready'])]).toEqual([
+      [0, 'Name this state.'],
+      [1, 'Name this state.'],
+    ]);
+  });
+
+  test('a state check waits until every name can be saved', () => {
+    const ready: DraftState = { name: 'Ready', screenshot: 0, steps: [] };
+    const draft: Draft = { ...EMPTY_DRAFT, kind: 'state', region, drawnOn: 0, states: [ready] };
+    const second = (name: string): Draft => ({ ...draft, states: [ready, { name, screenshot: 1, steps: [] }] });
+    const next = 'Fix each state name that has a message under it.';
+    expect(stateNamesNext(['Ready', 'Paused'])).toBeNull();
+    for (const name of ['ready', NO_STATE, 'a\tb', `${longest}a`]) {
+      expect(stateNamesNext(['Ready', name])).toBe(next);
+      expect(buildSpec(second(name), 'example')).toEqual({ ok: false, next });
+    }
+    expect(buildSpec(second('Paused'), 'example').ok).toBe(true);
+  });
 });
 
 test("recording waits for a place to read and the characters' color", () => {
