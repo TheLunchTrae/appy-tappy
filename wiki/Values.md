@@ -275,7 +275,11 @@ instant can then be missed.
   is left to teach: it does not change how a number reads. A `.` is always
   the decimal point, and a `,` only
   separates thousands: it counts only between groups of three digits, so
-  `12,5` reads as 12. A number written with its point first, such as `.5`,
+  `12,5` reads as 12. Any other character after the digits ends the number,
+  so a time such as `12:30` and a count such as `12/50` each read as 12, the
+  number before the colon or slash. The reference still has to know the `:`
+  or `/`, since a shape it has not learned fails the read. A number written
+  with its point first, such as `.5`,
   reads as 0.5, and a `.` with no digit after it, such as `...`, is not a
   number.
 - **Bar fill** reads how full a bar is, from 0 to 100. Draw the region
