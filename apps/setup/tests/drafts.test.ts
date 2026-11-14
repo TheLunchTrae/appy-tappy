@@ -28,7 +28,7 @@ import {
   removalLoses,
   unfinishedText,
 } from '../src/lib/drafts.ts';
-import { unfinishedApp } from '../src/lib/matching.ts';
+import { type AppSetup, startAppSetup, unfinishedApp } from '../src/lib/matching.ts';
 
 const apps: readonly AppSummary[] = [
   {
@@ -206,6 +206,8 @@ describe('the shape a draft keeps', () => {
       'sound',
       'target',
     ]);
+    const application: AppSetup = startAppSetup(null, null);
+    expect(Object.keys(application).sort()).toEqual(['antiCheat', 'name', 'sizeChanges', 'window']);
     const stored = storeSetup(EMPTY_SETUP);
     expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'mayMove', 'step', 'valueName']);
     expect(Object.keys(stored.draft).sort()).toEqual([

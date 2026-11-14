@@ -312,7 +312,7 @@ describe('input', () => {
   test("waits for the watched application's anti-cheat to be set to none, saying the first reason", () => {
     expect(build(toDraft(clicks), withAntiCheat('userMode'))).toEqual({
       ok: false,
-      next: "Anti-cheat can treat pressed keys as cheating, so keys are pressed only once Example App's anti-cheat is set to None on the Applications page.",
+      next: "Anti-cheat can treat pressed keys as cheating, so keys are pressed only once Example App's anti-cheat is set to None, on the Applications page or when you add or edit it.",
     });
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { WindowDef, WindowFit, WindowScore } from '../src/lib/bindings.ts';
+import type { AppFile, WindowDef, WindowFit, WindowScore } from '../src/lib/bindings.ts';
 import {
   exactWindow,
   fallbackUseful,
@@ -9,6 +9,7 @@ import {
   matchSummary,
   sentence,
   required,
+  startAppSetup,
   scoreText,
   withMustMatch,
 } from '../src/lib/matching.ts';
@@ -138,5 +139,38 @@ describe('a window score', () => {
     expect(
       scoreText(score({ title: false }), { mustMatch: { title: true, class: false }, fallback: 'executable' }),
     ).toEndWith('Not taken: its title must match, and a window that does is open, so the fallback is not used.');
+  });
+});
+
+describe('the application editor starts', () => {
+  const saved = (antiCheat: AppFile['antiCheat']): AppFile => ({
+    format: 1,
+    name: 'Example App',
+    window: example,
+    sizeChanges: 'rarely',
+    antiCheat,
+    values: [],
+    references: [],
+  });
+
+  test('a new application with nothing picked, and a saved one as it is saved', () => {
+    expect(startAppSetup(null, null)).toEqual({ name: '', window: null, sizeChanges: 'often', antiCheat: null });
+    expect(startAppSetup(saved('kernelLevel'), null)).toEqual({
+      name: 'Example App',
+      window: example,
+      sizeChanges: 'rarely',
+      antiCheat: null,
+    });
+  });
+
+  test("a draft's anti-cheat pick goes once the Applications page changed the class it was picked over", () => {
+    const kept = {
+      name: 'Renamed',
+      window: example,
+      sizeChanges: 'often',
+      antiCheat: { from: 'unknown', to: 'none' },
+    } as const;
+    expect(startAppSetup(saved('unknown'), kept)).toEqual(kept);
+    expect(startAppSetup(saved('kernelLevel'), kept)).toEqual({ ...kept, antiCheat: null });
   });
 });

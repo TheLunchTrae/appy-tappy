@@ -1,7 +1,8 @@
 // How an application's window match is edited and described.
 
 import type {
-  AntiCheatClass,
+  AntiCheatPick,
+  AppFile,
   FallbackDef,
   SizeChangesDef,
   WindowChoice,
@@ -10,6 +11,7 @@ import type {
   WindowScore,
 } from './bindings.ts';
 import type { Kept } from './drafts.ts';
+import { resumedPick } from './antiCheat.ts';
 
 /** One of the things an application's window is recognized by. */
 export type MatchField = 'title' | 'class' | 'executable';
@@ -181,8 +183,24 @@ export interface AppSetup {
   readonly name: string;
   readonly window: WindowDef | null;
   readonly sizeChanges: SizeChangesDef;
-  /** The anti-cheat class picked in the editor, or null to keep the saved one. */
-  readonly antiCheat: AntiCheatClass | null;
+  /** The anti-cheat class picked in the editor over the one saved then, or null to keep the saved one. */
+  readonly antiCheat: AntiCheatPick | null;
+}
+
+/**
+ * What the application editor starts with: the setup the draft `kept` holds, or else what the application `saved`
+ * has, or a new application's. A class the draft picked over one that is no longer saved is dropped.
+ */
+export function startAppSetup(saved: AppFile | null, kept: AppSetup | null): AppSetup {
+  if (kept !== null) {
+    return { ...kept, antiCheat: resumedPick(kept.antiCheat, saved?.antiCheat ?? null) };
+  }
+  return {
+    name: saved?.name ?? '',
+    window: saved?.window ?? null,
+    sizeChanges: saved?.sizeChanges ?? 'often',
+    antiCheat: null,
+  };
 }
 
 /** What a draft of an application keeps: the editor's setup. */
