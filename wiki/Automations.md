@@ -301,6 +301,46 @@ also keeps it from running again until that many seconds after it last ran.
 If its condition became true during the wait and is still true when the wait
 ends, it runs then.
 
+## Run the actions now
+
+To try an automation's actions without waiting for its condition, open the
+automation with **Edit** and select **Run actions now** under
+**Do, in order**. AppyTappy's background part runs the actions once, as if the
+condition had just become true. AppyTappy Setup never runs them itself.
+
+**Run actions now** runs the automation as it is saved. While the editor holds
+a change, or the automation was never saved, the button is unavailable and a
+note under it says to save first: select **Save automation**, then open the
+automation again. The button is also unavailable, with a note that says why,
+while the automation is turned off, and while AppyTappy's background part
+[isn't running](#when-appytappys-background-part-isnt-running).
+
+The actions run under the same rules as when the condition becomes true:
+
+- The application the automation watches must be open, and automations must be
+  enabled in the [tray menu](The-tray-icon.md#the-menu).
+- An automation that cannot run as saved, such as one that an application's
+  [anti-cheat setting](Applications.md#anti-cheat) blocks, does not run, and
+  the note under the button says why.
+- Keys are pressed, and clicks with the cursor made, only while the
+  application is the window in front. AppyTappy Setup is in front when you
+  select the button, so those actions are skipped, and the note under the
+  button says so. Media, volume, opening, sounds, and clicks sent to the
+  window run. When every action presses keys or clicks with the cursor,
+  nothing would run, so the button is unavailable and the note says why.
+
+What the run changes stays changed: AppyTappy does not undo it, even with
+**Undo these when the condition stops being true** on. An automation that ran
+because its condition became true still undoes its own changes afterwards, and
+puts back what it found before it ran. The run doesn't start the wait before
+the automation can run again, and the automation still runs when its condition
+becomes true.
+
+After you select the button, the note says that the background part was
+asked. Its answer doesn't come back to the editor. If nothing happens, the
+log says why, such as that the application isn't open:
+[AppyTappy's log](Troubleshooting.md#appytappys-log) describes where it is.
+
 ## Delete an automation
 
 Select **Delete**, then **Delete automation** to confirm.

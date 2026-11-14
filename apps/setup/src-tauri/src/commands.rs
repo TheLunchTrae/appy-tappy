@@ -677,6 +677,15 @@ pub(crate) async fn delete_automation(app: AppHandle, id: String) -> Result<(), 
     .await
 }
 
+/// Asks the runtime to run a saved automation's actions once.
+#[tauri::command]
+pub(crate) async fn run_automation_once(app: AppHandle, id: String) -> Result<(), String> {
+    try_ask(&app, "run_automation_once", move |owner| {
+        owner.run_automation_once(&id)
+    })
+    .await
+}
+
 /// Opens a window for each overlay that is on, and closes the rest.
 #[tauri::command]
 pub(crate) async fn sync_overlays(app: AppHandle) -> Result<(), String> {

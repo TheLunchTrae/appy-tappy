@@ -15,7 +15,9 @@ use appytappy_actions::Watched;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::paths::Locations;
 use appytappy_config::settings_file::{ReadInterval, SettingsFile, TraceCategory};
-use appytappy_config::store::{AppStore, AutomationStore, EnabledStore, SettingsStore};
+use appytappy_config::store::{
+    AppStore, AutomationStore, EnabledStore, RunOnceStore, SettingsStore,
+};
 use appytappy_platform::{
     Log, RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, TrayMenu, WindowWatch,
 };
@@ -23,7 +25,7 @@ use appytappy_sources::HostSystem;
 use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
-use crate::model::{Model, Order, Owner, ReaderNumber, SessionId};
+use crate::model::{Model, Order, Owner, ReaderNumber, Refused, SessionId};
 use crate::trace::switch::Switch;
 use crate::trace::writer::TraceReport;
 use crate::trace::{Detail, Record, Trace, What};
@@ -134,13 +136,15 @@ enum Step {
     Stop,
 }
 
-/// Where the saved applications, automations, and settings are, and where
-/// the runtime keeps whether automations are enabled.
+/// Where the saved applications, automations, and settings are, where the
+/// runtime keeps whether automations are enabled, and where the setup app
+/// leaves its request to run an automation once.
 struct Stores {
     apps: AppStore,
     automations: AutomationStore,
     settings: SettingsStore,
     enabled: EnabledStore,
+    run_once: RunOnceStore,
 }
 
 /// The action thread and the channel that brings it jobs.
@@ -336,7 +340,17 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         automations: AutomationStore::new(locations.automations()),
         settings: SettingsStore::new(locations.settings()),
         enabled: EnabledStore::new(locations.enabled()),
+        run_once: RunOnceStore::new(locations.run_once()),
     };
+    // A request that an earlier run did not take runs nothing now: only one
+    // that comes with a reload in this run is answered. This comes before
+    // the reload event exists, so a request sent meanwhile hears no runtime
+    // and the setup app says nothing ran.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the runtime starts whether or not a leftover request can be removed"
+    )]
+    let _ = stores.run_once.take();
     // The host system sets the process's DPI awareness, which Windows
     // requires before any window exists, so it comes before the tray window.
     let system = Arc::new(HostSystem::default());
@@ -469,6 +483,10 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
                 crew.detect(Input::Watch(watchlist));
             }
             carry(saved.orders, &mut crew, log);
+            // The setup app asks for a run with the event that asks for a
+            // reload, so its request is taken once the saved files read.
+            let asked = stores.run_once.take();
+            carry(run_once(&model, &reloads, asked, log), &mut crew, log);
             crew.trace.record(What::Reloaded, |record| Record {
                 took: started.map(|started| record.at.saturating_duration_since(started)),
                 ..record
@@ -918,6 +936,73 @@ fn loaded_line(plan: &plan::Plan) -> String {
     }
 }
 
+/// Why the runtime drops the setup app's request to run an automation once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dropped {
+    /// The saved applications and automations did not read, so the plan
+    /// the runtime keeps may not be what the setup app saved.
+    Unread,
+    /// The model refuses the automation.
+    Refused(Refused),
+}
+
+impl Dropped {
+    /// The log's line for a request that runs nothing.
+    const fn line(self) -> &'static str {
+        match self {
+            Self::Unread => "asked to run an automation once: the saved files cannot be read",
+            Self::Refused(Refused::Disabled) => {
+                "asked to run an automation once: automations are disabled from the tray"
+            },
+            Self::Refused(Refused::NotRunning) => {
+                "asked to run an automation once: its application is not running, or it is not \
+                 saved, is turned off, or cannot run"
+            },
+        }
+    }
+}
+
+/// The orders that answer the setup app's request to run the actions of
+/// the automation with the ID `automation` once.
+///
+/// # Errors
+///
+/// Returns why nothing runs: the saved applications and automations did
+/// not read at the last try, or the model refuses.
+fn answer_once(model: &Model, reloads: &Reloads, automation: &str) -> Result<Vec<Order>, Dropped> {
+    if reloads.failing.files {
+        return Err(Dropped::Unread);
+    }
+    model.run_once(automation).map_err(Dropped::Refused)
+}
+
+/// Answers the setup app's request to run one automation's actions once,
+/// if one waits: `request` is what taking its file gave. The orders are
+/// the one that runs the actions, as [`answer_once`] decides, or none. The
+/// log says that a run was asked for, before the order's own line names
+/// the automation, or why nothing runs.
+fn run_once(
+    model: &Model,
+    reloads: &Reloads,
+    request: io::Result<Option<String>>,
+    log: &mut Log,
+) -> Vec<Order> {
+    let unreadable;
+    let (line, orders) = match request {
+        Ok(None) => return Vec::new(),
+        Ok(Some(automation)) => match answer_once(model, reloads, &automation) {
+            Ok(orders) => ("the setup app asked to run an automation once", orders),
+            Err(dropped) => (dropped.line(), Vec::new()),
+        },
+        Err(error) => {
+            unreadable = format!("a request to run an automation once cannot be read: {error}");
+            (unreadable.as_str(), Vec::new())
+        },
+    };
+    note(log, line);
+    orders
+}
+
 /// Carries out `orders`: starts and stops readers and hands actions to the
 /// action thread.
 #[mutants::skip]
@@ -956,7 +1041,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                 watched,
                 actions,
                 clicks,
-                restore,
+                keeps,
                 cause,
             } => {
                 let job = act::Job::Run {
@@ -965,7 +1050,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                     watched,
                     actions,
                     clicks,
-                    restore,
+                    keeps,
                     cause,
                 };
                 queue(crew, What::Fired, job, log);
@@ -1625,6 +1710,7 @@ mod tests {
                 automations: AutomationStore::new(folder.join("automations.json")),
                 settings: SettingsStore::new(folder.join("settings.json")),
                 enabled: EnabledStore::new(folder.join("enabled.txt")),
+                run_once: RunOnceStore::new(folder.join("run-once.txt")),
             };
             let log = Log::open(&folder.join("logs"), "runtime", LOG_LIMIT).expect("open");
             let tracing = Switch::new(folder.join("traces"));
@@ -2201,7 +2287,7 @@ mod tests {
             },
             actions: Box::new([]),
             clicks: Arc::default(),
-            restore: appytappy_config::rule::Restore::OnRelease,
+            keeps: appytappy_actions::Keeps::ForRelease,
             cause: None,
         };
         queue(&mut crew, What::Fired, job, &mut scratch.log);
@@ -2482,6 +2568,113 @@ mod tests {
         assert!(retry(now).due(soon), "late");
     }
 
+    /// A model that runs the automation Mute, with the ID `mute`, of an
+    /// attached application.
+    fn muting() -> Model {
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "a".to_owned(),
+            app_plan("Example App", &["Mute"]),
+        )]));
+        model.apply(Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
+        model
+    }
+
+    #[test]
+    fn a_request_to_run_once_is_dropped_unless_the_plan_is_what_was_saved() {
+        let model = muting();
+        let reloads = Reloads::default();
+        assert!(
+            matches!(
+                answer_once(&model, &reloads, "mute").as_deref(),
+                Ok([Order::Run { automation, .. }]) if automation == "Mute"
+            ),
+            "a planned automation of a running application runs"
+        );
+        assert_eq!(
+            answer_once(&model, &reloads, "pause"),
+            Err(Dropped::Refused(Refused::NotRunning)),
+            "one that was deleted since, or a file that names none"
+        );
+        let unread = Reloads {
+            failing: Stale {
+                files: true,
+                settings: false,
+            },
+            ..reloads
+        };
+        assert_eq!(
+            answer_once(&model, &unread, "mute"),
+            Err(Dropped::Unread),
+            "the plan it keeps may be older than the save"
+        );
+        let settings_only = Reloads {
+            failing: SETTINGS_ONLY,
+            ..reloads
+        };
+        assert!(
+            answer_once(&model, &settings_only, "mute").is_ok(),
+            "settings that do not read change no automation"
+        );
+    }
+
+    #[test]
+    fn the_log_says_a_run_was_asked_for_or_why_nothing_runs() {
+        let mut scratch = Scratch::new("run-once");
+        let model = muting();
+        let reloads = Reloads::default();
+        scratch.stores.run_once.save("mute").expect("save");
+        let taken = scratch.stores.run_once.take();
+        let ran = run_once(&model, &reloads, taken, &mut scratch.log);
+        assert!(
+            matches!(ran.as_slice(), [Order::Run { automation, .. }] if automation == "Mute"),
+            "{ran:?}"
+        );
+        let none = scratch.stores.run_once.take();
+        assert_eq!(
+            run_once(&model, &reloads, none, &mut scratch.log),
+            [],
+            "a reload that no request came with runs nothing, and says nothing"
+        );
+        for request in [Ok(Some("pause".to_owned())), Err(io::Error::other("held"))] {
+            assert_eq!(run_once(&model, &reloads, request, &mut scratch.log), []);
+        }
+        let unread = Reloads {
+            failing: Stale::BOTH,
+            ..reloads
+        };
+        let while_unread = Ok(Some("mute".to_owned()));
+        assert_eq!(
+            run_once(&model, &unread, while_unread, &mut scratch.log),
+            []
+        );
+        note(&mut scratch.log, Dropped::Refused(Refused::Disabled).line());
+        let nothing = "asked to run an automation once: ";
+        let expected = [
+            "the setup app asked to run an automation once".to_owned(),
+            format!(
+                "{nothing}its application is not running, or it is not saved, is turned off, or \
+                 cannot run"
+            ),
+            "a request to run an automation once cannot be read: held".to_owned(),
+            format!("{nothing}the saved files cannot be read"),
+            format!("{nothing}automations are disabled from the tray"),
+        ];
+        let written = scratch.log();
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(lines.len(), expected.len(), "{written:?}");
+        for (line, message) in lines.iter().zip(expected) {
+            assert!(
+                line.ends_with(&message),
+                "{line:?} should end with {message:?}"
+            );
+        }
+    }
+
     #[test]
     fn orders_that_change_something_get_a_log_line() {
         let plan = app_plan("Example App", &[]);
@@ -2505,7 +2698,7 @@ mod tests {
                 watched,
                 actions: Box::new([]),
                 clicks: Arc::default(),
-                restore: appytappy_config::rule::Restore::OnRelease,
+                keeps: appytappy_actions::Keeps::ForRelease,
                 cause: None,
             },
             Order::Undo {

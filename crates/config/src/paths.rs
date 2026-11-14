@@ -79,6 +79,13 @@ impl Locations {
         self.local.join("enabled.txt")
     }
 
+    /// The file where the setup app leaves its request to run one
+    /// automation's actions once, which the runtime takes.
+    #[must_use]
+    pub fn run_once(&self) -> PathBuf {
+        self.local.join("run-once.txt")
+    }
+
     /// The folder where the setup app keeps drafts, the items the user saved
     /// before finishing them, each in its own folder. The runtime never
     /// reads it.
@@ -140,6 +147,10 @@ mod tests {
         assert_eq!(
             locations.enabled(),
             local.join("AppyTappy").join("enabled.txt")
+        );
+        assert_eq!(
+            locations.run_once(),
+            local.join("AppyTappy").join("run-once.txt")
         );
         assert_eq!(locations.apps(), roaming.join("AppyTappy").join("apps"));
         assert_eq!(

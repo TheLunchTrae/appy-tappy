@@ -72,7 +72,9 @@ quoted, with its quotes doubled.
 | Lifecycle | `reading`, `stopped`        | owner     |                         |                   |
 | Lifecycle | `reloaded`                  | owner     | reading the saved files |                   |
 
-`held` is a rule that would have fired, but its cooldown held it back. A rule
+`fired` is also a run that **Run actions now** asked for
+([Running once](Architecture.md#running-once)); it has no reading that caused
+it. `held` is a rule that would have fired, but its cooldown held it back. A rule
 held back is checked again at every change of its application's values until
 its cooldown ends, so one rule can make many `held` rows. The
 trace's own rows are `start`, the first row, whose detail is the local time

@@ -58,6 +58,9 @@ pub(super) struct FakeHost {
     pub(super) clock: Instant,
     /// Whether the runtime runs, or why that cannot be told.
     pub(super) runtime: Result<bool, String>,
+    /// Whether a runtime hears that a request to run an automation once
+    /// waits, or why it cannot be told.
+    pub(super) hears: Result<bool, String>,
     /// Told each click the owner sends.
     clicks: Sender<SentClick>,
     /// Why sending a click fails, if it does.
@@ -251,6 +254,10 @@ impl Host for FakeHost {
         self.reloads.send(()).expect("test listens");
     }
 
+    fn run_once(&self) -> io::Result<bool> {
+        self.hears.clone().map_err(io::Error::other)
+    }
+
     fn runtime_runs(&self) -> io::Result<bool> {
         self.runtime.clone().map_err(io::Error::other)
     }
@@ -315,6 +322,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         unsynced: None,
         clock: Instant::now(),
         runtime: Ok(false),
+        hears: Ok(true),
         clicks: click_sender,
         unclicked: None,
     };

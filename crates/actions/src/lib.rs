@@ -27,7 +27,7 @@ pub use click::{MouseButton, MouseEvent, MouseMessage, PlacedClick, Press, click
 pub use controls::{Controls, Executables, MediaSession, NoControls, Volume};
 pub use error::ActionError;
 pub use input::{Input, Unsupported};
-pub use journal::{Actions, MEDIA_RETRY, Watched};
+pub use journal::{Actions, Keeps, MEDIA_RETRY, Watched};
 pub use keys::{HOLD, Stroke, strokes};
 
 /// The [`Input`] of the platform this build targets.

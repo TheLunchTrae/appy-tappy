@@ -1,6 +1,7 @@
 //! Where the setup app keeps what the user saves: the applications' folders,
-//! the automations' file, the settings file and the drafts, and where the
-//! runtime writes its logs and traces.
+//! the automations' file, the settings file and the drafts, where the
+//! runtime writes its logs and traces, and where the setup app leaves the
+//! runtime its request to run an automation once.
 
 use std::fs;
 use std::io::{self, Read as _};
@@ -8,7 +9,7 @@ use std::path::PathBuf;
 
 use appytappy_config::app_file::AppFile;
 use appytappy_config::paths::Locations;
-use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
+use appytappy_config::store::{AppStore, AutomationStore, RunOnceStore, SettingsStore};
 
 use crate::drafts::DraftStore;
 
@@ -23,6 +24,9 @@ pub(crate) struct Stores {
     pub(crate) settings: SettingsStore,
     /// The drafts, which only the setup app reads.
     pub(crate) drafts: DraftStore,
+    /// The request to run one automation's actions once, which the runtime
+    /// takes.
+    pub(crate) run_once: RunOnceStore,
     /// The folder the runtime writes its trace files to.
     pub(crate) traces: PathBuf,
     /// The folder of the runtime's log, where the setup app writes its own
@@ -40,6 +44,7 @@ impl From<Locations> for Stores {
             automations: AutomationStore::new(locations.automations()),
             settings: SettingsStore::new(locations.settings()),
             drafts: DraftStore::new(locations.drafts()),
+            run_once: RunOnceStore::new(locations.run_once()),
             traces: locations.traces(),
             logs: locations.logs(),
             locations,

@@ -143,7 +143,7 @@ stateDiagram-v2
     [*] --> Starting
     Starting --> Running: threads started, first plan carried out
     Starting --> [*]: the window events hook, detection, or the action thread cannot start
-    Running --> Running: Carry orders, Reload, Due, or a read of the saved files again
+    Running --> Running: Carry orders, Reload, Due, or a read of the saved files again, which also answers a request to run once
     Running --> Running: a send to the action thread fails, so it starts again
     Running --> Undoing: Quit, CloseRequested, DetectionEnded, or a send to detection fails
     Undoing --> Undoing: an undo cannot reach the action thread, so it starts again
@@ -160,7 +160,9 @@ stateDiagram-v2
   after it. Then the lifecycle and action threads start. If either cannot
   start, the runtime stops what it started and exits with the error. A first
   read that fails starts with an empty plan and reads again, as
-  [Reload watch](#reload-watch) describes.
+  [Reload watch](#reload-watch) describes. A request to
+  [run once](#run-once) that an earlier run left is removed before the reload
+  watch starts.
 - **Running.** Each event becomes a `Step`: `Carry` some orders, `Picked`
   when the user picked Enable or Disable from the tray, which carries its
   orders too and sets `picked` (see [Reload watch](#reload-watch)), `Reload`
@@ -742,6 +744,10 @@ one audio session's volume, the entries form a stack:
 - **Perform, not restoring.** Every entry for that target is removed, so no
   release undoes the permanent change. A pending restore of that target is
   dropped too.
+- **Perform, leaving the journal untouched.** A [run once](#run-once) records
+  nothing and removes nothing (`Keeps::Untouched`), because no release
+  follows it. An entry or a pending restore of the same target stays, so the
+  rule that made it still puts back the state from before its own change.
 - **Release.** The rule's entries are taken newest first. If a later entry on
   the same target exists, it inherits the older state. Otherwise the change is
   undone. A pending restore of the same target came from a newer rule, so the
@@ -838,6 +844,64 @@ most 5 tries (`RETRIES`) follow one failed read. A try runs when the owner
 wakes at its time, or with the first event after it. One automation that
 cannot run, such as one that breaks a rule after a hand edit, does not fail
 the read: it is logged and left out of the plan.
+
+### Run once
+
+The setup app's **Run actions now** writes the automation's ID to
+`run-once.txt` and sets the reload event
+([Running once](Architecture.md#running-once)). The request is a file that is
+there or not. After each read of the saved files in its loop, the owner takes
+it (`RunOnceStore::take` in `crates/config/src/store.rs`) and answers it:
+`run_once` and `answer_once` in `apps/runtime/src/owner.rs` decide, and
+`Model::run_once` is the pure part, which reads the model and changes nothing
+in it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Waiting: the setup app writes the file and sets the reload event
+    Waiting --> Waiting: the setup app asks again, and the newer request replaces the file
+    Waiting --> None: the owner reloads, takes the file, and its actions run once
+    Waiting --> None: the owner reloads, takes the file, and drops the request
+    Waiting --> None: no runtime heard the event, so the setup app takes the file away
+    Waiting --> None: a runtime starts and removes the file
+    None --> None: a reload finds no file
+```
+
+- **Taking.** The owner renames the file to `run-once.txt.taken` in one step,
+  reads that copy and removes it, whether or not it reads. A request that the
+  setup app writes meanwhile is a new file, which the reload it comes with
+  takes, so a take never removes a request it did not read, and none is taken
+  twice. A copy that could not be removed is replaced by the next take.
+- **Runs.** The owner sends the action thread one `Run` job for the
+  automation, with the session's watched window, `Keeps::Untouched` and no
+  cause. The rule's state, its cooldown and the session do not change, so the
+  rule still fires when its condition becomes true. Nothing releases the run,
+  and the journal stays as it is
+  ([Action thread and restore journal](#action-thread-and-restore-journal)).
+- **Dropped.** Each drop logs its reason and runs nothing:
+  - The file cannot be renamed, read or removed, or is not text.
+  - That read of the saved applications and automations failed
+    (`Reloads::failing`), so the plan may be older than what the setup app
+    checked. The [reload](#reload-watch) tries go on; the user asks again.
+  - The model refuses (`Refused`): automations are disabled from the tray, or
+    no running application has an automation with that ID, because the
+    application is not running or the automation was deleted, is turned off
+    or cannot run as saved. A file that names no automation ends here too.
+- **Asked twice.** Two asks before the owner wakes leave one file, the newer,
+  and one reload, which answers it. Two asks around a reload are two runs.
+- **A runtime that is not there.** The reload event exists only while a
+  runtime waits on it. The setup app's signal says when none does, and the
+  setup app takes its file away.
+- **Left over.** A file stays when the setup app cannot take it away, or when
+  a runtime heard the event and ended before it took the file. The owner
+  removes any file as it starts, before the reload event exists, so a request
+  sent while it starts hears no runtime and the setup app takes it away. It
+  takes a request only after a reload in its loop, so a file left over never
+  runs with a later save.
+
+The outcome goes to the log only. The request's path brings nothing back to
+the setup app.
 
 ### Runtime trace
 
@@ -1307,6 +1371,50 @@ stateDiagram-v2
   which clicks nothing. An answer whose attempt number is not that of the
   try under way is dropped, so where an earlier target would land never
   shows for the target as it is set up now.
+
+### Run actions now
+
+The automation editor's **Run actions now** asks the runtime to run the saved
+automation's actions once (`apps/setup/src/pages/AutomationEditor.tsx`).
+`RunAsk` in `apps/setup/src/lib/runNow.ts` names the states of an ask,
+`runStep` there is the transition, and `runNowView` decides whether the button
+can be pressed and what the note under it says.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Asking: Run actions now
+    Asked --> Asking: Run actions now
+    Failed --> Asking: Run actions now
+    Asking --> Asked: the runtime heard the request
+    Asking --> Failed: why nothing was asked
+```
+
+- **When the button can be pressed.** Only while the editor shows the
+  automation as it is saved, the automation is turned on, the
+  [runtime warning](#runtime-warning) is not **Stopped**, at least one action
+  would run, and no ask or save is under way. Otherwise the button is disabled
+  and the note says which of these holds, in that order. A key press and a
+  click with the cursor run only while the watched application is in front,
+  which it is not while the user presses the button, so an automation with
+  only such actions has nothing to run (`frontOf`). A change in the editor is
+  not saved first, because **Save automation** closes the editor.
+- **Asking.** The button waits. The command ends by itself: the owner thread
+  checks the saved automation, writes the request and sets the reload event,
+  and waits for nothing from the runtime. One ask is under way at a time, so
+  no number tells asks apart, and `runStep` ends only an ask that is under
+  way.
+- **Asked.** The runtime heard the request. Whether the actions ran is in its
+  log, which the note names: [Run once](#run-once) lists why the runtime
+  drops a request.
+- **Failed.** The note warns why nothing was asked: the automation is no
+  longer saved, is turned off or cannot run as saved, such as under the
+  application's anti-cheat setting; the request cannot be written; or no
+  runtime heard it, which the setup app learns here even while the
+  [runtime warning](#runtime-warning) is **Unknown** or still says **Runs**.
+  The next press leaves the state.
+- **Leaving the editor.** The state lives in the editor, so closing it
+  forgets the ask. The request goes on to the runtime all the same.
 
 ### Update notice
 

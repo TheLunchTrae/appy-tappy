@@ -75,13 +75,15 @@ pub(crate) struct Runs {
     pub(crate) clicks: Arc<ClickTargets>,
 }
 
-/// An automation that can run: its rule, and its name for the log, the
-/// tray, and the trace.
+/// An automation that can run: its rule, its ID, and its name for the log,
+/// the tray, and the trace.
 ///
-/// Two are equal when their rules are, whatever their names, since a name
-/// is a label and renaming an automation restarts nothing.
+/// Two are equal when their rules are, whatever their IDs and names, since
+/// neither changes what runs and renaming an automation restarts nothing.
 #[derive(Debug)]
 pub(crate) struct RulePlan {
+    /// The automation's ID, by which the setup app asks to run it once.
+    pub(crate) id: String,
     /// The automation's name.
     pub(crate) automation: String,
     /// What it watches and does.
@@ -225,6 +227,7 @@ pub(crate) fn compile(
         }
         draft.clicks.add(&targets, pictures);
         draft.rules.push(RulePlan {
+            id: automation.id.clone(),
             automation: automation.name.clone(),
             rule,
         });
@@ -322,10 +325,12 @@ pub(crate) mod examples {
 
     /// The automation `automation`, which pauses media while progress is at
     /// least `threshold`, at most once every `cooldown`, and undoes it after.
+    /// Its ID is its name in lowercase with `_` for each space.
     pub(crate) fn pause_at(automation: &str, threshold: f64, cooldown: Duration) -> RulePlan {
         let condition =
             Condition::compare(signal(), Comparison::AtLeast, number(threshold)).expect("valid");
         RulePlan {
+            id: automation.to_lowercase().replace(' ', "_"),
             automation: automation.to_owned(),
             rule: Rule::new(condition, pause(), cooldown, Restore::OnRelease).expect("valid"),
         }

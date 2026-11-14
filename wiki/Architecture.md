@@ -44,6 +44,8 @@ defines the domain terms.
    [Setup app](Setup-app.md#saved-files) describes them.
 2. After each save that changes what the runtime runs, it sets the named event
    `Local\AppyTappy.Reload`, as [Files and handoff](#files-and-handoff) lists.
+   To run one automation's actions once, it leaves a request file and sets
+   the same event, as [Running once](#running-once) describes.
 3. The runtime reads the saved files when it starts and again on each reload,
    checks them, and logs any automation that cannot run. The rest run.
 4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`, and
@@ -617,7 +619,8 @@ changing.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
     describes, the runtime's log in `logs\`, the
-    [runtime trace](Trace.md)'s files in `traces\`, `enabled.txt`, and the
+    [runtime trace](Trace.md)'s files in `traces\`, `enabled.txt`,
+    `run-once.txt`, and the
     setup app's [drafts](Setup-app.md#drafts) in `drafts\`, which the
     runtime never reads.
 - **Writing.** Only the setup app writes the saved files, through
@@ -690,6 +693,59 @@ changing.
   its application. `app.json` records the build its values were checked
   against, and both programs warn when another build runs, as [Build
   detection](#build-detection) describes.
+
+### Running once
+
+**Run actions now** in the automation editor asks the runtime to run one saved
+automation's actions once, as if its condition had just become true
+([Automations](Automations.md#run-the-actions-now) describes what the user
+sees). Only the runtime runs actions: the setup app has no code path that
+performs one, apart from [trying a click](Actions.md#trying-a-click).
+
+- **The request.** The reload event carries no data, so the automation's ID
+  travels in a file. `Owner::run_automation_once` in
+  `apps/setup/src-tauri/src/owner/automations.rs` writes the ID to
+  `%LOCALAPPDATA%\AppyTappy\run-once.txt` through `RunOnceStore` in
+  `crates/config/src/store.rs`, the way every saved file is written, and then
+  sets the reload event. Setting the event tells the setup app whether a
+  runtime waits on it; when none does, the setup app takes the file away again
+  and says that nothing ran.
+- **What the setup app checks first.** The automation is saved, is turned on,
+  and can run as saved, with the same check that marks it on the Automations
+  page, so one that [anti-cheat](#anti-cheat-enforcement) blocks is refused
+  with its reason before anything is asked. The editor offers the button only
+  while it shows the automation as saved, because the runtime runs the saved
+  one.
+- **What the runtime does.** The owner reads the saved files again, as for
+  any reload, and then takes the request: `RunOnceStore::take` renames the
+  file to a name of its own, reads that copy and removes it, so a request the
+  setup app leaves meanwhile is a file of its own and none is taken twice. A
+  reload that no request came with finds no file. The owner drops the request
+  when that read of the saved applications and automations failed, because
+  the plan may then be older than what the setup app checked, and when
+  `Model::run_once` finds no running application with that automation or
+  automations are disabled from the tray. Otherwise the model answers with
+  the `Order::Run` that a fired rule sends, with the session's watched window,
+  so every guard on the action thread applies: keys and cursor clicks only
+  while the watched application is in front, and the anti-cheat classes, which
+  already kept a blocked automation out of the plan.
+- **No restore, no rule state.** No release follows a run that no condition
+  started, so nothing would undo what it changes. The run therefore leaves the
+  restore journal as it is (`Keeps::Untouched` in
+  `crates/actions/src/journal.rs`): it records no change, and it forgets
+  none, so a rule that fired earlier still puts back what it found when it is
+  released. The rule's state and its cooldown do not change, because the
+  engine never hears of the run.
+- **A request left over.** The owner takes a request only after a reload in
+  this run, and removes any that waits when it starts, before the reload
+  event exists. A request that the setup app could not take away, or that a
+  runtime heard and never answered, therefore never runs later.
+- **The outcome.** The request's path brings nothing back, and the setup app
+  learns only that a runtime heard the event. The runtime logs each request:
+  that it was asked, before the automation's own line, or why nothing runs,
+  and an action that fails logs as it does for a fired rule. The editor
+  points to that log. The [trace](Trace.md) records the run as it records a
+  rule that fired.
 
 ## Anti-cheat enforcement
 

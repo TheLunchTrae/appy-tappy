@@ -374,6 +374,12 @@ This page covers what the user guide leaves out.
   runtime reads the files again at once. Overlay changes do not, since
   the runtime does not read them. [The runtime](Architecture.md#the-runtime)
   describes how it reads them.
+- **Run actions now.** The automation editor's button calls
+  `run_automation_once` with the saved automation's ID. The owner thread
+  checks that the runtime runs that automation, leaves the request, and sets
+  the reload event; the runtime runs the actions, never the setup app.
+  [Running once](Architecture.md#running-once) describes the request, and
+  [Run actions now](State-machines.md#run-actions-now) the button's states.
 
 ## Recording
 

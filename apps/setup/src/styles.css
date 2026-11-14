@@ -1248,6 +1248,16 @@ div.match-answer {
   margin-bottom: -10px;
 }
 
+/* What Run actions now says, under its button. */
+.run-note {
+  max-width: 68ch;
+}
+
+/* The note stays in the page while it has nothing to say, without the card's gap above it. */
+.run-note:empty {
+  margin-top: -10px;
+}
+
 .live-reading {
   margin-top: 8px;
   padding: 8px 10px;
