@@ -153,7 +153,7 @@ impl<H: Host> Owner<H> {
 /// one.
 pub(super) fn named_apart(file: &AppFile, own: Option<&str>, name: &str) -> Result<(), String> {
     if let Some(other) = file.values.iter().find(|value| {
-        Some(value.id.as_str()) != own && value.name.trim().eq_ignore_ascii_case(name)
+        Some(value.id.as_str()) != own && value.name.trim().eq_ignore_ascii_case(name.trim())
     }) {
         return Err(format!(
             "{} already has a value named \"{}\". Pick another name.",

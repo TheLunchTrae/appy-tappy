@@ -26,7 +26,8 @@ select **Capture this window**, as the first step of
 [making a value](Values.md#make-a-value) describes.
 
 1. **Name it,** such as `Percent font`, with a name no other reference of
-   the application has: `Percent font` and `percent font` count as one name.
+   the application has. Capitals of the letters A to Z don't count:
+   `Percent font` and `percent font` are one name.
 2. **Pick the color.** Next to **Characters' color**, select **Pick**, then
    click the characters on a screenshot. **Tolerance** says how far a pixel's
    color may be from it and still count: drag the slider or type a number.

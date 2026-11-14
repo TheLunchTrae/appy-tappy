@@ -145,7 +145,7 @@ impl<H: Host> Owner<H> {
             if let Some(other) = file
                 .references
                 .iter()
-                .find(|saved| saved.id != id && saved.name.trim().eq_ignore_ascii_case(name))
+                .find(|saved| saved.id != id && saved.name.trim().eq_ignore_ascii_case(name.trim()))
             {
                 return Err(format!(
                     "{} already has a reference named \"{}\". Pick another name.",

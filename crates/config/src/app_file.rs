@@ -958,6 +958,9 @@ impl AppFile {
             if !references.insert(id) {
                 return Err(problem("another reference has the same ID".to_owned()));
             }
+            if named_before(&self.references, reference, |other| &other.name) {
+                return Err(problem("another reference has the same name".to_owned()));
+            }
             check_reference(reference).map_err(problem)?;
         }
         let mut ids = BTreeSet::new();
@@ -970,10 +973,27 @@ impl AppFile {
                     "another value has the same ID".to_owned(),
                 ));
             }
+            if named_before(&self.values, value, |other| &other.name) {
+                return Err(AppFileError::Value(
+                    value.id.clone(),
+                    "another value has the same name".to_owned(),
+                ));
+            }
             check_value(value).map_err(|problem| AppFileError::Value(value.id.clone(), problem))?;
         }
         Ok(())
     }
+}
+
+/// Whether an item listed before `item` in `items` has its name, ignoring
+/// spaces at either end and the capitals of ASCII letters, as the setup app
+/// compares names when it saves one.
+fn named_before<T>(items: &[T], item: &T, name: impl Fn(&T) -> &String) -> bool {
+    let own = name(item).trim();
+    items
+        .iter()
+        .take_while(|other| !std::ptr::eq(*other, item))
+        .any(|other| name(other).trim().eq_ignore_ascii_case(own))
 }
 
 /// Checks one reference's rules, answering the problem as a sentence.
@@ -1327,6 +1347,7 @@ mod tests {
         let mut file = dash();
         let mut status = file.values[0].clone();
         status.id = "status".to_owned();
+        status.name = "Status".to_owned();
         status.screen.check = states(&[("Paused", "status-1.png"), ("Live", "status-2.png")]);
         status.screen.fixes = vec![fix(&["status-1-1.png", "status-1-2.png"])];
         file.values.push(status);
@@ -1666,6 +1687,15 @@ mod tests {
         bad_id.values[0].id = "Score".to_owned();
         let mut twice = dash();
         twice.values.push(twice.values[0].clone());
+        let mut same_name = dash();
+        let mut other = same_name.values[0].clone();
+        other.id = "progress_2".to_owned();
+        other.name = format!(" {} ", other.name.to_uppercase());
+        same_name.values.push(other);
+        let mut same_reference_name = dash();
+        let mut other = same_reference_name.references[0].clone();
+        other.id = "percent_2".to_owned();
+        same_reference_name.references.push(other);
         let mut no_value_name = dash();
         no_value_name.values[0].name = String::new();
         let mut no_samples = dash();
@@ -1706,6 +1736,14 @@ mod tests {
             (unnamed, "the application has no name"),
             (bad_id, "value \"Score\": signal name"),
             (twice, "value \"progress\": another value has the same ID"),
+            (
+                same_name,
+                "value \"progress_2\": another value has the same name",
+            ),
+            (
+                same_reference_name,
+                "reference \"percent_2\": another reference has the same name",
+            ),
             (no_value_name, "value \"progress\": it has no name"),
             (
                 no_samples,

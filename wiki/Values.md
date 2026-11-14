@@ -25,8 +25,8 @@ back to the automation with the value picked.
    **Capture this window**. [When the window isn't found](#when-the-window-isnt-found)
    says what to do when it has no window to capture.
 2. **Where to read.** Type a **Value name**, such as `Progress`, that no
-   other value of the application has: `Progress` and `progress` count as
-   one name. Choose the **Check**, one of the four [checks](#checks) below.
+   other value of the application has. Capitals of the letters A to Z don't
+   count: `Progress` and `progress` are one name. Choose the **Check**, one of the four [checks](#checks) below.
    Then show AppyTappy where the value is, in one of two ways:
    - **Drag over the live window.** While the window shows what to read, drag
      a box around it. The drag takes the screenshot as it starts, the
