@@ -297,8 +297,8 @@ export function ApplicationsPage({
           Applications
         </h1>
         <span className="lead">
-          How AppyTappy finds each application&apos;s window, whether automations may press keys into it, and whether
-          its live values show on top of it while this app is open.
+          How AppyTappy finds each application&apos;s window, whether automations may press keys into it or click while
+          it runs, and whether its live values show on top of it while this app is open.
         </span>
         <div className="end">
           <ImportApp onImported={onChanged} />

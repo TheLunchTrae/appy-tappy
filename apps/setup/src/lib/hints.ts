@@ -13,7 +13,7 @@ export const ACTIONS_HINT =
 
 /** What undo can and cannot put back. */
 export const UNDO_HINT =
-  'Skipped tracks, pressed keys, opened programs, and played sounds stay as they are. With undo on, AppyTappy also puts things back when the application closes, when automations are turned off from the tray icon, and when AppyTappy quits.';
+  'Skipped tracks, pressed keys, clicks, opened programs, and played sounds stay as they are. With undo on, AppyTappy also puts things back when the application closes, when automations are turned off from the tray icon, and when AppyTappy quits.';
 
 /** The wait before an automation can run again. */
 export const COOLDOWN_HINT =
@@ -25,7 +25,7 @@ export const NEEDS_RUNNING_HINT =
 
 /** The anti-cheat setting. */
 export const ANTI_CHEAT_HINT =
-  'Anti-cheat can treat keys another program presses as cheating, so AppyTappy presses keys only into an application set to None. Reading the screen, media, volume, opening, and sounds work whatever this says.';
+  'Anti-cheat can treat keys another program presses and clicks it makes as cheating, so AppyTappy presses keys only into an application set to None, and clicks only while the watched application and the one it clicks in are both set to None. Reading the screen, media, volume, opening, and sounds work whatever this says.';
 
 /** The overlay menu. */
 export const OVERLAY_HINT =
@@ -136,4 +136,4 @@ export const ORIGIN_HINT =
 
 /** Confirming the anti-cheat setting of an imported application. */
 export const IMPORT_ANTI_CHEAT_HINT =
-  'AppyTappy presses keys only into an application set to None, and anti-cheat can treat those keys as cheating. A file from someone else could say None for an application that has anti-cheat, so the file never sets this: you do. You can change it later on this page.';
+  'AppyTappy presses keys into an application and clicks while it runs only once it is set to None, because anti-cheat can treat those keys and clicks as cheating. A file from someone else could say None for an application that has anti-cheat, so the file never sets this: you do. You can change it later on this page.';

@@ -122,7 +122,7 @@ export function Picker({
       {found !== null && found.antiCheat.length > 0 ? (
         <p className="warn">
           Anti-cheat running now: {found.antiCheat.join(', ')}. Reading the screen is fine, but set the
-          application&apos;s anti-cheat before giving it key press actions.
+          application&apos;s anti-cheat before giving it key press or click actions.
         </p>
       ) : null}
       <div className={lockedApp === null ? 'picker' : 'picker alone'}>

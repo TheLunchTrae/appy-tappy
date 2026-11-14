@@ -11,7 +11,7 @@ export function exportName(name: string): string {
 
 /**
  * The anti-cheat class the import dialog starts on for a file that says `inFile`. A file never starts it on None,
- * which lets automations press keys, so None is only ever the user's own pick.
+ * which lets automations press keys and click, so None is only ever the user's own pick.
  */
 export function classToConfirm(inFile: AntiCheatClass): AntiCheatClass {
   return inFile === 'none' ? 'unknown' : inFile;

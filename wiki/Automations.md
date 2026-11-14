@@ -277,8 +277,8 @@ things back when the condition stops being true:
 - Each volume goes back to what it was.
 
 A skipped track cannot be unskipped, pressed keys cannot be unpressed, what
-opened stays open, and a played sound cannot be unplayed, so an automation
-needs a pause, a play, or a volume action to undo. With undo on,
+opened stays open, a played sound cannot be unplayed, and a click cannot be
+undone, so an automation needs a pause, a play, or a volume action to undo. With undo on,
 AppyTappy also puts things back when the application closes, when you turn
 automations off from the [tray icon](The-tray-icon.md), and when AppyTappy
 quits. It quits when you sign out or shut down too, and asks Windows to wait

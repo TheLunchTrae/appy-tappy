@@ -1010,7 +1010,7 @@ deleted on its own; the next save writes the new IDs. Saving a value reads it
 back with `saved::build`, from its new pictures and those already saved, as the
 runtime will, and refuses it if the runtime could not read it. A new
 application's anti-cheat class starts as `unknown`, which blocks key press
-actions until the user sets it
+and click actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
 
 ## Sharing
