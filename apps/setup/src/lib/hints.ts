@@ -136,4 +136,4 @@ export const ORIGIN_HINT =
 
 /** Confirming the anti-cheat setting of an imported application. */
 export const IMPORT_ANTI_CHEAT_HINT =
-  'AppyTappy presses keys into an application and clicks while it runs only once it is set to None, because anti-cheat can treat those keys and clicks as cheating. A file from someone else could say None for an application that has anti-cheat, so the file never sets this: you do. You can change it later on this page.';
+  'AppyTappy presses keys into an application, and clicks while it runs, only once its anti-cheat is set to None, because anti-cheat can treat those keys and clicks as cheating. A file from someone else could say None for an application that has anti-cheat, so the file never sets this: you do. You can change it later on this page.';
