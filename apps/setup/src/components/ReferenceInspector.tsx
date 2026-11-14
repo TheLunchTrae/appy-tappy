@@ -9,7 +9,7 @@ import { TOO_MANY } from '../lib/expected.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
-import { referenceSave } from '../lib/teaching.ts';
+import { checkBackLabel, referenceSave } from '../lib/teaching.ts';
 import type { useBoxes } from '../lib/useBoxes.ts';
 import type { LiveCheck } from '../lib/useLiveCheck.ts';
 import type { Teaching } from '../lib/useReferenceTeaching.ts';
@@ -33,7 +33,7 @@ export function teachingSheet(teaching: Teaching): { readonly actions: ReactNode
     return {
       actions: (
         <button type="button" className="btn" onClick={guided.close}>
-          {reviewed !== null ? 'Back to review' : 'Back to the screenshot'}
+          {checkBackLabel(reviewed !== null)}
         </button>
       ),
       content: (

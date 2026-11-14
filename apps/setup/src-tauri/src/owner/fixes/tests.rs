@@ -207,7 +207,7 @@ fn a_bar_fix_keeps_only_its_region_and_the_flow_starts_from_it() {
     // Twice the height, the bar drawn on the whole window doubles.
     assert_eq!(
         harness.ask(place),
-        Ok(Some(RegionSpec {
+        Ok(Some(RegionDef {
             x: 0,
             y: 0,
             width: 8,
@@ -242,7 +242,7 @@ fn a_bar_fix_keeps_only_its_region_and_the_flow_starts_from_it() {
     );
     assert_eq!(
         harness.ask(place),
-        Ok(Some(RegionSpec {
+        Ok(Some(RegionDef {
             x: 1,
             y: 1,
             width: 6,

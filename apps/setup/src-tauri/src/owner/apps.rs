@@ -4,7 +4,9 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use appytappy_config::app_file::{AntiCheatDef, AppFile, BuildDef, CheckedDef};
+use appytappy_config::app_file::{AppFile, BuildDef, CheckedDef};
+
+use appytappy_config::anti_cheat::AntiCheatClass;
 use appytappy_config::process::ProcessId;
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 use serde::Serialize;
@@ -202,7 +204,11 @@ impl<H: Host> Owner<H> {
     /// Saves `class` as the anti-cheat class of the application `app`. A
     /// class other than none stops its automations that press keys, which
     /// the Automations page then shows as unable to run.
-    pub(crate) fn set_anti_cheat(&mut self, app: &str, class: AntiCheatDef) -> Result<(), String> {
+    pub(crate) fn set_anti_cheat(
+        &mut self,
+        app: &str,
+        class: AntiCheatClass,
+    ) -> Result<(), String> {
         self.update_app(app, Changed::Runtime, |_owner, found| {
             found.file.anti_cheat = class;
             Ok(Edit::Save((), Vec::new()))
@@ -210,15 +216,25 @@ impl<H: Host> Owner<H> {
         .map(|saved| saved.answer)
     }
 
-    /// Saves `spec` as a new application, or over `existing`, and answers
-    /// its ID.
+    /// Saves `spec` over `existing`, or as a new application in a folder
+    /// of its own, which a failed save leaves no trace of, and answers its
+    /// ID.
     pub(crate) fn save_app(
         &mut self,
         existing: Option<&str>,
         spec: AppSpec,
     ) -> Result<String, String> {
-        let (id, file) = applications::apply(self.stores()?, existing, spec)?;
-        self.write_app(&id, Changed::Values, Write::Save(&file, &Vec::new()))?;
+        let file = applications::apply(self.stores()?, existing, spec)?;
+        if let Some(id) = existing {
+            self.write_app(id, Changed::Values, Write::Save(&file, &Vec::new()))?;
+            return Ok(id.to_owned());
+        }
+        let id = self
+            .stores()?
+            .apps
+            .create(&file, &[])
+            .map_err(|error| error.to_string())?;
+        self.tell(&id, Changed::Values);
         Ok(id)
     }
 
@@ -250,8 +266,9 @@ pub(super) fn checked_now(build: BuildDef) -> CheckedDef {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::{SizeDef, WindowDef};
-    use appytappy_config::automation_file::{ActionDef, AutomationDef, MediaCommandDef};
+    use appytappy_config::action::MediaCommand;
+    use appytappy_config::app_file::{SizeChangesDef, SizeDef, WindowDef};
+    use appytappy_config::automation_file::{ActionDef, AutomationDef};
     use appytappy_sources::screen::{Image, Size};
 
     use crate::owner::SavedValue;
@@ -451,7 +468,7 @@ mod tests {
         assert_eq!(
             listed[0].automation.actions[0],
             ActionDef::Media {
-                command: MediaCommandDef::Pause,
+                command: MediaCommand::Pause,
                 app: Some("Player.exe".to_owned()),
             }
         );
@@ -485,11 +502,11 @@ mod tests {
         let set = |harness: &mut Harness, class| {
             harness.ask(|owner| owner.set_anti_cheat("example", class))
         };
-        set(&mut harness, AntiCheatDef::None).expect("sets");
+        set(&mut harness, AntiCheatClass::None).expect("sets");
         let apps = harness.ask(Owner::apps).expect("lists");
         assert_eq!(
             apps[0].file.as_ref().map(|file| file.anti_cheat),
-            Some(AntiCheatDef::None)
+            Some(AntiCheatClass::None)
         );
         let id = save_press(&mut harness).expect("saves");
         let listed = harness
@@ -503,7 +520,7 @@ mod tests {
             "the file keeps one spelling"
         );
         assert_eq!(listed[0].problem, None);
-        set(&mut harness, AntiCheatDef::KernelLevel).expect("sets");
+        set(&mut harness, AntiCheatClass::KernelLevel).expect("sets");
         let listed = harness
             .ask(|owner| owner.list_automations())
             .expect("lists");
@@ -518,7 +535,7 @@ mod tests {
             .ask(|owner| owner.delete_automation(&id))
             .expect("removes");
         assert_eq!(
-            set(&mut harness, AntiCheatDef::None).map(drop),
+            set(&mut harness, AntiCheatClass::None).map(drop),
             Ok(()),
             "lowering it again is allowed too"
         );
@@ -576,7 +593,7 @@ mod tests {
             Err("That application is no longer saved.".to_owned())
         );
         assert_eq!(
-            harness.ask(|owner| owner.set_anti_cheat("gone", AntiCheatDef::None)),
+            harness.ask(|owner| owner.set_anti_cheat("gone", AntiCheatClass::None)),
             Err("That application is no longer saved.".to_owned())
         );
         std::fs::remove_dir_all(root).expect("clean up");
@@ -647,7 +664,7 @@ mod tests {
                         class: "OtherWindow",
                         executable: "Other.exe",
                     }),
-                    size_changes: appytappy_config::app_file::SizeChangesDef::Often,
+                    size_changes: SizeChangesDef::Often,
                 },
             )
         });
@@ -661,6 +678,54 @@ mod tests {
             Some(updated),
             "a failed mark keeps the build"
         );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// Linux makes a folder whose path is just short of its 4096-byte
+    /// limit but no file in it, so the new application's folder is made
+    /// and its first save fails.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_new_application_whose_first_save_fails_leaves_no_folder() {
+        use appytappy_config::paths::Locations;
+
+        use crate::stores::Stores;
+
+        let (_stores, root) = scratch_store("first-save-fails");
+        let stores_at = |base: &std::path::Path| {
+            Stores::from(
+                Locations::from_app_data(Some(base.into()), Some(base.into()))
+                    .expect("the temporary folder is absolute"),
+            )
+        };
+        let short = stores_at(&root).apps.folder("example").as_os_str().len();
+        // `app.json`'s temporary file adds more than 30 bytes to this.
+        let mut missing = 4080_usize
+            .checked_sub(short)
+            .expect("a short temporary folder");
+        if missing % 200 == 1 {
+            missing += 1;
+        }
+        let mut deep = root.clone();
+        while missing > 0 {
+            let part = missing.min(200);
+            deep.push("a".repeat(part - 1));
+            missing -= part;
+        }
+        let stores = stores_at(&deep);
+        let mut harness = harness_with(false, Ok(stores.clone()));
+        harness.forget_reloads();
+
+        let saved = harness.ask(|owner| {
+            owner.save_app(
+                None,
+                crate::owner::test_support::example_app(SizeChangesDef::Often),
+            )
+        });
+        assert!(saved.is_err(), "the first save fails: {saved:?}");
+        assert!(!stores.apps.folder("example").exists(), "no folder stays");
+        assert_eq!(stores.apps.load().expect("lists"), []);
+        assert_eq!(harness.reloads(), 0, "a save that failed tells no one");
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -701,7 +766,7 @@ mod tests {
                             class: "ExampleWindow",
                             executable,
                         }),
-                        size_changes: appytappy_config::app_file::SizeChangesDef::Often,
+                        size_changes: SizeChangesDef::Often,
                     },
                 )
             })

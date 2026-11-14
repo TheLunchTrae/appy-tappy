@@ -23,14 +23,8 @@ use crate::system::Bounds;
 /// device works.
 const HEALTH_CHECK: Duration = Duration::from_secs(2);
 
-/// The wait a frame handler returns when it wants no more frames.
-///
-/// A one-frame grab returns it once it has its frame. The capture then waits
-/// a day before it reads another, longer than such a capture runs.
-pub const NO_MORE_FRAMES: Duration = Duration::MAX;
-
-/// The longest wait a capture keeps; a longer one, such as
-/// [`NO_MORE_FRAMES`], is cut to this so the deadline stays representable.
+/// The longest wait a capture keeps; a longer one is cut to this so the
+/// deadline stays representable.
 const LONGEST_WAIT: Duration = Duration::from_hours(24);
 
 /// The shortest wait a capture asks the system to match. Below it, the
@@ -42,7 +36,20 @@ const SHORTEST_PACED_WAIT: Duration = Duration::from_millis(64);
 const TICKS_PER_SECOND: i128 = 10_000_000;
 
 /// The frame handler as [`super::run_capture`] lends it to the loop.
-pub type Handler<'handler> = dyn FnMut(io::Result<Frame<'_>>) -> Duration + 'handler;
+pub type Handler<'handler> = dyn FnMut(io::Result<Frame<'_>>) -> NextFrame + 'handler;
+
+/// What a frame handler asks for after each frame or error it is handed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NextFrame {
+    /// The newest frame once this long has passed, such as the wait a
+    /// [`crate::schedule::ReadSchedule`] gives.
+    After(Duration),
+    /// No more frames, as a one-frame grab asks once it has its frame: the
+    /// frame loop ends, the handler is handed nothing more, not even the
+    /// capture's end, and the capture's thread ends, so closing the session
+    /// only waits for it.
+    Never,
+}
 
 /// What ended a wait for the capture's next event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,10 +190,10 @@ pub fn run_frames<S: FrameSource>(
             break;
         }
         if let Some(frame) = held.take_if(|_| source.now() >= state.next_read) {
-            let Some(wait) = state.read(source, frame, crop, handler) else {
-                break;
-            };
-            state.after_read(source, wait);
+            match state.read(source, frame, crop, handler) {
+                NextFrame::After(wait) => state.after_read(source, wait),
+                NextFrame::Never => break,
+            }
         }
     }
     if let Some(frame) = held {
@@ -230,10 +237,10 @@ fn ended(why: &str) -> io::Error {
     io::Error::new(io::ErrorKind::NotConnected, why)
 }
 
-/// Tells `handler` that its capture ended. Its wait is moot: nothing more
-/// will arrive.
+/// Tells `handler` that its capture ended. What it asks for next is moot:
+/// nothing more will arrive.
 fn end(handler: &mut Handler<'_>, error: io::Error) {
-    let _wait = handler(Err(error));
+    let _next = handler(Err(error));
 }
 
 impl FrameLoop {
@@ -258,40 +265,41 @@ impl FrameLoop {
         due
     }
 
-    /// Copies `crop` of one frame and passes it to `handler`, returning the
-    /// handler's wait, or `None` when the capture ended.
+    /// Copies `crop` of one frame and passes it to `handler`, returning what
+    /// the handler asks for next, or [`NextFrame::Never`] when the capture
+    /// ended.
     fn read<S: FrameSource>(
         &mut self,
         source: &mut S,
         held: Held<S::Frame>,
         crop: &Crop,
         handler: &mut Handler<'_>,
-    ) -> Option<Duration> {
+    ) -> NextFrame {
         let copied = self.copy(source, &held.frame, crop);
         source.release(held.frame);
         match copied {
-            Ok(Some(window_size)) => Some(match self.buffer.image() {
+            Ok(Some(window_size)) => match self.buffer.image() {
                 Some(image) => handler(Ok(Frame {
                     window_size,
                     image,
                     received: held.received,
                     delay: held.delay,
                 })),
-                None => Duration::ZERO,
-            }),
+                None => NextFrame::After(Duration::ZERO),
+            },
             // The system makes its frames at the window's new size from
             // here on; the next frame has it.
-            Ok(None) => Some(Duration::ZERO),
+            Ok(None) => NextFrame::After(Duration::ZERO),
             Err(error) => match lost_device(source) {
                 Some(lost) => {
                     end(handler, lost);
-                    None
+                    NextFrame::Never
                 },
                 None if error.kind() == io::ErrorKind::NotConnected => {
                     end(handler, error);
-                    None
+                    NextFrame::Never
                 },
-                None => Some(handler(Err(error))),
+                None => handler(Err(error)),
             },
         }
     }
@@ -399,6 +407,11 @@ mod tests {
 
     const fn millis(value: u64) -> Duration {
         Duration::from_millis(value)
+    }
+
+    /// The next frame once `ms` milliseconds have passed.
+    const fn after(ms: u64) -> NextFrame {
+        NextFrame::After(millis(ms))
     }
 
     const fn size(width: u32, height: u32) -> Size {
@@ -603,19 +616,19 @@ mod tests {
     }
 
     /// Runs the loop over `script`, whose frames start at `frames` size,
-    /// with a handler that asks for each of `waits` in turn and then the
+    /// with a handler that asks for each of `nexts` in turn and then the
     /// last again, and returns what the handler saw: each frame, or each
     /// error's kind and text.
     fn run_at(
         script: &mut Script,
         frames: Size,
         crop: &Crop,
-        waits: &[Duration],
+        nexts: &[NextFrame],
     ) -> Vec<Result<Seen, (io::ErrorKind, String)>> {
         let started = script.started;
         let mut seen = Vec::new();
-        let mut waits = waits.iter().copied();
-        let mut wait = Duration::ZERO;
+        let mut nexts = nexts.iter().copied();
+        let mut next = after(0);
         let mut handler = |frame: io::Result<Frame<'_>>| {
             seen.push(match frame {
                 Ok(frame) => Ok(Seen {
@@ -627,8 +640,8 @@ mod tests {
                 }),
                 Err(error) => Err((error.kind(), error.to_string())),
             });
-            wait = waits.next().unwrap_or(wait);
-            wait
+            next = nexts.next().unwrap_or(next);
+            next
         };
         run_frames(script, frames, THROTTLE, crop, &mut handler);
         seen
@@ -637,9 +650,9 @@ mod tests {
     fn run(
         script: &mut Script,
         crop: &Crop,
-        waits: &[Duration],
+        nexts: &[NextFrame],
     ) -> Vec<Result<Seen, (io::ErrorKind, String)>> {
-        run_at(script, FRAMES, crop, waits)
+        run_at(script, FRAMES, crop, nexts)
     }
 
     fn frames(numbers: impl IntoIterator<Item = u8>) -> Happens {
@@ -674,7 +687,7 @@ mod tests {
     #[test]
     fn only_the_newest_frame_is_read_and_the_others_are_given_back() {
         let mut script = Script::new([(5, frames([1, 2, 3])), (0, Happens::Stop)]);
-        let saw = run(&mut script, &Crop::Whole, &[millis(10)]);
+        let saw = run(&mut script, &Crop::Whole, &[after(10)]);
         assert_eq!(saw, [Ok(seen(3, 5))]);
         assert_eq!(
             script.calls,
@@ -697,7 +710,7 @@ mod tests {
             (30, frames([3])),
             (1_000, Happens::Stop),
         ]);
-        let saw = run(&mut script, &Crop::Whole, &[millis(100)]);
+        let saw = run(&mut script, &Crop::Whole, &[after(100)]);
         assert_eq!(saw, [Ok(seen(1, 0)), Ok(seen(3, 60))]);
         assert_eq!(
             script.waits(),
@@ -727,7 +740,7 @@ mod tests {
     #[test]
     fn a_held_frame_is_given_back_when_the_session_stops() {
         let mut script = Script::new([(0, frames([1])), (10, frames([2])), (10, Happens::Stop)]);
-        let saw = run(&mut script, &Crop::Whole, &[millis(1_000)]);
+        let saw = run(&mut script, &Crop::Whole, &[after(1_000)]);
         assert_eq!(saw, [Ok(seen(1, 0))]);
         assert_eq!(script.did().last(), Some(&&Call::Released(2)));
     }
@@ -742,7 +755,7 @@ mod tests {
             ),
         ] {
             let mut script = Script::new([(500, happens)]);
-            let saw = run(&mut script, &Crop::Whole, &[Duration::ZERO]);
+            let saw = run(&mut script, &Crop::Whole, &[after(0)]);
             assert_eq!(saw, [ending(why)]);
             assert_eq!(script.waits(), [HEALTH_CHECK], "{why}");
         }
@@ -757,7 +770,7 @@ mod tests {
             (600, frames([3])),
             (600, frames([4])),
         ]);
-        let saw = run(&mut script, &Crop::Whole, &[Duration::ZERO]);
+        let saw = run(&mut script, &Crop::Whole, &[after(0)]);
         assert_eq!(
             saw,
             [
@@ -780,7 +793,7 @@ mod tests {
             (100, frames([2])),
             (2_900, Happens::WindowCloses),
         ]);
-        let saw = run(&mut script, &Crop::Whole, &[millis(10_000)]);
+        let saw = run(&mut script, &Crop::Whole, &[after(10_000)]);
         assert_eq!(saw, [Ok(seen(1, 0)), ending("the captured window closed")]);
         assert_eq!(
             script.waits(),
@@ -803,7 +816,7 @@ mod tests {
             (16, Happens::Frames(vec![(3, larger)])),
             (0, Happens::Stop),
         ]);
-        let saw = run(&mut script, &Crop::Whole, &[millis(500)]);
+        let saw = run(&mut script, &Crop::Whole, &[after(500)]);
         assert_eq!(
             saw,
             [Ok(Seen {
@@ -840,7 +853,7 @@ mod tests {
     fn frames_that_cannot_follow_the_window_s_size_end_the_capture() {
         let mut script = Script::new([(0, Happens::Frames(vec![(1, size(1_024, 768))]))]);
         script.resizes = false;
-        let saw = run(&mut script, &Crop::Whole, &[Duration::ZERO]);
+        let saw = run(&mut script, &Crop::Whole, &[after(0)]);
         assert_eq!(
             saw,
             [ending(
@@ -854,7 +867,7 @@ mod tests {
     fn a_frame_that_cannot_be_copied_fails_alone() {
         let mut script = Script::new([(0, frames([1])), (50, frames([2])), (0, Happens::Stop)]);
         script.copy_errors = [Some(io::ErrorKind::Other)].into();
-        let saw = run(&mut script, &Crop::Whole, &[millis(50)]);
+        let saw = run(&mut script, &Crop::Whole, &[after(50)]);
         assert_eq!(
             saw,
             [
@@ -874,7 +887,7 @@ mod tests {
         let mut lost = Script::new([(0, Happens::DeviceLost), (0, frames([1]))]);
         lost.copy_errors = [Some(io::ErrorKind::Other)].into();
         assert_eq!(
-            run(&mut lost, &Crop::Whole, &[Duration::ZERO]),
+            run(&mut lost, &Crop::Whole, &[after(0)]),
             [ending("the graphics device was lost: the driver was reset")]
         );
         assert_eq!(lost.waits(), [HEALTH_CHECK], "the loop ended");
@@ -882,7 +895,7 @@ mod tests {
         let mut over = Script::new([(0, frames([1]))]);
         over.copy_errors = [Some(io::ErrorKind::NotConnected)].into();
         assert_eq!(
-            run(&mut over, &Crop::Whole, &[Duration::ZERO]),
+            run(&mut over, &Crop::Whole, &[after(0)]),
             [ending("the copy failed")]
         );
         assert_eq!(over.waits(), [HEALTH_CHECK], "the loop ended");
@@ -945,7 +958,7 @@ mod tests {
         let mut errors = Vec::new();
         let mut handler = |frame: io::Result<Frame<'_>>| {
             errors.push(frame.map(|_frame| ()).unwrap_err());
-            Duration::ZERO
+            after(0)
         };
         run_frames(&mut script, captured, THROTTLE, &crop, &mut handler);
         assert_eq!(
@@ -971,7 +984,12 @@ mod tests {
         let saw = run(
             &mut script,
             &Crop::Whole,
-            &[millis(500), millis(500), millis(10), NO_MORE_FRAMES],
+            &[
+                after(500),
+                after(500),
+                after(10),
+                NextFrame::After(Duration::MAX),
+            ],
         );
         assert_eq!(saw.len(), 4, "{saw:?}");
         let asked: Vec<_> = script
@@ -990,8 +1008,21 @@ mod tests {
         assert_eq!(
             script.did().last(),
             Some(&&Call::Released(5)),
-            "a handler that wants no more frames is handed none"
+            "a handler that waits a day is handed no frame meanwhile"
         );
+    }
+
+    #[test]
+    fn a_handler_that_wants_no_more_frames_ends_the_loop() {
+        let mut script = Script::new([(0, frames([1])), (10, frames([2])), (0, Happens::Stop)]);
+        let saw = run(&mut script, &Crop::Whole, &[NextFrame::Never]);
+        assert_eq!(saw, [Ok(seen(1, 0))]);
+        assert_eq!(
+            script.calls,
+            [Call::Waited(HEALTH_CHECK), whole(1), Call::Released(1)],
+            "it waits for nothing more, and asks the system for nothing"
+        );
+        assert_eq!(script.events.len(), 2, "the loop ended before the stop");
     }
 
     #[test]

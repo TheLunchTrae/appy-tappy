@@ -238,8 +238,9 @@ This page covers what the user guide leaves out.
   closes (`live_values`, `stop_live_values`). The automation editor's
   reading follows its window to each size the same way and keeps its watch's
   number, so the editor's poll goes on. **Fix at this size** opens the
-  capture locked to the value's application. Its first screenshot sets the
-  size, and its region starts where the value reads at that size: its fix
+  capture locked to the value's application. Its first screenshot whose
+  pixels arrive sets the size, and its region starts where the value reads
+  at that size: its fix
   there, or its first drawing scaled (`place_value`). The owner refuses a
   fix at the size of the first drawing, of another kind of check, or with
   other states than the value's, and saves it over any fix at the same size
@@ -1067,15 +1068,19 @@ saved file is held to and takes nothing else from it:
   each reference, as the runtime does and as saving a value does, so a file
   with a value the runtime could not read is refused.
 
-`Shared::of` holds an application to the same rules, and `pack` reads back
-what it packed with `unpack` and refuses what that refuses, such as an
+`pack` holds an application to the same rules as it exports it. It packs
+each picture as it reads it and stops at the first that takes what the zip
+file holds past `MAX_SHARED_BYTES`, so it reads no picture after that one,
+and it reads no picture beyond one byte past `MAX_SHARED_BYTES`. It then reads
+back what it packed with `unpack` and refuses what that refuses, such as an
 application whose pictures hold more bytes or pixels than an import reads.
 So an application that AppyTappy exports is one it imports; a property test
 packs and unpacks generated definitions. A refused export says what to
 change when the pixels are the cause.
 
 `import_app` unpacks the bytes again and saves the application with
-`AppStore::create`. It makes the folder under a new ID from `new_app_id`,
+`AppStore::create`, as saving a new application in the application editor
+does. It makes the folder under a new ID from `new_app_id`,
 never writes into one that is there, and removes it again when the save fails.
 When the ID's name is taken by something the store does not list, a file or on
 Windows a folder that differs only in case, it takes the next ID, and gives up
@@ -1351,10 +1356,12 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   lines.
 - `debug_bundle` hands the owner's file locations to a blocking task, which
   builds the zip in memory away from the owner thread, so the page's other
-  commands do not wait for a large trace to be packed. The page saves the
-  returned bytes with the WebView's save picker. Pictures are stored,
-  everything else is deflated, with the `zip` crate and its pure-Rust deflate
-  backend. `setup.log` records the whole time, packing included.
+  commands do not wait for a large trace to be packed. The page asks where to
+  save with the WebView's save picker first, then saves the returned bytes
+  there, as [Application import](State-machines.md#application-import) says
+  of the export dialogs. Pictures are stored, everything else is deflated,
+  with the `zip` crate and its pure-Rust deflate backend. `setup.log` records
+  the whole time, packing included.
 
 The same setting adds debug details to the editors. The page asks for them
 only while `showDebug` is true, so with it off they cost nothing:
@@ -1431,9 +1438,9 @@ which `api.ts` sends as the request's raw body with a `T` about it, as
 
 The file also holds what the page checks a draft against before it saves:
 `LIMITS`, such as the longest app name a media or volume action names, the
-longest path or link, the most states, the highest tolerance, and the most
-pixels a click's search area holds; `KEY_NAMES`, the keys a key press action
-can name; `SHORTCUT_KEYS`, the keys the screenshot shortcut can name;
+longest path or link, the most states, the longest state name, the highest
+tolerance, and the most pixels a click's search area holds; `KEY_NAMES`, the
+keys a key press action can name; `SHORTCUT_KEYS`, the keys the screenshot shortcut can name;
 `ACTIONS`, whether each kind of action sends input and whether undo can put
 it back; `TRACE_CATEGORIES`; `NO_STATE`; and `DEFAULT_SETTINGS`. The test
 reads them from `appytappy-config`, so the page and the save agree, and the

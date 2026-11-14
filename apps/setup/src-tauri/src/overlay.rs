@@ -30,7 +30,7 @@ use appytappy_config::app_file::{AppFile, OverlayDef, OverlayModeDef, PanelDef, 
 use appytappy_sources::screen::saved::{self, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{
-    CaptureSession, Crop, Frame, FrameHandler, FrameMeaning, Placed, Size,
+    CaptureSession, Crop, Frame, FrameHandler, FrameMeaning, NextFrame, Placed, Size,
 };
 use appytappy_sources::system::WindowPlace;
 use serde::Serialize;
@@ -609,7 +609,7 @@ fn start<H: Host>(
                 read: read_all(&placed, &values, frame),
             },
         });
-        OVERLAY_INTERVAL
+        NextFrame::After(OVERLAY_INTERVAL)
     });
     let session = host
         .capture(window, Crop::Layout(layout), OVERLAY_INTERVAL, handler)

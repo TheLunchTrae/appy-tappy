@@ -239,6 +239,8 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
 
 #[cfg(test)]
 mod tests {
+    use appytappy_sources::screen::NextFrame;
+
     use crate::owner::PREVIEW_INTERVAL;
 
     use super::*;
@@ -253,7 +255,7 @@ mod tests {
         assert!(desktop.processes().is_err());
         assert!(desktop.window_place(7).is_err());
         assert!(desktop.executable_build(ProcessId::new(7)).is_err());
-        let handler: FrameHandler = Box::new(|_frame| Duration::ZERO);
+        let handler: FrameHandler = Box::new(|_frame| NextFrame::After(Duration::ZERO));
         assert!(
             desktop
                 .capture(7, Crop::Whole, PREVIEW_INTERVAL, handler)

@@ -6,6 +6,7 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::app_file::RegionDef;
 use crate::names::{is_app_id, is_image_name};
 
 /// The widest or tallest distance a spot or a picture's area may have, in
@@ -150,19 +151,6 @@ impl Spot {
     }
 }
 
-/// A rectangle of a window in pixels from its top-left corner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Area {
-    /// The left edge.
-    pub x: u32,
-    /// The top edge.
-    pub y: u32,
-    /// The width.
-    pub width: u32,
-    /// The height.
-    pub height: u32,
-}
-
 /// A picture to find in an area of the window, and where on it to press.
 /// Its order only keys a map of the clicks' searches.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -175,8 +163,10 @@ pub struct ClickPicture {
     pub window_width: u32,
     /// The window's height when the picture was taken.
     pub window_height: u32,
-    /// The area of the window the picture is looked for in.
-    pub search: Area,
+    /// The area of the window the picture is looked for in, in pixels from
+    /// its top-left corner. [`ClickPicture::new`] refuses an area that is
+    /// empty or does not fit the window.
+    pub search: RegionDef,
     /// Where on the picture to press, from its top-left corner.
     pub press: (u32, u32),
     /// How far, on average, each compared pixel's red, green, and blue may
@@ -195,7 +185,7 @@ impl ClickPicture {
     pub fn new(
         image: &str,
         (window_width, window_height): (u32, u32),
-        search: Area,
+        search: RegionDef,
         press: (u32, u32),
         tolerance: u8,
     ) -> Result<Self, InvalidClick> {
@@ -301,8 +291,8 @@ impl Error for InvalidClick {}
 mod tests {
     use super::*;
 
-    fn area(x: u32, y: u32, width: u32, height: u32) -> Area {
-        Area {
+    fn area(x: u32, y: u32, width: u32, height: u32) -> RegionDef {
+        RegionDef {
             x,
             y,
             width,

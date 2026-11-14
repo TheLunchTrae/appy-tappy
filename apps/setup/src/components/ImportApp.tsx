@@ -1,7 +1,7 @@
 import { type ChangeEvent, useReducer, useRef } from 'react';
 
 import { errorText, importApp, readSharedApp } from '../lib/api.ts';
-import type { AntiCheatDef } from '../lib/bindings.ts';
+import type { AntiCheatClass } from '../lib/bindings.ts';
 import { checkedText } from '../lib/build.ts';
 import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/describe.ts';
 import { IMPORT_ANTI_CHEAT_HINT, ORIGIN_HINT, SHARED_CHECKED_HINT } from '../lib/hints.ts';
@@ -19,7 +19,7 @@ function listed(names: readonly string[]): string {
 interface AskingProps {
   readonly state: Extract<ImportState, { kind: 'asking' | 'importing' }>;
   readonly onName: (name: string) => void;
-  readonly onClass: (antiCheat: AntiCheatDef) => void;
+  readonly onClass: (antiCheat: AntiCheatClass) => void;
 }
 
 /** What a shared file holds, and the two things the user settles before it is imported: its name and its anti-cheat. */

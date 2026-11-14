@@ -47,7 +47,13 @@ export function ScreenshotStrip({ shots, selected, position, hidden, removal, no
             onSelect(shot.index);
           }}
         >
-          <span className="shot">{shot.thumb === null ? null : <PictureCanvas picture={shot.thumb} label="" />}</span>
+          <span className="shot">
+            {shot.thumb.kind === 'loaded' ? (
+              <PictureCanvas picture={shot.thumb.picture} label="" />
+            ) : shot.thumb.kind === 'failed' ? (
+              <span className="unloaded">Not loaded. Select to load again.</span>
+            ) : null}
+          </span>
           <span className="when">
             {shot.recorded ? <span className="dot" role="img" aria-label="Recorded" /> : null}
             {position(shot.index)} · {shot.time}

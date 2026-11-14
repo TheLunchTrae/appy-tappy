@@ -182,15 +182,6 @@ impl ScreenPixels for Unsupported {
     }
 }
 
-/// Each process's ID with its executable's name.
-#[must_use]
-pub fn executables(processes: Vec<ProcessEntry>) -> Vec<(ProcessId, String)> {
-    processes
-        .into_iter()
-        .map(|process| (process.id, process.executable))
-        .collect()
-}
-
 /// Which processes' windows a session may read, for [`session_window`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pick {
@@ -346,17 +337,6 @@ mod tests {
                 bottom: 2,
             },
         }
-    }
-
-    #[test]
-    fn executables_name_each_process_by_its_id() {
-        assert_eq!(
-            executables(vec![process(4, "Player.exe"), process(9, "Chat.exe")]),
-            [
-                (ProcessId::new(4), "Player.exe".to_owned()),
-                (ProcessId::new(9), "Chat.exe".to_owned()),
-            ]
-        );
     }
 
     fn example() -> WindowMatch {

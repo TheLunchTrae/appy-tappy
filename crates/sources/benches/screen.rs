@@ -206,7 +206,7 @@ mod live {
     use std::sync::mpsc;
 
     use appytappy_sources::HostSystem;
-    use appytappy_sources::screen::{Capture, CaptureSession, Crop, Layout};
+    use appytappy_sources::screen::{Capture, CaptureSession, Crop, Layout, NextFrame};
     use appytappy_sources::system::System;
 
     use super::{
@@ -248,11 +248,11 @@ mod live {
                 });
                 // A send fails only once the benchmark stopped listening.
                 let listening = sender.send(sample).is_ok();
-                schedule.after_read(if listening {
+                NextFrame::After(schedule.after_read(if listening {
                     Activity::Changed
                 } else {
                     Activity::Steady
-                })
+                }))
             }),
         )?;
         let started = Instant::now();

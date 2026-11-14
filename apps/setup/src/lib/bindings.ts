@@ -11,7 +11,7 @@ export type ActionDef = DeepReadonly<{ "kind": "media",
 /**
  * What to do.
  */
-command: MediaCommandDef,
+command: MediaCommand,
 /**
  * The executable whose media session to control, such as
  * `Player.exe`, or `None` for the session Windows considers current.
@@ -63,9 +63,14 @@ returnFocus: boolean,
 at: ClickAtDef, }>;
 
 /**
- * [`AntiCheatClass`] as the file spells it.
+ * How an app protects itself from other programs.
+ *
+ * Only [`AntiCheatClass::None`] permits input-injection actions: see
+ * [`allows_input`]. An application's file spells it as the variant in
+ * camel case, such as `userMode`, and the policy reads it as it is, since
+ * every class is one the policy handles.
  */
-export type AntiCheatDef = DeepReadonly<"none" | "userMode" | "kernelLevel" | "unknown">;
+export type AntiCheatClass = DeepReadonly<"none" | "userMode" | "kernelLevel" | "unknown">;
 
 /**
  * One application's authoring file.
@@ -92,7 +97,7 @@ sizeChanges: SizeChangesDef,
 /**
  * How the application protects itself from other programs.
  */
-antiCheat: AntiCheatDef,
+antiCheat: AntiCheatClass,
 /**
  * The values read from the application's window.
  */
@@ -258,7 +263,7 @@ problem: string | null, }>;
 /**
  * What looking for a bar in a region found.
  */
-export type BarDetection = DeepReadonly<{ "kind": "proposed", filled: ColorSpec, empty: ColorSpec,
+export type BarDetection = DeepReadonly<{ "kind": "proposed", filled: ColorDef, empty: ColorDef,
 /**
  * The screenshot whose layout gave the colors.
  */
@@ -401,7 +406,7 @@ export type CharactersSpec = DeepReadonly<{
  * Where the characters show, which a recording records and the live
  * window is read at.
  */
-region: RegionSpec,
+region: RegionDef,
 /**
  * The screenshot the region was drawn on. Every screenshot with a
  * box and the recording must have its window size, since the region
@@ -416,7 +421,7 @@ reference: ReferenceRef | null,
 /**
  * The characters' color.
  */
-ink: ColorSpec,
+ink: ColorDef,
 /**
  * How far from `ink` a pixel of a character may be.
  */
@@ -508,7 +513,7 @@ tolerance: number, }>;
 /**
  * A value's check as the UI describes it.
  */
-export type CheckSpec = DeepReadonly<{ "kind": "number", region: RegionSpec, reference: ReferenceRef,
+export type CheckSpec = DeepReadonly<{ "kind": "number", region: RegionDef, reference: ReferenceRef,
 /**
  * Whether digits after the decimal point are ignored.
  */
@@ -517,7 +522,7 @@ whole: boolean,
  * The characters the value reads, or `None` for every character
  * the reference knows, as [`CheckDef::Number`] saves them.
  */
-characters?: string, } | { "kind": "barFill", region: RegionSpec, filled: ColorSpec, empty: ColorSpec, } | { "kind": "color", region: RegionSpec, color: ColorSpec, tolerance: number, } | { "kind": "state", region: RegionSpec,
+characters?: string, } | { "kind": "barFill", region: RegionDef, filled: ColorDef, empty: ColorDef, } | { "kind": "color", region: RegionDef, color: ColorDef, tolerance: number, } | { "kind": "state", region: RegionDef,
 /**
  * The screenshot the region was drawn on; every state's screenshot
  * must have its window size.
@@ -671,20 +676,16 @@ green: number,
 blue: number, }>;
 
 /**
- * A color of a screenshot: one the user picked on it, one proposed to them,
- * or one the setup app read from it for the UI to show.
- */
-export type ColorSpec = DeepReadonly<{ red: number, green: number, blue: number, }>;
-
-/**
  * How a step's pick combines with the selection before it.
  */
 export type Combine = DeepReadonly<"replace" | "add" | "remove">;
 
 /**
- * [`Comparison`] as the file spells it.
+ * How a comparison relates a signal's value to the rule's value, spelled
+ * in the file as the variant in camel case, such as `atMost`. It has
+ * nothing to check, so the file reads it as it is.
  */
-export type ComparisonDef = DeepReadonly<"below" | "atMost" | "equals" | "notEquals" | "atLeast" | "above">;
+export type Comparison = DeepReadonly<"below" | "atMost" | "equals" | "notEquals" | "atLeast" | "above">;
 
 /**
  * [`Corner`] as the file spells it.
@@ -847,7 +848,7 @@ export type ExampleSpec = DeepReadonly<{
 /**
  * The box.
  */
-region: RegionSpec,
+region: RegionDef,
 /**
  * The screenshot it is drawn on.
  */
@@ -865,7 +866,7 @@ export type FindView = DeepReadonly<{
 /**
  * Where it is on the screenshot.
  */
-region: RegionSpec,
+region: RegionDef,
 /**
  * What the text reader made of it.
  */
@@ -874,7 +875,7 @@ text: RecordedText,
  * The characters' color its ink was last cut with for the text reader,
  * which reads the same ink as the same text.
  */
-ink: ColorSpec,
+ink: ColorDef,
 /**
  * The tolerance its ink was last cut with.
  */
@@ -1015,7 +1016,7 @@ name: string,
  * The anti-cheat class the user confirmed, which is saved whatever the
  * file holds.
  */
-antiCheat: AntiCheatDef,
+antiCheat: AntiCheatClass,
 /**
  * The name of the file the bytes came from, kept as where the
  * application was imported from.
@@ -1031,7 +1032,7 @@ export type Label = DeepReadonly<{ screenshot: number,
  * Where on the screenshot the text shows, when it is not the spec's
  * region: the box the user drew around it, or kept from found text.
  */
-region?: RegionSpec, text: string, }>;
+region?: RegionDef, text: string, }>;
 
 /**
  * The pixels of one kind in the rectangle asked about.
@@ -1106,7 +1107,7 @@ kept: Array<number>, }>;
 /**
  * What makes a pixel match, as the UI describes it.
  */
-export type MatchRule = DeepReadonly<{ "kind": "ink", ink: ColorSpec, tolerance: number, } | { "kind": "barFill", filled: ColorSpec, empty: ColorSpec, } | { "kind": "color", color: ColorSpec, tolerance: number, }>;
+export type MatchRule = DeepReadonly<{ "kind": "ink", ink: ColorDef, tolerance: number, } | { "kind": "barFill", filled: ColorDef, empty: ColorDef, } | { "kind": "color", color: ColorDef, tolerance: number, }>;
 
 /**
  * What a rule takes of a rectangle of a screenshot.
@@ -1119,7 +1120,7 @@ near: Layer,
 /**
  * The rectangle's average color.
  */
-average: ColorSpec,
+average: ColorDef,
 /**
  * The largest difference between the average's red, green, and
  * blue and the color's, which the tolerance bounds.
@@ -1131,14 +1132,17 @@ distance: number,
 matches: boolean, }>;
 
 /**
- * [`MediaCommand`] as the file spells it.
+ * What a media action does, spelled in the file as the variant in camel
+ * case, such as `play`. It has nothing to check, so the file reads it as
+ * it is.
  */
-export type MediaCommandDef = DeepReadonly<"play" | "pause" | "next" | "previous">;
+export type MediaCommand = DeepReadonly<"play" | "pause" | "next" | "previous">;
 
 /**
- * [`MustMatch`] as the file spells it.
+ * Which fields besides the executable a window has to match to qualify,
+ * as an application's file spells it too.
  */
-export type MustMatchDef = DeepReadonly<{
+export type MustMatch = DeepReadonly<{
 /**
  * The title has to match.
  */
@@ -1377,7 +1381,7 @@ app: string,
 /**
  * The region of the window to record.
  */
-region: RegionSpec,
+region: RegionDef,
 /**
  * The screenshot the region was drawn on, whose window size the
  * recording keeps.
@@ -1391,7 +1395,7 @@ pin: PinDef | null,
 /**
  * The characters' color.
  */
-ink: ColorSpec,
+ink: ColorDef,
 /**
  * How far from `ink` a pixel of a character may be.
  */
@@ -1718,11 +1722,6 @@ width: number,
 height: number, }>;
 
 /**
- * A rectangle of the window, in pixels from its top-left corner.
- */
-export type RegionSpec = DeepReadonly<{ x: number, y: number, width: number, height: number, }>;
-
-/**
  * Which rows the rows table shows.
  */
 export type RowFilter = DeepReadonly<{ range: TraceRange,
@@ -1866,7 +1865,7 @@ fixes: Array<FixDef>, }>;
 /**
  * One thing the user did to select.
  */
-export type SelectStep = DeepReadonly<{ "kind": "snap", region: RegionSpec, combine: Combine, } | { "kind": "click", x: number, y: number, combine: Combine, }>;
+export type SelectStep = DeepReadonly<{ "kind": "snap", region: RegionDef, combine: Combine, } | { "kind": "click", x: number, y: number, combine: Combine, }>;
 
 /**
  * What the user selected, as the steps they took.
@@ -2398,7 +2397,7 @@ value: string,
 /**
  * How the value relates to the target.
  */
-is: ComparisonDef,
+is: Comparison,
 /**
  * What the value is compared with.
  */
@@ -2453,7 +2452,7 @@ executable: string,
 /**
  * The fields besides the executable a window has to match to qualify.
  */
-mustMatch: MustMatchDef,
+mustMatch: MustMatch,
 /**
  * What to take when no window qualifies.
  */
@@ -2558,8 +2557,8 @@ states: Array<StateView>, }>;
 
 /**
  * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the
- * most states, the most characters a reference expects, the settings' ranges, the highest tolerance, and the most
- * pixels a click's search area holds, as the saved files take them.
+ * most states and the longest state name in characters, the most characters a reference expects, the settings'
+ * ranges, the highest tolerance, and the most pixels a click's search area holds, as the saved files take them.
  */
 export const LIMITS = {
   "fastestReadMs": 1,
@@ -2568,6 +2567,7 @@ export const LIMITS = {
   "maxExpectedCharacters": 128,
   "maxSearchPixels": 160000,
   "maxSharedBytes": 16777216,
+  "maxStateNameChars": 32,
   "maxStates": 16,
   "maxTargetBytes": 2048,
   "maxTolerance": 255,

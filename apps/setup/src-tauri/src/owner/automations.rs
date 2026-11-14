@@ -47,13 +47,13 @@ impl<H: Host> Owner<H> {
 mod tests {
     use appytappy_config::automation_file::AutomationDef;
 
-    use crate::check_spec::RegionSpec;
     use crate::owner::test_support::with_saved_bar;
+    use appytappy_config::app_file::RegionDef;
 
     #[test]
     fn a_click_picture_no_automation_was_saved_with_is_forgotten() {
         let (mut harness, root) = with_saved_bar("owner-click-pictures");
-        let region = RegionSpec {
+        let region = RegionDef {
             x: 0,
             y: 0,
             width: 2,

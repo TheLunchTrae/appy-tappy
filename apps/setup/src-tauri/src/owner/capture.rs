@@ -7,11 +7,11 @@ use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use appytappy_config::app_file::WindowDef;
-use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
+use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image, NextFrame};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
+use crate::check_spec;
 use crate::check_spec::bar::{self, BarDetection, BarMeasure};
-use crate::check_spec::{self, ColorSpec, RegionSpec};
 use crate::debug::workings::{self, ReadingDetails};
 use crate::match_preview::{self, MatchRule, MatchView};
 use crate::pixels;
@@ -21,6 +21,7 @@ use crate::selection::{self, SelectionSpec, SelectionView};
 use crate::ticket::{Running, Ticket, Tickets};
 use crate::window_list::{self, WindowChoice, WindowFit, WindowList, WindowScore};
 use crate::words::sentence;
+use appytappy_config::app_file::{ColorDef, RegionDef};
 
 use super::found::Found;
 use super::host::Host;
@@ -173,7 +174,7 @@ pub(super) fn start<H: Host>(
             ticket,
             event: to_event(frame),
         });
-        interval
+        NextFrame::After(interval)
     });
     let session = host
         .capture(window, crop, interval, handler)
@@ -432,7 +433,7 @@ impl<H: Host> Owner<H> {
     /// or why none are proposed.
     pub(crate) fn detect_bar(
         &self,
-        region: RegionSpec,
+        region: RegionDef,
         screenshot: usize,
     ) -> Result<BarDetection, String> {
         bar::detect(self.capture.screenshots().slots(), region, screenshot)
@@ -444,10 +445,10 @@ impl<H: Host> Owner<H> {
     /// window size.
     pub(crate) fn measure_bar(
         &self,
-        region: RegionSpec,
+        region: RegionDef,
         screenshot: usize,
-        filled: ColorSpec,
-        empty: ColorSpec,
+        filled: ColorDef,
+        empty: ColorDef,
     ) -> Result<BarMeasure, String> {
         bar::measure(
             self.capture.screenshots().slots(),
@@ -463,7 +464,7 @@ impl<H: Host> Owner<H> {
     pub(crate) fn match_pixels(
         &self,
         screenshot: usize,
-        area: RegionSpec,
+        area: RegionDef,
         rule: MatchRule,
     ) -> Result<MatchView, String> {
         self.capture
@@ -520,7 +521,6 @@ mod tests {
     use appytappy_config::app_file::WindowDef;
     use tokio::sync::oneshot;
 
-    use crate::check_spec::{ColorSpec, RegionSpec};
     use crate::owner::messages::Run;
     use crate::owner::run;
     use crate::owner::test_support::{
@@ -528,6 +528,7 @@ mod tests {
     };
     use crate::pixels;
     use crate::window_list::WindowFit;
+    use appytappy_config::app_file::{ColorDef, RegionDef};
 
     use super::*;
 
@@ -708,7 +709,7 @@ mod tests {
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        let region = RegionSpec {
+        let region = RegionDef {
             x: 0,
             y: 0,
             width: 4,
@@ -722,7 +723,7 @@ mod tests {
             Ok(serde_json::json!("declined")),
             "four pixels are too few to find a bar in"
         );
-        let colors = |filled: &str, empty: &str| -> (ColorSpec, ColorSpec) {
+        let colors = |filled: &str, empty: &str| -> (ColorDef, ColorDef) {
             let color = |text: &str| serde_json::from_str(text).expect("the UI's spelling");
             (color(filled), color(empty))
         };
@@ -883,9 +884,9 @@ mod tests {
     #[test]
     fn stopping_closes_the_capture_and_releases_every_picture_it_held() {
         let (mut harness, mut handler, root) = capturing("capture-stop");
-        let left: RegionSpec =
+        let left: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":2,"height":2}"#).expect("valid JSON");
-        let red: ColorSpec =
+        let red: ColorDef =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         harness
             .ask(|owner| owner.start_recording(characters_in(left, red), false))

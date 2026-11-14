@@ -25,10 +25,10 @@ use crate::action::{
     Action, AppName, KeyChord, MediaCommand, MediaTarget, OpenTarget, SoundFile, VolumeLevel,
     VolumeTarget,
 };
-use crate::anti_cheat::{AntiCheatClass, allows_input};
+use crate::anti_cheat::allows_input;
 use crate::app_file::{AppFile, RegionDef, SizeDef, ValueDef, ValueKind};
 use crate::click::{
-    Area, Click, ClickAt, ClickButton, ClickDelivery, ClickPicture, Corner, InvalidClick, Spot,
+    Click, ClickAt, ClickButton, ClickDelivery, ClickPicture, Corner, InvalidClick, Spot,
 };
 use crate::rule::{Comparison, Condition, Restore, Rule, RuleError};
 use crate::signal::{Number, SignalName, StateName, Value};
@@ -116,7 +116,7 @@ pub struct WhenDef {
     /// The value's ID within that application, such as `progress`.
     pub value: String,
     /// How the value relates to the target.
-    pub is: ComparisonDef,
+    pub is: Comparison,
     /// What the value is compared with.
     pub target: TargetDef,
 }
@@ -145,40 +145,8 @@ impl WhenDef {
         } else {
             "a yes-or-no value"
         };
-        Condition::compare(signal, self.is.into(), target)
+        Condition::compare(signal, self.is, target)
             .map_err(|_ordered| format!("{kind} can only be compared with \"is\" or \"is not\""))
-    }
-}
-
-/// [`Comparison`] as the file spells it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub enum ComparisonDef {
-    /// [`Comparison::Below`].
-    Below,
-    /// [`Comparison::AtMost`].
-    AtMost,
-    /// [`Comparison::Equals`].
-    Equals,
-    /// [`Comparison::NotEquals`].
-    NotEquals,
-    /// [`Comparison::AtLeast`].
-    AtLeast,
-    /// [`Comparison::Above`].
-    Above,
-}
-
-impl From<ComparisonDef> for Comparison {
-    fn from(comparison: ComparisonDef) -> Self {
-        match comparison {
-            ComparisonDef::Below => Self::Below,
-            ComparisonDef::AtMost => Self::AtMost,
-            ComparisonDef::Equals => Self::Equals,
-            ComparisonDef::NotEquals => Self::NotEquals,
-            ComparisonDef::AtLeast => Self::AtLeast,
-            ComparisonDef::Above => Self::Above,
-        }
     }
 }
 
@@ -228,32 +196,6 @@ impl TargetDef {
     }
 }
 
-/// [`MediaCommand`] as the file spells it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub enum MediaCommandDef {
-    /// [`MediaCommand::Play`].
-    Play,
-    /// [`MediaCommand::Pause`].
-    Pause,
-    /// [`MediaCommand::Next`].
-    Next,
-    /// [`MediaCommand::Previous`].
-    Previous,
-}
-
-impl From<MediaCommandDef> for MediaCommand {
-    fn from(command: MediaCommandDef) -> Self {
-        match command {
-            MediaCommandDef::Play => Self::Play,
-            MediaCommandDef::Pause => Self::Pause,
-            MediaCommandDef::Next => Self::Next,
-            MediaCommandDef::Previous => Self::Previous,
-        }
-    }
-}
-
 /// One action, as the file spells it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -262,7 +204,7 @@ pub enum ActionDef {
     /// Controls media playback.
     Media {
         /// What to do.
-        command: MediaCommandDef,
+        command: MediaCommand,
         /// The executable whose media session to control, such as
         /// `Player.exe`, or `None` for the session Windows considers current.
         #[serde(default)]
@@ -454,12 +396,7 @@ impl ClickAtDef {
             } => ClickAt::Picture(ClickPicture::new(
                 image,
                 (window_size.width, window_size.height),
-                Area {
-                    x: search.x,
-                    y: search.y,
-                    width: search.width,
-                    height: search.height,
-                },
+                *search,
                 (press.x, press.y),
                 *tolerance,
             )?),
@@ -500,7 +437,7 @@ impl ActionDef {
         Ok(match self {
             Self::Media { command, app: name } => Action::Media {
                 target: app(name)?.map_or(MediaTarget::Current, MediaTarget::App),
-                command: (*command).into(),
+                command: *command,
             },
             Self::Volume { percent, app: name } => Action::SetVolume {
                 target: app(name)?.map_or(VolumeTarget::System, VolumeTarget::App),
@@ -581,7 +518,7 @@ impl AutomationDef {
         // Read from the rule's actions, so a new kind of action that sends
         // input is covered as soon as `Action::input_sent` names it.
         if let Some(what) = rule.actions().iter().find_map(Action::input_sent)
-            && !allows_input(AntiCheatClass::from(app.anti_cheat))
+            && !allows_input(app.anti_cheat)
         {
             return Err(format!(
                 "it {what}, which anti-cheat can treat as cheating, so it can run only once \
@@ -602,7 +539,7 @@ impl AutomationDef {
                     click.app
                 ));
             };
-            if !allows_input(AntiCheatClass::from(target.anti_cheat)) {
+            if !allows_input(target.anti_cheat) {
                 return Err(format!(
                     "it clicks in {}, which anti-cheat can treat as cheating, so it can run \
                      only once {}'s anti-cheat is set to none",
@@ -762,9 +699,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::anti_cheat::AntiCheatClass;
     use crate::app_file::{
-        AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, OriginDef, ReferenceDef, RegionDef,
-        SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
+        CheckDef, ColorDef, FORMAT as APP_FORMAT, OriginDef, ReferenceDef, RegionDef, SampleDef,
+        ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
     use crate::names::sample_name;
     use crate::window_match::WindowFacts;
@@ -808,7 +746,7 @@ mod tests {
                 executable: "Example.exe",
             }),
             size_changes: SizeChangesDef::Often,
-            anti_cheat: AntiCheatDef::Unknown,
+            anti_cheat: AntiCheatClass::Unknown,
             overlay: None,
             checked: None,
             values: vec![
@@ -884,12 +822,12 @@ mod tests {
             when: WhenDef {
                 app: "example".to_owned(),
                 value: "progress".to_owned(),
-                is: ComparisonDef::AtLeast,
+                is: Comparison::AtLeast,
                 target: TargetDef::Number(90.0),
             },
             actions: vec![
                 ActionDef::Media {
-                    command: MediaCommandDef::Pause,
+                    command: MediaCommand::Pause,
                     app: Some("Player.exe".to_owned()),
                 },
                 ActionDef::Volume {
@@ -923,14 +861,14 @@ mod tests {
         let mut flag = pause_music();
         flag.id = "lower_volume".to_owned();
         flag.when.value = "icon_visible".to_owned();
-        flag.when.is = ComparisonDef::Equals;
+        flag.when.is = Comparison::Equals;
         flag.when.target = TargetDef::Flag(true);
         flag.enabled = false;
         flag.cooldown_ms = 1500;
         let mut state = pause_music();
         state.id = "paused".to_owned();
         state.when.value = "status".to_owned();
-        state.when.is = ComparisonDef::Equals;
+        state.when.is = Comparison::Equals;
         state.when.target = TargetDef::State("Paused".to_owned());
         let written = file(vec![pause_music(), flag, state]);
         let json = written.to_json();
@@ -959,7 +897,7 @@ mod tests {
         assert_eq!(
             automation.actions,
             [ActionDef::Media {
-                command: MediaCommandDef::Next,
+                command: MediaCommand::Next,
                 app: None
             }]
         );
@@ -999,7 +937,7 @@ mod tests {
         kept.undo = false;
         kept.cooldown_ms = 2500;
         kept.actions = vec![ActionDef::Media {
-            command: MediaCommandDef::Play,
+            command: MediaCommand::Play,
             app: None,
         }];
         let rule = kept.to_rule(progress()).expect("valid");
@@ -1026,27 +964,35 @@ mod tests {
         );
     }
 
+    /// The file spells each with no copy of its own between them, so the
+    /// derived spelling is the file's.
     #[test]
-    fn each_comparison_keeps_its_meaning() {
-        let cases = [
-            (ComparisonDef::Below, Comparison::Below),
-            (ComparisonDef::AtMost, Comparison::AtMost),
-            (ComparisonDef::Equals, Comparison::Equals),
-            (ComparisonDef::NotEquals, Comparison::NotEquals),
-            (ComparisonDef::AtLeast, Comparison::AtLeast),
-            (ComparisonDef::Above, Comparison::Above),
-        ];
-        for (def, comparison) in cases {
-            assert_eq!(Comparison::from(def), comparison);
+    fn comparisons_and_media_commands_keep_their_file_spelling() {
+        fn spelled<T>(value: T, text: &str)
+        where
+            T: Serialize + for<'de> Deserialize<'de> + PartialEq + fmt::Debug,
+        {
+            let json = format!("\"{text}\"");
+            assert_eq!(serde_json::to_string(&value).expect("writes"), json);
+            assert_eq!(serde_json::from_str::<T>(&json).expect("reads"), value);
         }
-        let commands = [
-            (MediaCommandDef::Play, MediaCommand::Play),
-            (MediaCommandDef::Pause, MediaCommand::Pause),
-            (MediaCommandDef::Next, MediaCommand::Next),
-            (MediaCommandDef::Previous, MediaCommand::Previous),
-        ];
-        for (def, command) in commands {
-            assert_eq!(MediaCommand::from(def), command);
+        for (comparison, text) in [
+            (Comparison::Below, "below"),
+            (Comparison::AtMost, "atMost"),
+            (Comparison::Equals, "equals"),
+            (Comparison::NotEquals, "notEquals"),
+            (Comparison::AtLeast, "atLeast"),
+            (Comparison::Above, "above"),
+        ] {
+            spelled(comparison, text);
+        }
+        for (command, text) in [
+            (MediaCommand::Play, "play"),
+            (MediaCommand::Pause, "pause"),
+            (MediaCommand::Next, "next"),
+            (MediaCommand::Previous, "previous"),
+        ] {
+            spelled(command, text);
         }
     }
 
@@ -1071,12 +1017,12 @@ mod tests {
             "a state can only be compared with \"is\" or \"is not\""
         );
         let mut bad_state = pause_music();
-        bad_state.when.is = ComparisonDef::Equals;
+        bad_state.when.is = Comparison::Equals;
         bad_state.when.target = TargetDef::State(" Paused".to_owned());
         assert!(problem(bad_state).contains("starts or ends with a space"));
         let mut no_state = pause_music();
         no_state.when.value = "status".to_owned();
-        no_state.when.is = ComparisonDef::NotEquals;
+        no_state.when.is = Comparison::NotEquals;
         no_state.when.target = TargetDef::State("none".to_owned());
         assert_eq!(check(&no_state), Ok(()));
 
@@ -1090,7 +1036,7 @@ mod tests {
         for name in ["", "   ", "Player\n.exe"] {
             let mut unnamed = pause_music();
             unnamed.actions = vec![ActionDef::Media {
-                command: MediaCommandDef::Pause,
+                command: MediaCommand::Pause,
                 app: Some(name.to_owned()),
             }];
             assert!(problem(unnamed).contains("executable name"), "{name:?}");
@@ -1098,7 +1044,7 @@ mod tests {
 
         let mut skip_only = pause_music();
         skip_only.actions = vec![ActionDef::Media {
-            command: MediaCommandDef::Next,
+            command: MediaCommand::Next,
             app: None,
         }];
         assert!(problem(skip_only).contains("none of these actions can be undone"));
@@ -1194,16 +1140,16 @@ mod tests {
         press.actions.push(ActionDef::Keys {
             keys: "F9".to_owned(),
         });
-        let blocked = |class: AntiCheatDef| {
+        let blocked = |class: AntiCheatClass| {
             let mut app = app();
             app.anti_cheat = class;
             press.compile(&[("example", &app)]).map(drop)
         };
-        assert_eq!(blocked(AntiCheatDef::None), Ok(()));
+        assert_eq!(blocked(AntiCheatClass::None), Ok(()));
         for class in [
-            AntiCheatDef::Unknown,
-            AntiCheatDef::UserMode,
-            AntiCheatDef::KernelLevel,
+            AntiCheatClass::Unknown,
+            AntiCheatClass::UserMode,
+            AntiCheatClass::KernelLevel,
         ] {
             assert_eq!(
                 blocked(class),
@@ -1260,7 +1206,7 @@ mod tests {
                     ClickPicture::new(
                         "click-1.png",
                         (1920, 1080),
-                        Area {
+                        RegionDef {
                             x: 1500,
                             y: 60,
                             width: 180,
@@ -1381,14 +1327,14 @@ mod tests {
     /// with that application not saved.
     fn check_classes(
         click: &AutomationDef,
-        watched: AntiCheatDef,
-        target: Option<AntiCheatDef>,
+        watched: AntiCheatClass,
+        target: Option<AntiCheatClass>,
     ) -> Result<(), String> {
         let mut app = app();
         app.anti_cheat = watched;
         let mut other = app.clone();
         other.name = "Streaming App".to_owned();
-        other.anti_cheat = target.unwrap_or(AntiCheatDef::None);
+        other.anti_cheat = target.unwrap_or(AntiCheatClass::None);
         let both = [("example", &app), ("streaming_app", &other)];
         let apps = if target.is_some() {
             &both[..]
@@ -1408,21 +1354,21 @@ mod tests {
         click.actions = vec![action];
         click.undo = false;
         assert_eq!(
-            check_classes(&click, AntiCheatDef::None, Some(AntiCheatDef::None)),
+            check_classes(&click, AntiCheatClass::None, Some(AntiCheatClass::None)),
             Ok(())
         );
         for class in [
-            AntiCheatDef::Unknown,
-            AntiCheatDef::UserMode,
-            AntiCheatDef::KernelLevel,
+            AntiCheatClass::Unknown,
+            AntiCheatClass::UserMode,
+            AntiCheatClass::KernelLevel,
         ] {
             assert!(
-                check_classes(&click, class, Some(AntiCheatDef::None))
+                check_classes(&click, class, Some(AntiCheatClass::None))
                     .is_err_and(|problem| problem.starts_with("it clicks, which anti-cheat")),
                 "watched {class:?}"
             );
             assert!(
-                check_classes(&click, AntiCheatDef::None, Some(class))
+                check_classes(&click, AntiCheatClass::None, Some(class))
                     .is_err_and(|problem| problem.starts_with("it clicks in Streaming App")),
                 "clicked in {class:?}"
             );
@@ -1436,11 +1382,11 @@ mod tests {
         click.undo = false;
         let check = check_classes;
         assert_eq!(
-            check(&click, AntiCheatDef::None, Some(AntiCheatDef::None)),
+            check(&click, AntiCheatClass::None, Some(AntiCheatClass::None)),
             Ok(())
         );
         assert_eq!(
-            check(&click, AntiCheatDef::UserMode, Some(AntiCheatDef::None)),
+            check(&click, AntiCheatClass::UserMode, Some(AntiCheatClass::None)),
             Err(
                 "it clicks, which anti-cheat can treat as cheating, so it can run only once \
                  Example App's anti-cheat is set to none"
@@ -1448,12 +1394,12 @@ mod tests {
             )
         );
         for class in [
-            AntiCheatDef::Unknown,
-            AntiCheatDef::UserMode,
-            AntiCheatDef::KernelLevel,
+            AntiCheatClass::Unknown,
+            AntiCheatClass::UserMode,
+            AntiCheatClass::KernelLevel,
         ] {
             assert_eq!(
-                check(&click, AntiCheatDef::None, Some(class)),
+                check(&click, AntiCheatClass::None, Some(class)),
                 Err(
                     "it clicks in Streaming App, which anti-cheat can treat as cheating, so it \
                      can run only once Streaming App's anti-cheat is set to none"
@@ -1463,14 +1409,14 @@ mod tests {
             );
         }
         assert_eq!(
-            check(&click, AntiCheatDef::None, None),
+            check(&click, AntiCheatClass::None, None),
             Err(
                 "the application streaming_app it clicks in is no longer saved or cannot be read"
                     .to_owned()
             )
         );
         let mut target = app();
-        target.anti_cheat = AntiCheatDef::None;
+        target.anti_cheat = AntiCheatClass::None;
         let compiled = click
             .compile(&[("example", &target), ("streaming_app", &target)])
             .expect("runs");
@@ -1487,13 +1433,13 @@ mod tests {
             keys: "F9".to_owned(),
         });
         assert!(
-            check(&click, AntiCheatDef::Unknown, Some(AntiCheatDef::None))
+            check(&click, AntiCheatClass::Unknown, Some(AntiCheatClass::None))
                 .is_err_and(|problem| problem.starts_with("it clicks,")),
             "the first action that sends input is named"
         );
         click.actions.reverse();
         assert!(
-            check(&click, AntiCheatDef::Unknown, Some(AntiCheatDef::None))
+            check(&click, AntiCheatClass::Unknown, Some(AntiCheatClass::None))
                 .is_err_and(|problem| problem.starts_with("it presses keys,")),
             "the first action that sends input is named"
         );
@@ -1589,7 +1535,7 @@ mod tests {
         let mut bar = pause_music();
         bar.when.value = "health".to_owned();
         assert_eq!(check(&bar), Ok(()));
-        bar.when.is = ComparisonDef::Equals;
+        bar.when.is = Comparison::Equals;
         bar.when.target = TargetDef::Flag(false);
         assert_eq!(
             check(&bar),
@@ -1598,7 +1544,7 @@ mod tests {
 
         let mut shown = pause_music();
         shown.when.value = "icon_visible".to_owned();
-        shown.when.is = ComparisonDef::Equals;
+        shown.when.is = Comparison::Equals;
         shown.when.target = TargetDef::Flag(true);
         assert_eq!(check(&shown), Ok(()));
         for target in [
@@ -1616,7 +1562,7 @@ mod tests {
 
         let mut status = pause_music();
         status.when.value = "status".to_owned();
-        status.when.is = ComparisonDef::Equals;
+        status.when.is = Comparison::Equals;
         for known in ["Paused", "Live", "none"] {
             status.when.target = TargetDef::State(known.to_owned());
             assert_eq!(check(&status), Ok(()), "{known}");

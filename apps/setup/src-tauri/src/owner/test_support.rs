@@ -10,15 +10,18 @@ use appytappy_config::click::{ClickButton, ClickDelivery, Spot};
 use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::screen::place::Target;
-use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};
+use appytappy_sources::screen::{
+    CaptureSession, Crop, Frame, FrameHandler, Image, NextFrame, Size,
+};
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
 use crate::applications::AppSpec;
-use crate::check_spec::{CharactersSpec, ColorSpec, RegionSpec};
+use crate::check_spec::CharactersSpec;
 use crate::overlay::OverlayWindow;
 use crate::recording::{Scope, Text, look, ocr};
 use crate::stores::{self, Stores};
 use crate::ticket::Ticket;
+use appytappy_config::app_file::{ColorDef, RegionDef};
 
 use super::host::{ClickNow, ClickedWindow, Host};
 use super::messages::{Event, Message};
@@ -463,7 +466,7 @@ impl Harness {
             received: self.owner.host.clock,
             delay: Duration::ZERO,
         });
-        assert_eq!(handler(frame), interval);
+        assert_eq!(handler(frame), NextFrame::After(interval));
         self.messages.try_recv().expect("handler sent")
     }
 }
@@ -497,7 +500,7 @@ pub(super) fn characters(json: &str) -> CharactersSpec {
 
 /// A recording of `region` of screenshot 0 of the application `example`'s
 /// window, of characters of the color `ink` at no tolerance.
-pub(super) fn characters_in(region: RegionSpec, ink: ColorSpec) -> RecordSpec {
+pub(super) fn characters_in(region: RegionDef, ink: ColorDef) -> RecordSpec {
     RecordSpec {
         app: "example".to_owned(),
         region,

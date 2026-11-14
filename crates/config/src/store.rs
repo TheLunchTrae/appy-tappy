@@ -611,9 +611,10 @@ mod tests {
     use std::env;
 
     use super::*;
+    use crate::anti_cheat::AntiCheatClass;
     use crate::app_file::{
-        AntiCheatDef, CheckDef, FORMAT, OriginDef, RegionDef, ScreenDef, SizeChangesDef, SizeDef,
-        StateDef, ValueDef, WindowDef,
+        CheckDef, FORMAT, OriginDef, RegionDef, ScreenDef, SizeChangesDef, SizeDef, StateDef,
+        ValueDef, WindowDef,
     };
     use crate::window_match::WindowFacts;
 
@@ -638,7 +639,7 @@ mod tests {
                 executable: "Example.exe",
             }),
             size_changes: SizeChangesDef::Often,
-            anti_cheat: AntiCheatDef::Unknown,
+            anti_cheat: AntiCheatClass::Unknown,
             overlay: None,
             checked: None,
             values: vec![ValueDef {
@@ -1048,9 +1049,9 @@ mod tests {
 
     #[test]
     fn automations_load_back_and_a_broken_file_says_why() {
-        use crate::automation_file::{
-            ActionDef, AutomationDef, ComparisonDef, MediaCommandDef, TargetDef, WhenDef,
-        };
+        use crate::action::MediaCommand;
+        use crate::automation_file::{ActionDef, AutomationDef, TargetDef, WhenDef};
+        use crate::rule::Comparison;
 
         let root = scratch("automations");
         let store = AutomationStore::new(root.join("roaming").join("automations.json"));
@@ -1067,11 +1068,11 @@ mod tests {
                 when: WhenDef {
                     app: "example".to_owned(),
                     value: "icon_visible".to_owned(),
-                    is: ComparisonDef::Equals,
+                    is: Comparison::Equals,
                     target: TargetDef::Flag(true),
                 },
                 actions: vec![ActionDef::Media {
-                    command: MediaCommandDef::Pause,
+                    command: MediaCommand::Pause,
                     app: None,
                 }],
                 undo: true,

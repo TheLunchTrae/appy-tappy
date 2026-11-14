@@ -6,11 +6,13 @@
 //! in the file sets nothing, and the import brings no automation, so nothing
 //! reads its values for an action until the user makes one.
 
-use appytappy_config::app_file::{AntiCheatDef, AppFile, OriginDef};
+use appytappy_config::app_file::{AppFile, OriginDef};
+
+use appytappy_config::anti_cheat::AntiCheatClass;
 use serde::{Deserialize, Serialize};
 
 use crate::applications;
-use crate::sharing::{ShareError, Shared};
+use crate::sharing::{self, ShareError, Shared};
 
 use super::host::Host;
 use super::{Changed, Owner};
@@ -41,7 +43,7 @@ pub(crate) struct ImportSpec {
     pub(crate) name: String,
     /// The anti-cheat class the user confirmed, which is saved whatever the
     /// file holds.
-    pub(crate) anti_cheat: AntiCheatDef,
+    pub(crate) anti_cheat: AntiCheatClass,
     /// The name of the file the bytes came from, kept as where the
     /// application was imported from.
     pub(crate) from: String,
@@ -51,9 +53,7 @@ impl<H: Host> Owner<H> {
     /// The saved application `app` as the bytes of a file to share.
     pub(crate) fn export_app(&self, app: &str) -> Result<Vec<u8>, String> {
         let saved = self.stores()?.app(app)?;
-        Shared::of(&saved)
-            .and_then(|shared| shared.pack())
-            .map_err(|error| cannot_export(&saved.file.name, &error))
+        sharing::pack(&saved).map_err(|error| cannot_export(&saved.file.name, &error))
     }
 
     /// What the shared file `bytes`, named `from`, holds, for the user to
@@ -160,12 +160,12 @@ mod tests {
     use appytappy_config::app_file::OverlayModeDef;
     use appytappy_sources::screen::{Image, Size};
 
-    use crate::check_spec::ColorSpec;
     use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
         BAR, FakeHost, Harness, STATE, capturing, characters_in, frame_image, spec,
     };
     use crate::stores::SavedApp;
+    use appytappy_config::app_file::ColorDef;
 
     use super::*;
 
@@ -179,7 +179,7 @@ mod tests {
                 .expect("saves");
         }
         harness
-            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatClass::None))
             .expect("sets the class");
         harness
             .ask(|owner| owner.set_overlay("example", true, OverlayModeDef::PictureInPicture))
@@ -197,7 +197,7 @@ mod tests {
     fn import(
         bytes: &[u8],
         name: &str,
-        anti_cheat: AntiCheatDef,
+        anti_cheat: AntiCheatClass,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<String, String> {
         let spec = ImportSpec {
             name: name.to_owned(),
@@ -225,13 +225,13 @@ mod tests {
         assert_eq!(view.name, "Example App 2", "its own name is taken");
         assert_eq!(
             view.file.anti_cheat,
-            AntiCheatDef::None,
+            AntiCheatClass::None,
             "shown as its maker set it"
         );
         assert_eq!(view.file.overlay, None);
         harness.forget_reloads();
         assert_eq!(
-            harness.ask(import(&bytes, " Friend's app ", AntiCheatDef::Unknown)),
+            harness.ask(import(&bytes, " Friend's app ", AntiCheatClass::Unknown)),
             Ok("example-2".to_owned())
         );
         assert_eq!(harness.reloads(), 1, "the runtime reads it");
@@ -243,7 +243,7 @@ mod tests {
         let imported = saved(&mut harness, "example-2");
         let mut expected = exported.file.clone();
         "Friend's app".clone_into(&mut expected.name);
-        expected.anti_cheat = AntiCheatDef::Unknown;
+        expected.anti_cheat = AntiCheatClass::Unknown;
         expected.overlay = None;
         let from = OriginDef::Imported {
             file: "friend's.zip".to_owned(),
@@ -286,7 +286,7 @@ mod tests {
             "the name of the user's own file stays with them"
         );
         assert_eq!(
-            harness.ask(import(&bytes, "friend's APP", AntiCheatDef::Unknown)),
+            harness.ask(import(&bytes, "friend's APP", AntiCheatClass::Unknown)),
             Err(
                 "Another application is already called friend's APP. Pick another name or edit \
                  Friend's app."
@@ -294,11 +294,11 @@ mod tests {
             )
         );
         assert_eq!(
-            harness.ask(import(&bytes, " ", AntiCheatDef::Unknown)),
+            harness.ask(import(&bytes, " ", AntiCheatClass::Unknown)),
             Err("Name the application first.".to_owned())
         );
         assert_eq!(
-            harness.ask(import(b"text", "Other", AntiCheatDef::Unknown)),
+            harness.ask(import(b"text", "Other", AntiCheatClass::Unknown)),
             Err(
                 "AppyTappy cannot import friend's.zip: it is not a zip file AppyTappy can read."
                     .to_owned()
@@ -310,7 +310,7 @@ mod tests {
             std::fs::write(apps.join(format!("example-{number}")), "").expect("writes");
         }
         assert_eq!(
-            harness.ask(import(&bytes, "Other", AntiCheatDef::Unknown)),
+            harness.ask(import(&bytes, "Other", AntiCheatClass::Unknown)),
             Err(
                 "AppyTappy cannot import friend's.zip: it could not be saved (the 16 names it \
                  tries for the folder of Example.exe are taken)."
@@ -441,7 +441,7 @@ mod tests {
         save(&mut harness, reference("By hand", None, LABEL, ""));
         save(&mut harness, reference("Other", None, LABEL, ""));
         let region = serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("JSON");
-        let ink: ColorSpec =
+        let ink: ColorDef =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("JSON");
         harness
             .ask(|owner| owner.start_recording(characters_in(region, ink), false))

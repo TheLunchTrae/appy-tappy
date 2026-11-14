@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Thirteen guards drop such stale messages:
+it was about has gone. Fourteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -86,6 +86,12 @@ it was about has gone. Thirteen guards drop such stale messages:
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
   once the drag is over.
+- **Removed screenshots.** The capture screen remembers the screenshots the
+  user removed (`apps/setup/src/lib/useScreenshots.ts`), and drops pixels
+  that arrive afterward for one taken or recorded. A load of a draft's
+  screenshot that ends after the screenshot left the list changes nothing
+  (`loadEnded`). So a removed screenshot is never listed again, its pixels
+  are not kept, and a failure to load them shows no error.
 - **Press numbers.** A drag over the live window numbers each press, which
   starts taking a screenshot (`apps/setup/src/lib/liveDraw.ts`). A screenshot
   that arrives with another press's number is dropped.
@@ -456,8 +462,7 @@ the reader frames show), `last` (each value's last reading), `problems`
 another size), `heard` (where the reader gives it back), `seen` (whether
 it sent a reading since it last sent `Unseen`), `failures` (frames in a
 row that failed), `restart` (whether the reader started this capture
-again after the last one ended, and whether a frame came since), `ended` (whether it told the reader
-its capture ended or that handling a frame panicked), and `trace` (what it
+again after the last one ended, and whether a frame came since), and `trace` (what it
 records to, the newest that the reader handed it before the frame).
 
 ```mermaid
@@ -499,9 +504,9 @@ stateDiagram-v2
   `seen` turns true only once a reading was sent and false only once
   `Unseen` was, so a panic between them cannot leave it wrong, and a
   capture that panicked before it sent a reading sends no `Unseen`.
-- **Ended.** The capture can still hand frames to the handler until the reader
-  closes it. The handler reads none of them, so nothing it sends follows
-  `Unseen`.
+- **Ended.** The handler returns `NextFrame::Never`, so the
+  [frame loop](#capture-frame-loop) ends and hands it nothing more before
+  the reader closes the capture, and nothing it sends follows `Unseen`.
 - A frame at another size sends `Unseen` and reads nothing, and the handler
   tells the reader the size with `Resizing` once, not for each frame, so
   nothing is resolved for each frame. Only the reader resolves a size, once
@@ -557,6 +562,8 @@ stateDiagram-v2
     Holding --> Ended: a read cannot follow the window's size, or the device is lost
     Empty --> [*]: Stop
     Holding --> [*]: Stop, the frame is given back
+    Holding --> [*]: the frame is read, and the handler wants no more frames
+    Empty --> [*]: a frame arrives after the wait and is read, and the handler wants no more frames
     Ended --> [*]
 ```
 
@@ -572,11 +579,15 @@ stateDiagram-v2
   frame, has the crop's regions copied, hands the copy to the handler, and
   takes the handler's wait. A wait of 64 ms or more also sets how often the
   system is asked for frames, as [Capture](Screen-regions.md#capture)
-  describes. A handler that returns `NO_MORE_FRAMES`, as a one-frame grab's
-  does, is handed no frame for a day, longer than such a capture runs.
+  describes. A handler that returns `NextFrame::Never`, as a one-frame grab's
+  does once it has its frame, ends the loop, which gives back any frame it
+  holds and returns. The handler hears nothing more, not even a panic in
+  the loop after it. The capture's thread then ends; on Windows it stops the
+  system capture first, and closing the session waits for that thread.
 - **A frame that fails.** A region that lies outside the window's content, or
   a copy the system fails, reaches the handler as that frame's error, and the
-  loop goes on with the wait the handler returns. The
+  loop goes on with the wait the handler returns, or ends if the handler wants
+  no more frames, as the runtime's does after frames keep failing. The
   [frame handler](#frame-handler) counts such frames.
 - **Ended.** Every `HEALTH_CHECK`, 2 seconds, whatever arrives meanwhile, the
   loop asks whether the window is gone and whether the graphics device is
@@ -1364,8 +1375,16 @@ taken, goes back to **Asking** with what the user entered and the reason, and
 **Import** tries again. An event that does not fit the state, such as a late
 read while the dialog asks, changes nothing.
 
-The export dialog (`ExportApp.tsx`) has no states beyond busy while the file
-is made and saved; a failure shows in it and **Save file** tries again.
+The export dialog (`ExportApp.tsx`) and the debug bundle dialog
+(`ExportBundle.tsx`) have no states beyond busy while the file is made and
+saved. Each asks where to save first, then makes the file and writes it
+(`saveZip`): the click lets the page open the picker for only about 5
+seconds, and a slow build would otherwise never reach it. The picker makes
+the file it picks, or empties one that was there, so the old content is gone
+from the pick on. A file that fails to be made or written is removed: a
+failure leaves no file there, not even the one the user picked to replace,
+shows in the dialog, and **Save file** or **Save bundle** tries again. Closing
+the picker makes nothing.
 
 ### Capture slot
 
@@ -1931,6 +1950,40 @@ kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
 the live view shows or a screenshot of another size does. It changes only the
 size the screenshot shows at, so a drag goes on through a zoom or a scroll.
 
+### Draft screenshot pixels
+
+The capture screen's screenshots (`apps/setup/src/lib/useScreenshots.ts`)
+list a screenshot taken or recorded this session only once its thumbnail and
+its own pixels arrive, so its tile is never blank. A screenshot that a draft
+brings back is listed from the start, under the index the draft refers to
+it by, and its tile (`Thumb`) has its own states:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Loading: the draft's screenshots come back
+    Loading --> Loaded: its thumbnail and pixels arrive
+    Loading --> Failed: either does not arrive, or the fetch fails
+    Failed --> Loading: it is shown
+    Loading --> [*]: the user removes it
+    Loaded --> [*]: the user removes it
+    Failed --> [*]: the user removes it
+```
+
+- **Loading** shows an empty tile. **Loaded** shows the thumbnail, and the
+  screenshot can be drawn on. `loadEnded` is the pure transition out of
+  **Loading**.
+- **Failed** says **Not loaded. Select to load again.** in its tile, and the
+  screenshots' error says why. Showing it, by selecting its tile or by any
+  step that shows it, loads it again (`loadsAgain`). The hook remembers the
+  screenshots it is loading, so showing one again before the strip shows it
+  loading starts no second load, whose late failure could mark a loaded tile
+  failed. It stays listed, so the draft's states, boxes, and region keep the
+  screenshot they refer to.
+- **Removed.** A screenshot the user removes leaves the list from any state.
+  A load that ends for it afterward changes neither the list, the pixels
+  kept, nor the error (`loadEnded`), as the
+  [guard](#how-to-read-this-page) for removed screenshots says.
+
 ### Live draw
 
 While a value has no place yet, the capture screen's first step lays a region
@@ -1973,7 +2026,8 @@ stateDiagram-v2
   the screenshot's (`scaleRect`).
 - **A click, or a drag that drew no box,** places the screenshot with no box.
   The screenshot shows, and the user draws on it.
-- **Failures.** A screenshot that cannot be taken arrives as none. The
+- **Failures.** A screenshot that cannot be taken, or whose pixels do not
+  arrive, arrives as none; the strip never lists it. The
   machine still returns to **Idle** on the release, nothing is placed, and
   the screenshots' own error says why. A drag the region surface interrupts
   hands over no box. The surface reports the pointer as let go when it is
@@ -2762,9 +2816,13 @@ second copy over to the first, which brings its window forward
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
 one. Each save reads the file, changes it, and writes it back. A save of an
-application's file, an edit of one of its values included, goes through
-`Owner::update_app`, which loads the file,
-changes it and hands it to `Owner::write_app`, and a save of the automations
+existing application's file goes to `Owner::write_app`: an edit of one of
+its values, references, overlay, anti-cheat class or checked build, goes through
+`Owner::update_app`, which loads the file and changes it first, and a save
+from the application editor hands its file straight over. A new application,
+saved in the editor or imported, goes through `AppStore::create`, which removes the
+application's whole folder when its save fails, so a failed new application
+leaves nothing behind. A save of the automations
 or the settings goes through `Owner::update_runtime`. After a save that works,
 they tell who reads what it changed, as its `Changed` kind says:
 
@@ -2804,11 +2862,12 @@ each edit in the editor. A reference is kept only when every sample's
 picture could be read, so one that is missing a picture is read again on
 each ask and learned once the picture is back. It keeps the pictures, not a
 reader learned from them: the color and tolerance being taught decide what
-the samples teach, so each ask learns them again. `Owner::write_app` empties it
-before any saved application is written or removed, whether that works or
-fails, and keeping another reference replaces it. An import writes a new
-application, which no kept reference is part of. A file changed outside the setup app
-while a reference is kept is not seen until then.
+the samples teach, so each ask learns them again. `Owner::write_app` empties
+it before any existing application is written or removed, whether that works
+or fails, and keeping another reference replaces it. A new application, saved
+in the editor or imported, has no reference kept, since its ID is new. A file
+changed outside the setup app while a reference is kept is not seen until
+then.
 
 A click's picture is written to the `clicks` folder when its target is set
 up, before its automation is saved. Each save of the automations removes the

@@ -13,18 +13,12 @@ use appytappy_config::signal::Value;
 use appytappy_sources::schedule::{Activity, ReadSchedule};
 use appytappy_sources::screen::check::CheckError;
 use appytappy_sources::screen::saved::Unread;
-use appytappy_sources::screen::{Frame, FrameMeaning, Placed, Size};
+use appytappy_sources::screen::{Frame, FrameMeaning, NextFrame, Placed, Size};
 
 use super::{Control, Job, RESTART_AFTER, Reading, Recovery};
 use crate::model::{ReaderNumber, SessionId};
 use crate::plan::AppPlan;
 use crate::trace::{Record, Trace, What};
-
-/// The wait the handler asks for once it told the reader that its capture
-/// ended. The reader closes the capture, and no frame it hands over until
-/// then is read, so the wait only keeps the capture from handing them over
-/// at once.
-const AFTER_END: Duration = Duration::from_secs(1);
 
 /// The problems said for each value since it was last read, in the order of
 /// its application's values: why it is not read at the window's size, or
@@ -127,11 +121,6 @@ pub(super) struct FrameReader<E> {
     restart: Restart,
     /// Whether it sent a reading since it last sent [`Reading::Unseen`].
     seen: bool,
-    /// Whether it told the reader that its capture ended, or that reading a
-    /// frame panicked. The capture can still hand it frames until the
-    /// reader closes it, and it reads none of them, so nothing it sends
-    /// follows the reader's `Unseen`.
-    ended: bool,
     schedule: ReadSchedule,
     /// Where it records each reading and change, when the trace is on.
     trace: Trace,
@@ -168,7 +157,6 @@ impl<E: From<Reading>> FrameReader<E> {
             failures: 0,
             restart: Restart::Done,
             seen: false,
-            ended: false,
             schedule: ReadSchedule::new(job.interval),
             trace: Trace::OFF,
             traces,
@@ -177,70 +165,72 @@ impl<E: From<Reading>> FrameReader<E> {
         }
     }
 
-    /// Acts on what `frame` means and returns how long to wait before the
-    /// next one. It runs on the capture's thread, so a panic while it acts
-    /// is caught here and told to the reader with [`Control::Panicked`]:
-    /// unwound, it would end that thread, and the reader would hear of it
-    /// only once it closed the capture.
-    pub(super) fn handle(&mut self, frame: io::Result<Frame<'_>>) -> Duration {
-        if self.ended {
-            return AFTER_END;
-        }
+    /// Acts on what `frame` means and returns what it wants next: the next
+    /// frame once the read schedule's wait has passed, or none once it told
+    /// the reader that its capture ended or that reading a frame panicked,
+    /// so nothing it sends follows the reader's `Unseen`. It runs on the
+    /// capture's thread, so a panic while it acts is caught here and told
+    /// to the reader with [`Control::Panicked`]: unwound, it would end that
+    /// thread, and the reader would hear of it only once it closed the
+    /// capture.
+    pub(super) fn handle(&mut self, frame: io::Result<Frame<'_>>) -> NextFrame {
         // Once it panicked, it reads no more frames. What it still reads of
         // its state is what a panic cannot leave half changed: a value
         // counts as seen once its reading was sent.
         match panic::catch_unwind(AssertUnwindSafe(|| self.act(frame))) {
-            Ok(wait) => {
+            Ok(next) => {
                 // Only a frame handled without a panic shows that a capture
                 // started again reads.
                 if self.restart == Restart::Read {
                     self.restart = Restart::Done;
                     self.tell(Control::Recovered);
                 }
-                wait
+                next
             },
             Err(payload) => {
                 let reason = appytappy_platform::panic_reason(payload.as_ref()).to_owned();
                 self.unseen();
                 self.tell(Control::Panicked(reason));
-                AFTER_END
+                NextFrame::Never
             },
         }
     }
 
     /// Acts on what `frame` means, as [`FrameReader::handle`] says.
-    fn act(&mut self, frame: io::Result<Frame<'_>>) -> Duration {
+    fn act(&mut self, frame: io::Result<Frame<'_>>) -> NextFrame {
         if let Some(trace) = self.traces.try_iter().last() {
             self.trace = trace;
         }
         match self.placed.meaning(frame) {
             Ok(FrameMeaning::Readable(frame)) => {
                 self.captured();
-                self.read_all(&frame)
+                NextFrame::After(self.read_all(&frame))
             },
             Ok(FrameMeaning::Resized(size)) => {
                 self.captured();
                 self.resizing(size);
-                Duration::ZERO
+                NextFrame::After(Duration::ZERO)
             },
             // A new capture would fail the same way, so the frame does not
             // count toward starting one.
-            Ok(FrameMeaning::Unreadable(outside)) => self.frame_failed(&outside.to_string()),
+            Ok(FrameMeaning::Unreadable(outside)) => {
+                NextFrame::After(self.frame_failed(&outside.to_string()))
+            },
             Err(error) if error.kind() == io::ErrorKind::NotConnected => {
                 self.unseen();
                 self.tell(Control::Lost(format!("its capture ended: {error}")));
-                Duration::ZERO
+                NextFrame::Never
             },
             Err(error) => {
                 let wait = self.frame_failed(&error.to_string());
                 self.failures = self.failures.saturating_add(1);
                 if self.failures < RESTART_AFTER {
-                    return wait;
+                    return NextFrame::After(wait);
                 }
                 self.failures = 0;
                 self.unseen();
                 self.tell(Control::Failing(error.to_string()));
-                Duration::ZERO
+                NextFrame::Never
             },
         }
     }
@@ -449,15 +439,8 @@ impl<E: From<Reading>> FrameReader<E> {
         }
     }
 
-    /// Tells the reader `control`; once that ends the capture, it reads no
-    /// more frames.
-    fn tell(&mut self, control: Control) {
-        if matches!(
-            control,
-            Control::Lost(_) | Control::Failing(_) | Control::Panicked(_)
-        ) {
-            self.ended = true;
-        }
+    /// Tells the reader `control`.
+    fn tell(&self, control: Control) {
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a failed send means the reader already stopped"
@@ -590,10 +573,10 @@ mod tests {
         );
         // Only the left value's square, at the top of the packed image, is red.
         let left_red = frame_image(2, 4, |_, y| y < 2);
-        let wait = frames.handle(Ok(frame(&left_red, WINDOW)));
+        let wait = ReadInterval::DEFAULT.min();
         assert_eq!(
-            wait,
-            ReadInterval::DEFAULT.min(),
+            frames.handle(Ok(frame(&left_red, WINDOW))),
+            NextFrame::After(wait),
             "a change reads again soon"
         );
         assert_eq!(
@@ -601,7 +584,10 @@ mod tests {
             [(0, Value::Flag(true)), (1, Value::Flag(false))]
         );
         let steady = frames.handle(Ok(frame(&left_red, WINDOW)));
-        assert!(steady > wait, "a steady read backs off");
+        assert!(
+            matches!(steady, NextFrame::After(steady) if steady > wait),
+            "a steady read backs off"
+        );
         assert_eq!(flags(&readings), [], "nothing changed, so nothing is sent");
         let right_red = frame_image(2, 4, |_, y| y >= 2);
         frames.handle(Ok(frame(&right_red, WINDOW)));
@@ -667,7 +653,10 @@ mod tests {
         let image = frame_image(2, 2, |_, _| true);
         frames.handle(Ok(frame(&image, WINDOW)));
         assert_eq!(flags(&readings), [(0, Value::Flag(true))]);
-        assert_eq!(frames.handle(Ok(frame(&image, SMALL))), Duration::ZERO);
+        assert_eq!(
+            frames.handle(Ok(frame(&image, SMALL))),
+            NextFrame::After(Duration::ZERO)
+        );
         frames.handle(outside(SMALL));
         frames.handle(Ok(frame(&image, SMALL)));
         assert_eq!(
@@ -827,7 +816,10 @@ mod tests {
         frames.handle(Ok(frame(&red, WINDOW)));
         assert_eq!(flags(&readings), [(0, Value::Flag(true))]);
         assert_eq!(told.try_recv(), Err(TryRecvError::Empty));
-        assert_eq!(frames.handle(outside(SMALL)), Duration::ZERO);
+        assert_eq!(
+            frames.handle(outside(SMALL)),
+            NextFrame::After(Duration::ZERO)
+        );
         assert_eq!(
             told.try_recv(),
             Ok(Control::Resizing {
@@ -1074,7 +1066,7 @@ mod tests {
         let icon = job(vec![red_at("icon", 0, 0)]);
         let mut frames = frames_at(&icon, WINDOW, events, control);
         let closed = io::Error::new(io::ErrorKind::NotConnected, "the captured window closed");
-        assert_eq!(frames.handle(Err(closed)), Duration::ZERO);
+        assert_eq!(frames.handle(Err(closed)), NextFrame::Never);
         assert_eq!(
             told.try_recv(),
             Ok(Control::Lost(
@@ -1108,7 +1100,11 @@ mod tests {
             "a good frame starts the count again"
         );
         readings.try_iter().for_each(drop);
-        assert_eq!(frames.handle(failed()), Duration::ZERO);
+        assert_eq!(
+            frames.handle(failed()),
+            NextFrame::Never,
+            "it wants no frame the capture would hand it until it closes"
+        );
         assert_eq!(
             told.try_recv(),
             Ok(Control::Failing("the copy failed".to_owned()))
@@ -1127,44 +1123,10 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(frames.handle(Ok(frame(&red, WINDOW))), AFTER_END);
-        frames.handle(failed());
-        assert_eq!(
-            readings.try_recv(),
-            Err(TryRecvError::Empty),
-            "the capture ended, so what it hands over until it closes is not read"
-        );
-        assert_eq!(told.try_recv(), Err(TryRecvError::Empty));
     }
 
     #[test]
-    fn a_capture_that_ended_reads_nothing_more() {
-        let (events, readings) = mpsc::channel::<Reading>();
-        let (control, told) = mpsc::channel();
-        let values = || vec![red_at("icon", 0, 0), drawn_at("small", 0, 0, SMALL)];
-        let red = frame_image(2, 2, |_, _| true);
-        let closed = || Err(io::Error::new(io::ErrorKind::NotConnected, "closed"));
-        // Another size does not end it: the reader ends it once the size
-        // settled.
-        for ending in [
-            closed(),
-            Err(io::Error::new(io::ErrorKind::NotConnected, "lost")),
-        ] {
-            let job = job(values());
-            let mut frames = frames_at(&job, WINDOW, events.clone(), control.clone());
-            frames.handle(Ok(frame(&red, WINDOW)));
-            frames.handle(ending);
-            assert!(told.try_recv().is_ok(), "the capture ended");
-            readings.try_iter().for_each(drop);
-            frames.handle(Ok(frame(&red, WINDOW)));
-            frames.handle(closed());
-            assert_eq!(readings.try_recv(), Err(TryRecvError::Empty));
-            assert_eq!(told.try_recv(), Err(TryRecvError::Empty));
-        }
-    }
-
-    #[test]
-    fn a_frame_whose_reading_panics_tells_the_reader_and_reads_no_more() {
+    fn a_frame_whose_reading_panics_tells_the_reader_and_wants_no_more_frames() {
         let (events, readings) = mpsc::channel::<Tripwire>();
         let (control, told) = mpsc::channel();
         let job = job(vec![red_at("icon", 0, 0)]);
@@ -1177,13 +1139,9 @@ mod tests {
             mpsc::channel().1,
             mpsc::channel().1,
         );
-        let (red, black) = (
-            frame_image(2, 2, |_, _| true),
-            frame_image(2, 2, |_, _| false),
-        );
-        frames.handle(Ok(frame(&red, WINDOW)));
+        let red = frame_image(2, 2, |_, _| true);
+        assert_eq!(frames.handle(Ok(frame(&red, WINDOW))), NextFrame::Never);
         assert_eq!(told.try_recv(), Ok(Control::Panicked("broke".to_owned())));
-        frames.handle(Ok(frame(&black, WINDOW)));
         assert_eq!(readings.try_recv(), Err(TryRecvError::Empty));
         assert_eq!(told.try_recv(), Err(TryRecvError::Empty));
     }

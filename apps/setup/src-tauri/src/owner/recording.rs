@@ -5,18 +5,18 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+use appytappy_config::app_file::{ColorDef, PinDef, RegionDef};
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::{Image, Region, Rgb, Size};
 use serde::Deserialize;
 
-use crate::check_spec::{self, CharactersSpec, ColorSpec, RegionSpec};
+use crate::check_spec::{self, CharactersSpec};
 use crate::pixels;
 use crate::recording::follow::Follows;
 use crate::recording::{
     NewReading, Recorder, Recording, RecordingView, Scope, Text, find, look, ocr,
 };
 use crate::words::sentence;
-use appytappy_config::app_file::PinDef;
 
 use super::Owner;
 use super::host::Host;
@@ -31,7 +31,7 @@ pub(crate) struct RecordSpec {
     /// the window to another size.
     pub(crate) app: String,
     /// The region of the window to record.
-    pub(crate) region: RegionSpec,
+    pub(crate) region: RegionDef,
     /// The screenshot the region was drawn on, whose window size the
     /// recording keeps.
     pub(crate) screenshot: usize,
@@ -39,7 +39,7 @@ pub(crate) struct RecordSpec {
     /// size, or `None` for the side the region is nearest.
     pub(crate) pin: Option<PinDef>,
     /// The characters' color.
-    pub(crate) ink: ColorSpec,
+    pub(crate) ink: ColorDef,
     /// How far from `ink` a pixel of a character may be.
     pub(crate) tolerance: u8,
     /// Where to look for characters: in the region alone, or wherever the
@@ -57,7 +57,7 @@ pub(crate) struct RecordSpec {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExampleSpec {
     /// The box.
-    pub(crate) region: RegionSpec,
+    pub(crate) region: RegionDef,
     /// The screenshot it is drawn on.
     pub(crate) screenshot: usize,
 }
@@ -142,7 +142,7 @@ impl<H: Host> Owner<H> {
     /// recorded there; otherwise what to do first.
     pub(super) fn recordable(
         &self,
-        region: RegionSpec,
+        region: RegionDef,
         screenshot: usize,
     ) -> Result<(Region, Size), String> {
         let Some(picked) = self.capture.picked() else {
@@ -373,7 +373,6 @@ mod tests {
     use appytappy_sources::screen::Size;
     use appytappy_sources::screen::settle::SETTLE;
 
-    use crate::check_spec::ColorSpec;
     use crate::owner::messages::{Event, Message};
     use crate::owner::test_support::{
         FakeHost, Harness, capturing, characters_in, example_app, frame_image, harness, recognized,
@@ -382,6 +381,7 @@ mod tests {
     use crate::pixels;
     use crate::recording::RecordingView;
     use crate::ticket::Ticket;
+    use appytappy_config::app_file::ColorDef;
 
     use super::*;
 
@@ -412,11 +412,10 @@ mod tests {
         red: u8,
         more: bool,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
-        let region: RegionSpec =
+        let region: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
-        let ink: ColorSpec =
-            serde_json::from_str(&format!(r#"{{"red":{red},"green":0,"blue":0}}"#))
-                .expect("valid JSON");
+        let ink: ColorDef = serde_json::from_str(&format!(r#"{{"red":{red},"green":0,"blue":0}}"#))
+            .expect("valid JSON");
         move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region, ink), more)
     }
 
@@ -523,7 +522,7 @@ mod tests {
 
         // A recording of looks takes its place, and the stop the readings'
         // screen sends as it goes leaves the looks alone.
-        let region: RegionSpec =
+        let region: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         let looks = harness
             .ask(move |owner| owner.start_look_recording(region, 0, 0))
@@ -692,12 +691,12 @@ mod tests {
         x: u32,
         more: bool,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
-        let region: RegionSpec = serde_json::from_str(&format!(
+        let region: RegionDef = serde_json::from_str(&format!(
             r#"{{"x":{x},"y":0,"width":{},"height":2}}"#,
             4_u32.saturating_sub(x)
         ))
         .expect("valid JSON");
-        let ink: ColorSpec =
+        let ink: ColorDef =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         move |owner: &mut Owner<FakeHost>| {
             owner.start_recording(
@@ -793,13 +792,13 @@ mod tests {
         examples: &[(usize, u32, u32)],
         more: bool,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
-        let region = |x: u32, y: u32, height: u32| -> RegionSpec {
+        let region = |x: u32, y: u32, height: u32| -> RegionDef {
             serde_json::from_str(&format!(
                 r#"{{"x":{x},"y":{y},"width":4,"height":{height}}}"#
             ))
             .expect("valid JSON")
         };
-        let ink: ColorSpec =
+        let ink: ColorDef =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         let spec = RecordSpec {
             scope,
@@ -870,9 +869,9 @@ mod tests {
     fn start_recording_right(
         pin: Option<PinDef>,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
-        let region: RegionSpec =
+        let region: RegionDef =
             serde_json::from_str(r#"{"x":2,"y":0,"width":2,"height":2}"#).expect("valid JSON");
-        let ink: ColorSpec =
+        let ink: ColorDef =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         move |owner: &mut Owner<FakeHost>| {
             owner.start_recording(
@@ -966,9 +965,9 @@ mod tests {
     #[test]
     fn a_recording_needs_its_application_saved() {
         let (mut harness, _handler, root) = capturing("rec-no-app");
-        let region: RegionSpec =
+        let region: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
-        let ink: ColorSpec =
+        let ink: ColorDef =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         let spec = RecordSpec {
             app: "other".to_owned(),
@@ -1103,9 +1102,9 @@ mod tests {
                     .to_owned()
             )
         );
-        let empty: RegionSpec =
+        let empty: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":0,"height":2}"#).expect("valid JSON");
-        let ink: ColorSpec =
+        let ink: ColorDef =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         assert_eq!(
             harness.ask(|owner| owner.start_recording(characters_in(empty, ink), false)),

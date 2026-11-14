@@ -1,7 +1,7 @@
 // Sharing an application: the name its exported file is offered under, what the import dialog says of a shared
 // file, and the dialog's states. wiki/State-machines.md maps the import.
 
-import { type AntiCheatDef, LIMITS, type OriginDef, type SharedView } from './bindings.ts';
+import { type AntiCheatClass, LIMITS, type OriginDef, type SharedView } from './bindings.ts';
 
 /** The name an export of the application named `name` is saved under, such as `appytappy-example-app.zip`. */
 export function exportName(name: string): string {
@@ -13,7 +13,7 @@ export function exportName(name: string): string {
  * The anti-cheat class the import dialog starts on for a file that says `inFile`. A file never starts it on None,
  * which lets automations press keys, so None is only ever the user's own pick.
  */
-export function classToConfirm(inFile: AntiCheatDef): AntiCheatDef {
+export function classToConfirm(inFile: AntiCheatClass): AntiCheatClass {
   return inFile === 'none' ? 'unknown' : inFile;
 }
 
@@ -72,7 +72,7 @@ interface Asked {
   /** The name the application is imported under. */
   readonly name: string;
   /** The anti-cheat class the user confirms. */
-  readonly antiCheat: AntiCheatDef;
+  readonly antiCheat: AntiCheatClass;
 }
 
 /** The import dialog's state. */
@@ -93,7 +93,7 @@ export type ImportEvent =
   /** The read or the import failed. */
   | { readonly kind: 'failed'; readonly problem: string }
   | { readonly kind: 'named'; readonly name: string }
-  | { readonly kind: 'classed'; readonly antiCheat: AntiCheatDef }
+  | { readonly kind: 'classed'; readonly antiCheat: AntiCheatClass }
   | { readonly kind: 'import' }
   | { readonly kind: 'imported' }
   | { readonly kind: 'close' };

@@ -10,7 +10,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use super::{Image, Layout, NO_MORE_FRAMES, Region, Size};
+use super::{Image, Layout, NextFrame, Region, Size};
 use crate::system::{Bounds, Unsupported};
 
 /// What a capture copies out of each frame.
@@ -76,13 +76,9 @@ pub fn in_frame(region: Region, content: Region) -> Option<Region> {
 /// whole frame, and where it finds none, the whole frame, as for a capture.
 #[must_use]
 pub fn content_on_screen(frame: Bounds, client: Option<Bounds>) -> Bounds {
-    let length = |from: i32, to: i32| u32::try_from(to.saturating_sub(from)).unwrap_or_default();
-    let whole = Size {
-        width: length(frame.left, frame.right),
-        height: length(frame.top, frame.bottom),
-    };
     client
-        .and_then(|client| content(frame, client, whole))
+        .zip(frame.size())
+        .and_then(|(client, whole)| content(frame, client, whole))
         .and_then(|area| {
             let left = frame.left.checked_add_unsigned(area.x())?;
             let top = frame.top.checked_add_unsigned(area.y())?;
@@ -126,36 +122,37 @@ impl Frame<'_> {
 /// A [`io::ErrorKind::NotConnected`] error says the capture ended, such as
 /// when the window closed, and no frame follows it.
 ///
-/// It returns how long to wait before handling another, such as the wait a
-/// [`crate::schedule::ReadSchedule`] gives, or [`NO_MORE_FRAMES`], and runs
-/// on the capture's own thread. A panic in it unwinds that thread, so the capture stops and
+/// It returns what it wants next, [`NextFrame`], and runs on the capture's
+/// own thread. A panic in it unwinds that thread, so the capture stops and
 /// tells nobody until it is closed: a handler whose owner must hear of a
 /// panic catches its own. A panic elsewhere in the capture's frame loop
 /// reaches the handler as the capture's end, as [`run_capture`] says.
-pub type FrameHandler = Box<dyn FnMut(io::Result<Frame<'_>>) -> Duration + Send>;
+pub type FrameHandler = Box<dyn FnMut(io::Result<Frame<'_>>) -> NextFrame + Send>;
 
 /// Runs `work`, which hands a capture's frames to `handler` on the
 /// capture's thread, and tells the handler when the work panics.
 ///
 /// A panic outside the handler reaches it as a
 /// [`io::ErrorKind::NotConnected`] error with the panic's message, as for
-/// any capture that cannot go on. Unwound, the panic would end the thread,
-/// and the handler would hear nothing until the capture closed. A panic in
-/// the handler itself unwinds on, because a handler that panicked is not
-/// called again.
+/// any capture that cannot go on, unless it wanted no more frames. Unwound,
+/// the panic would end the thread, and the handler would hear nothing until
+/// the capture closed. A panic in the handler itself unwinds on, because a
+/// handler that panicked is not called again.
 pub fn run_capture(
     handler: &mut FrameHandler,
-    work: impl FnOnce(&mut dyn FnMut(io::Result<Frame<'_>>) -> Duration),
+    work: impl FnOnce(&mut dyn FnMut(io::Result<Frame<'_>>) -> NextFrame),
 ) {
     let mut handling = false;
+    let mut done = false;
     // The handler is called again only when the panic did not come from it,
-    // so it never sees itself half changed.
+    // so it never sees itself half changed, and only while it wants frames.
     let worked = panic::catch_unwind(AssertUnwindSafe(|| {
         work(&mut |frame| {
             handling = true;
-            let wait = handler(frame);
+            let next = handler(frame);
             handling = false;
-            wait
+            done = next == NextFrame::Never;
+            next
         });
     }));
     let Err(payload) = worked else {
@@ -164,12 +161,15 @@ pub fn run_capture(
     if handling {
         panic::resume_unwind(payload);
     }
+    if done {
+        return;
+    }
     let ended = io::Error::new(
         io::ErrorKind::NotConnected,
         format!("the capture panicked: {}", panic_reason(payload.as_ref())),
     );
-    // The wait is moot: nothing more will arrive.
-    let _wait = handler(Err(ended));
+    // What it asks for next is moot: nothing more will arrive.
+    let _next = handler(Err(ended));
 }
 
 /// The message a panic left.
@@ -247,7 +247,7 @@ pub fn grab<C: Capture>(
             reason = "a frame after the first, or after the grab stopped waiting, is not wanted"
         )]
         let _ = sender.try_send(copied);
-        NO_MORE_FRAMES
+        NextFrame::Never
     });
     let session = capture.start(
         window,
@@ -305,8 +305,8 @@ mod tests {
     #[derive(Debug, PartialEq)]
     enum Asked {
         Start(u64, Crop),
-        /// The handler took a frame and asked for this wait.
-        Wait(Duration),
+        /// The handler took a frame and asked for this next.
+        Next(NextFrame),
         Close,
     }
 
@@ -347,7 +347,7 @@ mod tests {
                 height: 480,
             };
             for frame in &self.frames {
-                let wait = handler(match frame {
+                let next = handler(match frame {
                     Ok(image) => Ok(Frame {
                         window_size,
                         image,
@@ -357,7 +357,7 @@ mod tests {
                     Err(kind) => Err(io::Error::from(*kind)),
                 });
                 self.asked
-                    .send(Asked::Wait(wait))
+                    .send(Asked::Next(next))
                     .map_err(io::Error::other)?;
             }
             Ok(FakeSession(self.asked.clone()))
@@ -404,8 +404,8 @@ mod tests {
             asked.try_iter().collect::<Vec<_>>(),
             [
                 Asked::Start(7, Crop::Layout(Layout::one(region))),
-                Asked::Wait(NO_MORE_FRAMES),
-                Asked::Wait(NO_MORE_FRAMES),
+                Asked::Next(NextFrame::Never),
+                Asked::Next(NextFrame::Never),
                 Asked::Close
             ],
             "it wants no frame after its first"
@@ -590,12 +590,12 @@ mod tests {
                 Err(error) => Err(format!("{:?}: {error}", error.kind())),
             };
             handed.send(what).unwrap();
-            Duration::ZERO
+            NextFrame::After(Duration::ZERO)
         });
         (handler, received)
     }
 
-    fn hand(handler: &mut dyn FnMut(io::Result<Frame<'_>>) -> Duration, image: &Image) {
+    fn hand(handler: &mut dyn FnMut(io::Result<Frame<'_>>) -> NextFrame, image: &Image) {
         handler(Ok(Frame {
             window_size: image.size(),
             image,
@@ -618,6 +618,20 @@ mod tests {
                 Err("NotConnected: the capture panicked: the copy broke".to_owned())
             ]
         );
+    }
+
+    #[test]
+    fn a_capture_that_panics_after_its_handler_wants_no_more_frames_tells_it_nothing() {
+        let (handed, received) = mpsc::channel();
+        let mut handler: FrameHandler = Box::new(move |frame| {
+            handed.send(frame.is_ok()).unwrap();
+            NextFrame::Never
+        });
+        run_capture(&mut handler, |handler| {
+            hand(handler, &pixel(10));
+            panic!("the release broke");
+        });
+        assert_eq!(received.try_iter().collect::<Vec<_>>(), [true]);
     }
 
     #[test]

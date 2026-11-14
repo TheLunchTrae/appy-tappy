@@ -88,8 +88,9 @@ impl<H: Host> Owner<H> {
     /// Keeps the saved reference `reference` as read now, so the asks about
     /// the characters that add to it, a few for each edit in its editor,
     /// read its application's file and its pictures once. It stays until
-    /// an application is written, which [`Owner::write_app`] says, or
-    /// another reference is kept. One that cannot be read whole, with every
+    /// an existing application is written or removed, which
+    /// [`Owner::write_app`] says, or another reference is kept; a new
+    /// application has none kept. One that cannot be read whole, with every
     /// sample's picture, is not kept, so each ask reads it again and says
     /// what is wrong once that changed. `None`, a new reference, keeps what
     /// is kept.
@@ -214,7 +215,8 @@ pub(super) fn and_list(names: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::{AntiCheatDef, CheckDef, FixDef, SizeDef};
+    use appytappy_config::anti_cheat::AntiCheatClass;
+    use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
 
     use crate::owner::SavedValue;
     use crate::owner::test_support::{
@@ -561,7 +563,7 @@ mod tests {
         // Writing an application forgets it, so the next ask reads what
         // the folder has now.
         harness
-            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatClass::None))
             .expect("writes the application");
         assert!(missing(edit(&mut harness)));
         std::fs::remove_dir_all(root).expect("clean up");

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { type AppSummary, type MediaCommandDef, NO_STATE, type ReadingDetails, type WhenDef } from '../lib/bindings.ts';
+import { type AppSummary, type MediaCommand, NO_STATE, type ReadingDetails, type WhenDef } from '../lib/bindings.ts';
 import {
   errorText,
   explainWatched,
@@ -51,7 +51,7 @@ import { actionKeys } from '../lib/shortcut.ts';
 import { arrived, readiness, returned, watchApps, watchGuide, watchStep, watching } from '../lib/watch.ts';
 
 /** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
-type ActionChoice = MediaCommandDef | Exclude<ActionDraft['kind'], 'media'>;
+type ActionChoice = MediaCommand | Exclude<ActionDraft['kind'], 'media'>;
 
 const ACTION_CHOICES: readonly ActionChoice[] = [
   'pause',

@@ -34,24 +34,25 @@ use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
 
+use appytappy_config::action::MediaCommand;
 use appytappy_config::action::{
     AppName, KeyChord, MAX_APP_NAME_LEN, MAX_FUNCTION_KEY, MAX_TARGET_LEN, Modifier, NAMED_KEYS,
     OpenTarget, SoundFile,
 };
+use appytappy_config::anti_cheat::AntiCheatClass;
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef,
-    is_label_character,
+    AppFile, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef, is_label_character,
 };
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef,
-    MAX_COOLDOWN_MS, MediaCommandDef, WhenDef,
+    MAX_COOLDOWN_MS, WhenDef,
 };
 use appytappy_config::click::{MAX_SEARCH_PIXELS, Spot};
 use appytappy_config::settings_file::{
     FASTEST_READ_MS, MAX_TRACE_FILE_MB, MAX_TRACE_FILES, SHORTCUT_ALONE_KEYS, SHORTCUT_MODIFIERS,
     SHORTCUT_NAMED_KEYS, SLOWEST_READ_MS, SettingsFile, TraceCategory,
 };
-use appytappy_config::signal::NO_STATE;
+use appytappy_config::signal::{MAX_STATE_NAME_LEN, NO_STATE};
 use appytappy_sources::screen::{Image, Size};
 use serde::Serialize;
 use serde_json::json;
@@ -63,9 +64,7 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
 use crate::check_spec::characters::expected_characters;
-use crate::check_spec::{
-    CharactersSpec, CheckSpec, ColorSpec, Label, MAX_EXPECTED_CHARACTERS, RegionSpec,
-};
+use crate::check_spec::{CharactersSpec, CheckSpec, Label, MAX_EXPECTED_CHARACTERS};
 use crate::commands::Upload;
 use crate::debug::bundle::BundleSpec;
 use crate::debug::outline::CaptureOutline;
@@ -93,6 +92,7 @@ use crate::sharing::MAX_SHARED_BYTES;
 use crate::updates::UpdateOffer;
 use crate::window_list::{WindowFit, WindowList, WindowScore};
 use crate::{commands, updates};
+use appytappy_config::app_file::{ColorDef, RegionDef};
 
 /// The command to write the files again.
 const REGENERATE: &str = "UPDATE_BINDINGS=1 cargo test -p appytappy-setup bindings";
@@ -112,6 +112,8 @@ fn page_file(name: &str) -> PathBuf {
 /// reads.
 trait Wire {
     type Rust;
+    /// How the page sends it as an argument.
+    const SENT: Sent = Sent::Json;
     fn ts(cfg: &Config) -> String;
     fn visit(found: &mut Declarations<'_>);
 }
@@ -150,20 +152,27 @@ impl Wire for Bytes {
 }
 
 /// A file that the page sends as a command's raw body, with a `T` about it
-/// in a header, rather than as JSON.
+/// in a header, rather than as JSON. Its TypeScript type is the `T`'s.
 impl<T: TS + 'static> Wire for Upload<T> {
     type Rust = Self;
+    const SENT: Sent = Sent::Upload;
     fn ts(cfg: &Config) -> String {
-        format!("{UPLOAD}{}>", T::ts(cfg))
+        T::ts(cfg)
     }
     fn visit(found: &mut Declarations<'_>) {
         found.visit::<T>();
     }
 }
 
-/// How the TypeScript type of an [`Upload`] starts, before what is said
-/// about the file.
-const UPLOAD: &str = "Upload<";
+/// How the page sends a command's argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sent {
+    /// As JSON, under the argument's name.
+    Json,
+    /// As the command's raw body, with what is said about it in a header,
+    /// which only a command's only argument can be.
+    Upload,
+}
 
 /// A `u64` that the page sends and reads as a number, such as a window's
 /// handle or a watch's number, which stay far below 2^53.
@@ -195,12 +204,19 @@ struct Command {
     name: &'static str,
     /// The page's doc comment, a line at a time.
     docs: Vec<&'static str>,
-    /// Each argument's name and TypeScript type.
-    args: Vec<(&'static str, String)>,
+    args: Vec<Arg>,
     /// The answer's TypeScript type.
     answer: String,
     /// Visits the types of its arguments and answer.
     visit: fn(&mut Declarations<'_>),
+}
+
+/// One argument of a command.
+struct Arg {
+    name: &'static str,
+    /// Its TypeScript type, or that of what is said about an upload.
+    ts: String,
+    sent: Sent,
 }
 
 /// Returns `command`, a future answering `Result<T, String>`, so the
@@ -225,7 +241,11 @@ fn commands(cfg: &Config) -> Vec<Command> {
                     module: stringify!($module),
                     name: stringify!($name),
                     docs: vec![$($doc),*],
-                    args: vec![$((stringify!($arg), <$ty as Wire>::ts(cfg))),*],
+                    args: vec![$(Arg {
+                        name: stringify!($arg),
+                        ts: <$ty as Wire>::ts(cfg),
+                        sent: <$ty as Wire>::SENT,
+                    }),*],
                     answer: <$answer as Wire>::ts(cfg),
                     visit: |found: &mut Declarations<'_>| {
                         $(<$ty as Wire>::visit(found);)*
@@ -345,7 +365,7 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
         let types = command
             .args
             .iter()
-            .map(|(_name, ts)| ts)
+            .map(|arg| &arg.ts)
             .chain([&command.answer]);
         for ts in types {
             imported.extend(
@@ -354,17 +374,28 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
             );
         }
         let upload = match command.args.as_slice() {
-            [(_name, ts)] => ts
-                .strip_prefix(UPLOAD)
-                .and_then(|about| about.strip_suffix('>')),
-            _ => None,
+            [
+                Arg {
+                    sent: Sent::Upload,
+                    ts,
+                    ..
+                },
+            ] => Some(ts),
+            args => {
+                assert!(
+                    args.iter().all(|arg| arg.sent == Sent::Json),
+                    "{} sends a file beside other arguments; an upload is a command's only one",
+                    command.name
+                );
+                None
+            },
         };
         let parameters = upload.map_or_else(
             || {
                 command
                     .args
                     .iter()
-                    .map(|(name, ts)| format!("{}: {ts}", camel(name)))
+                    .map(|arg| format!("{}: {}", camel(arg.name), arg.ts))
                     .collect::<Vec<_>>()
                     .join(", ")
             },
@@ -373,7 +404,7 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
         let keys = command
             .args
             .iter()
-            .map(|(name, _ts)| camel(name))
+            .map(|arg| camel(arg.name))
             .collect::<Vec<_>>();
         let call = if upload.is_some() {
             format!(
@@ -513,10 +544,10 @@ fn spelled(value: &impl Serialize) -> String {
 /// kind fail to type-check.
 fn sample_actions() -> Vec<ActionDef> {
     let mut actions: Vec<ActionDef> = [
-        MediaCommandDef::Play,
-        MediaCommandDef::Pause,
-        MediaCommandDef::Next,
-        MediaCommandDef::Previous,
+        MediaCommand::Play,
+        MediaCommand::Pause,
+        MediaCommand::Next,
+        MediaCommand::Previous,
     ]
     .into_iter()
     .map(|command| ActionDef::Media { command, app: None })
@@ -956,6 +987,7 @@ fn constants() -> String {
         "maxActionAppBytes": MAX_APP_NAME_LEN,
         "maxCooldownMs": MAX_COOLDOWN_MS,
         "maxStates": MAX_STATES,
+        "maxStateNameChars": MAX_STATE_NAME_LEN,
         "maxExpectedCharacters": MAX_EXPECTED_CHARACTERS,
         "maxTargetBytes": MAX_TARGET_LEN,
         "maxTraceFileMb": MAX_TRACE_FILE_MB,
@@ -988,7 +1020,7 @@ fn constants() -> String {
     });
     [
         format!(
-            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states, the most characters a reference expects, the settings' ranges, the highest tolerance, and the most\n * pixels a click's search area holds, as the saved files take them.\n */\nexport const LIMITS = {} as const;\n",
+            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states and the longest state name in characters, the most characters a reference expects, the settings'\n * ranges, the highest tolerance, and the most pixels a click's search area holds, as the saved files take them.\n */\nexport const LIMITS = {} as const;\n",
             literal(&limits)
         ),
         format!(
@@ -1109,7 +1141,7 @@ fn bindings_match_the_rust_types() {
 #[test]
 fn the_command_table_names_each_argument_as_its_command_does() {
     for command in commands(&Config::new()) {
-        let table: Vec<&str> = command.args.iter().map(|(name, _ts)| *name).collect();
+        let table: Vec<&str> = command.args.iter().map(|arg| arg.name).collect();
         assert_eq!(
             parameters(command.module, command.name),
             table,
