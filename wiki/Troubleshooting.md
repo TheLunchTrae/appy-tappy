@@ -21,27 +21,32 @@ AppyTappy is not signed, so Windows warns the first time you run the installer.
 
 Select the arrow next to the clock that shows hidden icons. If AppyTappy is not
 there, it is not running: you quit it from the menu, or it could not start.
-Start it again as [The tray icon](The-tray-icon.md#the-menu) describes. If it
-still doesn't appear, check the log.
+The Automations page in AppyTappy Setup says so too. Start it again as
+[When AppyTappy's background part isn't running](Automations.md#when-appytappys-background-part-isnt-running)
+describes. If it still doesn't appear, check the log.
 
 ## An automation doesn't run
 
 Check these in order:
 
-1. **Is it on?** Its switch on the Automations page is on, and **Enabled** is
+1. **Is AppyTappy's background part running?** While it isn't, the
+   Automations page and the automation editor say so at the top, with how to
+   [start it](Automations.md#when-appytappys-background-part-isnt-running).
+   It runs your automations, so none runs without it.
+2. **Is it on?** Its switch on the Automations page is on, and **Enabled** is
    checked in the [tray menu](The-tray-icon.md#the-menu).
-2. **Can it run?** If it cannot, the Automations page says why under its name.
-3. **Is the application running?** Point at the tray icon: it says
+3. **Can it run?** If it cannot, the Automations page says why under its name.
+4. **Is the application running?** Point at the tray icon: it says
    **AppyTappy: attached** while one of your applications runs. The tray's
    **Active automations** lists the automations that run now.
-4. **Does the value read?** Turn on the [overlay](Applications.md#overlay) to
+5. **Does the value read?** Turn on the [overlay](Applications.md#overlay) to
    see what AppyTappy reads, or look at the Values page while the application
    runs. At a size the value wasn't drawn at, it reads as
    [Window size](Values.md#window-size) describes, and the log says why a
    value doesn't read there. A value also reads only while its window shows:
    while the window is minimized, AppyTappy waits, and reads the values again
    when it shows.
-5. **Did it already run?** An automation runs once each time its condition
+6. **Did it already run?** An automation runs once each time its condition
    becomes true. It runs again only after the condition has stopped being
    true, and after its wait.
 

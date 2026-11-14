@@ -1,5 +1,6 @@
 //! Saved automations: listing them, and saving, turning on or off, and
-//! deleting one, each of which the runtime reads again once it worked.
+//! deleting one, each of which the runtime reads again once it worked; and
+//! whether the runtime that runs them runs.
 
 use appytappy_config::automation_file::AutomationDef;
 
@@ -9,6 +10,13 @@ use super::Owner;
 use super::host::Host;
 
 impl<H: Host> Owner<H> {
+    /// Whether the runtime runs, which the Automations page and the
+    /// automation editor warn about when it does not, or `None` when the
+    /// check fails.
+    pub(crate) fn runtime_runs(&self) -> Option<bool> {
+        self.host.runtime_runs().ok()
+    }
+
     /// The saved automations, as the Automations page lists them.
     pub(crate) fn list_automations(&self) -> Result<Vec<AutomationSummary>, String> {
         self.stores().and_then(automations::list)
@@ -47,8 +55,23 @@ impl<H: Host> Owner<H> {
 mod tests {
     use appytappy_config::automation_file::AutomationDef;
 
-    use crate::owner::test_support::with_saved_bar;
+    use crate::owner::test_support::{harness, with_saved_bar};
     use appytappy_config::app_file::RegionDef;
+
+    #[test]
+    fn the_runtime_runs_or_not_or_cannot_be_told() {
+        let mut harness = harness(false);
+        harness.owner.host.runtime = Ok(false);
+        assert_eq!(harness.ask(|owner| owner.runtime_runs()), Some(false));
+        harness.owner.host.runtime = Ok(true);
+        assert_eq!(harness.ask(|owner| owner.runtime_runs()), Some(true));
+        harness.owner.host.runtime = Err("no mutexes here".to_owned());
+        assert_eq!(
+            harness.ask(|owner| owner.runtime_runs()),
+            None,
+            "a check that fails warns of nothing"
+        );
+    }
 
     #[test]
     fn a_click_picture_no_automation_was_saved_with_is_forgotten() {

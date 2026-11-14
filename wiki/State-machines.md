@@ -114,8 +114,8 @@ it was about has gone. Fourteen guards drop such stale messages:
   **Save as draft** carry the flow they are for in the same way, and
   `keepStep` drops an answer for any other flow than the open one.
 - **List reads.** The setup app numbers each read of the saved applications,
-  automations, and drafts as it starts. An answer older than the newest one taken is
-  dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
+  automations, and drafts, and of whether the runtime runs, as it starts. An
+  answer older than the newest one taken is dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
   started before a save and answers late never puts older lists back.
 - **Newest asks.** Every other answer the setup app's screens wait for goes
   through `apps/setup/src/lib/request.ts`. `ask` is what an effect returns:
@@ -1340,6 +1340,32 @@ the process, the owner saves where each panel is and stops the capture, as the
 app's own end would. While the question to leave a flow has the nav's place,
 the notice is hidden and keeps its state. An event that does not fit the
 state, such as a late check during the download, changes nothing.
+
+### Runtime warning
+
+The Automations page and the automation editor warn while the runtime does
+not run (`apps/setup/src/components/RuntimeWarning.tsx`). `App.tsx` holds
+`runtime`, which the [list reads](#how-to-read-this-page) refresh with the
+saved lists: on the `REFRESH_MS` timer while no screen holds the capture, and after
+each save. The owner answers from the runtime's single-instance guard
+(`Owner::runtime_runs`), the check the Debug page shows too.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unknown
+    Unknown --> Runs: a read finds the runtime's guard held
+    Unknown --> Stopped: a read finds it free
+    Runs --> Stopped: a read finds it free
+    Stopped --> Runs: a read finds it held
+    Runs --> Unknown: the check or the command fails
+    Stopped --> Unknown: the check or the command fails
+```
+
+Only **Stopped** shows the warning, so a check that fails warns of nothing,
+and the next read that works leaves **Unknown**. The reload signal after a
+save does not feed this state: the refresh that follows the save reads the
+guard itself, and a runtime that missed the signal reads the saved files
+when it starts.
 
 ### Application import
 

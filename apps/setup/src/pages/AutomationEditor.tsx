@@ -46,6 +46,7 @@ import { ClickPictureThumb } from '../components/ClickPictureThumb.tsx';
 import { ClickTarget } from '../components/ClickTarget.tsx';
 import { DeleteDraft } from '../components/Drafts.tsx';
 import { Hint } from '../components/Hint.tsx';
+import { RuntimeWarning } from '../components/RuntimeWarning.tsx';
 import { ReadingDetailsBox } from '../components/ReadingDetails.tsx';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { type ReportDraft, useDraft } from '../lib/drafts.ts';
@@ -454,6 +455,8 @@ interface Props {
   readonly listed: number;
   /** Why the newest read of the saved lists failed, or null when it answered. */
   readonly readError: string | null;
+  /** Whether the background part runs, or null while that is not known. */
+  readonly runtime: boolean | null;
   /**
    * The automation to make or change. After a flow the editor opened ends, it also has the draft to show again, the
    * application its condition starts with, and what that flow saved.
@@ -483,6 +486,7 @@ export function AutomationEditor({
   apps,
   listed,
   readError,
+  runtime,
   flow,
   continued,
   onCancel,
@@ -646,6 +650,7 @@ export function AutomationEditor({
           Automations / <b>{existing === null ? 'New automation' : existing.name}</b>
         </span>
       </div>
+      <RuntimeWarning runs={runtime} />
       <div className="editor">
         <div className="field">
           <label htmlFor="automation-name">Name</label>

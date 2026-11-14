@@ -10,7 +10,9 @@ watch the same value.
 The **Automations** page lists each automation with a switch that turns it on
 or off, its condition, its actions, and the application that must be running
 for it to run. If an automation can no longer run, the reason shows under its
-name.
+name. A warning at the top says when
+[AppyTappy's background part isn't running](#when-appytappys-background-part-isnt-running),
+since then no automation runs.
 
 ## Make an automation
 
@@ -300,3 +302,21 @@ ends, it runs then.
 ## Delete an automation
 
 Select **Delete**, then **Delete automation** to confirm.
+
+## When AppyTappy's background part isn't running
+
+AppyTappy's background part runs every automation, whether AppyTappy Setup is
+open or not. While it isn't running, such as after you select **Quit** in the
+[tray menu](The-tray-icon.md#the-menu) or when it couldn't start, the
+Automations page and the automation editor show a warning at the top that no
+automation runs, and how to start it again:
+
+- It starts each time you sign in to Windows while
+  **Start AppyTappy when I sign in to Windows** is on in
+  [Settings](Settings.md#general).
+- To start it now, open `appytappy-runtime.exe` in the folder AppyTappy is
+  installed in, `%LOCALAPPDATA%\AppyTappy` unless you picked another folder.
+
+The warning goes away within a few seconds of the background part starting.
+Your automations are saved either way, and the background part runs them once
+it starts.

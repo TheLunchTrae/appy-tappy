@@ -221,7 +221,7 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
     fn reload_runtime(&self) {
         #[expect(
             clippy::let_underscore_must_use,
-            reason = "the save already happened; the runtime picks it up when it next starts"
+            reason = "the save already happened, and a runtime that missed the signal reads it when it starts; the main pages ask whether it runs"
         )]
         let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
     }

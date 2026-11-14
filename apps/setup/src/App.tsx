@@ -14,6 +14,7 @@ import {
   listApps,
   listAutomations,
   listDrafts,
+  runtimeRuns,
   saveDraft,
   loadSettings,
   saveSettings,
@@ -79,7 +80,10 @@ const LISTED_ON: Readonly<Record<Flow['kind'], Page>> = {
   reference: 'references',
 };
 
-/** How often the saved files are read again, which also refreshes which applications are running. */
+/**
+ * How often the saved files are read again, which also refreshes which applications are running and whether the
+ * background part runs.
+ */
 const REFRESH_MS = 3000;
 
 export function App() {
@@ -105,6 +109,8 @@ export function App() {
   const [listed, setListed] = useState(0);
   const [automations, setAutomations] = useState<readonly AutomationSummary[] | null>(null);
   const [drafts, setDrafts] = useState<readonly DraftSummary[] | null>(null);
+  // Whether the background part runs, or null while that is not known, from the same reads as the lists.
+  const [runtime, setRuntime] = useState<boolean | null>(null);
   // How the open flow saves its draft, which the leave question offers, and why its last try failed.
   const draftSaver = useRef<DraftSaver | null>(null);
   const [canDraft, setCanDraft] = useState(false);
@@ -172,10 +178,11 @@ export function App() {
     // Each is read apart, so a broken automations file still lists the values.
     reads.current.started += 1;
     const read = reads.current.started;
-    const [appsRead, automationsRead, draftsRead] = await Promise.allSettled([
+    const [appsRead, automationsRead, draftsRead, runtimeRead] = await Promise.allSettled([
       listApps(),
       listAutomations(),
       listDrafts(),
+      runtimeRuns(),
     ]);
     // Reads overlap, so an answer that arrives after a newer one would put older lists back.
     if (!supersedes(read, reads.current.applied)) {
@@ -202,6 +209,8 @@ export function App() {
     } else {
       setDrafts((last) => last ?? []);
     }
+    // A check that fails warns of nothing.
+    setRuntime(runtimeRead.status === 'fulfilled' ? runtimeRead.value : null);
   }, []);
   // The overlays that are on open with the app.
   useEffect(() => {
@@ -409,6 +418,7 @@ export function App() {
           apps={apps ?? []}
           listed={listed}
           readError={loadError}
+          runtime={runtime}
           flow={flow}
           continued={continued}
           onCancel={() => {
@@ -457,6 +467,7 @@ export function App() {
             drafts={drafts}
             automations={automations}
             loadError={automationError ?? loadError}
+            runtime={runtime}
             onChanged={refresh}
             onNew={() => {
               open({ kind: 'automation', existing: null, draft: null, app: null, handed: null, resumed: null });

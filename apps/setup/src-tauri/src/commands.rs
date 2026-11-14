@@ -630,6 +630,12 @@ pub(crate) async fn set_anti_cheat(
     .await
 }
 
+/// Whether the runtime runs, or `None` when that cannot be told.
+#[tauri::command]
+pub(crate) async fn runtime_runs(app: AppHandle) -> Result<Option<bool>, String> {
+    ask(&app, "runtime_runs", |owner| owner.runtime_runs()).await
+}
+
 /// The saved automations, with what stops each one from running.
 #[tauri::command]
 pub(crate) async fn list_automations(app: AppHandle) -> Result<Vec<AutomationSummary>, String> {
