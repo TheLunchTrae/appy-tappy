@@ -1,8 +1,8 @@
 // A click's target: where it lands in its application's window, as the
 // target screen sets it up and the automation editor shows it.
 
+import type { Guarded } from './antiCheat.ts';
 import {
-  type AntiCheatClass,
   type AppSummary,
   type ClickAtDef,
   type ClickButtonDef,
@@ -157,37 +157,8 @@ export function targetSummary(button: ClickButtonDef, at: ClickAtDef | null, del
 }
 
 /** The saved applications a click can click in: those whose files read fine. */
-export function clickApps(
-  apps: readonly AppSummary[],
-): readonly { readonly id: string; readonly name: string; readonly antiCheat: AntiCheatClass }[] {
+export function clickApps(apps: readonly AppSummary[]): readonly (Guarded & { readonly id: string })[] {
   return apps.flatMap((app) =>
     app.file === null ? [] : [{ id: app.id, name: app.file.name, antiCheat: app.file.antiCheat }],
   );
-}
-
-/** What each anti-cheat class is called in a sentence. */
-const ANTI_CHEAT_WORDS: Readonly<Record<AntiCheatClass, string>> = {
-  none: 'none',
-  userMode: 'user-mode',
-  kernelLevel: 'kernel-level',
-  unknown: 'not set',
-};
-
-/**
- * Why a click cannot run between the watched application and the one it clicks in, or null when it can: anti-cheat
- * can see a click, so both must have none, as the runtime also checks.
- */
-export function clickBlocked(
-  watched: { readonly name: string; readonly antiCheat: AntiCheatClass },
-  clicked: { readonly name: string; readonly antiCheat: AntiCheatClass } | null,
-): string | null {
-  const blocking = [watched, clicked].find((app) => app !== null && app.antiCheat !== 'none');
-  if (blocking === undefined || blocking === null) {
-    return null;
-  }
-  const what =
-    blocking.antiCheat === 'unknown'
-      ? `${blocking.name}'s anti-cheat is not set`
-      : `${blocking.name}'s anti-cheat is ${ANTI_CHEAT_WORDS[blocking.antiCheat]}`;
-  return `${what}, so AppyTappy cannot click while it runs: anti-cheat can see clicks that AppyTappy makes. A click needs the watched application and the one it clicks in both set to None on the Applications page.`;
 }

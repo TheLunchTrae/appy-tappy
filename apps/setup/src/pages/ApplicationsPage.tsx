@@ -4,7 +4,7 @@ import type { AntiCheatClass, AppSummary, DraftSummary, OverlayModeDef } from '.
 import { Question, useQuestion } from '../components/Question.tsx';
 import { errorText, removeApp, setAntiCheat, setOverlay } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
-import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/describe.ts';
+import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/antiCheat.ts';
 import { ANTI_CHEAT_HINT, OVERLAY_HINT } from '../lib/hints.ts';
 import { type AppKept, matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';

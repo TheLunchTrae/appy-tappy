@@ -1,38 +1,22 @@
-// What an automation means in words, and the editor's draft of one.
+// The editor's draft of an automation: the values it can watch, its condition, and what it still needs before it
+// can be saved.
 
+import { type ActionDraft, buildAction, draftedAction, inputBlocked, newAction, undoRefused } from './actions.ts';
 import {
   type ActionDef,
-  ACTIONS,
   type AntiCheatClass,
   type AppSummary,
   type AutomationDef,
   type AutomationSummary,
-  type ClickAtDef,
-  type ClickButtonDef,
-  type ClickDeliveryDef,
   type Comparison,
   LIMITS,
-  type Live,
-  type MediaCommand,
   NO_STATE,
-  type Reading,
   type TargetDef,
   type ValueDef,
   type WhenDef,
 } from './bindings.ts';
 import { CHECKS, type ValueKind } from './check.ts';
-import { clickBlocked, clickName } from './click.ts';
-import {
-  appName,
-  hasControl,
-  openTarget,
-  soundFile,
-  spellKeys,
-  trimmed,
-  typedNumber,
-  typedPath,
-  utf8Bytes,
-} from './text.ts';
+import { typedNumber } from './text.ts';
 
 /** A saved value an automation can watch. */
 export interface ValueChoice {
@@ -84,88 +68,6 @@ export const COMPARISON_NAMES: Readonly<Record<Comparison, string>> = {
   above: 'is above',
 };
 
-/** The most decimals a reading shows when that is enough to tell it from the target. */
-const READING_DECIMALS = 4;
-
-/**
- * A number as read, such as `87`, `12.46` or `33.3333`: exact up to four
- * decimals, and rounded beyond that only while the rounded number still falls
- * on the same side of `target` as the reading, so it never contradicts
- * whether a condition holds.
- */
-function numberText(value: number, target?: number): string {
-  for (let decimals = 0; decimals <= READING_DECIMALS; decimals += 1) {
-    const shown = value.toFixed(decimals);
-    if (Number(shown) === value) {
-      return shown;
-    }
-  }
-  const rounded = value.toFixed(READING_DECIMALS);
-  if (target !== undefined && Math.sign(Number(rounded) - target) !== Math.sign(value - target)) {
-    return String(value);
-  }
-  return rounded;
-}
-
-/**
- * A reading as the UI shows it, such as `87`, `12.46`, `Yes` or `Paused`, never contradicting a comparison with
- * `target`.
- */
-export function readingText(reading: Reading, target?: TargetDef): string {
-  switch (reading.kind) {
-    case 'number':
-      return numberText(reading.value, typeof target === 'number' ? target : undefined);
-    case 'flag':
-      return reading.value ? 'Yes' : 'No';
-    case 'state':
-      return reading.value;
-  }
-}
-
-/** A live reading, or an error that stopped one, or null before the first answer arrives. */
-export type LiveState = Live | { readonly kind: 'error'; readonly message: string } | null;
-
-/** A live reading in a sentence, such as `Progress reads 87 now, so the condition is true.` */
-export function liveText(live: LiveState, choice: ValueChoice, when: WhenDef | null): string {
-  const name = choice.value.name;
-  if (live === null) {
-    return `Looking for ${choice.appName}…`;
-  }
-  switch (live.kind) {
-    case 'waiting':
-      return `Waiting for ${choice.appName} to show ${name}…`;
-    case 'error':
-    case 'problem':
-    case 'lost':
-      return live.message;
-    case 'read': {
-      const reads = `${name} reads ${readingText(live.reading, when?.target)} now`;
-      if (live.holds === null) {
-        return `${reads}.`;
-      }
-      return live.holds ? `${reads}, so the condition is true.` : `${reads}, so the condition is not true.`;
-    }
-  }
-}
-
-/**
- * What a screen reader announces of a live reading: only whether the
- * condition holds, or what is wrong, so a moving number is not announced
- * twice a second.
- */
-export function liveAnnouncement(live: LiveState): string {
-  if (live === null || live.kind === 'waiting') {
-    return '';
-  }
-  if (live.kind === 'read') {
-    if (live.holds === null) {
-      return '';
-    }
-    return live.holds ? 'The condition is true.' : 'The condition is not true.';
-  }
-  return live.message;
-}
-
 /** A target as the condition reads it. */
 export function targetText(target: TargetDef): string {
   if (typeof target === 'boolean') {
@@ -174,115 +76,11 @@ export function targetText(target: TargetDef): string {
   return String(target);
 }
 
-/** What each media command does, as an action's name. */
-export const MEDIA_NAMES: Readonly<Record<MediaCommand, string>> = {
-  pause: 'Pause media',
-  play: 'Play media',
-  next: 'Next track',
-  previous: 'Previous track',
-};
-
-/** The last part of a Windows path, such as `Ding.wav` for `C:\Sounds\Ding.wav`. */
-function fileName(path: string): string {
-  return path.split(/[\\/]/u).at(-1) ?? path;
-}
-
-/**
- * An action in a few words, such as `Pause media · Player.exe`; `appName` names a saved application by its ID, for a
- * click.
- */
-export function actionText(action: ActionDef, appName: (id: string) => string = (id) => id): string {
-  switch (action.kind) {
-    case 'media':
-      return `${MEDIA_NAMES[action.command]} · ${action.app ?? 'whatever is playing'}`;
-    case 'volume':
-      return `Volume · ${action.app ?? 'system'} ${action.percent}%`;
-    case 'keys':
-      return `Press ${action.keys}`;
-    case 'open':
-      return `Open ${action.target}`;
-    case 'sound':
-      return `Play ${fileName(action.file)}`;
-    case 'click':
-      return `${clickName(action.button)} · ${appName(action.app)}`;
-  }
-}
-
-/**
- * Whether undo can put back what `action` changed, as the runtime decides: a skipped track cannot be unskipped,
- * pressed keys cannot be unpressed, and what was opened or played has nothing to put back.
- */
-export function undoable(action: ActionDef): boolean {
-  return ACTIONS.undoable[action.kind === 'media' ? (`media.${action.command}` as const) : action.kind];
-}
-
-/**
- * Why `actions` cannot run for an application whose anti-cheat is `antiCheat`, or null when they can: keys
- * are pressed only for an application without anti-cheat, as the runtime also checks. A click sends input too, but
- * {@link clicksBlocked} says why it cannot run, since it also depends on the application it clicks in.
- */
-export function keysBlocked(
-  actions: readonly { readonly kind: ActionDef['kind'] }[],
-  antiCheat: AntiCheatClass,
-  appName: string,
-): string | null {
-  if (antiCheat === 'none' || !actions.some((action) => action.kind !== 'click' && ACTIONS.injectsInput[action.kind])) {
-    return null;
-  }
-  return `Anti-cheat can treat pressed keys as cheating, so keys are pressed only once ${appName}'s anti-cheat is set to None on the Applications page.`;
-}
-
-/** What undo does for `actions`, as a sentence, or null when none of them can be undone. */
-export function undoText(actions: readonly ActionDef[]): string | null {
-  const parts = [
-    actions.some((action) => action.kind === 'media' && action.command === 'pause') ? 'paused media plays again' : null,
-    actions.some((action) => action.kind === 'media' && action.command === 'play')
-      ? 'started media pauses again'
-      : null,
-    actions.some((action) => action.kind === 'volume') ? 'each volume goes back to where it was' : null,
-  ].filter((part) => part !== null);
-  if (parts.length === 0) {
-    return null;
-  }
-  const joined = parts.length === 1 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1) ?? ''}`;
-  return `${joined.charAt(0).toUpperCase()}${joined.slice(1)}.`;
-}
-
 /** The names of the automations that watch the value `value` of the application `app`. */
 export function usedBy(automations: readonly AutomationSummary[], app: string, value: string): readonly string[] {
   return automations
     .filter(({ automation }) => automation.when.app === app && automation.when.value === value)
     .map(({ automation }) => automation.name);
-}
-
-/** Whose media or volume an action changes: the current player or the system, or one application. */
-type ActionTarget = 'default' | 'app';
-
-/** An action as the editor holds it, with text fields kept as typed. */
-export interface ActionDraft {
-  /** Tells the rows apart while they are added, moved and removed. */
-  readonly key: number;
-  readonly kind: ActionDef['kind'];
-  readonly command: MediaCommand;
-  readonly percent: string;
-  readonly target: ActionTarget;
-  /** The application's executable, such as `Player.exe`, when `target` is `app`. */
-  readonly app: string;
-  /** The keys to press, such as `Ctrl+Shift+M`. */
-  readonly keys: string;
-  /** What an open action opens, as typed: a full path or a web link. */
-  readonly opens: string;
-  /** The WAV file a sound action plays, as typed. */
-  readonly sound: string;
-  /** The ID of the saved application a click clicks in, or empty before one is picked. */
-  readonly clickApp: string;
-  readonly button: ClickButtonDef;
-  /** How a click reaches its window. */
-  readonly delivery: ClickDeliveryDef;
-  /** Whether a click with the cursor gives the focus back to the window that was in front. */
-  readonly returnFocus: boolean;
-  /** Where a click lands, or null before its target is set up. */
-  readonly at: ClickAtDef | null;
 }
 
 /** An automation as the editor holds it. */
@@ -302,31 +100,6 @@ export interface Draft {
   readonly undo: boolean;
   /** The cooldown in seconds, as typed. */
   readonly cooldown: string;
-}
-
-/** A new action row of `kind`. */
-export function newAction(key: number, kind: ActionDraft['kind'] = 'media'): ActionDraft {
-  return {
-    key,
-    kind,
-    command: 'pause',
-    percent: '20',
-    target: 'default',
-    app: '',
-    keys: '',
-    opens: '',
-    sound: '',
-    clickApp: '',
-    button: 'left',
-    delivery: 'cursor',
-    returnFocus: true,
-    at: null,
-  };
-}
-
-/** A key no row of `actions` has, for a row added to them. */
-export function unusedKey(actions: readonly ActionDraft[]): number {
-  return actions.reduce((next, action) => Math.max(next, action.key + 1), 0);
 }
 
 /** A new automation: pause whatever is playing, and undo it afterwards. */
@@ -354,22 +127,7 @@ export function toDraft(automation: AutomationDef): Draft {
     number: typeof when.target === 'number' ? String(when.target) : '',
     flag: typeof when.target === 'boolean' ? when.target : true,
     state: typeof when.target === 'string' ? when.target : '',
-    actions: automation.actions.map((action, key) => ({
-      key,
-      kind: action.kind,
-      command: action.kind === 'media' ? action.command : 'pause',
-      percent: action.kind === 'volume' ? String(action.percent) : '20',
-      target: (action.kind === 'media' || action.kind === 'volume') && action.app !== null ? 'app' : 'default',
-      app: action.kind === 'media' || action.kind === 'volume' ? (action.app ?? '') : '',
-      keys: action.kind === 'keys' ? action.keys : '',
-      opens: action.kind === 'open' ? action.target : '',
-      sound: action.kind === 'sound' ? action.file : '',
-      clickApp: action.kind === 'click' ? action.app : '',
-      button: action.kind === 'click' ? action.button : 'left',
-      delivery: action.kind === 'click' ? action.delivery : 'cursor',
-      returnFocus: action.kind === 'click' ? action.returnFocus : true,
-      at: action.kind === 'click' ? action.at : null,
-    })),
+    actions: automation.actions.map(draftedAction),
     undo: automation.undo,
     cooldown: String(automation.cooldownMs / 1000),
   };
@@ -414,91 +172,6 @@ export function readsText(choice: ValueChoice): string {
 /** The longest cooldown, in seconds. */
 const MAX_COOLDOWN_SECONDS = LIMITS.maxCooldownMs / 1000;
 
-/** Why the path or link `text` of action `position` can't be saved whatever its kind, or `null` when it can be. */
-function targetProblem(text: string, position: number): string | null {
-  if (hasControl(text)) {
-    return `The path or link in action ${position} has a tab or line break in it. Remove it.`;
-  }
-  if (utf8Bytes(text) > LIMITS.maxTargetBytes) {
-    return `The path or link in action ${position} is too long to save. Shorten it.`;
-  }
-  return null;
-}
-
-function buildAction(draft: ActionDraft, position: number): ActionDef | string {
-  if (draft.kind === 'click') {
-    if (draft.clickApp === '') {
-      return `Pick the application action ${position} clicks in.`;
-    }
-    if (draft.at === null) {
-      return `Set up where action ${position} clicks.`;
-    }
-    return {
-      kind: 'click',
-      app: draft.clickApp,
-      button: draft.button,
-      delivery: draft.delivery,
-      returnFocus: draft.returnFocus,
-      at: draft.at,
-    };
-  }
-  if (draft.kind === 'open') {
-    const target = typedPath(draft.opens);
-    if (target === '') {
-      return `Enter what action ${position} opens: a program's full path, such as C:\\Tools\\Timer.exe, or a web link.`;
-    }
-    const problem = targetProblem(target, position);
-    if (problem !== null) {
-      return problem;
-    }
-    const opens = openTarget(target);
-    return opens !== null
-      ? { kind: 'open', target: opens }
-      : `Action ${position} opens a program or file by its full path, such as C:\\Tools\\Timer.exe, or a link that starts with http:// or https://.`;
-  }
-  if (draft.kind === 'sound') {
-    const file = typedPath(draft.sound);
-    if (file === '') {
-      return `Enter the full path of the WAV file action ${position} plays, such as C:\\Sounds\\Ding.wav.`;
-    }
-    const problem = targetProblem(file, position);
-    if (problem !== null) {
-      return problem;
-    }
-    const plays = soundFile(file);
-    return plays !== null
-      ? { kind: 'sound', file: plays }
-      : `Action ${position} plays a WAV file by its full path, such as C:\\Sounds\\Ding.wav.`;
-  }
-  if (draft.kind === 'keys') {
-    if (trimmed(draft.keys) === '') {
-      return `Choose the keys for action ${position} to press.`;
-    }
-    const keys = spellKeys(draft.keys);
-    return keys === null
-      ? `Spell the keys for action ${position} as any of Ctrl, Alt, Shift and Win, then one key such as M, 5, F9, Space or Enter, joined by +, such as Ctrl+Shift+M.`
-      : { kind: 'keys', keys };
-  }
-  const app = draft.target === 'app' ? trimmed(draft.app) : null;
-  if (app === '') {
-    return `Name the application for action ${position}, such as Player.exe.`;
-  }
-  if (app !== null && hasControl(app)) {
-    return `The application name in action ${position} has a tab or line break in it. Remove it.`;
-  }
-  if (app !== null && appName(app) === null) {
-    return `The application name in action ${position} is too long to save. Shorten it.`;
-  }
-  if (draft.kind === 'media') {
-    return { kind: 'media', command: draft.command, app };
-  }
-  const percent = typedNumber(draft.percent);
-  if (percent === null || !Number.isInteger(percent) || percent < 0 || percent > 100) {
-    return `Set the volume of action ${position} to a whole number from 0 to 100.`;
-  }
-  return { kind: 'volume', percent, app };
-}
-
 /** The condition `draft` describes on the value `choice`, or the next thing to fill in. */
 export function buildWhen(draft: Draft, choice: ValueChoice): WhenDef | string {
   let target: TargetDef = draft.flag;
@@ -527,31 +200,6 @@ export type Built =
   | { readonly ok: false; readonly next: string };
 
 /**
- * Why clicks in the applications `clickedIn`, by their IDs, cannot run for the value `choice`, or null when they
- * can: anti-cheat can see a click, so the watched application and each one clicked in need none.
- */
-export function clicksBlocked(
-  clickedIn: readonly string[],
-  choice: ValueChoice,
-  apps: readonly AppSummary[],
-): string | null {
-  if (clickedIn.length === 0) {
-    return null;
-  }
-  for (const id of clickedIn) {
-    const clicked = apps.find((app) => app.id === id)?.file ?? null;
-    const blocked = clickBlocked(
-      { name: choice.appName, antiCheat: choice.antiCheat },
-      clicked === null ? null : { name: clicked.name, antiCheat: clicked.antiCheat },
-    );
-    if (blocked !== null) {
-      return blocked;
-    }
-  }
-  return null;
-}
-
-/**
  * Builds the automation `draft` describes, watching a value among `choices`; `id` is the saved one's, or empty.
  * `apps` are the saved applications a click may click in.
  */
@@ -559,7 +207,7 @@ export function buildAutomation(
   draft: Draft,
   choices: readonly ValueChoice[],
   id: string,
-  apps: readonly AppSummary[] = [],
+  apps: readonly AppSummary[],
 ): Built {
   const name = draft.name.trim();
   if (name === '') {
@@ -584,30 +232,12 @@ export function buildAutomation(
     }
     actions.push(built);
   }
-  if (draft.undo && !actions.some(undoable)) {
-    const has = (kind: ActionDef['kind']): boolean => actions.some((action) => action.kind === kind);
-    const why = [
-      has('media') ? 'a skipped track cannot be unskipped' : null,
-      has('keys') ? 'pressed keys cannot be unpressed' : null,
-      has('open') ? 'what opened stays open' : null,
-      has('sound') ? 'a played sound cannot be unplayed' : null,
-      has('click') ? 'a click cannot be undone' : null,
-    ].filter((part) => part !== null);
-    // Each part is a clause, so a comma comes before the last one's `and`.
-    const last = why.pop() ?? '';
-    return {
-      ok: false,
-      next: `Turn off undo: ${[why.join(', '), last].filter((part) => part !== '').join(', and ')}.`,
-    };
+  const refused = draft.undo ? undoRefused(actions) : null;
+  if (refused !== null) {
+    return { ok: false, next: refused };
   }
-  const blocked =
-    keysBlocked(actions, choice.antiCheat, choice.appName) ??
-    clicksBlocked(
-      actions.flatMap((action) => (action.kind === 'click' ? [action.app] : [])),
-      choice,
-      apps,
-    );
-  if (blocked !== null) {
+  const [blocked] = inputBlocked(draft.actions, { name: choice.appName, antiCheat: choice.antiCheat }, apps);
+  if (blocked !== undefined) {
     return { ok: false, next: blocked };
   }
   for (const [index, action] of actions.entries()) {

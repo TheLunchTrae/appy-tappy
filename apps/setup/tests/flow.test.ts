@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { AppSummary, AutomationDef, DraftDef, ValueDef } from '../src/lib/bindings.ts';
-import { EMPTY_DRAFT, newAction, toDraft } from '../src/lib/automation.ts';
+import { newAction } from '../src/lib/actions.ts';
+import { EMPTY_DRAFT, toDraft } from '../src/lib/automation.ts';
 import { type Resumed, keep } from '../src/lib/drafts.ts';
 import {
   type ApplicationFlow,

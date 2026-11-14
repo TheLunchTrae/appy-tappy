@@ -245,14 +245,14 @@ describe('saving while a value a flow saved is awaited', () => {
 
   test('has no value to save, so the old one cannot be saved in its place', () => {
     expect(back.source).toBeNull();
-    const built = buildAutomation(back, valueChoices([example]), '');
+    const built = buildAutomation(back, valueChoices([example]), '', [example]);
     expect(built).toEqual({ ok: false, next: 'Pick the value to watch.' });
     const at = step([example], { draft: back, chosen: 'example', handed: handedOver('hull') });
     expect(readiness(built, at)).toEqual({ text: 'Reading what you saved…', ready: false });
   });
 
   test('saves nothing while it waits, whatever the draft would build', () => {
-    const built = buildAutomation(watchesProgress, valueChoices([example]), '');
+    const built = buildAutomation(watchesProgress, valueChoices([example]), '', [example]);
     expect(built.ok).toBe(true);
     const at = step([example], { draft: watchesProgress, chosen: 'example', handed: handedOver('hull') });
     expect(readiness(built, at)).toEqual({ text: 'Reading what you saved…', ready: false });
@@ -265,14 +265,14 @@ describe('saving while a value a flow saved is awaited', () => {
       throw new Error('the value is listed');
     }
     const picked = withSource(back, landed);
-    const built = buildAutomation(picked, choices, '');
+    const built = buildAutomation(picked, choices, '', [withHull]);
     expect(built.ok && built.automation.when).toEqual({ app: 'example', value: 'hull', is: 'atLeast', target: 90 });
     const at = step([withHull], { draft: picked, chosen: 'example' });
     expect(readiness(built, at)).toEqual({ text: 'Ready to save.', ready: true });
   });
 
   test('says what the automation still needs otherwise', () => {
-    const built = buildAutomation(EMPTY_DRAFT, valueChoices([example]), '');
+    const built = buildAutomation(EMPTY_DRAFT, valueChoices([example]), '', [example]);
     expect(readiness(built, step([example]))).toEqual({ text: 'Name the automation.', ready: false });
   });
 });

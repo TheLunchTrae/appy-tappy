@@ -2,14 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { AppSummary, AutomationSummary, DraftSummary } from '../lib/bindings.ts';
 import { deleteAutomation, errorText, setAutomationEnabled } from '../lib/api.ts';
-import {
-  COMPARISON_NAMES,
-  type ValueChoice,
-  actionText,
-  findValue,
-  targetText,
-  valueChoices,
-} from '../lib/automation.ts';
+import { actionText } from '../lib/actions.ts';
+import { COMPARISON_NAMES, type ValueChoice, findValue, targetText, valueChoices } from '../lib/automation.ts';
 import { Hint } from '../components/Hint.tsx';
 import { NEEDS_RUNNING_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';

@@ -1,24 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { AntiCheatClass, AppSummary, AutomationDef, CheckDef, ValueDef } from '../src/lib/bindings.ts';
+import { newAction } from '../src/lib/actions.ts';
 import {
+  type Draft,
   EMPTY_DRAFT,
-  actionText,
   buildAutomation,
   buildWhen,
   findValue,
-  keysBlocked,
-  liveAnnouncement,
-  liveText,
-  newAction,
-  readingText,
   readsState,
   readsText,
   targetText,
   toDraft,
-  undoable,
-  undoText,
-  unusedKey,
   usedBy,
   valueChoices,
   withSource,
@@ -149,45 +142,20 @@ describe('values', () => {
 });
 
 describe('words', () => {
-  test('targets and actions read plainly', () => {
+  test('a target reads as the condition says it', () => {
     expect(targetText(90)).toBe('90');
     expect(targetText(true)).toBe('yes');
     expect(targetText(false)).toBe('no');
-    expect(actionText({ kind: 'media', command: 'pause', app: 'Player.exe' })).toBe('Pause media · Player.exe');
-    expect(actionText({ kind: 'media', command: 'next', app: null })).toBe('Next track · whatever is playing');
-    expect(actionText({ kind: 'volume', percent: 20, app: null })).toBe('Volume · system 20%');
-    expect(actionText({ kind: 'volume', percent: 0, app: 'Player.exe' })).toBe('Volume · Player.exe 0%');
-    expect(actionText({ kind: 'keys', keys: 'Ctrl+Shift+M' })).toBe('Press Ctrl+Shift+M');
-    expect(actionText({ kind: 'open', target: 'https://example.com' })).toBe('Open https://example.com');
-    expect(actionText({ kind: 'sound', file: 'C:\\Sounds\\Ding.wav' })).toBe('Play Ding.wav');
-    expect(actionText({ kind: 'sound', file: 'C:/Sounds/Ding.wav' })).toBe('Play Ding.wav');
-  });
-
-  test('undo says what it puts back, and skips cannot be undone', () => {
-    expect(undoable({ kind: 'media', command: 'pause', app: null })).toBe(true);
-    expect(undoable({ kind: 'media', command: 'play', app: null })).toBe(true);
-    expect(undoable({ kind: 'media', command: 'next', app: null })).toBe(false);
-    expect(undoable({ kind: 'media', command: 'previous', app: null })).toBe(false);
-    expect(undoable({ kind: 'volume', percent: 5, app: null })).toBe(true);
-    expect(undoable({ kind: 'keys', keys: 'M' })).toBe(false);
-    expect(undoable({ kind: 'open', target: 'https://example.com' })).toBe(false);
-    expect(undoable({ kind: 'sound', file: 'C:\\Ding.wav' })).toBe(false);
-    expect(undoText(pauseMusic.actions)).toBe('Paused media plays again and each volume goes back to where it was.');
-    expect(undoText([{ kind: 'media', command: 'play', app: null }])).toBe('Started media pauses again.');
-    expect(
-      undoText([
-        { kind: 'media', command: 'pause', app: null },
-        { kind: 'media', command: 'play', app: null },
-        { kind: 'volume', percent: 5, app: null },
-      ]),
-    ).toBe('Paused media plays again, started media pauses again and each volume goes back to where it was.');
-    expect(undoText([{ kind: 'media', command: 'next', app: null }])).toBeNull();
+    expect(targetText('none')).toBe('none');
   });
 });
 
 describe('buildAutomation', () => {
   test('a saved automation round-trips through the editor', () => {
-    expect(buildAutomation(toDraft(pauseMusic), choices, 'pause_music')).toEqual({ ok: true, automation: pauseMusic });
+    expect(buildAutomation(toDraft(pauseMusic), choices, 'pause_music', apps)).toEqual({
+      ok: true,
+      automation: pauseMusic,
+    });
     const flag: AutomationDef = {
       ...pauseMusic,
       enabled: false,
@@ -195,12 +163,12 @@ describe('buildAutomation', () => {
       undo: false,
       cooldownMs: 0,
     };
-    expect(buildAutomation(toDraft(flag), choices, 'x')).toEqual({ ok: true, automation: { ...flag, id: 'x' } });
+    expect(buildAutomation(toDraft(flag), choices, 'x', apps)).toEqual({ ok: true, automation: { ...flag, id: 'x' } });
   });
 
   test('says what to fill in next', () => {
-    const next = (draft: typeof EMPTY_DRAFT): string => {
-      const built = buildAutomation(draft, choices, '');
+    const next = (draft: Draft): string => {
+      const built = buildAutomation(draft, choices, '', apps);
       return built.ok ? 'ok' : built.next;
     };
     expect(next(EMPTY_DRAFT)).toBe('Name the automation.');
@@ -219,21 +187,6 @@ describe('buildAutomation', () => {
     expect(next({ ...complete, actions: [newAction(1), { ...newAction(2), target: 'app', app: '  ' }] })).toBe(
       'Name the application for action 2, such as Player.exe.',
     );
-    const longestApp = `${'a'.repeat(252)}.exe`;
-    const app = (name: string): typeof EMPTY_DRAFT => ({
-      ...complete,
-      actions: [{ ...newAction(1), target: 'app', app: name }],
-    });
-    expect(next(app(longestApp))).toBe('ok');
-    expect(next(app(`a${longestApp}`))).toBe('The application name in action 1 is too long to save. Shorten it.');
-    expect(next(app('Player\t.exe'))).toBe(
-      'The application name in action 1 has a tab or line break in it. Remove it.',
-    );
-    for (const percent of ['', '101', '-1', '2.5', 'x']) {
-      expect(next({ ...complete, actions: [{ ...newAction(1, 'volume'), percent }] })).toBe(
-        'Set the volume of action 1 to a whole number from 0 to 100.',
-      );
-    }
     expect(next({ ...complete, actions: [{ ...newAction(1), command: 'next' }] })).toBe(
       'Turn off undo: a skipped track cannot be unskipped.',
     );
@@ -254,7 +207,7 @@ describe('buildAutomation', () => {
       actions: [{ ...newAction(4, 'volume'), percent: ' 30 ', target: 'app' as const, app: ' Player.exe ' }],
       cooldown: '1.2345',
     };
-    expect(buildAutomation(draft, choices, '')).toEqual({
+    expect(buildAutomation(draft, choices, '', apps)).toEqual({
       ok: true,
       automation: {
         id: '',
@@ -280,212 +233,102 @@ describe('buildAutomation', () => {
     expect(withSource({ ...picked, is: 'notEquals' }, icon).is).toBe('notEquals');
     expect(withSource({ ...picked, is: 'notEquals' }, number).is).toBe('notEquals');
     expect(withSource({ ...picked, is: 'atMost' }, number).is).toBe('atMost');
-    const built = buildAutomation({ ...picked, flag: false }, choices, '');
+    const built = buildAutomation({ ...picked, flag: false }, choices, '', apps);
     expect(built.ok && built.automation.when).toEqual({
       app: 'example',
       value: 'icon_visible',
       is: 'equals',
       target: false,
     });
-    expect(buildAutomation({ ...picked, is: 'atLeast' }, choices, '')).toEqual({
+    expect(buildAutomation({ ...picked, is: 'atLeast' }, choices, '', apps)).toEqual({
       ok: false,
       next: 'Pick how Icon visible is compared.',
     });
   });
 
-  test('a loaded automation gives each action its own key and target', () => {
-    expect(toDraft(pauseMusic).actions.map((action) => [action.key, action.target, action.app])).toEqual([
-      [0, 'app', 'Player.exe'],
-      [1, 'default', ''],
+  test('a loaded automation gives each action a row with its own key', () => {
+    expect(toDraft(pauseMusic).actions.map((action) => [action.key, action.kind])).toEqual([
+      [0, 'media'],
+      [1, 'volume'],
     ]);
-  });
-
-  test('an added action gets a key no row has, also after rows were removed', () => {
-    expect(unusedKey([])).toBe(0);
-    expect(unusedKey(toDraft(pauseMusic).actions)).toBe(2);
-    expect(unusedKey([newAction(1), newAction(2)])).toBe(3);
-    expect(unusedKey([newAction(4), newAction(0)])).toBe(5);
   });
 });
 
-describe('key presses', () => {
-  const free: readonly AppSummary[] = apps.map((app) =>
-    app.file === null ? app : { ...app, file: { ...app.file, antiCheat: 'none' } },
-  );
-  const pressKeys: AutomationDef = {
-    ...pauseMusic,
-    actions: [{ kind: 'keys', keys: 'Ctrl+Shift+M' }],
-    undo: false,
+describe('input', () => {
+  const streaming: AppSummary = {
+    id: 'streaming',
+    file: {
+      format: 1,
+      name: 'Streaming app',
+      window: {
+        title: 'Streaming',
+        class: '',
+        executable: 'Streaming.exe',
+        mustMatch: { title: false, class: false },
+        fallback: 'none',
+      },
+      antiCheat: 'none',
+      values: [],
+      references: [],
+      sizeChanges: 'often',
+    },
+    error: null,
+    windows: [],
+    running: null,
   };
-
-  test('round-trip through the editor for an application without anti-cheat', () => {
-    const draft = toDraft(pressKeys);
-    expect(draft.actions.map((action) => [action.kind, action.keys, action.target, action.app])).toEqual([
-      ['keys', 'Ctrl+Shift+M', 'default', ''],
-    ]);
-    expect(buildAutomation(draft, valueChoices(free), 'pause_music')).toEqual({ ok: true, automation: pressKeys });
-  });
-
-  test('need keys an action can press, in the one spelling the file keeps', () => {
-    const draft = toDraft(pressKeys);
-    const typed = (keys: string): ReturnType<typeof buildAutomation> =>
-      buildAutomation(
-        { ...draft, actions: draft.actions.map((action) => ({ ...action, keys })) },
-        valueChoices(free),
-        'pause_music',
-      );
-    expect(typed('  ')).toEqual({ ok: false, next: 'Choose the keys for action 1 to press.' });
-    expect(typed('Ctrl+Mute')).toEqual({
-      ok: false,
-      next: 'Spell the keys for action 1 as any of Ctrl, Alt, Shift and Win, then one key such as M, 5, F9, Space or Enter, joined by +, such as Ctrl+Shift+M.',
-    });
-    expect(typed(' ctrl + m ')).toEqual({
-      ok: true,
-      automation: { ...pressKeys, actions: [{ kind: 'keys', keys: 'Ctrl+M' }] },
-    });
-  });
-
-  test("wait for the application's anti-cheat to be set to none", () => {
-    const blocked =
-      "Anti-cheat can treat pressed keys as cheating, so keys are pressed only once Example App's anti-cheat is set to None on the Applications page.";
-    expect(buildAutomation(toDraft(pressKeys), choices, 'pause_music')).toEqual({ ok: false, next: blocked });
-    expect(keysBlocked(pressKeys.actions, 'unknown', 'Example App')).toBe(blocked);
-    expect(keysBlocked(pressKeys.actions, 'userMode', 'Example App')).toBe(blocked);
-    expect(keysBlocked(pressKeys.actions, 'kernelLevel', 'Example App')).toBe(blocked);
-    expect(keysBlocked(pressKeys.actions, 'none', 'Example App')).toBeNull();
-    expect(keysBlocked(pauseMusic.actions, 'kernelLevel', 'Example App')).toBeNull();
-  });
-
-  test('cannot be undone', () => {
-    const undone = (actions: AutomationDef['actions']): ReturnType<typeof buildAutomation> =>
-      buildAutomation({ ...toDraft({ ...pressKeys, actions }), undo: true }, valueChoices(free), 'pause_music');
-    expect(undone(pressKeys.actions)).toEqual({ ok: false, next: 'Turn off undo: pressed keys cannot be unpressed.' });
-    expect(undone([{ kind: 'media', command: 'next', app: null }, ...pressKeys.actions])).toEqual({
-      ok: false,
-      next: 'Turn off undo: a skipped track cannot be unskipped, and pressed keys cannot be unpressed.',
-    });
-  });
-});
-
-describe('opening and sounds', () => {
-  const openAndPlay: AutomationDef = {
+  const withAntiCheat = (watched: AntiCheatClass): readonly AppSummary[] => [
+    ...apps.map((app) => (app.file === null ? app : { ...app, file: { ...app.file, antiCheat: watched } })),
+    streaming,
+  ];
+  const clicks: AutomationDef = {
     ...pauseMusic,
     actions: [
-      { kind: 'open', target: 'C:\\Tools\\Timer.exe' },
-      { kind: 'sound', file: 'C:\\Sounds\\Ding.wav' },
+      { kind: 'keys', keys: 'Ctrl+Shift+M' },
+      {
+        kind: 'click',
+        app: 'streaming',
+        button: 'left',
+        delivery: 'message',
+        returnFocus: true,
+        at: {
+          kind: 'picture',
+          image: 'click-1.png',
+          windowSize: { width: 1280, height: 720 },
+          search: { x: 0, y: 300, width: 188, height: 120 },
+          press: { x: 62, y: 10 },
+          tolerance: 20,
+        },
+      },
     ],
     undo: false,
   };
+  const build = (draft: Draft, summaries: readonly AppSummary[]): ReturnType<typeof buildAutomation> =>
+    buildAutomation(draft, valueChoices(summaries), 'pause_music', summaries);
 
-  test('round-trip through the editor, whatever the anti-cheat', () => {
-    const draft = toDraft(openAndPlay);
-    expect(draft.actions.map((action) => [action.kind, action.opens, action.sound, action.target, action.app])).toEqual(
-      [
-        ['open', 'C:\\Tools\\Timer.exe', '', 'default', ''],
-        ['sound', '', 'C:\\Sounds\\Ding.wav', 'default', ''],
-      ],
-    );
-    expect(buildAutomation(draft, choices, 'pause_music')).toEqual({ ok: true, automation: openAndPlay });
+  test('round-trips through the editor when neither application has anti-cheat', () => {
+    expect(build(toDraft(clicks), withAntiCheat('none'))).toEqual({ ok: true, automation: clicks });
   });
 
-  test('need a full path or a web link, as typed or copied as a path', () => {
-    const typed = (kind: 'open' | 'sound', text: string): ReturnType<typeof buildAutomation> =>
-      buildAutomation(
-        { ...toDraft(openAndPlay), actions: [{ ...newAction(1, kind), opens: text, sound: text }] },
-        choices,
-        'pause_music',
-      );
-    const opens = (target: string): ReturnType<typeof buildAutomation> => ({
-      ok: true,
-      automation: { ...openAndPlay, actions: [{ kind: 'open', target }] },
-    });
-    expect(typed('open', ' "C:\\Program Files\\Timer\\Timer.exe" ')).toEqual(
-      opens('C:\\Program Files\\Timer\\Timer.exe'),
-    );
-    expect(typed('open', 'd:/notes.txt')).toEqual(opens('d:/notes.txt'));
-    expect(typed('open', ' HTTPS://example.com/timer ')).toEqual(opens('HTTPS://example.com/timer'));
-    expect(typed('open', ' "" ')).toEqual({
+  test("waits for the watched application's anti-cheat to be set to none, saying the first reason", () => {
+    expect(build(toDraft(clicks), withAntiCheat('userMode'))).toEqual({
       ok: false,
-      next: "Enter what action 1 opens: a program's full path, such as C:\\Tools\\Timer.exe, or a web link.",
+      next: "Anti-cheat can treat pressed keys as cheating, so keys are pressed only once Example App's anti-cheat is set to None on the Applications page.",
     });
-    for (const target of [
-      'Timer.exe',
-      'C:Timer.exe',
-      'ftp://example.com',
-      'search-ms:query=x',
-      '\\\\server\\share\\run.bat',
-      'https://',
-      'https://a b',
-    ]) {
-      expect(typed('open', target)).toEqual({
-        ok: false,
-        next: 'Action 1 opens a program or file by its full path, such as C:\\Tools\\Timer.exe, or a link that starts with http:// or https://.',
-      });
-    }
-    expect(typed('sound', '"C:\\Sounds\\Ding.WAV"')).toEqual({
-      ok: true,
-      automation: { ...openAndPlay, actions: [{ kind: 'sound', file: 'C:\\Sounds\\Ding.WAV' }] },
-    });
-    expect(typed('sound', '  ')).toEqual({
-      ok: false,
-      next: 'Enter the full path of the WAV file action 1 plays, such as C:\\Sounds\\Ding.wav.',
-    });
-    for (const file of ['Ding.wav', 'C:\\Sounds\\Ding.mp3', 'https://example.com/ding.wav', '\\\\server\\ding.wav']) {
-      expect(typed('sound', file)).toEqual({
-        ok: false,
-        next: 'Action 1 plays a WAV file by its full path, such as C:\\Sounds\\Ding.wav.',
-      });
-    }
   });
 
-  test('refuse a path or link the runtime would not save', () => {
-    const typed = (kind: 'open' | 'sound', text: string): ReturnType<typeof buildAutomation> =>
-      buildAutomation(
-        { ...toDraft(openAndPlay), actions: [{ ...newAction(1, kind), opens: text, sound: text }] },
-        choices,
-        'pause_music',
-      );
-    const longest = `https://${'a'.repeat(2040)}`;
-    expect(typed('open', longest)).toEqual({
-      ok: true,
-      automation: { ...openAndPlay, actions: [{ kind: 'open', target: longest }] },
-    });
-    expect(typed('open', `${longest}a`)).toEqual({
+  test('cannot be undone, which is said before anti-cheat', () => {
+    expect(build({ ...toDraft(clicks), undo: true }, withAntiCheat('userMode'))).toEqual({
       ok: false,
-      next: 'The path or link in action 1 is too long to save. Shorten it.',
+      next: 'Turn off undo: pressed keys cannot be unpressed, and a click cannot be undone.',
     });
-    for (const kind of ['open', 'sound'] as const) {
-      expect(typed(kind, 'C:\\Sounds\tDing.wav')).toEqual({
-        ok: false,
-        next: 'The path or link in action 1 has a tab or line break in it. Remove it.',
-      });
-    }
   });
 
-  test('cannot be undone', () => {
-    expect(buildAutomation({ ...toDraft(openAndPlay), undo: true }, choices, 'pause_music')).toEqual({
+  test('a click needs a saved application to click in', () => {
+    const draft = toDraft(clicks);
+    const gone = { ...draft, actions: draft.actions.map((action) => ({ ...action, clickApp: 'gone' })) };
+    expect(build(gone, withAntiCheat('none'))).toEqual({
       ok: false,
-      next: 'Turn off undo: what opened stays open, and a played sound cannot be unplayed.',
-    });
-    expect(
-      buildAutomation(
-        {
-          ...toDraft({
-            ...openAndPlay,
-            actions: [
-              { kind: 'media', command: 'next', app: null },
-              { kind: 'keys', keys: 'M' },
-              ...openAndPlay.actions,
-            ],
-          }),
-          undo: true,
-        },
-        choices,
-        'pause_music',
-      ),
-    ).toEqual({
-      ok: false,
-      next: 'Turn off undo: a skipped track cannot be unskipped, pressed keys cannot be unpressed, what opened stays open, and a played sound cannot be unplayed.',
+      next: 'The application action 2 clicks in is not saved. Pick another.',
     });
   });
 });
@@ -542,60 +385,6 @@ describe('buildWhen', () => {
   });
 });
 
-describe('readingText', () => {
-  test('shows numbers as read, flags as yes or no', () => {
-    expect(readingText({ kind: 'number', value: 87 })).toBe('87');
-    expect(readingText({ kind: 'number', value: 12.46 })).toBe('12.46');
-    expect(readingText({ kind: 'number', value: 99.95 })).toBe('99.95');
-    expect(readingText({ kind: 'number', value: 100 / 3 })).toBe('33.3333');
-    expect(readingText({ kind: 'flag', value: true })).toBe('Yes');
-    expect(readingText({ kind: 'flag', value: false }, true)).toBe('No');
-    expect(readingText({ kind: 'state', value: 'Paused' })).toBe('Paused');
-    expect(targetText('none')).toBe('none');
-  });
-
-  test('never rounds a number onto or across the target it is compared with', () => {
-    const close = 99.999_996;
-    expect(readingText({ kind: 'number', value: close })).toBe('100.0000');
-    expect(readingText({ kind: 'number', value: close }, 100)).toBe(String(close));
-    expect(readingText({ kind: 'number', value: close }, 99)).toBe('100.0000');
-    expect(readingText({ kind: 'number', value: 33.333_333_7 }, 33.3333)).toBe('33.3333337');
-    expect(readingText({ kind: 'number', value: 33.333_333_7 }, 33)).toBe('33.3333');
-  });
-});
-
-describe('liveText', () => {
-  const progress = findValue(choices, { app: 'example', value: 'progress' });
-  if (progress === null) {
-    throw new Error('the value exists');
-  }
-  const when = { app: 'example', value: 'progress', is: 'atLeast' as const, target: 100 };
-  const read = (holds: boolean | null) =>
-    ({ kind: 'read', reading: { kind: 'number', value: 99.999_996 }, holds }) as const;
-
-  test('says what the value reads and whether the condition is true', () => {
-    expect(liveText(null, progress, when)).toBe('Looking for Example App…');
-    expect(liveText({ kind: 'waiting' }, progress, when)).toBe('Waiting for Example App to show Progress…');
-    expect(liveText(read(null), progress, null)).toBe('Progress reads 100.0000 now.');
-    expect(liveText(read(false), progress, when)).toBe('Progress reads 99.999996 now, so the condition is not true.');
-    expect(liveText({ ...read(true), reading: { kind: 'number', value: 100 } }, progress, when)).toBe(
-      'Progress reads 100 now, so the condition is true.',
-    );
-    for (const kind of ['problem', 'lost', 'error'] as const) {
-      expect(liveText({ kind, message: 'Resize the window.' }, progress, when)).toBe('Resize the window.');
-    }
-  });
-
-  test('announces only the verdict or what is wrong', () => {
-    expect(liveAnnouncement(null)).toBe('');
-    expect(liveAnnouncement({ kind: 'waiting' })).toBe('');
-    expect(liveAnnouncement(read(null))).toBe('');
-    expect(liveAnnouncement(read(true))).toBe('The condition is true.');
-    expect(liveAnnouncement(read(false))).toBe('The condition is not true.');
-    expect(liveAnnouncement({ kind: 'lost', message: 'The window closed.' })).toBe('The window closed.');
-  });
-});
-
 describe('typed numbers', () => {
   test('a number too large to hold is not a target', () => {
     const progress = findValue(choices, { app: 'example', value: 'progress' });
@@ -604,122 +393,5 @@ describe('typed numbers', () => {
     }
     const draft = { ...EMPTY_DRAFT, source: { app: 'example', value: 'progress' }, number: '9'.repeat(400) };
     expect(buildWhen(draft, progress)).toBe('Enter the number Progress is compared with, such as 90 or 12.5.');
-  });
-});
-
-describe('clicks', () => {
-  const streaming = {
-    id: 'streaming',
-    file: {
-      format: 1,
-      name: 'Streaming app',
-      window: {
-        title: 'Streaming',
-        class: '',
-        executable: 'Streaming.exe',
-        mustMatch: { title: false, class: false },
-        fallback: 'none' as const,
-      },
-      antiCheat: 'none' as const,
-      values: [],
-      references: [],
-      sizeChanges: 'often' as const,
-    },
-    error: null,
-    windows: [],
-    running: null,
-  };
-  const withAntiCheat = (watched: AntiCheatClass, clicked: AntiCheatClass): readonly AppSummary[] => [
-    ...apps.map((app) => (app.file === null ? app : { ...app, file: { ...app.file, antiCheat: watched } })),
-    { ...streaming, file: { ...streaming.file, antiCheat: clicked } },
-  ];
-  const click: AutomationDef = {
-    ...pauseMusic,
-    actions: [
-      {
-        kind: 'click',
-        app: 'streaming',
-        button: 'left',
-        delivery: 'message',
-        returnFocus: true,
-        at: {
-          kind: 'picture',
-          image: 'click-1.png',
-          windowSize: { width: 1280, height: 720 },
-          search: { x: 0, y: 300, width: 188, height: 120 },
-          press: { x: 62, y: 10 },
-          tolerance: 20,
-        },
-      },
-    ],
-    undo: false,
-  };
-
-  test('round-trip through the editor when neither application has anti-cheat', () => {
-    const free = withAntiCheat('none', 'none');
-    expect(buildAutomation(toDraft(click), valueChoices(free), 'pause_music', free)).toEqual({
-      ok: true,
-      automation: click,
-    });
-  });
-
-  test('need an application, a target, and no anti-cheat on either side', () => {
-    const free = withAntiCheat('none', 'none');
-    const draft = toDraft(click);
-    const [first] = draft.actions;
-    if (first === undefined) {
-      throw new Error('one action');
-    }
-    const build = (action: typeof first, summaries: readonly AppSummary[] = free) =>
-      buildAutomation({ ...draft, actions: [action] }, valueChoices(summaries), 'pause_music', summaries);
-    expect(build({ ...first, clickApp: '' })).toEqual({ ok: false, next: 'Pick the application action 1 clicks in.' });
-    expect(build({ ...first, at: null })).toEqual({ ok: false, next: 'Set up where action 1 clicks.' });
-    expect(build({ ...first, clickApp: 'gone' })).toEqual({
-      ok: false,
-      next: 'The application action 1 clicks in is not saved. Pick another.',
-    });
-    expect(build(first, withAntiCheat('none', 'userMode'))).toEqual({
-      ok: false,
-      next: "Streaming app's anti-cheat is user-mode, so AppyTappy cannot click while it runs: anti-cheat can see clicks that AppyTappy makes. A click needs the watched application and the one it clicks in both set to None on the Applications page.",
-    });
-    expect(build(first, withAntiCheat('unknown', 'none'))).toEqual({
-      ok: false,
-      next: "Example App's anti-cheat is not set, so AppyTappy cannot click while it runs: anti-cheat can see clicks that AppyTappy makes. A click needs the watched application and the one it clicks in both set to None on the Applications page.",
-    });
-  });
-
-  test('a click cannot be undone, and names its application', () => {
-    const [action] = click.actions;
-    if (action === undefined) {
-      throw new Error('one action');
-    }
-    expect(undoable(action)).toBe(false);
-    expect(actionText(action, (id) => (id === 'streaming' ? 'Streaming app' : id))).toBe('Left click · Streaming app');
-    const free = withAntiCheat('none', 'none');
-    expect(buildAutomation({ ...toDraft(click), undo: true }, valueChoices(free), 'pause_music', free)).toEqual({
-      ok: false,
-      next: 'Turn off undo: a click cannot be undone.',
-    });
-  });
-
-  test('a new click starts with the left button and the cursor, going back to the window in front, and no target', () => {
-    const action = newAction(3, 'click');
-    expect([action.clickApp, action.button, action.delivery, action.returnFocus, action.at]).toEqual([
-      '',
-      'left',
-      'cursor',
-      true,
-      null,
-    ]);
-  });
-
-  test('a click sent to the window needs no anti-cheat on either side, as a click with the cursor does', () => {
-    for (const delivery of ['cursor', 'message'] as const) {
-      const draft = toDraft({ ...click, actions: click.actions.map((action) => ({ ...action, delivery })) });
-      for (const blocked of [withAntiCheat('none', 'userMode'), withAntiCheat('kernelLevel', 'none')]) {
-        const built = buildAutomation(draft, valueChoices(blocked), 'pause_music', blocked);
-        expect(built.ok ? null : built.next).toContain('so AppyTappy cannot click while it runs');
-      }
-    }
   });
 });
