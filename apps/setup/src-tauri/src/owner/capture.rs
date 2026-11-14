@@ -7,7 +7,7 @@ use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use appytappy_config::app_file::WindowDef;
-use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
+use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image, NextFrame};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
 use crate::check_spec::bar::{self, BarDetection, BarMeasure};
@@ -173,7 +173,7 @@ pub(super) fn start<H: Host>(
             ticket,
             event: to_event(frame),
         });
-        interval
+        NextFrame::After(interval)
     });
     let session = host
         .capture(window, crop, interval, handler)

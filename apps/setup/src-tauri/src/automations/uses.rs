@@ -115,3 +115,64 @@ fn unused<'file>(
         if users.len() == 1 { "it" } else { "them" }
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use crate::automations::test_support::{automations_file, clicking, draft, png, stores};
+    use crate::automations::{list, save};
+
+    #[test]
+    fn a_value_in_use_names_its_automations() {
+        let (stores, folder) = stores("in-use");
+        let unused =
+            |stores: &Stores| check_unused(stores, "example", "icon_visible", "Icon visible");
+        assert_eq!(unused(&stores), Ok(()));
+        save(&stores, None, draft("Pause music")).expect("saves");
+        assert_eq!(
+            unused(&stores),
+            Err("Pause music uses Icon visible. Change or delete it first.".to_owned())
+        );
+        save(&stores, None, draft("Lower volume")).expect("saves");
+        save(&stores, None, draft("Skip ahead")).expect("saves");
+        assert_eq!(
+            unused(&stores),
+            Err(
+                "Pause music, Lower volume and Skip ahead use Icon visible. Change or delete them \
+                 first."
+                    .to_owned()
+            )
+        );
+        assert_eq!(check_unused(&stores, "example", "health", "Health"), Ok(()));
+        fs::write(automations_file(&folder), b"{").expect("breaks");
+        assert!(
+            unused(&stores)
+                .is_err_and(|error| error.starts_with("AppyTappy cannot read your automations"))
+        );
+        assert!(list(&stores).is_err());
+        assert!(save(&stores, None, draft("New")).is_err());
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn an_application_clicked_in_names_its_automations() {
+        let (stores, folder) = stores("clicked-in");
+        let picture = stores.automations.add_picture(&png(4)).expect("adds");
+        let mut clicks = clicking(&stores, "Click", &picture);
+        clicks.when.app = "other".to_owned();
+        let mut file = load(&stores).expect("loads");
+        file.automations.push(clicks);
+        stores.automations.save(&file).expect("saves");
+        assert_eq!(
+            check_app_unused(&stores, "example", "Example App"),
+            Err(
+                "Click uses Example App as the application it clicks in. Change or delete it \
+                 first."
+                    .to_owned()
+            )
+        );
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+}

@@ -547,9 +547,11 @@ fn show(tray: Option<&Tray>, model: &Model, shown: &mut TrayMenu) {
 fn controls(system: &Arc<HostSystem>) -> io::Result<appytappy_actions::HostControls> {
     let system = Arc::clone(system);
     appytappy_actions::HostControls::new(Box::new(move || {
-        system
-            .processes()
-            .map(appytappy_sources::system::executables)
+        let processes = system.processes()?;
+        Ok(processes
+            .into_iter()
+            .map(|process| (process.id, process.executable))
+            .collect())
     }))
 }
 

@@ -10,7 +10,9 @@ use appytappy_config::click::{ClickButton, ClickDelivery, Spot};
 use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::screen::place::Target;
-use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};
+use appytappy_sources::screen::{
+    CaptureSession, Crop, Frame, FrameHandler, Image, NextFrame, Size,
+};
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
 use crate::applications::AppSpec;
@@ -463,7 +465,7 @@ impl Harness {
             received: self.owner.host.clock,
             delay: Duration::ZERO,
         });
-        assert_eq!(handler(frame), interval);
+        assert_eq!(handler(frame), NextFrame::After(interval));
         self.messages.try_recv().expect("handler sent")
     }
 }

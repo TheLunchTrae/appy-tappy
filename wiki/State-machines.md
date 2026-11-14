@@ -462,8 +462,7 @@ the reader frames show), `last` (each value's last reading), `problems`
 another size), `heard` (where the reader gives it back), `seen` (whether
 it sent a reading since it last sent `Unseen`), `failures` (frames in a
 row that failed), `restart` (whether the reader started this capture
-again after the last one ended, and whether a frame came since), `ended` (whether it told the reader
-its capture ended or that handling a frame panicked), and `trace` (what it
+again after the last one ended, and whether a frame came since), and `trace` (what it
 records to, the newest that the reader handed it before the frame).
 
 ```mermaid
@@ -505,9 +504,9 @@ stateDiagram-v2
   `seen` turns true only once a reading was sent and false only once
   `Unseen` was, so a panic between them cannot leave it wrong, and a
   capture that panicked before it sent a reading sends no `Unseen`.
-- **Ended.** The capture can still hand frames to the handler until the reader
-  closes it. The handler reads none of them, so nothing it sends follows
-  `Unseen`.
+- **Ended.** The handler returns `NextFrame::Never`, so the
+  [frame loop](#capture-frame-loop) ends and hands it nothing more before
+  the reader closes the capture, and nothing it sends follows `Unseen`.
 - A frame at another size sends `Unseen` and reads nothing, and the handler
   tells the reader the size with `Resizing` once, not for each frame, so
   nothing is resolved for each frame. Only the reader resolves a size, once
@@ -563,6 +562,8 @@ stateDiagram-v2
     Holding --> Ended: a read cannot follow the window's size, or the device is lost
     Empty --> [*]: Stop
     Holding --> [*]: Stop, the frame is given back
+    Holding --> [*]: the frame is read, and the handler wants no more frames
+    Empty --> [*]: a frame arrives after the wait and is read, and the handler wants no more frames
     Ended --> [*]
 ```
 
@@ -578,11 +579,15 @@ stateDiagram-v2
   frame, has the crop's regions copied, hands the copy to the handler, and
   takes the handler's wait. A wait of 64 ms or more also sets how often the
   system is asked for frames, as [Capture](Screen-regions.md#capture)
-  describes. A handler that returns `NO_MORE_FRAMES`, as a one-frame grab's
-  does, is handed no frame for a day, longer than such a capture runs.
+  describes. A handler that returns `NextFrame::Never`, as a one-frame grab's
+  does once it has its frame, ends the loop, which gives back any frame it
+  holds and returns. The handler hears nothing more, not even a panic in
+  the loop after it. The capture's thread then ends; on Windows it stops the
+  system capture first, and closing the session waits for that thread.
 - **A frame that fails.** A region that lies outside the window's content, or
   a copy the system fails, reaches the handler as that frame's error, and the
-  loop goes on with the wait the handler returns. The
+  loop goes on with the wait the handler returns, or ends if the handler wants
+  no more frames, as the runtime's does after frames keep failing. The
   [frame handler](#frame-handler) counts such frames.
 - **Ended.** Every `HEALTH_CHECK`, 2 seconds, whatever arrives meanwhile, the
   loop asks whether the window is gone and whether the graphics device is

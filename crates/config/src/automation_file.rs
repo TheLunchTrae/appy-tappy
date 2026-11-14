@@ -28,7 +28,7 @@ use crate::action::{
 use crate::anti_cheat::{AntiCheatClass, allows_input};
 use crate::app_file::{AppFile, RegionDef, SizeDef, ValueDef, ValueKind};
 use crate::click::{
-    Area, Click, ClickAt, ClickButton, ClickDelivery, ClickPicture, Corner, InvalidClick, Spot,
+    Click, ClickAt, ClickButton, ClickDelivery, ClickPicture, Corner, InvalidClick, Spot,
 };
 use crate::rule::{Comparison, Condition, Restore, Rule, RuleError};
 use crate::signal::{Number, SignalName, StateName, Value};
@@ -454,12 +454,7 @@ impl ClickAtDef {
             } => ClickAt::Picture(ClickPicture::new(
                 image,
                 (window_size.width, window_size.height),
-                Area {
-                    x: search.x,
-                    y: search.y,
-                    width: search.width,
-                    height: search.height,
-                },
+                *search,
                 (press.x, press.y),
                 *tolerance,
             )?),
@@ -1260,7 +1255,7 @@ mod tests {
                     ClickPicture::new(
                         "click-1.png",
                         (1920, 1080),
-                        Area {
+                        RegionDef {
                             x: 1500,
                             y: 60,
                             width: 180,
