@@ -292,9 +292,12 @@ This page covers what the user guide leaves out.
   `characters` of its own and follows the value's. A value saved without a `pin` keeps none while the
   edit names the side guessed from its region, so an edit that changes
   nothing writes nothing. Two values of an application cannot share a
-  name: names are compared with spaces at either end trimmed and ASCII
-  letters' case ignored, as automations and applications compare theirs, and
-  the refusal quotes the value that has the name. The ID never decides: a
+  name: `AppFile::check` refuses a file in which two values, or two
+  references, have names that match with spaces at either end trimmed and
+  ASCII letters' case ignored, as automations and applications compare
+  theirs. Such a file loads neither in the runtime nor in the setup app, and
+  importing it is refused. Saving refuses the name first and quotes the
+  value that has it. The ID never decides: a
   value keeps its ID when renamed, and a new value whose name makes a taken
   ID, such as a renamed one's old name, a name with no ASCII letter, or one
   that differs from another only past the ID's length, gets that ID with a

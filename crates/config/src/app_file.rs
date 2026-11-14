@@ -932,7 +932,9 @@ impl AppFile {
 
     /// Checks the rules JSON alone cannot: the format version, a name for
     /// the application and each value and reference, a window match that
-    /// passes [`WindowDef::check`], valid and unique IDs, picture file names,
+    /// passes [`WindowDef::check`], valid and unique IDs, no two values and
+    /// no two references whose names match with spaces at either end trimmed
+    /// and the capitals of ASCII letters ignored, picture file names,
     /// at least one sample for a reference, checks that pass
     /// [`CheckDef::check`], and a reading area only for a check that reads
     /// anywhere in its region. Whether a value's pictures and region can be
@@ -952,18 +954,20 @@ impl AppFile {
         }
         self.window.check().map_err(AppFileError::Window)?;
         let mut references = BTreeSet::new();
+        let mut reference_names = BTreeSet::new();
         for reference in &self.references {
             let problem = |problem: String| AppFileError::Reference(reference.id.clone(), problem);
             let id = SignalName::new(&reference.id).map_err(|error| problem(error.to_string()))?;
             if !references.insert(id) {
                 return Err(problem("another reference has the same ID".to_owned()));
             }
-            if named_before(&self.references, reference, |other| &other.name) {
+            if !reference_names.insert(reference.name.trim().to_ascii_lowercase()) {
                 return Err(problem("another reference has the same name".to_owned()));
             }
             check_reference(reference).map_err(problem)?;
         }
         let mut ids = BTreeSet::new();
+        let mut value_names = BTreeSet::new();
         for value in &self.values {
             let id = SignalName::new(&value.id)
                 .map_err(|error| AppFileError::Value(value.id.clone(), error.to_string()))?;
@@ -973,7 +977,7 @@ impl AppFile {
                     "another value has the same ID".to_owned(),
                 ));
             }
-            if named_before(&self.values, value, |other| &other.name) {
+            if !value_names.insert(value.name.trim().to_ascii_lowercase()) {
                 return Err(AppFileError::Value(
                     value.id.clone(),
                     "another value has the same name".to_owned(),
@@ -983,17 +987,6 @@ impl AppFile {
         }
         Ok(())
     }
-}
-
-/// Whether an item listed before `item` in `items` has its name, ignoring
-/// spaces at either end and the capitals of ASCII letters, as the setup app
-/// compares names when it saves one.
-fn named_before<T>(items: &[T], item: &T, name: impl Fn(&T) -> &String) -> bool {
-    let own = name(item).trim();
-    items
-        .iter()
-        .take_while(|other| !std::ptr::eq(*other, item))
-        .any(|other| name(other).trim().eq_ignore_ascii_case(own))
 }
 
 /// Checks one reference's rules, answering the problem as a sentence.
