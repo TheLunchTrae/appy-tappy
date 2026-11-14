@@ -1369,6 +1369,13 @@ feed this state: the refresh that follows the save checks the processes
 itself, and a runtime that missed the signal reads the saved files
 when it starts.
 
+#### Open problems
+
+- [#440](https://github.com/TheLunchTrae/appy-tappy/issues/440): the process
+  list holds every signed-in Windows user's processes, so another user's
+  runtime reads as **Runs** and hides the warning while this user's runtime
+  is stopped.
+
 ### Application import
 
 **Import** on the Applications page (`apps/setup/src/lib/sharing.ts`, drawn by
