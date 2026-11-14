@@ -1,12 +1,12 @@
 // Recording a region on the capture screen: its readings, their pictures, and its commands.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 
 import type { ExampleSpec, PinDef, RecordingSettings, RecordingView } from './bindings.ts';
 import { discardRecording, recordedReading, recordingState, startRecording } from './api.ts';
 import type { Picture } from './pixels.ts';
 import { background } from './repeat.ts';
-import { type Crops, NO_CROPS, withCrop } from './review.ts';
+import { type CropAsks, type Crops, cropAskFailed, cropsToAsk, NO_CROP_ASKS, NO_CROPS, withCrop } from './review.ts';
 import { useRecorder } from './useRecorder.ts';
 
 /** Whether the recording's state still changes: it records, or the text reader is still reading a reading. */
@@ -16,6 +16,9 @@ function stillRead(view: RecordingView): boolean {
 
 /** The widest a recorded reading is asked for: a region is small, and review shows it a few times larger. */
 const CROP_WIDTH = 480;
+
+/** How long a reading whose picture could not be fetched waits before it is asked for again. */
+const CROP_RETRY_MS = 1000;
 
 /**
  * What a recording records: a region drawn on a screenshot of `app`'s window, read with the characters' color and
@@ -59,31 +62,37 @@ export function useRecording(): {
   // Each recorded reading's pixels, for the recording they belong to.
   const [crops, setCrops] = useState<Crops>(NO_CROPS);
 
-  // Fetches the pixels of each reading that has none yet, once.
-  const asked = useRef<{ id: number; readings: Set<number> }>({ id: -1, readings: new Set() });
+  // Fetches the pixels of each reading that has none yet, once, and again after a pause when the ask fails, up to
+  // `CROP_TRIES` asks in all.
+  const asked = useRef<CropAsks>(NO_CROP_ASKS);
+  const [retries, retry] = useReducer((count: number) => count + 1, 0);
   const readingCount = view?.readings.length ?? 0;
   const recordingId = view?.id ?? null;
   useEffect(() => {
     if (recordingId === null) {
       return;
     }
-    if (asked.current.id !== recordingId) {
-      asked.current = { id: recordingId, readings: new Set() };
-    }
-    for (let index = 0; index < readingCount; index += 1) {
-      if (asked.current.readings.has(index)) {
-        continue;
-      }
-      asked.current.readings.add(index);
-      background(
-        recordedReading(recordingId, index, CROP_WIDTH).then((picture) => {
+    const { asks, indexes } = cropsToAsk(asked.current, recordingId, readingCount);
+    asked.current = asks;
+    for (const index of indexes) {
+      const ask = async (): Promise<void> => {
+        try {
+          const picture = await recordedReading(recordingId, index, CROP_WIDTH);
           if (picture !== null) {
             setCrops((current) => withCrop(current, asked.current.id, recordingId, index, picture));
           }
-        }),
-      );
+        } catch (error: unknown) {
+          const failed = cropAskFailed(asked.current, recordingId, index);
+          asked.current = failed.asks;
+          if (failed.retry) {
+            setTimeout(retry, CROP_RETRY_MS);
+          }
+          throw error;
+        }
+      };
+      background(ask());
     }
-  }, [recordingId, readingCount]);
+  }, [recordingId, readingCount, retries]);
 
   // The owner refuses to go on with other settings rather than start over,
   // so kept readings and review edits are never dropped without a discard.
