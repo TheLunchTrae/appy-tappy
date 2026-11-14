@@ -1068,15 +1068,19 @@ saved file is held to and takes nothing else from it:
   each reference, as the runtime does and as saving a value does, so a file
   with a value the runtime could not read is refused.
 
-`Shared::of` holds an application to the same rules, and `pack` reads back
-what it packed with `unpack` and refuses what that refuses, such as an
+`pack` holds an application to the same rules as it exports it. It packs
+each picture as it reads it and stops at the first that takes what the zip
+file holds past `MAX_SHARED_BYTES`, so it reads no picture after that one,
+and it reads no picture beyond one byte past `MAX_SHARED_BYTES`. It then reads
+back what it packed with `unpack` and refuses what that refuses, such as an
 application whose pictures hold more bytes or pixels than an import reads.
 So an application that AppyTappy exports is one it imports; a property test
 packs and unpacks generated definitions. A refused export says what to
 change when the pixels are the cause.
 
 `import_app` unpacks the bytes again and saves the application with
-`AppStore::create`. It makes the folder under a new ID from `new_app_id`,
+`AppStore::create`, as saving a new application in the application editor
+does. It makes the folder under a new ID from `new_app_id`,
 never writes into one that is there, and removes it again when the save fails.
 When the ID's name is taken by something the store does not list, a file or on
 Windows a folder that differs only in case, it takes the next ID, and gives up

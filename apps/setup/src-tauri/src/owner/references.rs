@@ -88,8 +88,9 @@ impl<H: Host> Owner<H> {
     /// Keeps the saved reference `reference` as read now, so the asks about
     /// the characters that add to it, a few for each edit in its editor,
     /// read its application's file and its pictures once. It stays until
-    /// an application is written, which [`Owner::write_app`] says, or
-    /// another reference is kept. One that cannot be read whole, with every
+    /// an existing application is written or removed, which
+    /// [`Owner::write_app`] says, or another reference is kept; a new
+    /// application has none kept. One that cannot be read whole, with every
     /// sample's picture, is not kept, so each ask reads it again and says
     /// what is wrong once that changed. `None`, a new reference, keeps what
     /// is kept.

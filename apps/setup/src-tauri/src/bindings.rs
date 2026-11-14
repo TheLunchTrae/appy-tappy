@@ -112,6 +112,8 @@ fn page_file(name: &str) -> PathBuf {
 /// reads.
 trait Wire {
     type Rust;
+    /// How the page sends it as an argument.
+    const SENT: Sent = Sent::Json;
     fn ts(cfg: &Config) -> String;
     fn visit(found: &mut Declarations<'_>);
 }
@@ -150,20 +152,27 @@ impl Wire for Bytes {
 }
 
 /// A file that the page sends as a command's raw body, with a `T` about it
-/// in a header, rather than as JSON.
+/// in a header, rather than as JSON. Its TypeScript type is the `T`'s.
 impl<T: TS + 'static> Wire for Upload<T> {
     type Rust = Self;
+    const SENT: Sent = Sent::Upload;
     fn ts(cfg: &Config) -> String {
-        format!("{UPLOAD}{}>", T::ts(cfg))
+        T::ts(cfg)
     }
     fn visit(found: &mut Declarations<'_>) {
         found.visit::<T>();
     }
 }
 
-/// How the TypeScript type of an [`Upload`] starts, before what is said
-/// about the file.
-const UPLOAD: &str = "Upload<";
+/// How the page sends a command's argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sent {
+    /// As JSON, under the argument's name.
+    Json,
+    /// As the command's raw body, with what is said about it in a header,
+    /// which only a command's only argument can be.
+    Upload,
+}
 
 /// A `u64` that the page sends and reads as a number, such as a window's
 /// handle or a watch's number, which stay far below 2^53.
@@ -195,12 +204,19 @@ struct Command {
     name: &'static str,
     /// The page's doc comment, a line at a time.
     docs: Vec<&'static str>,
-    /// Each argument's name and TypeScript type.
-    args: Vec<(&'static str, String)>,
+    args: Vec<Arg>,
     /// The answer's TypeScript type.
     answer: String,
     /// Visits the types of its arguments and answer.
     visit: fn(&mut Declarations<'_>),
+}
+
+/// One argument of a command.
+struct Arg {
+    name: &'static str,
+    /// Its TypeScript type, or that of what is said about an upload.
+    ts: String,
+    sent: Sent,
 }
 
 /// Returns `command`, a future answering `Result<T, String>`, so the
@@ -225,7 +241,11 @@ fn commands(cfg: &Config) -> Vec<Command> {
                     module: stringify!($module),
                     name: stringify!($name),
                     docs: vec![$($doc),*],
-                    args: vec![$((stringify!($arg), <$ty as Wire>::ts(cfg))),*],
+                    args: vec![$(Arg {
+                        name: stringify!($arg),
+                        ts: <$ty as Wire>::ts(cfg),
+                        sent: <$ty as Wire>::SENT,
+                    }),*],
                     answer: <$answer as Wire>::ts(cfg),
                     visit: |found: &mut Declarations<'_>| {
                         $(<$ty as Wire>::visit(found);)*
@@ -345,7 +365,7 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
         let types = command
             .args
             .iter()
-            .map(|(_name, ts)| ts)
+            .map(|arg| &arg.ts)
             .chain([&command.answer]);
         for ts in types {
             imported.extend(
@@ -354,17 +374,28 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
             );
         }
         let upload = match command.args.as_slice() {
-            [(_name, ts)] => ts
-                .strip_prefix(UPLOAD)
-                .and_then(|about| about.strip_suffix('>')),
-            _ => None,
+            [
+                Arg {
+                    sent: Sent::Upload,
+                    ts,
+                    ..
+                },
+            ] => Some(ts),
+            args => {
+                assert!(
+                    args.iter().all(|arg| arg.sent == Sent::Json),
+                    "{} sends a file beside other arguments; an upload is a command's only one",
+                    command.name
+                );
+                None
+            },
         };
         let parameters = upload.map_or_else(
             || {
                 command
                     .args
                     .iter()
-                    .map(|(name, ts)| format!("{}: {ts}", camel(name)))
+                    .map(|arg| format!("{}: {}", camel(arg.name), arg.ts))
                     .collect::<Vec<_>>()
                     .join(", ")
             },
@@ -373,7 +404,7 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
         let keys = command
             .args
             .iter()
-            .map(|(name, _ts)| camel(name))
+            .map(|arg| camel(arg.name))
             .collect::<Vec<_>>();
         let call = if upload.is_some() {
             format!(
@@ -1110,7 +1141,7 @@ fn bindings_match_the_rust_types() {
 #[test]
 fn the_command_table_names_each_argument_as_its_command_does() {
     for command in commands(&Config::new()) {
-        let table: Vec<&str> = command.args.iter().map(|(name, _ts)| *name).collect();
+        let table: Vec<&str> = command.args.iter().map(|arg| arg.name).collect();
         assert_eq!(
             parameters(command.module, command.name),
             table,

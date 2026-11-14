@@ -18,9 +18,10 @@
 //! name the setup app gives it, whatever the file calls it, so no two
 //! values or references share a picture and a later save in the setup app
 //! replaces only its own.
-//! [`Shared::of`] holds an application to the same rules before it is
-//! exported, and [`Shared::pack`] reads back what it packed, so a file
-//! AppyTappy exports is one it imports.
+//! [`pack`] holds a saved application to the same rules as it exports it:
+//! it stops at the first picture that takes the zip file past
+//! [`MAX_SHARED_BYTES`], and reads back what it packed, so a file AppyTappy
+//! exports is one it imports.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -54,25 +55,55 @@ pub(crate) struct Shared {
     pictures: BTreeMap<String, Vec<u8>>,
 }
 
-impl Shared {
-    /// The saved application `app` as it is shared.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ShareError`] when a picture its file names is missing or
-    /// cannot be read, or a value or a reference cannot be read as saved.
-    pub(crate) fn of(app: &SavedApp) -> Result<Self, ShareError> {
-        Self::new(app.file.clone(), |name| {
-            app.picture(name).map_err(|source| {
-                if source.kind() == io::ErrorKind::NotFound {
-                    ShareError::NoPicture(name.to_owned())
-                } else {
-                    ShareError::Read(source)
-                }
-            })
+/// The bytes of the zip file that shares the saved application `app`,
+/// which [`Shared::unpack`] reads back.
+///
+/// # Errors
+///
+/// Returns a [`ShareError`] when a picture its file names is missing or
+/// cannot be read, when packing fails, or when [`Shared::unpack`] would
+/// refuse the file, such as one that holds more than [`MAX_SHARED_BYTES`].
+pub(crate) fn pack(app: &SavedApp) -> Result<Vec<u8>, ShareError> {
+    pack_with(app.file.clone(), |name, most| {
+        app.picture_within(name, most).map_err(|source| {
+            if source.kind() == io::ErrorKind::NotFound {
+                ShareError::NoPicture(name.to_owned())
+            } else {
+                ShareError::Read(source)
+            }
         })
-    }
+    })
+}
 
+/// The bytes of the zip file that shares `file` with the pictures `picture`
+/// answers, packed as they are read. `picture` is told the most bytes a
+/// whole export holds, so it reads no picture past one byte more than that.
+/// A file past [`MAX_SHARED_BYTES`] is refused at the picture that takes it
+/// there, so no picture after it is read.
+fn pack_with(
+    mut file: AppFile,
+    mut picture: impl FnMut(&str, u64) -> Result<Vec<u8>, ShareError>,
+) -> Result<Vec<u8>, ShareError> {
+    let most = u64::try_from(MAX_SHARED_BYTES).unwrap_or(u64::MAX);
+    let mut zip = ZipPack::new();
+    let mut budget = MAX_SHARED_BYTES;
+    let mut add = |name: &str, bytes: &[u8]| {
+        budget = budget
+            .checked_sub(bytes.len())
+            .ok_or(ShareError::TooLarge)?;
+        zip.add(name, bytes).map_err(ShareError::Pack)
+    };
+    share(
+        &mut file,
+        |name| picture(name, most),
+        |name, bytes| add(&name, &bytes),
+    )?;
+    add(APP_FILE, file.to_json().as_bytes())?;
+    let packed = zip.finish().map_err(ShareError::Pack)?;
+    Shared::unpack(&packed).map(|_read| packed)
+}
+
+impl Shared {
     /// Reads a shared file's bytes.
     ///
     /// # Errors
@@ -103,93 +134,21 @@ impl Shared {
     }
 
     /// `file`, which passed [`AppFile::check`], as it is shared, with the
-    /// pictures `picture` answers for the names in it, once every value and
-    /// reference reads from them as the runtime would read it.
+    /// pictures `picture` answers for the names in it, as [`share`] takes
+    /// them, once every value and reference reads from them as the runtime
+    /// would read it.
     ///
-    /// Each picture is asked for once for each place that names it and
-    /// takes that place's own name: a sample's as [`sample_name`] numbers
-    /// them, a state's as [`state_image_name`] does, with a fix's pictures
-    /// in the set of its place among the fixes. A file made elsewhere can
-    /// name a picture anything a folder can hold, such as another value's
-    /// next picture, which a later save would overwrite.
-    ///
-    /// Each picture's size is read from its header as it is taken, and none
-    /// is decoded unless all of them together hold no more pixels than
-    /// [`LARGEST_PICTURE`]: a picture's pixels cost many times the bytes of
-    /// a file that compresses them, so the file's own limit bounds none.
-    /// Reading the values then decodes each picture once: each has one
-    /// place that names it, and [`read_all`] builds each reference's reader
-    /// once.
+    /// Reading the values decodes each picture once: each has one place
+    /// that names it, and [`read_all`] builds each reference's reader once.
     fn new(
         mut file: AppFile,
-        mut picture: impl FnMut(&str) -> Result<Vec<u8>, ShareError>,
+        picture: impl FnMut(&str) -> Result<Vec<u8>, ShareError>,
     ) -> Result<Self, ShareError> {
-        file.overlay = None;
-        // A shared file says that its maker imported a value or a
-        // reference, and not from which file of theirs.
-        for origin in file.origins_mut() {
-            if let OriginDef::Imported { file: from } = origin {
-                from.clear();
-            }
-        }
         let mut pictures = BTreeMap::new();
-        let mut held = 0_u64;
-        let mut take = |image: &mut String,
-                        name: String,
-                        owner: &dyn Fn(SavedError) -> ShareError|
-         -> Result<(), ShareError> {
-            let bytes = picture(image)?;
-            let size = Image::png_size(&bytes).map_err(|source| {
-                owner(SavedError::Picture {
-                    name: image.clone(),
-                    source,
-                })
-            })?;
-            held = held.saturating_add(size.pixels());
-            if held > LARGEST_PICTURE.pixels() {
-                return Err(ShareError::TooManyPixels);
-            }
-            pictures.insert(name.clone(), bytes);
-            *image = name;
+        share(&mut file, picture, |name, bytes| {
+            pictures.insert(name, bytes);
             Ok(())
-        };
-        for reference in &mut file.references {
-            let owner = |source| ShareError::Reference {
-                name: reference.name.clone(),
-                source,
-            };
-            for (sample, number) in reference.samples.iter_mut().zip(1..) {
-                take(
-                    &mut sample.image,
-                    sample_name(&reference.id, number),
-                    &owner,
-                )?;
-            }
-        }
-        for value in &mut file.values {
-            let owner = |source| ShareError::Value {
-                name: value.name.clone(),
-                source,
-            };
-            if let CheckDef::State { states, .. } = &mut value.screen.check {
-                for (state, number) in states.iter_mut().zip(1..) {
-                    take(
-                        &mut state.image,
-                        state_image_name(&value.id, None, number),
-                        &owner,
-                    )?;
-                }
-            }
-            for (fix, set) in value.screen.fixes.iter_mut().zip(1..) {
-                for (image, number) in fix.images.iter_mut().zip(1..) {
-                    take(
-                        image,
-                        state_image_name(&value.id, Some(set), number),
-                        &owner,
-                    )?;
-                }
-            }
-        }
+        })?;
         read_all(&file, |name| {
             pictures
                 .get(name)
@@ -197,24 +156,6 @@ impl Shared {
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
         })?;
         Ok(Self { file, pictures })
-    }
-
-    /// The bytes of the zip file that [`Shared::unpack`] reads back.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ShareError`] when packing fails, or when
-    /// [`Shared::unpack`] would refuse the file, such as one that holds
-    /// more than [`MAX_SHARED_BYTES`].
-    pub(crate) fn pack(&self) -> Result<Vec<u8>, ShareError> {
-        let mut zip = ZipPack::new();
-        zip.add(APP_FILE, self.file.to_json().as_bytes())
-            .map_err(ShareError::Pack)?;
-        for (name, bytes) in &self.pictures {
-            zip.add(name, bytes).map_err(ShareError::Pack)?;
-        }
-        let packed = zip.finish().map_err(ShareError::Pack)?;
-        Self::unpack(&packed).map(|_read| packed)
     }
 
     /// The application's file.
@@ -226,6 +167,95 @@ impl Shared {
     pub(crate) fn into_parts(self) -> (AppFile, Pictures) {
         (self.file, self.pictures.into_iter().collect())
     }
+}
+
+/// Readies `file`, which passed [`AppFile::check`], to share: leaves out
+/// the overlay and the names of the files its values and references were
+/// imported from, and hands `keep` each picture `picture` answers for the
+/// names in it.
+///
+/// Each picture is asked for once for each place that names it and takes
+/// that place's own name: a sample's as [`sample_name`] numbers them, a
+/// state's as [`state_image_name`] does, with a fix's pictures in the set
+/// of its place among the fixes. A file made elsewhere can name a picture
+/// anything a folder can hold, such as another value's next picture, which
+/// a later save would overwrite.
+///
+/// Each picture's size is read from its header as it is taken, and none is
+/// kept once all of them together hold more pixels than
+/// [`LARGEST_PICTURE`]: a picture's pixels cost many times the bytes of a
+/// file that compresses them, so the file's own limit bounds none.
+fn share(
+    file: &mut AppFile,
+    mut picture: impl FnMut(&str) -> Result<Vec<u8>, ShareError>,
+    mut keep: impl FnMut(String, Vec<u8>) -> Result<(), ShareError>,
+) -> Result<(), ShareError> {
+    file.overlay = None;
+    // A shared file says that its maker imported a value or a
+    // reference, and not from which file of theirs.
+    for origin in file.origins_mut() {
+        if let OriginDef::Imported { file: from } = origin {
+            from.clear();
+        }
+    }
+    let mut held = 0_u64;
+    let mut take = |image: &mut String,
+                    name: String,
+                    owner: &dyn Fn(SavedError) -> ShareError|
+     -> Result<(), ShareError> {
+        let bytes = picture(image)?;
+        let size = Image::png_size(&bytes).map_err(|source| {
+            owner(SavedError::Picture {
+                name: image.clone(),
+                source,
+            })
+        })?;
+        held = held.saturating_add(size.pixels());
+        if held > LARGEST_PICTURE.pixels() {
+            return Err(ShareError::TooManyPixels);
+        }
+        keep(name.clone(), bytes)?;
+        *image = name;
+        Ok(())
+    };
+    for reference in &mut file.references {
+        let owner = |source| ShareError::Reference {
+            name: reference.name.clone(),
+            source,
+        };
+        for (sample, number) in reference.samples.iter_mut().zip(1..) {
+            take(
+                &mut sample.image,
+                sample_name(&reference.id, number),
+                &owner,
+            )?;
+        }
+    }
+    for value in &mut file.values {
+        let owner = |source| ShareError::Value {
+            name: value.name.clone(),
+            source,
+        };
+        if let CheckDef::State { states, .. } = &mut value.screen.check {
+            for (state, number) in states.iter_mut().zip(1..) {
+                take(
+                    &mut state.image,
+                    state_image_name(&value.id, None, number),
+                    &owner,
+                )?;
+            }
+        }
+        for (fix, set) in value.screen.fixes.iter_mut().zip(1..) {
+            for (image, number) in fix.images.iter_mut().zip(1..) {
+                take(
+                    image,
+                    state_image_name(&value.id, Some(set), number),
+                    &owner,
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Reads each value of `file` and each of its references, as the runtime
@@ -777,10 +807,43 @@ mod tests {
             assert_eq!(name, image);
             Ok(large.clone())
         };
-        let shared = Shared::new(file, held).expect("each value reads");
+        Shared::new(file.clone(), held).expect("each value reads");
         assert_eq!(
-            shared.pack().expect_err("too large to import").to_string(),
+            pack_with(file, |name, _most| held(name))
+                .expect_err("too large to import")
+                .to_string(),
             "it holds more than 16 MB"
+        );
+    }
+
+    #[test]
+    fn no_picture_is_read_past_the_most_an_export_holds() {
+        let mut file = app("Example App");
+        let mut pictures = BTreeMap::new();
+        for (id, more) in [
+            ("first", MAX_SHARED_BYTES / 2),
+            ("second", MAX_SHARED_BYTES / 2),
+            ("third", 0),
+        ] {
+            let (value, image) = state_value(id, 2, 2);
+            file.values.push(value);
+            pictures.insert(image, padded(&png(2, 2, [0, 0, 255, 255]), more));
+        }
+        let mut asked = Vec::new();
+        let refused = pack_with(file, |name, most| {
+            assert_eq!(most, 16 * 1024 * 1024, "no picture is read past the most");
+            asked.push(name.to_owned());
+            Ok(pictures[name].clone())
+        })
+        .expect_err("too large to export");
+        assert_eq!(refused.to_string(), "it holds more than 16 MB");
+        assert_eq!(
+            asked,
+            [
+                state_image_name("first", None, 1),
+                state_image_name("second", None, 1)
+            ],
+            "the third picture is never read"
         );
     }
 
@@ -968,9 +1031,9 @@ mod tests {
     }
 
     prop_compose! {
-        /// A definition that can be shared: a few state values, each with a
-        /// picture of its own size and pixels, and a reference or none with
-        /// a few samples.
+        /// A definition that can be shared and its pictures by name: a few
+        /// state values, each with a picture of its own size and pixels,
+        /// and a reference or none with a few samples.
         fn shared()(
             name in "[A-Za-z][A-Za-z0-9 ]{0,20}",
             pictures in prop::collection::vec((1_u32..6, 1_u32..6, any::<[u8; 3]>()), 0..4),
@@ -987,7 +1050,7 @@ mod tests {
                 AntiCheatDef::KernelLevel,
                 AntiCheatDef::Unknown,
             ]),
-        ) -> Shared {
+        ) -> (AppFile, BTreeMap<String, Vec<u8>>) {
             let mut file = app(&name);
             file.anti_cheat = anti_cheat;
             file.checked = checked.map(|(size, at, version)| CheckedDef {
@@ -1009,15 +1072,16 @@ mod tests {
                 }
                 file.references.push(reference);
             }
-            Shared::new(file, |name| Ok(held[name].clone()))
-                .expect("every value reads")
+            (file, held)
         }
     }
 
     proptest! {
         #[test]
-        fn what_is_packed_unpacks_as_it_was(shared in shared()) {
-            let packed = shared.pack().expect("packs");
+        fn what_is_packed_unpacks_as_it_is_shared((file, held) in shared()) {
+            let shared = Shared::new(file.clone(), |name| Ok(held[name].clone()))
+                .expect("every value reads");
+            let packed = pack_with(file, |name, _most| Ok(held[name].clone())).expect("packs");
             prop_assert_eq!(Shared::unpack(&packed).expect("unpacks"), shared);
         }
     }
