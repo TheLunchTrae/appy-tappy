@@ -16,10 +16,11 @@ that someone else set up.
   of open windows, and choose what has to match to
   [find it again](#how-appytappy-finds-the-window). Give it a name, answer
   [how often its window changes size](#how-often-the-window-changes-size),
-  and select **Save application**, or **Save as draft** to finish it later
-  ([Drafts](Drafts.md)).
+  set its [anti-cheat](#anti-cheat), and select **Save application**, or
+  **Save as draft** to finish it later ([Drafts](Drafts.md)).
 - **Change.** Select **Edit** on its row to change its name, how its window
-  is found, or how often it changes size. Its values stay as they are.
+  is found, how often it changes size, or its anti-cheat. Its values stay as
+  they are.
 - **Remove.** Select **Remove** on its row and confirm. Its values go with it.
   An application whose values an automation uses can't be removed until that
   automation is changed or deleted.
@@ -151,7 +152,9 @@ so AppyTappy presses keys only into an application whose anti-cheat is set to
 **None**, and clicks only when the watched application and the one it clicks
 in are both set to **None**.
 
-Set it in the **Anti-cheat** menu on the Applications page:
+Set it in the **Anti-cheat** menu on the application's row on the
+Applications page, or in the **Anti-cheat** menu where you add or edit the
+application:
 
 - **Not set.** Every new application starts here. Key presses and clicks are
   blocked.
@@ -167,9 +170,11 @@ AppyTappy asks you to confirm before it sets **None**.
 > an application with anti-cheat, or clicking in one, can get your account
 > banned.
 
-Changing the setting takes effect at once: automations that press keys into
-the application, or click while it runs, stop when you move it away from
-**None**.
+On the Applications page, changing the setting takes effect at once. Where
+you add or edit the application, it takes effect when you select
+**Save application**, and **Cancel** leaves it as it was. Automations that
+press keys into the application, or click while it runs, stop when you move
+it away from **None**.
 
 ## Overlay
 

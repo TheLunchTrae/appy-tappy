@@ -1,9 +1,10 @@
 //! Adding, changing, and removing applications.
 //!
-//! The Applications page is the one place an application is made, renamed,
-//! told how to find its window and how often that window changes size, or
-//! removed. A new application starts with no
-//! values; the Values page adds them to an application saved here.
+//! The application editor makes an application, or renames one and changes
+//! how its window is found, how often that window changes size, and its
+//! anti-cheat class; the Applications page sets the class too and removes an
+//! application. A new application starts with no values; the Values page adds
+//! them to an application saved here.
 
 use appytappy_config::app_file::{AppFile, FORMAT, SizeChangesDef, WindowDef, WindowDefError};
 
@@ -14,8 +15,8 @@ use serde::Deserialize;
 use crate::automations;
 use crate::stores::Stores;
 
-/// An application's name, how to find its window, and how often that window
-/// changes size, as the editor sends them.
+/// An application's name, how to find its window, how often that window
+/// changes size, and its anti-cheat class, as the editor sends them.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -27,6 +28,11 @@ pub(crate) struct AppSpec {
     /// How often its window changes size, which decides whether its values
     /// scale to sizes they were not drawn at.
     pub(crate) size_changes: SizeChangesDef,
+    /// The anti-cheat class picked in the editor, or `None` to keep the
+    /// saved one, which a new application starts at unknown. The editor
+    /// sends a class only when it was picked there, so a save leaves a class
+    /// set on the Applications page since the editor opened as it is.
+    pub(crate) anti_cheat: Option<AntiCheatClass>,
 }
 
 /// The file `spec` makes of the application `existing`, or of a new
@@ -85,6 +91,9 @@ pub(crate) fn apply(
     }
     file.window = spec.window;
     file.size_changes = spec.size_changes;
+    if let Some(class) = spec.anti_cheat {
+        file.anti_cheat = class;
+    }
     Ok(file)
 }
 
@@ -187,6 +196,7 @@ mod tests {
                 executable,
             }),
             size_changes: SizeChangesDef::Often,
+            anti_cheat: None,
         }
     }
 
@@ -215,6 +225,42 @@ mod tests {
             save(&stores, None, spec("Second", "Example.exe")),
             Ok("example-2".to_owned())
         );
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn the_editor_sets_the_anti_cheat_class_only_when_it_picked_one() {
+        let (stores, folder) = stores("anti-cheat");
+        let class = |id: &str| {
+            stores
+                .apps
+                .load()
+                .expect("loads")
+                .into_iter()
+                .find(|app| app.id == id)
+                .map(|app| app.file.expect("readable").anti_cheat)
+        };
+        let mut picked = spec("Example App", "Example.exe");
+        picked.anti_cheat = Some(AntiCheatClass::None);
+        let id = save(&stores, None, picked).expect("saves");
+        assert_eq!(class(&id), Some(AntiCheatClass::None));
+
+        // A class set on the Applications page stays when the editor saves
+        // without picking one.
+        let mut file =
+            apply(&stores, Some(&id), spec("Example App", "Example.exe")).expect("applies");
+        file.anti_cheat = AntiCheatClass::KernelLevel;
+        stores.apps.save(&id, &file, &[]).expect("sets the class");
+        assert_eq!(
+            save(&stores, Some(&id), spec("Renamed", "Example.exe")),
+            Ok(id.clone())
+        );
+        assert_eq!(class(&id), Some(AntiCheatClass::KernelLevel));
+
+        let mut picked = spec("Renamed", "Example.exe");
+        picked.anti_cheat = Some(AntiCheatClass::UserMode);
+        assert_eq!(save(&stores, Some(&id), picked), Ok(id.clone()));
+        assert_eq!(class(&id), Some(AntiCheatClass::UserMode));
         fs::remove_dir_all(folder).expect("clean up");
     }
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { clickBlocked, keysBlocked } from '../src/lib/antiCheat.ts';
+import { clickBlocked, keysBlocked, pickedAntiCheat, shownAntiCheat } from '../src/lib/antiCheat.ts';
 
 describe('input is sent only where anti-cheat is none', () => {
   const free = { name: 'Notes', antiCheat: 'none' } as const;
@@ -31,5 +31,26 @@ describe('input is sent only where anti-cheat is none', () => {
     expect(
       clickBlocked({ name: 'Example App', antiCheat: 'unknown' }, { name: 'Streaming app', antiCheat: 'userMode' }),
     ).toBe(blocked("Example App's anti-cheat is not set"));
+  });
+});
+
+describe('the application editor asks about anti-cheat too', () => {
+  test('a new application shows not set until a class is picked', () => {
+    expect(shownAntiCheat(null, null)).toBe('unknown');
+    expect(shownAntiCheat('none', null)).toBe('none');
+    expect(pickedAntiCheat('unknown', null)).toBeNull();
+    expect(pickedAntiCheat('none', null)).toBe('none');
+  });
+
+  test('a saved application shows its class, and picking that class again sends none', () => {
+    expect(shownAntiCheat(null, 'kernelLevel')).toBe('kernelLevel');
+    expect(shownAntiCheat('userMode', 'kernelLevel')).toBe('userMode');
+    expect(pickedAntiCheat('kernelLevel', 'kernelLevel')).toBeNull();
+    expect(pickedAntiCheat('none', 'kernelLevel')).toBe('none');
+  });
+
+  test("a draft's class that the Applications page has set since counts as not picked", () => {
+    expect(pickedAntiCheat('none', 'none')).toBeNull();
+    expect(pickedAntiCheat(null, 'none')).toBeNull();
   });
 });

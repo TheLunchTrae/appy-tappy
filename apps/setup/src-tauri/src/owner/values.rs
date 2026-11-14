@@ -382,6 +382,7 @@ mod tests {
                         executable: "Example.exe",
                     }),
                     size_changes: appytappy_config::app_file::SizeChangesDef::Often,
+                    anti_cheat: None,
                 }
             )),
             Err(NO_STORE.to_owned())

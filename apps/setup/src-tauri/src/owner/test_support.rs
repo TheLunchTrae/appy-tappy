@@ -555,6 +555,7 @@ pub(super) fn example_app(size_changes: SizeChangesDef) -> AppSpec {
             executable: "Example.exe",
         }),
         size_changes,
+        anti_cheat: None,
     }
 }
 

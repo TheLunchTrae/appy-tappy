@@ -10,7 +10,7 @@ import { deleteDraft, errorText, saveDraft } from './api.ts';
  * The shape of what each flow keeps in a draft. A draft that keeps another shape was saved by another version of
  * AppyTappy Setup, and cannot be finished in this one.
  */
-export const DRAFT_FORMAT = 3;
+export const DRAFT_FORMAT = 4;
 
 /** What a flow keeps in a draft: its own state, marked with the format and the kind of flow that reads it. */
 export interface Kept<Kind extends DraftKind, State> {

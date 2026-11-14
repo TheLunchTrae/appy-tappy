@@ -46,3 +46,20 @@ export function clickBlocked(watched: Guarded, clicked: Guarded | null): string 
     ? null
     : `${blocking.name}'s anti-cheat is ${inWords(blocking.antiCheat)}, so AppyTappy cannot click while it runs: anti-cheat can see clicks that AppyTappy makes. A click needs the watched application and the one it clicks in both set to None on the Applications page.`;
 }
+
+/**
+ * The class the application editor shows: the one picked there, or else the saved one, which a new application
+ * starts at not set.
+ */
+export function shownAntiCheat(picked: AntiCheatClass | null, saved: AntiCheatClass | null): AntiCheatClass {
+  return picked ?? saved ?? 'unknown';
+}
+
+/**
+ * What the application editor keeps of the class `choice`, picked there or kept in a draft: null when it is the
+ * saved class `saved`, so the save leaves the setting as it is, and never puts back a class that the Applications
+ * page set since.
+ */
+export function pickedAntiCheat(choice: AntiCheatClass | null, saved: AntiCheatClass | null): AntiCheatClass | null {
+  return choice === shownAntiCheat(null, saved) ? null : choice;
+}

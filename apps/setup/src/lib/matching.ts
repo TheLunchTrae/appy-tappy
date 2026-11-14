@@ -1,6 +1,14 @@
 // How an application's window match is edited and described.
 
-import type { FallbackDef, SizeChangesDef, WindowChoice, WindowDef, WindowFit, WindowScore } from './bindings.ts';
+import type {
+  AntiCheatClass,
+  FallbackDef,
+  SizeChangesDef,
+  WindowChoice,
+  WindowDef,
+  WindowFit,
+  WindowScore,
+} from './bindings.ts';
 import type { Kept } from './drafts.ts';
 
 /** One of the things an application's window is recognized by. */
@@ -173,6 +181,8 @@ export interface AppSetup {
   readonly name: string;
   readonly window: WindowDef | null;
   readonly sizeChanges: SizeChangesDef;
+  /** The anti-cheat class picked in the editor, or null to keep the saved one. */
+  readonly antiCheat: AntiCheatClass | null;
 }
 
 /** What a draft of an application keeps: the editor's setup. */

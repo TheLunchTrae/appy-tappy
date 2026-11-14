@@ -55,7 +55,14 @@ This page covers what the user guide leaves out.
   list the transitions.
 - **Application editor.** A new application's match starts from the picked
   window's title, class, and executable and requires only the executable, with
-  no fallback. An application that an automation uses cannot be removed.
+  no fallback. An application that an automation uses cannot be removed. The
+  editor asks the anti-cheat question with the Applications page's menu and
+  its **None** question (`components/AntiCheatMenu.tsx`), and sends a class
+  in `AppSpec` only when one was picked there: otherwise `antiCheat` is
+  `null` and the save keeps the saved class, so it never puts back a class
+  set on the Applications page while a draft waited. A draft's class that
+  the application has been set to since counts as not picked
+  (`pickedAntiCheat` in `lib/antiCheat.ts`).
 - **Screenshots.** The owner thread keeps the session's screenshots, taken or
   [recorded](#recording-looks), in memory until the user removes them or
   their capture stops: on **Change window**, when another window is picked, or

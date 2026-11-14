@@ -177,7 +177,7 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(3);
+    expect(DRAFT_FORMAT).toBe(4);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -299,7 +299,7 @@ describe('what an unfinished item still needs', () => {
   });
 
   test('an application needs a window and a name', () => {
-    expect(unfinishedApp({ name: ' ', window: null, sizeChanges: 'often' })).toEqual([
+    expect(unfinishedApp({ name: ' ', window: null, sizeChanges: 'often', antiCheat: null })).toEqual([
       "Pick the application's window.",
       'Name the application.',
     ]);

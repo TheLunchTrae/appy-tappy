@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react';
 
 import type { AntiCheatClass, AppSummary, DraftSummary, OverlayModeDef } from '../lib/bindings.ts';
+import { AntiCheatMenu } from '../components/AntiCheatMenu.tsx';
 import { Question, useQuestion } from '../components/Question.tsx';
 import { errorText, removeApp, setAntiCheat, setOverlay } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
-import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/antiCheat.ts';
 import { ANTI_CHEAT_HINT, OVERLAY_HINT } from '../lib/hints.ts';
 import { type AppKept, matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
@@ -20,66 +20,6 @@ import {
   removalLoses,
 } from '../lib/drafts.ts';
 import { DraftActions, DraftNote, DraftPill } from '../components/Drafts.tsx';
-
-interface AntiCheatCellProps {
-  readonly name: string;
-  readonly antiCheat: AntiCheatClass;
-  readonly confirming: boolean;
-  readonly onConfirm: (confirming: boolean) => void;
-  readonly onSet: (antiCheat: AntiCheatClass) => void;
-  /** Whether a change is saving, which locks the question's answers. */
-  readonly busy: boolean;
-}
-
-/**
- * An application's anti-cheat, picked from a menu. None lets automations press keys into it and click in it, so
- * picking None asks first, in the menu's place.
- */
-function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet, busy }: AntiCheatCellProps) {
-  const { control, refs } = useQuestion<HTMLSelectElement>(confirming);
-  if (confirming) {
-    return (
-      <Question
-        refs={refs}
-        label={`Set ${name}'s anti-cheat to None?`}
-        keepLabel={`Keep ${ANTI_CHEAT_NAMES[antiCheat]}`}
-        actLabel="Set to None"
-        busy={busy}
-        onKeep={() => {
-          onConfirm(false);
-        }}
-        onAct={() => {
-          onSet('none');
-        }}
-      >
-        Only pick None if {name} has no anti-cheat. Pressing keys into an application with anti-cheat, or clicking in
-        one, can get your account banned.
-      </Question>
-    );
-  }
-  return (
-    <select
-      ref={control}
-      className="input"
-      aria-label={`${name}: anti-cheat`}
-      value={antiCheat}
-      onChange={(event) => {
-        const picked = ANTI_CHEAT_CHOICES.find((choice) => choice === event.target.value);
-        if (picked === 'none') {
-          onConfirm(true);
-        } else if (picked !== undefined) {
-          onSet(picked);
-        }
-      }}
-    >
-      {ANTI_CHEAT_CHOICES.map((choice) => (
-        <option key={choice} value={choice}>
-          {ANTI_CHEAT_NAMES[choice]}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 /** The overlay menu's choices: off, or one of the two places the readings show. */
 type OverlayChoice = 'off' | OverlayModeDef;
@@ -381,8 +321,9 @@ export function ApplicationsPage({
                     {summary.then === null ? null : <span className="note">{summary.then}</span>}
                   </td>
                   <td>
-                    <AntiCheatCell
+                    <AntiCheatMenu
                       name={file.name}
+                      label={`${file.name}: anti-cheat`}
                       antiCheat={file.antiCheat}
                       confirming={confirming === app.id}
                       onConfirm={(now) => {
