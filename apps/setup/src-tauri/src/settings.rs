@@ -19,7 +19,7 @@ use serde::Serialize;
 use crate::stores::Stores;
 
 /// The runtime's program, which the installer puts beside the setup app's.
-const RUNTIME_PROGRAM: &str = "appytappy-runtime.exe";
+pub(crate) const RUNTIME_PROGRAM: &str = "appytappy-runtime.exe";
 
 /// The settings as the Settings page shows them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

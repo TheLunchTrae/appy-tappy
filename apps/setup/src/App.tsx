@@ -47,6 +47,7 @@ import {
   waiting,
 } from './lib/flow.ts';
 import { supersedes } from './lib/reads.ts';
+import { runtimeAfter } from './lib/runtime.ts';
 import { useCaptureHeld } from './lib/capture.ts';
 import { background, useRepeat } from './lib/repeat.ts';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
@@ -209,8 +210,7 @@ export function App() {
     } else {
       setDrafts((last) => last ?? []);
     }
-    // A check that fails warns of nothing.
-    setRuntime(runtimeRead.status === 'fulfilled' ? runtimeRead.value : null);
+    setRuntime(runtimeAfter(runtimeRead));
   }, []);
   // The overlays that are on open with the app.
   useEffect(() => {

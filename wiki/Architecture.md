@@ -366,14 +366,13 @@ started on the other copy.
 
 A named mutex, `Local\AppyTappy.Runtime`, is the single-instance guard. A
 second copy that finds it logs that and exits at once. The setup app learns
-whether the runtime runs with `InstanceGuard::is_held`, which opens the mutex
-without taking it and closes it at once, for the Debug page and for the
-warning on the Automations page and in the automation editor. A mutex that
-exists but cannot be opened, as when the runtime runs as administrator, counts
-as held. A runtime that starts in the moment the setup app holds the mutex
-open finds it taken and exits; the setup app asks every few seconds and holds
-it for a moment, so this is rare, the warning stays, and starting the runtime
-again works.
+whether the runtime runs, for the Debug page and for the warning on the
+Automations page and in the automation editor, from the list of running
+processes: the runtime runs while one is called `appytappy-runtime.exe`
+(`Desktop::runtime_runs`). The check opens neither the mutex nor the process,
+so a runtime that starts while the setup app asks still takes the guard. The
+list holds every user's processes, so another user's runtime on the same PC
+counts as running too.
 
 Autostart is the `AppyTappy` value under the user's
 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` key,

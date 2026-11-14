@@ -1347,24 +1347,26 @@ The Automations page and the automation editor warn while the runtime does
 not run (`apps/setup/src/components/RuntimeWarning.tsx`). `App.tsx` holds
 `runtime`, which the [list reads](#how-to-read-this-page) refresh with the
 saved lists: on the `REFRESH_MS` timer while no screen holds the capture, and after
-each save. The owner answers from the runtime's single-instance guard
-(`Owner::runtime_runs`), the check the Debug page shows too.
+each save. The owner answers from the running processes
+(`Owner::runtime_runs`), the check the Debug page shows too, which opens
+nothing the runtime needs to start.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Unknown
-    Unknown --> Runs: a read finds the runtime's guard held
-    Unknown --> Stopped: a read finds it free
-    Runs --> Stopped: a read finds it free
-    Stopped --> Runs: a read finds it held
+    Unknown --> Runs: a read finds the runtime's program running
+    Unknown --> Stopped: a read finds it not running
+    Runs --> Stopped: a read finds it not running
+    Stopped --> Runs: a read finds it running
     Runs --> Unknown: the check or the command fails
     Stopped --> Unknown: the check or the command fails
 ```
 
 Only **Stopped** shows the warning, so a check that fails warns of nothing,
-and the next read that works leaves **Unknown**. The reload signal after a
-save does not feed this state: the refresh that follows the save reads the
-guard itself, and a runtime that missed the signal reads the saved files
+and the next read that works leaves **Unknown** (`runtimeAfter` in
+`apps/setup/src/lib/runtime.ts`). The reload signal after a save does not
+feed this state: the refresh that follows the save checks the processes
+itself, and a runtime that missed the signal reads the saved files
 when it starts.
 
 ### Application import

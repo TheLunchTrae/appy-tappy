@@ -12,8 +12,7 @@ pub struct InstanceGuard {
 }
 
 impl InstanceGuard {
-    /// The name of the runtime's guard. The setup app can check for it to
-    /// learn whether the runtime is running.
+    /// The name of the runtime's guard.
     pub const RUNTIME: &str = r"Local\AppyTappy.Runtime";
 
     /// Takes the guard called `name`, or returns `None` when another holder
@@ -24,16 +23,5 @@ impl InstanceGuard {
     /// Returns the operating system's error.
     pub fn acquire(name: &str) -> io::Result<Option<Self>> {
         host::InstanceGuard::acquire(name).map(|guard| guard.map(|held| Self { _held: held }))
-    }
-
-    /// Whether another program holds the guard called `name`, without taking
-    /// it. The check keeps the guard open only for the moment it takes, so
-    /// a copy starting in that moment would find it held and exit.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    pub fn is_held(name: &str) -> io::Result<bool> {
-        host::InstanceGuard::is_held(name)
     }
 }

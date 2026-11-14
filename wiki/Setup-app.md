@@ -1344,7 +1344,7 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
 `settings.json` is true; the runtime ignores that setting. Its commands live in
 `owner/debug.rs` and its file readers in `src-tauri/src/debug/`:
 
-- `debug_overview` asks `InstanceGuard::is_held` whether the runtime runs,
+- `debug_overview` asks the running processes whether the runtime runs,
   through `Owner::runtime_runs`, as the main pages' `runtime_runs` does, and
   summarizes the newest `trace-*.csv` in the trace folder. `TraceTail` keeps
   its place in that file, so each poll reads only the rows added since the last

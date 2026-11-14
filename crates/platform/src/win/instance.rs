@@ -2,11 +2,8 @@
 
 use std::io;
 
-use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, GetLastError,
-    HANDLE,
-};
-use windows::Win32::System::Threading::{CreateMutexW, OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::core::HSTRING;
 
 /// A named mutex that marks the one running copy.
@@ -26,24 +23,6 @@ impl InstanceGuard {
         let existed = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
         let guard = Self(handle);
         Ok((!existed).then_some(guard))
-    }
-
-    pub(crate) fn is_held(name: &str) -> io::Result<bool> {
-        let name = HSTRING::from(name);
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: `name` is a null-terminated wide string that outlives the call.
-        let opened = unsafe { OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, &name) };
-        match opened {
-            Ok(handle) => {
-                drop(Self(handle));
-                Ok(true)
-            },
-            Err(error) if error.code() == ERROR_FILE_NOT_FOUND.to_hresult() => Ok(false),
-            // The mutex exists but is out of reach, as when its holder runs as
-            // administrator: it is still held.
-            Err(error) if error.code() == ERROR_ACCESS_DENIED.to_hresult() => Ok(true),
-            Err(error) => Err(error.into()),
-        }
     }
 }
 
@@ -75,17 +54,5 @@ mod tests {
         assert!(InstanceGuard::acquire(&name).expect("acquire").is_none());
         drop(first);
         assert!(InstanceGuard::acquire(&name).expect("acquire").is_some());
-    }
-
-    #[test]
-    fn a_guard_is_held_only_while_a_holder_keeps_it() {
-        let name = format!(r"Local\AppyTappy.Test.Held.{}", process::id());
-        assert!(!InstanceGuard::is_held(&name).expect("check"));
-        let first = InstanceGuard::acquire(&name)
-            .expect("acquire")
-            .expect("first guard");
-        assert!(InstanceGuard::is_held(&name).expect("check"));
-        drop(first);
-        assert!(!InstanceGuard::is_held(&name).expect("check"));
     }
 }
