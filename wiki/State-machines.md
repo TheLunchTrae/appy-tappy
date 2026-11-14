@@ -1973,7 +1973,8 @@ stateDiagram-v2
   the screenshot's (`scaleRect`).
 - **A click, or a drag that drew no box,** places the screenshot with no box.
   The screenshot shows, and the user draws on it.
-- **Failures.** A screenshot that cannot be taken arrives as none. The
+- **Failures.** A screenshot that cannot be taken, or whose pixels do not
+  arrive, arrives as none; the strip never lists it. The
   machine still returns to **Idle** on the release, nothing is placed, and
   the screenshots' own error says why. A drag the region surface interrupts
   hands over no box. The surface reports the pointer as let go when it is

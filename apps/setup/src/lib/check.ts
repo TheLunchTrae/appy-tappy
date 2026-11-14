@@ -182,6 +182,23 @@ export function regionScreenshot(
   return drawnOn !== null && full.has(drawnOn) ? drawnOn : newest;
 }
 
+/**
+ * The first of `shots`, in their order, whose pixels are in `full`, with its pixels, or null while none has them. A
+ * fix or an edit places its region on it.
+ */
+export function firstWithPixels<Pixels>(
+  shots: readonly { readonly index: number }[],
+  full: ReadonlyMap<number, Pixels>,
+): { readonly index: number; readonly picture: Pixels } | null {
+  for (const { index } of shots) {
+    const picture = full.get(index);
+    if (picture !== undefined) {
+      return { index, picture };
+    }
+  }
+  return null;
+}
+
 /** Why the reference editor cannot record `draft`'s reading region yet, or null when it can. */
 export function recordBlocked(draft: Draft): string | null {
   const reading = readingOf(draft);
