@@ -1653,7 +1653,12 @@ owner drops a stop that carries another recording's number
 [stale-message guards](#how-to-read-this-page): a stop sent as one
 component goes can arrive after the recording that took its place started,
 as when the reference editor's recording of readings replaces a recording of
-looks.
+looks. After a start the page reads the recording's state until a read
+answers (`keepsReading` in `apps/setup/src/lib/useRecorder.ts`), so a
+recording whose first read failed still shows with **Stop** and **Discard**,
+and then reads it while it still changes. That first read's failure is a
+failed read, as a poll's is, not a failed start: it shows until the next
+read that answers clears it (`learn`).
 
 A recording of readings keeps a reading for each shape a region shows, for
 the user to review. Its `Sightings` hold `full`, which says why it takes no

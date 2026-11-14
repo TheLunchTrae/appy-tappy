@@ -54,7 +54,7 @@ export function useLookRecording(adopt: (index: number) => void): {
     await command(async () => {
       started(await startLookRecording(settings.region, settings.tolerance, settings.drawnOn));
       onStarted();
-      show(await lookRecordingState());
+      await recorder.readState();
     });
   };
 

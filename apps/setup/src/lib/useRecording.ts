@@ -105,7 +105,7 @@ export function useRecording(): {
         setCrops(NO_CROPS);
       }
       onStarted();
-      show(await recordingState());
+      await recorder.readState();
     });
   };
 
