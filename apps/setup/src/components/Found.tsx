@@ -132,7 +132,9 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
     unlisted === 0
       ? null
       : `Skipped ${plural(unlisted, 'find that shows', 'finds that show')} characters the reference does not need. A find you ticked before its text was read is skipped the same way.`,
-    view.more === 0 ? null : `${plural(view.more, 'more was', 'more were')} left out; add these, then find again.`,
+    view.more === 0
+      ? null
+      : `${plural(view.more, 'more was', 'more were')} left out. Add the ones you want, then find again for the rest.`,
   ].filter((part) => part !== null);
   return (
     <section className="autofill" aria-labelledby="found-title">
@@ -266,6 +268,23 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
         </>
       )}
       {skipped.length === 0 ? null : <p className="note">{skipped.join(' ')}</p>}
+      {view.passed === 0 ? null : (
+        <div className="row">
+          <p className="note">
+            This list skips {plural(view.passed, "find you didn't add", "finds you didn't add")} from earlier lists.
+          </p>
+          <button
+            type="button"
+            className="btn small"
+            disabled={searching}
+            onClick={() => {
+              background(finder.searchSkipped());
+            }}
+          >
+            Show them again
+          </button>
+        </div>
+      )}
       {error === null ? null : <p className="warn">{error}</p>}
       <div className="row">
         {rows.length === 0 ? null : (

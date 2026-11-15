@@ -2770,11 +2770,19 @@ stateDiagram-v2
   carries the text color and tolerance its ink was last cut with
   (`read_with`).
 - The UI keeps each find's tick, its text, and whether the user typed it
-  (`useFound`) until a new search or a dismissal; a reread keeps them. A find
-  starts unticked. It is listed when its text may show only characters the
-  value the reference is taught for needs, a lookalike digit counted as its
-  digit (`fitsNeeds`), or
-  while it is being read or the user typed it. Answers to a search the user
+  (`useFound`) until a new search or a dismissal; a reread keeps them.
+  **Add** and **Not these** also pass over the finds not added, ticked or
+  not and listed or not: the UI keeps their regions by screenshot, with the
+  text color each was read with (`passOver`), and each later search on that
+  screenshot with that text color sends them (`skippedOn`), so the owner
+  leaves out a find at exactly such a region and the list reaches finds it
+  hasn't offered. The owner counts the finds it left out that way
+  (`passed`), and **Show them again** forgets the screenshot's and searches
+  again from the box the shown search started from (`searchSkipped`).
+  Closing the reference editor forgets them all (`reset`). A find starts
+  unticked. It is listed when its text may show only characters the value
+  the reference is taught for needs, a lookalike digit counted as its digit
+  (`fitsNeeds`), or while it is being read or the user typed it. Answers to a search the user
   moved on from are ignored by the UI's turn and, for pictures, by the
   search's number. A reread also starts a new turn, so the search's state as it
   was read before the reread does not put the finds back and end the wait for

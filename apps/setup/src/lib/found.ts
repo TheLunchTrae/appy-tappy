@@ -259,3 +259,38 @@ export function rereadOffer(
     .map((row) => row.index);
   return { indexes, blocked: indexes.length === 0 ? REREAD_SAME : null };
 }
+
+/** A find the user passed over, and the text color it was read with, null for contrast. */
+export interface PassedFind {
+  readonly region: Rect;
+  readonly ink: ColorDef | null;
+}
+
+/**
+ * `passed`, the finds by screenshot that a later search there skips, with each find of `rows` on screenshot
+ * `screenshot` that is not added, ticked or not, listed or not: the finds the user passed over.
+ */
+export function passOver(
+  passed: ReadonlyMap<number, readonly PassedFind[]>,
+  screenshot: number,
+  rows: readonly FoundRow[],
+): ReadonlyMap<number, readonly PassedFind[]> {
+  const left = rows.filter((row) => !row.keep).map((row) => ({ region: row.region, ink: row.readWith.ink }));
+  if (left.length === 0) {
+    return passed;
+  }
+  return new Map(passed).set(screenshot, [...(passed.get(screenshot) ?? []), ...left]);
+}
+
+/**
+ * The regions of the finds on screenshot `screenshot` that `passed` holds and that were read with the text color
+ * `ink`, null for contrast: the ones a search there with `ink` skips. A find passed over as read with another text
+ * color may read as other text now, so it is offered again.
+ */
+export function skippedOn(
+  passed: ReadonlyMap<number, readonly PassedFind[]>,
+  screenshot: number,
+  ink: ColorDef | null,
+): readonly Rect[] {
+  return (passed.get(screenshot) ?? []).filter((find) => sameTextColor(find.ink, ink)).map((find) => find.region);
+}

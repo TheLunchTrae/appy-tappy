@@ -236,7 +236,7 @@ export function useReferenceTeaching({
     setError(null);
     stopPicking();
     boxes.select(null);
-    finder.dismiss();
+    finder.reset();
     guided.forget();
     setDraft(fromReference);
   };

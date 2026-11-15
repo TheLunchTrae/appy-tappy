@@ -92,9 +92,10 @@ macro_rules! with_commands {
             /// sample reads with it, and otherwise one its samples read with, when there is one.
             commands::contrast_tolerance(spec: CharactersSpec) -> u8;
             /// Finds text like what `region` of screenshot `screenshot` shows, as a reference with the text color `ink`,
-            /// or by contrast without one, and `tolerance` tells it from the region's background, at any size, elsewhere on that screenshot and away from the finds `added` already, in place of any
-            /// earlier search.
-            commands::find_like(screenshot: usize, region: RegionDef, added: Vec<RegionDef>, ink: Option<ColorDef>, tolerance: u8) -> FoundView;
+            /// or by contrast without one, and `tolerance` tells it from the region's background, at any size,
+            /// elsewhere on that screenshot and away from the finds `added` already and those an earlier search offered
+            /// that the user left out, `passed`, in place of any earlier search.
+            commands::find_like(screenshot: usize, region: RegionDef, added: Vec<RegionDef>, passed: Vec<RegionDef>, ink: Option<ColorDef>, tolerance: u8) -> FoundView;
             /// The search and the text read for each find so far, or null without one.
             commands::found_state() -> Option<FoundView>;
             /// A find of search `search` at most `maxWidth` wide, or null for an unknown index or a replaced search.

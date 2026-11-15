@@ -31,6 +31,8 @@ pub(super) struct Found {
     items: Vec<Item>,
     /// Finds past the most a search keeps.
     more: usize,
+    /// Finds left out for being at a region the user passed over.
+    passed: usize,
 }
 
 /// One find.
@@ -66,6 +68,8 @@ pub(crate) struct FoundView {
     pub(crate) finds: Vec<FindView>,
     /// Finds past the most a search keeps.
     pub(crate) more: usize,
+    /// Finds left out for being at a region the user passed over.
+    pub(crate) passed: usize,
 }
 
 /// One find as the UI shows it.
@@ -114,6 +118,7 @@ impl Found {
                 })
                 .collect(),
             more: self.more,
+            passed: self.passed,
         }
     }
 }
@@ -123,13 +128,15 @@ impl<H: Host> Owner<H> {
     /// a reference with the text color `ink`, if any, and `tolerance`
     /// tells it from the region's background, at any size,
     /// elsewhere on that screenshot and away from `added`, the finds added
-    /// already, in place of any earlier search, and sends each find to the
-    /// text reader.
+    /// already, and from `passed`, the finds an earlier search offered that
+    /// the user left out, in place of any earlier search, and sends each
+    /// find to the text reader.
     pub(crate) fn find_like(
         &mut self,
         screenshot: usize,
         region: RegionDef,
         added: &[RegionDef],
+        passed: &[RegionDef],
         ink: Option<ColorDef>,
         tolerance: u8,
     ) -> Result<FoundView, String> {
@@ -148,13 +155,16 @@ impl<H: Host> Owner<H> {
             );
         }
         let reader = DigitReader::new(check_spec::ink_rule(ink, tolerance));
-        let added: Vec<Region> = added
-            .iter()
-            .filter_map(|&spec| Region::try_from(spec).ok())
-            .collect();
-        let search = find::like(image, region, &added, &reader).ok_or_else(|| {
-            "The box shows no characters. Draw it around some characters first.".to_owned()
-        })?;
+        let regions = |specs: &[RegionDef]| -> Vec<Region> {
+            specs
+                .iter()
+                .filter_map(|&spec| Region::try_from(spec).ok())
+                .collect()
+        };
+        let search = find::like(image, region, &regions(added), &regions(passed), &reader)
+            .ok_or_else(|| {
+                "The box shows no characters. Draw it around some characters first.".to_owned()
+            })?;
         let id = self.tickets.next();
         let mut items = Vec::with_capacity(search.finds.len());
         for found in search.finds {
@@ -179,6 +189,7 @@ impl<H: Host> Owner<H> {
             screenshot,
             items,
             more: search.more,
+            passed: search.passed,
         };
         let view = found.view();
         if let Some(picked) = self.capture.picked_mut() {
@@ -418,7 +429,26 @@ mod tests {
     fn find_like(
         region: RegionDef,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<FoundView, String> {
-        move |owner: &mut Owner<FakeHost>| owner.find_like(0, region, &[], Some(red()), 0)
+        move |owner: &mut Owner<FakeHost>| owner.find_like(0, region, &[], &[], Some(red()), 0)
+    }
+
+    #[test]
+    fn a_search_leaves_out_the_finds_passed_over() {
+        let (mut harness, _handler) = searchable();
+        let found = harness
+            .ask(|owner| {
+                owner.find_like(
+                    0,
+                    region(0, 0, 4, 5),
+                    &[],
+                    &[region(7, 0, 4, 5)],
+                    Some(red()),
+                    0,
+                )
+            })
+            .expect("found");
+        let regions: Vec<RegionDef> = found.finds.iter().map(|find| find.region).collect();
+        assert_eq!(regions, [region(0, 6, 4, 5)]);
     }
 
     #[test]
@@ -491,7 +521,14 @@ mod tests {
         let (mut harness, _handler) = searchable();
         let found = harness
             .ask(move |owner: &mut Owner<FakeHost>| {
-                owner.find_like(0, region(0, 0, 4, 5), &[region(7, 0, 4, 5)], Some(red()), 0)
+                owner.find_like(
+                    0,
+                    region(0, 0, 4, 5),
+                    &[region(7, 0, 4, 5)],
+                    &[],
+                    Some(red()),
+                    0,
+                )
             })
             .expect("found");
         let regions: Vec<RegionDef> = found.finds.iter().map(|find| find.region).collect();

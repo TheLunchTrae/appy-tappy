@@ -16,11 +16,15 @@ import {
   foundRows,
   keepAll,
   keptFound,
+  type PassedFind,
+  passOver,
   rereadOffer,
   rowFlags,
+  skippedOn,
   withoutFlagged,
 } from './found.ts';
 import type { Picture } from './pixels.ts';
+import type { Rect } from './region.ts';
 import { background, useRepeat } from './repeat.ts';
 import { ask, useNewest } from './request.ts';
 
@@ -44,8 +48,16 @@ export interface Finder {
   /** Why the last search, or the last check of the finds, failed. */
   readonly error: string | null;
   readonly searching: boolean;
-  /** Searches the screenshot `sample` is on for text like it, away from the boxes there already. */
+  /**
+   * Searches the screenshot `sample` is on for text like it, away from the boxes there already and from the finds
+   * the user passed over there.
+   */
   readonly search: (sample: Box) => Promise<void>;
+  /**
+   * Searches again from the box the search shown started from, forgetting which finds the user passed over on its
+   * screenshot, so it offers them too.
+   */
+  readonly searchSkipped: () => Promise<void>;
   readonly edit: (index: number, entry: FoundEntry) => void;
   /** Ticks every listed find, or with `keep` false leaves every one out. */
   readonly keepAll: (keep: boolean) => void;
@@ -61,10 +73,12 @@ export interface Finder {
    * and the flagged ones whose text is its guess and was read with another. Ticks and typed text stay.
    */
   readonly reread: () => Promise<void>;
-  /** Adds the kept finds to the draft and forgets the search. */
+  /** Adds the kept finds to the draft and forgets the search; a later search skips the rest. */
   readonly add: () => void;
-  /** Forgets the search without adding any of it. */
+  /** Forgets the search without adding any of it; a later search skips its finds. */
   readonly dismiss: () => void;
+  /** Forgets the search and which finds the user passed over, for a reference edited afresh. */
+  readonly reset: () => void;
 }
 
 /**
@@ -82,6 +96,10 @@ export function useFound(
 ): Finder {
   const [view, setView] = useState<FoundView | null>(null);
   const [edits, setEdits] = useState<ReadonlyMap<number, FoundEntry>>(new Map());
+  // The finds each screenshot's searches offered that the user did not add, which a later search there skips.
+  const [passed, setPassed] = useState<ReadonlyMap<number, readonly PassedFind[]>>(new Map());
+  // The box the search shown started from, which Show them again searches from.
+  const [sample, setSample] = useState<Box | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   // Each search, reread and dismissal begins a turn, so an answer sent before one is ignored.
@@ -188,19 +206,26 @@ export function useFound(
     );
   };
 
-  const search = async (sample: Box): Promise<void> => {
+  const passOverRest = (): void => {
+    if (view !== null) {
+      setPassed((current) => passOver(current, view.screenshot, rows));
+    }
+  };
+
+  const find = async (sample: Box, skip: readonly Rect[]): Promise<void> => {
     const { ink, tolerance, boxes } = draft;
     const { screenshot, region } = sample;
-    // The server leaves these out, so a search after adding offers the rest.
+    // The server leaves these out, so a search after adding or passing over finds offers the rest.
     const added = boxesOn(boxes, screenshot)
       .filter((box) => box.id !== sample.id)
       .map((box) => box.region);
     const current = turn.begin();
     setSearching(true);
     try {
-      const result = await findLike(screenshot, region, added, ink, tolerance);
+      const result = await findLike(screenshot, region, added, [...skip], ink, tolerance);
       if (current()) {
         setView(result);
+        setSample(sample);
         setEdits(new Map());
         setError(null);
       }
@@ -214,6 +239,21 @@ export function useFound(
     }
   };
 
+  const search = (sample: Box): Promise<void> => find(sample, skippedOn(passed, sample.screenshot, draft.ink));
+
+  const searchSkipped = async (): Promise<void> => {
+    if (sample === null) {
+      return;
+    }
+    const { screenshot } = sample;
+    setPassed((current) => {
+      const left = new Map(current);
+      left.delete(screenshot);
+      return left;
+    });
+    await find(sample, []);
+  };
+
   return {
     view,
     rows,
@@ -223,6 +263,7 @@ export function useFound(
     error,
     searching,
     search,
+    searchSkipped,
     edit: (index, entry) => {
       setEdits((current) => new Map(current).set(index, entry));
     },
@@ -257,8 +298,16 @@ export function useFound(
         return;
       }
       addBoxes(keptFound(view.screenshot, rows));
+      passOverRest();
       forget();
     },
-    dismiss: forget,
+    dismiss: () => {
+      passOverRest();
+      forget();
+    },
+    reset: () => {
+      setPassed(new Map());
+      forget();
+    },
   };
 }

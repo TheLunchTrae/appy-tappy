@@ -1007,7 +1007,11 @@ finds: Array<FindView>,
 /**
  * Finds past the most a search keeps.
  */
-more: number, }>;
+more: number,
+/**
+ * Finds left out for being at a region the user passed over.
+ */
+passed: number, }>;
 
 /**
  * How close a character is to one glyph.
