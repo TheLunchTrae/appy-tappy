@@ -361,7 +361,8 @@ A reference is a font: it can know digits, signs, and letters, and several
 values can share it. Each Number value says which characters it needs, under
 **Characters it needs** in the step that picks its reference. Turn on
 everything the value shows: its digits and any sign right after them, such
-as the `%` in `87%`. A new value starts with **Digits** on.
+as the `%` in `87%`. A new value starts with nothing turned on, so it reads
+every character its reference knows until you choose.
 
 - **Digits** is `0` to `9`.
 - **Decimal point**, **Comma**, **Percent**, **Minus**, **Plus**, and

@@ -75,6 +75,8 @@ impl<H: Host> Owner<H> {
             let saved =
                 check_spec::to_saved(&spec.check, owner.capture.screenshots(), &spec.app, &id)
                     .map_err(|error| error.to_string())?;
+            check_spec::expected_within_limit(&saved.check, None)
+                .map_err(|error| error.to_string())?;
             let screen = ScreenDef {
                 window_size: size.into(),
                 region: saved.region,

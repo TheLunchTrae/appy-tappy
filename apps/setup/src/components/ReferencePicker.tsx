@@ -1,5 +1,5 @@
 import type { AppFile } from '../lib/bindings.ts';
-import { coverage } from '../lib/expected.ts';
+import { coverage, knowsNone } from '../lib/expected.ts';
 import { readers, referenceCharacters } from '../lib/reference.ts';
 import { REFERENCE_HINT } from '../lib/hints.ts';
 import { draftHolds } from '../lib/teaching.ts';
@@ -41,8 +41,6 @@ export function ReferencePicker(props: Props) {
   const chosen = references.find((reference) => reference.id === selected) ?? null;
   const held = chosen === null ? null : draftHolds(chosen, props.drafted);
   const { characters } = props;
-  const knowsNone =
-    chosen !== null && characters.length > 0 && coverage(characters, referenceCharacters(chosen)).known.length === 0;
   return (
     <>
       <ExpectedCharacters expected={characters} onExpected={props.onCharacters} />
@@ -52,7 +50,7 @@ export function ReferencePicker(props: Props) {
           <Hint topic="Reference">{REFERENCE_HINT}</Hint>
         </span>
         <span className="note">
-          The characters&apos; shapes and color this value is read with. Pick one made for {appName}, or make one.
+          The shapes of the characters this value is read with. Pick one made for {appName}, or make one.
         </span>
         {references.length === 0 ? (
           <p className="note">{appName} has no references yet. Make one from this region.</p>
@@ -81,7 +79,7 @@ export function ReferencePicker(props: Props) {
             })}
           </div>
         )}
-        {knowsNone ? (
+        {chosen !== null && knowsNone(characters, referenceCharacters(chosen)) ? (
           <span className="warn" role="status">
             {chosen.name} knows none of these characters yet. Teach it them, or choose another reference.
           </span>

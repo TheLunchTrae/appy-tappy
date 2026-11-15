@@ -1632,9 +1632,7 @@ shapes: Array<RecordedShape>, }>;
  * their color when it has a text color.
  *
  * It is a font and no more: which of its characters a value needs is the
- * value's to say, in its number check. A key of a reference that this
- * version does not know is ignored and left out of the next save, so a
- * file that names the characters a reference needs still loads.
+ * value's to say, in its number check.
  */
 export type ReferenceDef = DeepReadonly<{
 /**

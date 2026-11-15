@@ -110,8 +110,12 @@ readings, or correct them.
 
 While you teach a reference for a value, the editor also shows
 **Characters the value needs**, the value's
-[**Characters it needs**](Values.md#characters-a-number-needs), which you
-can change there too, and compares them with what the reference learned:
+[**Characters it needs**](Values.md#characters-a-number-needs), and compares
+them with what the reference learned. You can change them there too: the
+value takes the change when you save the reference, and **Discard** leaves
+the value's list as it was. A [fix](Values.md#fix-a-value-at-one-size)
+needs the characters its value does, so its reference's editor shows the
+list without the choices; edit the value to change it.
 
 - **Characters still missing** shows each needed character it has yet to
   learn, outlined. This is what is left to teach. Once it has them all, it
@@ -315,7 +319,7 @@ pixels tall, draw boxes around several readings of each character, or
 AppyTappy finds a reference's characters by how they stand out from the
 background behind them, so text in several colors reads as one: a gradient,
 an outline, a number that turns red when it is low. It takes the background
-from the edge of each box and region, and chooses how far a pixel must be
+from the pixels just around each box and region, and chooses how far a pixel must be
 from it to count from the boxes you type and the readings you keep, so there
 is nothing to set.
 
@@ -335,7 +339,10 @@ Only pixels near the text color count as characters then, whatever is behind
 them, so the text has to be drawn in one color. **Remove text color** goes
 back to finding the characters by contrast. A box that was drawn while the
 reference had a text color needs a little room around its text for that. If
-the reference then can't learn a box, draw it again.
+the reference then can't learn a box, draw it again. A saved picture whose
+text touches its edge can't be learned by contrast either, and has no box to
+draw again: put the text color back, or teach the reference afresh from new
+boxes or readings.
 
 With or without a text color, turn on **Show matching pixels** to tint every
 pixel on the screenshot that counts as part of the characters. Without a

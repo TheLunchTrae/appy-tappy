@@ -4,6 +4,7 @@ import { LIMITS } from '../src/lib/bindings.ts';
 import {
   coverage,
   expectedSet,
+  knowsNone,
   LETTER_PRESETS,
   NUMBER_PRESETS,
   otherCharacters,
@@ -104,4 +105,12 @@ test('coverage splits the needed characters by whether they are learned, and lis
   // Without a choice of what is needed, nothing is missing and nothing learned is flagged.
   expect(coverage([], ['8', '%'])).toEqual({ known: [], missing: [], extra: ['8', '%'] });
   expect(coverage(['8'], [])).toEqual({ known: [], missing: ['8'], extra: [] });
+});
+
+test('a reference knows none of what a value needs only when the value needs some', () => {
+  expect(knowsNone(['1', '%'], ['7', 'L'])).toBe(true);
+  expect(knowsNone(['1', '%'], ['%'])).toBe(false);
+  // A value that needs none reads every character the reference knows.
+  expect(knowsNone([], ['7'])).toBe(false);
+  expect(knowsNone(['1'], [])).toBe(true);
 });

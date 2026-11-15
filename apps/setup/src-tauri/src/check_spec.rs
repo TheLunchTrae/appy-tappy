@@ -54,12 +54,7 @@ pub(crate) const MAX_EXPECTED_CHARACTERS: usize = 128;
 /// its reference knows: each character a label teaches, as [`is_label_character`]
 /// says, that is no control character, once, the digits `0` to `9` first
 /// and the rest by code point.
-///
-/// # Errors
-///
-/// Returns [`SpecError::TooManyExpected`] for more than
-/// [`MAX_EXPECTED_CHARACTERS`] of them.
-pub(crate) fn expected_characters(expected: &str) -> Result<Option<String>, SpecError> {
+pub(crate) fn expected_characters(expected: &str) -> Option<String> {
     // A digit sorts before every other character, and each group by code
     // point.
     let characters: BTreeSet<(bool, char)> = expected
@@ -67,14 +62,38 @@ pub(crate) fn expected_characters(expected: &str) -> Result<Option<String>, Spec
         .filter(|&character| is_label_character(character) && !character.is_control())
         .map(|character| (!character.is_ascii_digit(), character))
         .collect();
-    if characters.len() > MAX_EXPECTED_CHARACTERS {
-        return Err(SpecError::TooManyExpected);
-    }
     let list: String = characters
         .into_iter()
         .map(|(_, character)| character)
         .collect();
-    Ok((!list.is_empty()).then_some(list))
+    (!list.is_empty()).then_some(list)
+}
+
+/// Whether `check`, a value's as a save leaves it, may need the characters
+/// it lists. A list is held to [`MAX_EXPECTED_CHARACTERS`] where it is set
+/// or changed: `was` is the check the value is saved with, if it is, whose
+/// own list stays as long as it is.
+///
+/// # Errors
+///
+/// Returns [`SpecError::TooManyExpected`] for a new or changed list of more
+/// characters than that.
+pub(crate) fn expected_within_limit(
+    check: &CheckDef,
+    was: Option<&CheckDef>,
+) -> Result<(), SpecError> {
+    let list = |check: &CheckDef| match check {
+        CheckDef::Number { characters, .. } => {
+            expected_characters(characters.as_deref().unwrap_or_default())
+        },
+        CheckDef::BarFill { .. } | CheckDef::Color { .. } | CheckDef::State { .. } => None,
+    };
+    let needs = list(check);
+    let count = needs.as_deref().map_or(0, |needs| needs.chars().count());
+    if count > MAX_EXPECTED_CHARACTERS && was.map(list) != Some(needs) {
+        return Err(SpecError::TooManyExpected);
+    }
+    Ok(())
 }
 
 /// A value's check as the UI describes it.
@@ -217,7 +236,7 @@ pub(crate) fn to_saved_fix(
             CheckDef::Number {
                 reference: reference.id.clone(),
                 whole: *whole,
-                characters: expected_characters(characters.as_deref().unwrap_or_default())?,
+                characters: expected_characters(characters.as_deref().unwrap_or_default()),
             }
         },
         CheckSpec::BarFill { filled, empty, .. } => CheckDef::BarFill {

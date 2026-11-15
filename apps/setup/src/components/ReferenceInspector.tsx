@@ -3,7 +3,7 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
-import type { Editing } from '../lib/captureDraft.ts';
+import type { Editing, NeedsField } from '../lib/captureDraft.ts';
 import { type Built, type Draft, type ReferenceSaving, withTextColor } from '../lib/check.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers } from '../lib/reference.ts';
@@ -124,11 +124,8 @@ interface Props {
   readonly busy: boolean;
   readonly draftError: ReactNode;
   readonly draftButton: ReactNode;
-  /**
-   * Changes the characters the value it is taught for needs, or null for a reference made by itself, which has no
-   * value to need any.
-   */
-  readonly onNeeds: ((needs: readonly string[]) => void) | null;
+  /** How the editor shows the characters the value it is taught for needs. */
+  readonly needsField: NeedsField;
   /** Leaves the editor without saving. */
   readonly onDiscard: () => void;
 }
@@ -157,7 +154,7 @@ export function ReferenceInspector({
   busy,
   draftError,
   draftButton,
-  onNeeds,
+  needsField,
   onDiscard,
 }: Props) {
   const { taught, finder, guided, review, recorder, checking, covered } = teaching;
@@ -201,7 +198,10 @@ export function ReferenceInspector({
         onTolerance={(tolerance) => {
           setDraft((current) => ({ ...current, tolerance }));
         }}
-        onExpected={onNeeds}
+        needsField={needsField}
+        onExpected={(needs) => {
+          setEditing((current) => (current === null ? null : { ...current, needs }));
+        }}
         boxes={
           <BoxList
             boxes={draft.boxes}

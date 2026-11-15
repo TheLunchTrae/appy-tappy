@@ -17,7 +17,8 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::de::IgnoredAny;
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::anti_cheat::AntiCheatClass;
 use crate::names::is_image_name;
@@ -350,10 +351,8 @@ pub struct ValueDef {
 /// their color when it has a text color.
 ///
 /// It is a font and no more: which of its characters a value needs is the
-/// value's to say, in its number check. A key of a reference that this
-/// version does not know is ignored and left out of the next save, so a
-/// file that names the characters a reference needs still loads.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// value's to say, in its number check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ReferenceDef {
     /// The reference's ID, unique within the file, such as `percent_font`.
@@ -377,6 +376,39 @@ pub struct ReferenceDef {
     pub tolerance: u8,
     /// The pictures it learns from.
     pub samples: Vec<SampleDef>,
+}
+
+/// A [`ReferenceDef`] as a file holds it: its keys, and `expects`, a list of
+/// characters that references carried once. That one key is read and
+/// forgotten, so the next save leaves it out; any other key the reference
+/// does not have is refused, as in every other part of the file.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReferenceKeys {
+    id: String,
+    name: String,
+    #[serde(default)]
+    origin: OriginDef,
+    #[serde(default)]
+    ink: Option<ColorDef>,
+    tolerance: u8,
+    samples: Vec<SampleDef>,
+    #[serde(default, rename = "expects")]
+    _expects: IgnoredAny,
+}
+
+impl<'de> Deserialize<'de> for ReferenceDef {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let keys = ReferenceKeys::deserialize(deserializer)?;
+        Ok(Self {
+            id: keys.id,
+            name: keys.name,
+            origin: keys.origin,
+            ink: keys.ink,
+            tolerance: keys.tolerance,
+            samples: keys.samples,
+        })
+    }
 }
 
 /// A value read from a region of the window's frame.
@@ -1198,16 +1230,23 @@ mod tests {
     }
 
     #[test]
-    fn a_reference_ignores_a_key_it_does_not_know() {
+    fn a_reference_forgets_the_characters_it_once_listed_and_refuses_any_other_key() {
         let file = dash();
         let json = file.to_json();
-        let with_more = json.replacen(
-            "\"samples\": [",
-            "\"expects\": \"0123456789%\",\n      \"samples\": [",
-            1,
-        );
-        assert_ne!(with_more, json);
-        assert_eq!(AppFile::parse(&with_more), Ok(file));
+        let with_key = |key: &str| {
+            let more = json.replacen(
+                "\"samples\": [",
+                &format!("\"{key}\": \"0123456789%\",\n      \"samples\": ["),
+                1,
+            );
+            assert_ne!(more, json);
+            more
+        };
+        let read = AppFile::parse(&with_key("expects")).expect("loads");
+        assert_eq!(read, file);
+        assert!(!read.to_json().contains("expects"));
+        let refused = AppFile::parse(&with_key("inkColor")).expect_err("no such key");
+        assert!(refused.to_string().contains("inkColor"), "{refused}");
     }
 
     #[test]

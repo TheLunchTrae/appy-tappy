@@ -161,8 +161,8 @@ impl<H: Host> Owner<H> {
     }
 
     /// Saves the settings `spec` gives a saved reference, its name and its
-    /// text color and tolerance, and says where it is saved. Its samples stay as they are, so this needs
-    /// no screenshot and no picked window. The reference must still learn
+    /// text color and tolerance, and says where it is saved. Its samples
+    /// stay as they are, so this needs no screenshot and no picked window. The reference must still learn
     /// every sample with the new text color and tolerance.
     pub(crate) fn save_reference_settings(
         &mut self,

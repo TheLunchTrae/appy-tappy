@@ -14,7 +14,7 @@ import {
   type StateSpec,
 } from './bindings.ts';
 import { type Box, boxLabels } from './boxes.ts';
-import { DIGITS, TOO_MANY, expectedSet, tooMany } from './expected.ts';
+import { TOO_MANY, expectedSet, tooMany } from './expected.ts';
 import { AUTOMATIC, type PinChoice } from './pin.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
@@ -102,8 +102,7 @@ export const EMPTY_DRAFT: Draft = {
   colorMatch: DEFAULT_COLOR_MATCH,
   ignoreBackground: true,
   whole: false,
-  // Numbers are mostly digits, so a new value starts with them.
-  characters: DIGITS.characters,
+  characters: [],
 };
 
 /** Where the region is: its rectangle and the screenshot it was drawn on. */
@@ -422,9 +421,6 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
       if (draft.reference === null) {
         return missing('Pick a reference to read the number with, or make one from this region.');
       }
-      if (tooMany(draft.characters)) {
-        return missing(TOO_MANY);
-      }
       const spec = { kind: 'number', region, reference: { app, id: draft.reference }, whole: draft.whole } as const;
       return {
         ok: true,
@@ -540,11 +536,23 @@ export function checkSummary(check: CheckDef, references: readonly ReferenceDef[
   return described(check, (entry, saved) => entry.summary(saved, references));
 }
 
-/** The check `draft` describes for the saved application `app`, or the next thing it needs. */
-export function buildSpec(draft: Draft, app: string): Built {
-  return draft.region === null
-    ? missing('Draw a region on a screenshot.')
-    : CHECKS[draft.kind].build(draft, draft.region, app);
+/** The characters the saved `check` needs, as a draft holds them, or null for a check that is no number. */
+export function savedNeeds(check: CheckDef): readonly string[] | null {
+  return check.kind === 'number' ? expectedSet(check.characters ?? '') : null;
+}
+
+/**
+ * The check `draft` describes for the saved application `app`, or the next thing it needs. A number's characters are
+ * held to the most a value saves where they are set or changed: `saved` is what the value the draft changes or fixes
+ * needs already, from {@link savedNeeds}, which stays however long it is.
+ */
+export function buildSpec(draft: Draft, app: string, saved: readonly string[] | null = null): Built {
+  if (draft.region === null) {
+    return missing('Draw a region on a screenshot.');
+  }
+  const built = CHECKS[draft.kind].build(draft, draft.region, app);
+  const changed = saved === null || saved.join('') !== draft.characters.join('');
+  return built.ok && draft.kind === 'number' && changed && tooMany(draft.characters) ? missing(TOO_MANY) : built;
 }
 
 /** The position of the state taken from `screenshot` in `draft`, or -1 when none is. */
