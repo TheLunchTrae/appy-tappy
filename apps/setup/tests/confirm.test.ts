@@ -669,6 +669,23 @@ describe('what the capture screen holds of the check', () => {
     expect(earlierOf(closed, null, null).seen).toEqual(new Set(['box-2 s']));
   });
 
+  test('a box that is deleted is no place that joined anymore, so a box drawn with its ID joins anew', () => {
+    const boxed = { ...answered, seen: new Set(['box-1 s', 'box-2 s e', 'box-20 e', 'find-0 s e p']) };
+    const closed = heldStep(heldStep(NOTHING_HELD, { kind: 'show', guide: boxed }), close);
+    // Nothing is deleted, so nothing changes.
+    expect(heldStep(closed, { kind: 'boxes', ids: new Set([1, 2, 20]) })).toBe(closed);
+    const deleted = heldStep(closed, { kind: 'boxes', ids: new Set([1, 20]) });
+    expect(deleted.past.seen).toEqual(new Set(['box-1 s', 'box-20 e', 'find-0 s e p']));
+    expect(deleted.past.answers).toEqual(answered.answers);
+    // A box drawn since has the deleted one's ID and shows the same shapes, with the reader's guess for its text.
+    const drawn: Place = { ...place('box', 2, 'se', '18'), typed: false };
+    const redrawn = heldStep(deleted, { kind: 'boxes', ids: new Set([1, 2, 20]) });
+    expect(openGuide([drawn], [], earlierOf(redrawn, 7, 3)).changes).toEqual([
+      { source: 'box', index: 2, text: '78', keep: true },
+    ]);
+    expect(openGuide([drawn], [], earlierOf(closed, 7, 3)).changes).toEqual([]);
+  });
+
   test("the reference's editor closing closes an open check and forgets every answer", () => {
     const closed = heldStep(open, close);
     for (const held of [open, closed, heldStep(open, leftOut)]) {

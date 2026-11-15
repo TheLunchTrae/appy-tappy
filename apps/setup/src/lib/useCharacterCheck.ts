@@ -259,10 +259,16 @@ export type HeldEvent =
   /** The check opens with `guide`, or the open one becomes it. */
   | { readonly kind: 'show'; readonly guide: Guide }
   /**
-   * The check closes: its answers, the places it left out, and the places that joined it stay for the next check. `search` and `recording`
-   * are the IDs of the search and the recording whose finds and readings it went over.
+   * The check closes: its answers, the places it left out, and the places that joined it stay for the next
+   * check. `search` and `recording` are the IDs of the search and the recording whose finds and readings it went
+   * over.
    */
   | { readonly kind: 'close'; readonly search: number | null; readonly recording: number | null }
+  /**
+   * The reference has the boxes `ids` now. A box that is gone is no place that joined a closed check anymore, so a
+   * box drawn later, which can have its ID, joins anew.
+   */
+  | { readonly kind: 'boxes'; readonly ids: ReadonlySet<number> }
   /** The reference's editor closes, so the next reference starts with nothing. */
   | { readonly kind: 'forget' }
   /** The check edited reading `index` of recording `recording`, which the draft now has as `reading`. */
@@ -321,6 +327,13 @@ export function heldStep(held: Held, event: HeldEvent): Held {
           recording: held.guide === null ? held.past.recording : event.recording,
         },
       };
+    case 'boxes': {
+      const seen = [...held.past.seen].filter((key) => {
+        const id = /^box-(\d+)(?: |$)/u.exec(key)?.[1];
+        return id === undefined || event.ids.has(Number(id));
+      });
+      return seen.length === held.past.seen.size ? held : { ...held, past: { ...held.past, seen: new Set(seen) } };
+    }
     case 'forget':
       return NOTHING_HELD;
     case 'reading': {
@@ -463,6 +476,11 @@ export function useCharacterCheck(
       }
     }
   };
+
+  // A box deleted while the check is closed leaves the places that joined, before a new box can take its ID.
+  useEffect(() => {
+    send({ kind: 'boxes', ids: new Set(boxes.map((box) => box.id)) });
+  }, [boxes]);
 
   // A place that shows while the check is open, or whose text arrives then, gets the answers that stand.
   useEffect(() => {
