@@ -271,9 +271,8 @@ fn learned(
                 },
                 None => error.into(),
             },
-            SavedError::Missing { name, .. } | SavedError::Picture { name, .. }
-                if text_of(name).is_some() =>
-            {
+            // `saved::reader` only asks for the pictures the samples name.
+            SavedError::Missing { name, .. } | SavedError::Picture { name, .. } => {
                 SpecError::MissingPicture {
                     picture: name.clone(),
                 }
