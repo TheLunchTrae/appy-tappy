@@ -78,7 +78,8 @@ it was about has gone. Fifteen guards drop such stale messages:
   joined a closed check under the numbers of their search and their
   recording, and counts a find of another search, or a reading of another
   recording, as one that never joined and was never left out
-  (`earlierOf`).
+  (`earlierOf`), and forgets a box that joined once the box is deleted,
+  so a box drawn with its ID is not taken for it.
 - **Pick numbers.** A capture screen that picks its window with the picker
   numbers each pick (`pickedWindowStep` in
   `apps/setup/src/lib/windowSearch.ts`). The owner's answer that the capture
@@ -2895,9 +2896,9 @@ stateDiagram-v2
   when one is no character. A tick the user changes afterward stays.
 - **A place joins once its text is read.** The guide names the places that
   have joined in `seen`, each with the shapes it shows (`joinKey`): the ones
-  whose text was read when the check opened, and each one since. A place that first shows under an open check, or
-  whose text the reader sends then, gets every answer that stands for its
-  shapes, as the turn that gave the answer would have written it (`join`,
+  whose text was read when the check opened, and each one since. A place
+  that first shows under an open check, or whose text the reader sends
+  then, gets every answer that stands for its shapes, as the turn that gave the answer would have written it (`join`,
   which `useCharacterCheck.ts` runs after each render). Its text takes the
   answered characters, it is left out and remembered in `left` for a shape
   that is no character, and it is ticked or kept once all its shapes have
@@ -2937,8 +2938,11 @@ stateDiagram-v2
   its text, and is ticked when the answers cover all of it. A find of
   another search than the closed check's, or a reading of another
   recording, counts as one that never joined and was never left out, since
-  only its index is the same. A place that did join stays as the user has it since. The guide
-  names the shapes the earlier answers cover in `earlier`, and such a shape
+  only its index is the same. A box that is deleted while the check is
+  closed leaves the places that joined (`boxes` in `heldStep`), so a box
+  drawn later joins anew though it has the deleted box's ID and shows the
+  same shapes. A place that did join stays as the user has it since. The
+  guide names the shapes the earlier answers cover in `earlier`, and such a shape
   joins no step while its answer holds, so the steps ask only about shapes
   nobody has answered for: the ones a new find or reading shows, the ones a
   step the user skipped left, and the ones whose answer a text typed since

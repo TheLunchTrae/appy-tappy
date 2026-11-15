@@ -387,7 +387,7 @@ function firstOpen(places: readonly Place[], given: Given, needs: readonly strin
   return unfittedStop(places, given) ?? { at: 'done' };
 }
 
-/** The names, as {@link joinKey} gives them, of the places of `places` whose text is read, so they are part of a check. */
+/** The names, as {@link joinKey} gives them, of the places of `places` whose text is read: the ones in a check. */
 function readKeys(places: readonly Place[]): ReadonlySet<string> {
   return new Set(places.flatMap((place) => (place.reading ? [] : [joinKey(place)])));
 }
@@ -446,9 +446,9 @@ export function join(
 /**
  * A check of `places` for a reference that needs the characters `needs`, which goes on from `earlier`, and the
  * edits that follow. The earlier answers stand, and the places an earlier check left out for a shape that is no
- * character can be kept again by taking that answer back. A place that was not part of an earlier check joins this one as
- * {@link join} says, so it gets those answers. The check starts at the first stop that still asks something, and
- * the shapes the earlier answers cover join no step.
+ * character can be kept again by taking that answer back. A place that was not part of an earlier check joins
+ * this one as {@link join} says, so it gets those answers. The check starts at the first stop that still asks
+ * something, and the shapes the earlier answers cover join no step.
  */
 export function openGuide(
   places: readonly Place[],
