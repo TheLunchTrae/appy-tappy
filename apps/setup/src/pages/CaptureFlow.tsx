@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useReducer, useState } from 'react';
 
 import type { AppSummary } from '../lib/bindings.ts';
 import { captureEnded, restoreDraftScreenshots } from '../lib/api.ts';
-import { background } from '../lib/repeat.ts';
+import { background, backgroundLater } from '../lib/repeat.ts';
 import { useCapture } from '../lib/capture.ts';
 import { AntiCheatRunning } from '../components/AntiCheatRunning.tsx';
 import { Capture, type CaptureMode, type Restored } from '../components/Capture.tsx';
@@ -12,7 +12,7 @@ import { type Choice, Picker } from '../components/Picker.tsx';
 import type { Made, RefFlow, ValueFlow } from '../lib/flow.ts';
 import type { Held } from '../lib/unsaved.ts';
 import { useWindowSearch } from '../lib/useWindowSearch.ts';
-import { ENDED_ASK_PAUSE_MS, endedAsks, windowLanding } from '../lib/windowSearch.ts';
+import { ENDED_ASK_PAUSE_MS, FIRST_PICK, endedAsks, pickedWindowStep, windowLanding } from '../lib/windowSearch.ts';
 import type { ReportDraft } from '../lib/drafts.ts';
 
 interface Props {
@@ -190,15 +190,16 @@ function PickedCapture({
   // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at.
   const { pick, stop } = useCapture();
   // Whether the picked window closed, which only another pick gets past.
-  const [closed, setClosed] = useState(false);
-  const [askEnded] = useState(() => endedAsks(captureEnded, ENDED_ASK_PAUSE_MS, Date.now));
+  const [pickedWindow, tell] = useReducer(pickedWindowStep, FIRST_PICK);
+  const [askEnded] = useState(() => endedAsks(captureEnded, ENDED_ASK_PAUSE_MS, Date.now, backgroundLater));
+  const asked = pickedWindow.pick;
   const windowFailed = useCallback((): void => {
     background(
       askEnded(() => {
-        setClosed(true);
+        tell({ kind: 'ended', pick: asked });
       }),
     );
-  }, [askEnded]);
+  }, [askEnded, asked]);
   if (picking || choice === null) {
     return (
       <Picker
@@ -229,7 +230,9 @@ function PickedCapture({
     <Capture
       choice={choice}
       absent={null}
-      windowNotes={closed ? <p className="warn">The window closed. Select Change window to pick it again.</p> : null}
+      windowNotes={
+        pickedWindow.closed ? <p className="warn">The window closed. Select Change window to pick it again.</p> : null
+      }
       onWindowFailed={windowFailed}
       landing={NO_LANDING}
       mode={mode}
@@ -240,7 +243,7 @@ function PickedCapture({
       onChangeWindow={() => {
         // The capture ends here, not when another window is picked, so nothing keeps its screenshots meanwhile.
         stop();
-        setClosed(false);
+        tell({ kind: 'repicked' });
         setPicking(true);
       }}
       onSaved={onSaved}

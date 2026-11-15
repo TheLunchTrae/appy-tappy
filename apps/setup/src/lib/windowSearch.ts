@@ -175,23 +175,42 @@ export const ENDED_ASK_PAUSE_MS = 1000;
 
 /**
  * Asks whether the window's capture ended, with `asks`, each time something suggests the window closed, and calls
- * `ended` when it did. One ask runs at a time, and the next waits `pauseMs` after the last one started, as `now`
- * counts them: a live view that fails without ending the capture fails again with every frame.
+ * `ended` when it did. One ask runs at a time, and the next starts no sooner than `pauseMs` after the last one
+ * started, as `now` counts them: a live view that fails without ending the capture fails again with every frame. A
+ * sign that arrives meanwhile is not lost: `later` runs one ask for it once the pause is over, with the newest
+ * `ended`.
  */
 export function endedAsks(
   asks: () => Promise<boolean>,
   pauseMs: number,
   now: () => number,
+  later: (run: () => Promise<void>, afterMs: number) => void,
 ): (ended: () => void) => Promise<void> {
   let asking = false;
   let asked: number | null = null;
-  return async (ended) => {
-    const time = now();
-    if (asking || (asked !== null && time - asked < pauseMs)) {
+  let waiting: (() => void) | null = null;
+  const sign = async (ended: () => void): Promise<void> => {
+    const wait = asked === null ? 0 : asked + pauseMs - now();
+    if (asking || wait > 0) {
+      const scheduled = waiting !== null;
+      waiting = ended;
+      if (!scheduled) {
+        later(
+          async () => {
+            const newest = waiting;
+            waiting = null;
+            if (newest !== null) {
+              await sign(newest);
+            }
+          },
+          // An ask that outlasts its pause is waited for one pause more.
+          wait > 0 ? wait : pauseMs,
+        );
+      }
       return;
     }
     asking = true;
-    asked = time;
+    asked = now();
     try {
       if (await asks()) {
         ended();
@@ -200,6 +219,34 @@ export function endedAsks(
       asking = false;
     }
   };
+  return sign;
+}
+
+/** A capture screen's picked window: the number of its pick, and whether that window closed. */
+interface PickedWindow {
+  readonly pick: number;
+  readonly closed: boolean;
+}
+
+export const FIRST_PICK: PickedWindow = { pick: 0, closed: false };
+
+type PickedWindowEvent =
+  /** The user left the window to pick one again. */
+  | { readonly kind: 'repicked' }
+  /** The owner answered that the capture of pick `pick` ended. */
+  | { readonly kind: 'ended'; readonly pick: number };
+
+/**
+ * The picked window after `event`. An end that was asked about before the user picked again is dropped, so it
+ * never says that the window picked since has closed.
+ */
+export function pickedWindowStep(window: PickedWindow, event: PickedWindowEvent): PickedWindow {
+  switch (event.kind) {
+    case 'repicked':
+      return { pick: window.pick + 1, closed: false };
+    case 'ended':
+      return event.pick === window.pick ? { ...window, closed: true } : window;
+  }
 }
 
 /**

@@ -6,9 +6,11 @@ import type { PickerApp, PickerStep } from '../src/lib/picker.ts';
 import {
   type SearchEvent,
   type WindowCapture,
+  FIRST_PICK,
   NO_CAPTURE,
   endedAsks,
   fallbackWarning,
+  pickedWindowStep,
   searchStep,
   showsNewCloseSign,
   windowAbsence,
@@ -180,30 +182,19 @@ test('only a running capture of the fallback window is said to be the fallback',
 });
 
 describe('asking whether the capture ended', () => {
-  test('tells an ended capture, and nothing for one that goes on', async () => {
-    const answers = [false, true];
-    let time = 0;
-    const ask = endedAsks(
-      async () => Promise.resolve(answers.shift() ?? false),
-      1000,
-      () => time,
-    );
-    let ended = 0;
-    const told = (): void => {
-      ended += 1;
-    };
-    await ask(told);
-    expect(ended).toBe(0);
-    time = 1000;
-    await ask(told);
-    expect(ended).toBe(1);
-  });
-
-  test('asks once at a time, and again only after the pause', async () => {
+  /** Asks the test answers by hand, on a clock it sets, with the asks put off until later. */
+  function asker(): {
+    readonly sign: (ended: () => void) => Promise<void>;
+    readonly asked: () => number;
+    readonly answer: (ended: boolean) => void;
+    readonly at: (time: number) => void;
+    readonly later: { readonly run: () => Promise<void>; readonly afterMs: number }[];
+  } {
     let asked = 0;
     let answer: (ended: boolean) => void = () => undefined;
     let time = 0;
-    const ask = endedAsks(
+    const later: { readonly run: () => Promise<void>; readonly afterMs: number }[] = [];
+    const sign = endedAsks(
       async () => {
         asked += 1;
         return new Promise<boolean>((resolve) => {
@@ -212,22 +203,88 @@ describe('asking whether the capture ended', () => {
       },
       1000,
       () => time,
+      (run, afterMs) => {
+        later.push({ run, afterMs });
+      },
     );
-    const nothing = (): void => undefined;
-    const first = ask(nothing);
-    time = 5000;
-    await ask(nothing);
-    expect(asked).toBe(1);
+    return {
+      sign,
+      asked: () => asked,
+      answer: (ended) => {
+        answer(ended);
+      },
+      at: (now) => {
+        time = now;
+      },
+      later,
+    };
+  }
+
+  test('tells an ended capture, and nothing for one that goes on', async () => {
+    const { sign, answer, at } = asker();
+    let ended = 0;
+    const told = (): void => {
+      ended += 1;
+    };
+    const first = sign(told);
     answer(false);
     await first;
-    time = 999;
-    await ask(nothing);
-    expect(asked).toBe(1);
-    time = 1000;
-    const next = ask(nothing);
-    expect(asked).toBe(2);
+    expect(ended).toBe(0);
+    at(1000);
+    const second = sign(told);
+    answer(true);
+    await second;
+    expect(ended).toBe(1);
+  });
+
+  test('a sign inside the pause asks once when the pause ends, for the newest sign', async () => {
+    const { sign, asked, answer, at, later } = asker();
+    const told: string[] = [];
+    const first = sign(() => told.push('first'));
     answer(false);
-    await next;
+    await first;
+    at(400);
+    await sign(() => told.push('early'));
+    at(700);
+    await sign(() => told.push('newest'));
+    expect(asked()).toBe(1);
+    expect(later.map((each) => each.afterMs)).toEqual([600]);
+    at(1000);
+    const put = later[0]?.run();
+    expect(asked()).toBe(2);
+    answer(true);
+    await put;
+    expect(told).toEqual(['newest']);
+  });
+
+  test('a sign while an ask is under way waits for it, one ask at a time', async () => {
+    const { sign, asked, answer, at, later } = asker();
+    const nothing = (): void => undefined;
+    const first = sign(nothing);
+    at(1500);
+    await sign(nothing);
+    expect(asked()).toBe(1);
+    expect(later.map((each) => each.afterMs)).toEqual([1000]);
+    answer(false);
+    await first;
+    at(2500);
+    const put = later[0]?.run();
+    expect(asked()).toBe(2);
+    answer(false);
+    await put;
+    expect(later).toHaveLength(1);
+  });
+});
+
+describe('the window a capture screen picked', () => {
+  test('closes when the owner says its capture ended', () => {
+    expect(pickedWindowStep(FIRST_PICK, { kind: 'ended', pick: 0 })).toEqual({ pick: 0, closed: true });
+  });
+
+  test('is open again once the user picks again, and drops the end of the pick before', () => {
+    const again = pickedWindowStep({ pick: 0, closed: true }, { kind: 'repicked' });
+    expect(again).toEqual({ pick: 1, closed: false });
+    expect(pickedWindowStep(again, { kind: 'ended', pick: 0 })).toEqual(again);
   });
 });
 
