@@ -21,9 +21,9 @@ use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::saved::{AtSize, Readers, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Size};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::check_spec::{self, CharactersSpec, CheckSpec, expected_characters};
+use crate::check_spec::{self, CharactersSpec, CheckSpec, SpecError, expected_characters};
 use crate::reading::at_size;
 
 use super::Owner;
@@ -68,6 +68,22 @@ pub(crate) struct ReferenceTrial {
     /// The side of the window that number's region stays at, or `None`
     /// for the side the region is nearest.
     pub(crate) pin: Option<PinDef>,
+}
+
+/// What may keep a reference from reading as its samples do, for its
+/// editor to warn about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReadingRisks {
+    /// The pairs of characters whose learned shapes match each other, so
+    /// it may read one as the other: each pair once, in the order it
+    /// learned them.
+    pub(crate) lookalikes: Vec<(char, char)>,
+    /// Whether it finds its characters by contrast with a tolerance that
+    /// leaves an outline or a shadow of a sample out, so that it reads only
+    /// over backgrounds that hide it too.
+    pub(crate) hides_tone: bool,
 }
 
 /// The ID a value is tried under before it is saved under its own. It
@@ -254,17 +270,17 @@ impl<H: Host> Owner<H> {
         Ok(())
     }
 
-    /// The pairs of characters whose shapes, as the reference `spec`
-    /// teaches them, match each other, so it may read one as the
-    /// other: each pair once, in the order it learned them.
-    pub(crate) fn lookalike_characters(
-        &mut self,
-        spec: &CharactersSpec,
-    ) -> Result<Vec<(char, char)>, String> {
+    /// What may keep the reference `spec` teaches from reading as its
+    /// samples do.
+    pub(crate) fn reading_risks(&mut self, spec: &CharactersSpec) -> Result<ReadingRisks, String> {
         self.keep_reference(spec.reference.as_ref());
-        self.with_session(|session| spec.teach(session, None, TAUGHT))
-            .map(|taught| taught.reader.lookalikes())
-            .map_err(|error| error.to_string())
+        self.with_session(|session| {
+            Ok(ReadingRisks {
+                lookalikes: spec.teach(session, None, TAUGHT)?.reader.lookalikes(),
+                hides_tone: spec.hides_a_tone(session)?,
+            })
+        })
+        .map_err(|error: SpecError| error.to_string())
     }
 
     /// Reads the live frame of the picked window with `value` from now on,
@@ -333,8 +349,35 @@ mod tests {
         .expect("matching length")
     }
 
+    /// A 14 by 8 frame of two white blocks whose black outlines touch, on
+    /// a dark blue background.
+    fn outlined() -> Image {
+        let pixels = (0..8_u32)
+            .flat_map(|y| {
+                (0..14_u32).flat_map(move |x| {
+                    let inside = (2..6).contains(&y);
+                    if inside && ((3..5).contains(&x) || (9..11).contains(&x)) {
+                        [255, 255, 255, 0]
+                    } else if (1..7).contains(&y) && (2..12).contains(&x) {
+                        [0, 0, 0, 0]
+                    } else {
+                        [90, 30, 10, 0]
+                    }
+                })
+            })
+            .collect();
+        Image::new(
+            Size {
+                width: 14,
+                height: 8,
+            },
+            pixels,
+        )
+        .expect("matching length")
+    }
+
     #[test]
-    fn lookalike_characters_name_the_learned_shapes_that_match_each_other() {
+    fn reading_risks_name_the_learned_shapes_that_match_each_other() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&near_twins()));
@@ -348,13 +391,42 @@ mod tests {
             .expect("valid JSON")
         };
         assert_eq!(
-            harness.ask(|owner| owner.lookalike_characters(&spec(0))),
-            Ok(vec![('8', '6')]),
+            harness.ask(|owner| owner.reading_risks(&spec(0))),
+            Ok(ReadingRisks {
+                lookalikes: vec![('8', '6')],
+                hides_tone: false,
+            }),
             "the bar matches neither block"
         );
         assert_eq!(
-            harness.ask(|owner| owner.lookalike_characters(&spec(9))),
+            harness.ask(|owner| owner.reading_risks(&spec(9))),
             Err("That screenshot is gone. Take a new one and try again.".to_owned())
+        );
+    }
+
+    #[test]
+    fn reading_risks_say_when_the_tolerance_leaves_an_outline_out() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&outlined()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let spec = |ink: &str| -> CharactersSpec {
+            serde_json::from_str(&format!(
+                r#"{{"region":{{"x":1,"y":1,"width":12,"height":6}},"screenshot":0,{ink}
+                    "tolerance":168,"labels":[{{"screenshot":0,"text":"11"}}]}}"#
+            ))
+            .expect("valid JSON")
+        };
+        let mut hides = |ink: &str| {
+            harness
+                .ask(|owner| owner.reading_risks(&spec(ink)))
+                .map(|risks| risks.hides_tone)
+        };
+        assert_eq!(hides(""), Ok(true));
+        assert_eq!(
+            hides(r#""ink":{"red":255,"green":255,"blue":255},"#),
+            Ok(false),
+            "a text color counts only the fill"
         );
     }
 

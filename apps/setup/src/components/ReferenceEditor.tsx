@@ -5,7 +5,7 @@ import type { Coverage } from '../lib/expected.ts';
 import type { Color } from '../lib/pixels.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
 import { INK_HINT, INK_TOLERANCE_HINT, LOOKALIKE_HINT } from '../lib/hints.ts';
-import { lookalikeWarning } from '../lib/useLookalikes.ts';
+import { HIDDEN_TONE_WARNING, lookalikeWarning } from '../lib/useReadingRisks.ts';
 import { CharacterChips, MissingChips } from './CharacterChips.tsx';
 import { ExpectedCharacters } from './ExpectedCharacters.tsx';
 import { ColorField, ToleranceField } from './Fields.tsx';
@@ -31,6 +31,8 @@ interface Props {
   readonly coverage: Coverage;
   /** The pairs of characters it may read as each other, of those with a character the value needs. */
   readonly lookalikes: readonly (readonly [string, string])[];
+  /** Whether its tolerance leaves an outline or a shadow out of what it learned. */
+  readonly hidesTone: boolean;
   /** The texts of found text not added yet, whose new characters are outlined. */
   readonly finding: readonly string[];
   /** The values that read with the saved reference. */
@@ -201,6 +203,7 @@ export function ReferenceEditor(props: Props) {
           {learnedNote(saved.length, labeled.length, recorded.length)}
           {pending.length === 0 ? '' : ' Outlined characters come from the found text, once you add it.'}
         </span>
+        {props.hidesTone ? <p className="warn">{HIDDEN_TONE_WARNING}</p> : null}
         {lookalike === null ? null : (
           <div className="row">
             <p className="warn">{lookalike}</p>

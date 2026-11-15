@@ -132,6 +132,13 @@ most with bold text that has a thick outline: give it a
 [text color](#text-color). With a text color, lower the **Tolerance**, or
 pick the color again from the middle of a character.
 
+A second warning there says that an outline or a shadow around the
+characters is close to the background color in what the reference learned
+from, so it isn't part of the shapes it learned. Over a background of
+another color it can count, and the number won't read, as when a game goes
+from one level or scene to the next: give the reference a
+[text color](#text-color), so only the inside of the characters counts.
+
 AppyTappy learns a character from a box, found text you add, or a kept
 reading, never because a value needs it. A reference you make or edit from
 the References page is taught for no value, so nothing shows as missing
@@ -376,8 +383,16 @@ text touches its edge can't be learned by contrast either, and has no box to
 draw again: put the text color back, or teach the reference afresh from new
 boxes or readings.
 
-An outline usually reads by contrast, but a thick one around bold text
-can't. When AppyTappy finds the characters by contrast, the outline counts as
+An outline reads by contrast while the background behind the number stays
+much the same. Where the background changes, the outline counts as part of
+each character over one background and blends into another, so the
+characters change shape and the number stops reading: give such text a text
+color. The editor warns under
+[**Characters it knows**](#what-it-has-learned) when the boxes and readings
+the reference learned from leave an outline or a shadow out.
+
+A thick outline around bold text can't be read by contrast over any
+background. When AppyTappy finds the characters by contrast, the outline counts as
 part of each character, so the strokes are thicker, the holes in `0`, `6`,
 `8`, and `9` are small, and the reference can read one of them as another,
 such as `0` as `8`. Give such text a text color: pick the color inside a

@@ -1,17 +1,18 @@
-// The characters a reference may read as each other, because the shapes it learned for them match each other, which
-// the reference editor warns about.
+// What may keep a reference from reading as its samples do, which the reference editor warns about: characters it may
+// read as each other, because the shapes it learned for them match each other, and an outline or a shadow that its
+// tolerance leaves out of its samples.
 
 import { useEffect, useRef, useState } from 'react';
 
-import type { CharactersSpec } from './bindings.ts';
-import { lookalikeCharacters } from './api.ts';
+import type { CharactersSpec, ReadingRisks } from './bindings.ts';
+import { readingRisks } from './api.ts';
 import type { Color } from './pixels.ts';
 import { ask } from './request.ts';
 
 /** Two characters whose learned shapes match each other. */
 type Pair = readonly [string, string];
 
-/** How long the samples must rest before the pairs are asked for, so a label asks once it is typed. */
+/** How long the samples must rest before the risks are asked for, so a label asks once it is typed. */
 const CHECK_DELAY_MS = 250;
 
 /**
@@ -47,36 +48,46 @@ export function lookalikeWarning(pairs: readonly Pair[], ink: Color | null, tole
   return `${which} ${fix}`;
 }
 
-/** A name for the pairs `spec` asks for, which stays while nothing they depend on changes, or null for none. */
-export function lookalikeKey(spec: CharactersSpec | null): string | null {
+/**
+ * What the reference editor says of a reference whose tolerance leaves an outline or a shadow out of its samples. It
+ * reads while the background hides that tone as the samples' does, and may not over another.
+ */
+export const HIDDEN_TONE_WARNING =
+  "An outline or a shadow around the characters is close to the background color in what this reference learned from, so it isn't part of the shapes it learned. Over a background of another color it can count, and the number won't read. Pick a text color below, so only the inside of the characters counts.";
+
+/** A name for the risks `spec` asks for, which stays while nothing they depend on changes, or null for none. */
+export function riskKey(spec: CharactersSpec | null): string | null {
   return spec === null ? null : JSON.stringify(spec);
 }
 
 /** An answer of the owner, and the key it was asked under. */
 interface Answer {
   readonly key: string;
-  readonly pairs: readonly Pair[];
+  readonly risks: ReadingRisks;
 }
+
+/** What a reference risks before it is answered. */
+const NO_RISKS: ReadingRisks = { lookalikes: [], hidesTone: false };
 
 /** What the reference has been answered before it asks. */
-const NO_ANSWER: Answer = { key: '', pairs: [] };
+const NO_ANSWER: Answer = { key: '', risks: NO_RISKS };
 
 /**
- * The pairs to show while the reference asks under `wanted`: those of `answer` when it was asked under that key, and
+ * The risks to show while the reference asks under `wanted`: those of `answer` when it was asked under that key, and
  * none otherwise, so an answer for samples, a region, or a text color since changed is dropped.
  */
-export function pairsArrived(answer: Answer, wanted: string | null): readonly Pair[] {
-  return answer.key === wanted ? answer.pairs : [];
+export function risksArrived(answer: Answer, wanted: string | null): ReadingRisks {
+  return answer.key === wanted ? answer.risks : NO_RISKS;
 }
 
 /**
- * The pairs of characters whose shapes the reference `spec` teaches match each other, as the setup app answers for
- * that spec, or none while `spec` is null or the answer for it has not arrived. It asks again once a sample, the
- * region, the text color, or the tolerance changed and then rested. A spec that cannot be taught answers nothing,
- * and the check of the characters says what is wrong with it.
+ * What may keep the reference `spec` teaches from reading as its samples do, as the setup app answers for that spec,
+ * or nothing while `spec` is null or the answer for it has not arrived. It asks again once a sample, the region, the
+ * text color, or the tolerance changed and then rested. A spec that cannot be taught answers nothing, and the check
+ * of the characters says what is wrong with it.
  */
-export function useLookalikes(spec: CharactersSpec | null): readonly Pair[] {
-  const key = lookalikeKey(spec);
+export function useReadingRisks(spec: CharactersSpec | null): ReadingRisks {
+  const key = riskKey(spec);
   const [answer, setAnswer] = useState<Answer>(NO_ANSWER);
   const latest = useRef(spec);
   latest.current = spec;
@@ -86,9 +97,9 @@ export function useLookalikes(spec: CharactersSpec | null): readonly Pair[] {
       return undefined;
     }
     const cancel = ask(
-      () => lookalikeCharacters(asked),
-      (pairs) => {
-        setAnswer({ key, pairs });
+      () => readingRisks(asked),
+      (risks) => {
+        setAnswer({ key, risks });
       },
       (error) => {
         console.error(error);
@@ -102,5 +113,5 @@ export function useLookalikes(spec: CharactersSpec | null): readonly Pair[] {
       setAnswer(NO_ANSWER);
     };
   }, [key]);
-  return pairsArrived(answer, key);
+  return risksArrived(answer, key);
 }

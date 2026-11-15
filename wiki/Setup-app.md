@@ -758,8 +758,8 @@ each other. Bold text with a thick outline does this by contrast, since the
 outline counts as part of each character and closes the holes in `0`, `6`,
 `8`, and `9`; with a text color only the fill counts. The page asks the
 owner for the pairs of the reference it teaches once its samples rest for a
-quarter of a second (`lookalike_characters`, `useLookalikes` in
-`lib/useLookalikes.ts`), and the editor warns about the pairs with a
+quarter of a second (`reading_risks`, `useReadingRisks` in
+`lib/useReadingRisks.ts`), and the editor warns about the pairs with a
 character the value needs, or about every pair when it needs none
 (`neededPairs`). A pair with only one needed character is still a risk: a
 read takes a shown letter or symbol the value doesn't need for a kept
@@ -767,8 +767,39 @@ lookalike, and fails on a left-out digit that is closer. A reference made
 by itself takes what the values that read with it need (`readersNeed`). A
 reference found by contrast asks once its tolerance is fitted, since the fit
 changes the spec.
-[Look-alike characters](State-machines.md#look-alike-characters) has its
+[Reading risks](State-machines.md#reading-risks) has its
 states. Only the setup app checks this, so the runtime is unchanged.
+
+### Hidden outlines
+
+By contrast, a tone of the text counts as ink only where it is further from
+the background than the tolerance. An outline or a shadow that is nearer
+than that in every sample is left out of the shapes the reference learns:
+black around white digits on dark blue, say. The
+[contrast tolerance](#contrast-tolerance) settles there readily, since it
+is where touching outlines stop joining the characters. Such a reference
+reads over that background and over others that hide the outline. Over a
+background further from the outline, the outline is ink, the characters are
+thicker or touch, and no shape matches, so a number that reads in setup
+stops reading when the application changes what is behind it.
+
+The same `reading_risks` answer says whether the reference does this
+(`hides_a_tone` in `check_spec/contrast.rs`), and the editor warns and
+points to a text color, which counts the fill alone over any background. A
+sample hides a tone when enough of the pixels inside its border are not
+characters at the reference's tolerance and have a color that neither its
+background nor its characters account for; `hides_a_tone` documents the
+test and the constants that set its limits. The sample's border is its
+background, so a gradient, grain, or a panel's line behind the text is not
+a tone of the text, and an anti-aliased edge blends the background and the
+characters, so it is not one either.
+
+The warning says the outline can count over another background, not that
+it does, because the check sees only the samples. It finds no outline whose
+red, green, and blue each lie between the background's and the characters',
+which looks like an anti-aliased edge, none that reaches the sample's
+border, and none that is the background's own color. It does not look at a
+reference with a text color.
 
 ### Checking characters
 

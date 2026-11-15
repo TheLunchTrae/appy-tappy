@@ -118,7 +118,10 @@ The reasons a number has no reading:
   it a little differently this time: draw a [box](References.md#boxes) around
   this reading on a screenshot, or [record](References.md#record-readings)
   the region until it reads. If it is another character, the reference hasn't
-  learned the one shown: draw a box around a reading with it.
+  learned the one shown: draw a box around a reading with it. If the number
+  reads over one background and not over another, and its characters have
+  an outline or a shadow, give the reference a
+  [text color](References.md#text-color).
   [What a reference can't learn](References.md#what-a-reference-cant-learn)
   lists the characters no box teaches.
 - **The value leaves out a character its number holds.** The message shows
