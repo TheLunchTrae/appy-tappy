@@ -5,6 +5,7 @@
 import { useCallback, useRef, useState } from 'react';
 
 import type { Rect, Size } from './region.ts';
+import { sameSize } from './sizes.ts';
 import type { Taken } from './useScreenshots.ts';
 
 /** A box drawn over the live view, in the pixels of the live frame of size `at`. */
@@ -114,20 +115,19 @@ export interface LiveDrawScene {
   readonly settingPlace: boolean;
   /** The size of the live frame shown, or null while a screenshot shows or no frame has arrived. */
   readonly live: Size | null;
-  readonly hasRegion: boolean;
-  /** Whether a saved value is edited, whose region keeps to the window size it was drawn at. */
-  readonly editsSaved: boolean;
+  /** The window size an edited saved value's region keeps to, or null for a new value. */
+  readonly drawnAt: Size | null;
   /** Whether a recording runs, a review covers the picture, or a click picks a color. */
   readonly occupied: boolean;
 }
 
 /**
- * The live frame the stage draws the value's region over, or null when it draws none there. A region already placed
- * is drawn again over it, on the screenshot the drag takes, except an edited value's, since the live window can have
- * another size than the one its region is drawn at.
+ * The live frame the stage draws the value's region over, or null when it draws none there. The region, placed or
+ * not, is drawn again over it, on the screenshot the drag takes. An edited saved value's region keeps to the window
+ * size it was drawn at, so it is drawn over a live frame of that size only.
  */
-export function liveDrawFrame({ settingPlace, live, hasRegion, editsSaved, occupied }: LiveDrawScene): Size | null {
-  return settingPlace && !occupied && (!hasRegion || !editsSaved) ? live : null;
+export function liveDrawFrame({ settingPlace, live, drawnAt, occupied }: LiveDrawScene): Size | null {
+  return settingPlace && !occupied && live !== null && (drawnAt === null || sameSize(drawnAt, live)) ? live : null;
 }
 
 /**

@@ -486,18 +486,23 @@ export function Capture({
     if (shot === null) {
       return;
     }
-    setSelected(shot.index);
     const size = shot.size;
+    const fits = regionSize !== null && sameSize(regionSize, size);
     const region = box === null ? null : scaleRect(box.rect, box.at, size);
     if (region === null) {
-      onValuePicture(shot);
+      // A click that drew no box takes a screenshot, but leaves a region placed at another size where it is.
+      if (draft.region === null || fits) {
+        setSelected(shot.index);
+        onValuePicture(shot);
+      }
       return;
     }
+    setSelected(shot.index);
     setDraft((current) => ({
       ...current,
       region,
       drawnOn: shot.index,
-      pin: pinChoiceAfterRegion(current.pin, current.region, region, size),
+      pin: pinChoiceAfterRegion(current.pin, fits ? current.region : null, region, size),
     }));
   });
   const { liveFrozen } = stage;
@@ -754,10 +759,11 @@ export function Capture({
   const liveFrame = liveDrawFrame({
     settingPlace: shownStep === 'where' && editing === null,
     live: selected === null ? liveSize : null,
-    hasRegion: draft.region !== null,
-    editsSaved: edited !== null,
+    drawnAt: edited?.screen.windowSize ?? null,
     occupied: recordingNow !== null || sheeted || picking !== null,
   });
+  const regionOnLive =
+    liveFrame !== null && regionSize !== null && sameSize(regionSize, liveFrame) ? draft.region : null;
   const regionShown = regionOnStage(shownStep, draft.kind, recordingNow !== null);
   const drawing: Drawing = liveFrame !== null ? 'live' : editing !== null ? 'boxes' : regionShown ? 'region' : 'none';
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
@@ -981,8 +987,9 @@ export function Capture({
                 size={liveFrame}
                 shown={shown}
                 screenshot={null}
-                // The box drawn stays outlined from when the pointer is let go until its screenshot arrives.
-                region={live.shown.box?.rect ?? null}
+                // The box drawn stays outlined from when the pointer is let go until its screenshot arrives, and a
+                // region placed at the live frame's size shows over it until a press.
+                region={live.shown.frozen ? (live.shown.box?.rect ?? null) : regionOnLive}
                 area={area}
                 label={regionLabel(valueName, moving)}
                 editable={live.shown.box === null}
