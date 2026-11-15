@@ -335,6 +335,15 @@ boxes show more characters than you typed. Give it a text color instead:
    still count: drag the slider or type a number. Raise it until the
    characters are whole, and lower it if the background counts too.
 
+Bold text with a thick outline takes a text color too. By contrast the
+outline is part of each character, so the strokes are thicker and the holes
+in `0`, `6`, `8`, and `9` are small, and the reference can read one of them
+as another, such as `0` as `8`. Pick the color inside a character, not its
+outline: only the inside counts then, and the digits stay apart. Without a
+text color, draw each box and the value's region around the whole
+character, outline included. A box that cuts through the outline cuts the
+character.
+
 Only pixels near the text color count as characters then, whatever is behind
 them, so the text has to be drawn in one color. **Remove text color** goes
 back to finding the characters by contrast. A box that was drawn while the
