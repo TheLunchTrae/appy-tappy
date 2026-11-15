@@ -23,8 +23,11 @@ interface Props {
  */
 export function UnlearnedPictures({ unlearned, hasTextColor, removed, onRemove, onPutBack }: Props) {
   const { samples, pictures } = unlearned;
-  // A picture that is missing teaches nothing whatever the text color, and by contrast the tolerance is fitted.
-  const colorHelps = hasTextColor && samples.some((sample) => !sample.missing);
+  // A missing picture teaches nothing whatever the text color. One cut for a text color learns again once it is picked.
+  const colorHelps = samples.some((sample) => !sample.missing);
+  const colorAdvice = hasTextColor
+    ? ', or change the text color or its tolerance until the list is empty'
+    : ', or pick a text color until the list is empty';
   if (samples.length === 0 && removed === 0) {
     return null;
   }
@@ -39,7 +42,7 @@ export function UnlearnedPictures({ unlearned, hasTextColor, removed, onRemove, 
           <p className="warn">
             It can't be saved while it keeps {samples.length === 1 ? 'this picture' : 'these pictures'}. Remove{' '}
             {samples.length === 1 ? 'it' : 'them'}
-            {colorHelps ? ', or change the text color or its tolerance until the list is empty' : ''}.
+            {colorHelps ? colorAdvice : ''}.
           </p>
           <ul className="box-list unlearned" aria-labelledby="unlearned-title">
             {samples.map((sample) => {

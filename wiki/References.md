@@ -432,9 +432,10 @@ one of them: **Save reference** waits, and says
   character, draw a box around it on a screenshot. The editor counts the
   pictures you removed, and **Put back** brings them all back. Saving the
   reference deletes them.
-- **Change the text color**, or its tolerance, until the list is empty:
-  what the reference was saved with learns every picture. This doesn't
-  help a picture that is missing from the application's folder.
+- **Change the text color**, or its tolerance, until the list is empty.
+  Without a text color, pick one: a picture cut for a text color learns
+  again with it. This doesn't help a picture that is missing from the
+  application's folder.
 
 A reference needs at least one picture, box, or kept reading, so draw a box
 before you save one whose pictures you removed.
