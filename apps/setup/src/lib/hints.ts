@@ -46,7 +46,7 @@ export const REGION_HINT =
 /** The tolerance's scale for a check's colors. */
 export const TOLERANCE_HINT = `From 0, an exact match, up to ${LIMITS.maxTolerance}, which matches any color. Raise it if the check misses; lower it if it matches when it shouldn't.`;
 
-/** The tolerance's scale for a reference's characters' color. */
+/** The tolerance's scale for a reference's text color. */
 export const INK_TOLERANCE_HINT = `From 0, only the exact color, up to ${LIMITS.maxTolerance}, which counts every pixel. Raise it if parts of characters go missing; lower it if the background counts as characters.`;
 
 /** A bar fill's two colors. */
@@ -55,7 +55,7 @@ export const BAR_COLORS_HINT =
 
 /** Where a recording of readings looks for characters. */
 export const RECORD_SCOPE_HINT =
-  "This place records only where the reference reads: its first box, or the value's region. The whole window also records text in the characters' color and as tall as the text there, wherever the window shows it, so a stats panel or a second counter in the same font teaches the reference too. When the window shows the characters at another size as well, draw a box around some text of that size first: each box is one more example of a size to look for. It looks over the window twice a second, so text that flashes by faster can be missed, and it can pick up other text of that color and size, which you leave out in review.";
+  "This place records only where the reference reads: its first box, or the value's region. The whole window also records text that stands out as the characters there do and is as tall as the text there, wherever the window shows it, so a stats panel or a second counter in the same font teaches the reference too. When the window shows the characters at another size as well, draw a box around some text of that size first: each box is one more example of a size to look for. It looks over the window twice a second, so text that flashes by faster can be missed, and it can pick up other text of that size, which you leave out in review.";
 
 /** What the sizes of text are that a recording of the whole window looks for. */
 export const TEXT_SIZES_HINT =
@@ -67,15 +67,15 @@ export const RECORD_RESIZED_HINT =
 
 /** What a reference is. */
 export const REFERENCE_HINT =
-  'A reference knows what each character looks like in one font and color, learned from the boxes you draw on screenshots and the readings you record. Values that show the same font can share one.';
+  'A reference knows what each character looks like in one font, learned from the boxes you draw on screenshots and the readings you record. Values that show the same font can share one.';
 
 /** The characters of its reference that a number value reads. */
 export const CHARACTERS_READ_HINT =
   'A reference can know a whole font. Reading only the characters this value shows stops it mistaking one character for a lookalike, such as 0 for O. The reference keeps every character, so other values can read more of it.';
 
-/** A reference's characters' color. */
+/** A reference's text color, which most references leave unset. */
 export const INK_HINT =
-  'Pick a pixel inside a character, not on its edge. Pixels within the tolerance of this color count as part of the characters.';
+  'A reference finds its characters by how they stand out from the background behind them, whatever their colors. Over a busy background, such as a scene that shows through behind the text, pick the text color instead: select a pixel inside a character, not on its edge. Then only pixels within the tolerance of that color count as part of the characters.';
 
 /** The boxes a reference learns from. */
 export const BOXES_HINT =
@@ -86,7 +86,7 @@ export const EXPECTED_HINT =
   'Your list of what to teach. AppyTappy shows which of these characters the reference has yet to learn. It only guides you: a character is learned from the boxes you type and the readings you keep, never from this list, and a number reads the same way whatever you turn on. A number ends at a colon or slash, so 12:30 and 12/50 each read as 12.';
 /** Finding more text like the selected box. */
 export const FIND_LIKE_HINT =
-  "Looks on the selected box's screenshot for other text in the characters' color and as tall as the text in the box, and reads each as text. It lists only text that shows the characters the reference needs. Each one you tick and add becomes a box. Draw the box tightly around the text and type what it shows first, so the size is right.";
+  "Looks on the selected box's screenshot for other text that stands out as the text in the box does and is as tall, and reads each as text. It lists only text that shows the characters the reference needs. Each one you tick and add becomes a box. Draw the box tightly around the text and type what it shows first, so the size is right.";
 
 /** What the found text's list shows, and what each row's box and field do. */
 export const FOUND_HINT =
@@ -106,7 +106,7 @@ export const CHECK_OFFER_HINT =
 
 /** What Reread reads again, and when that changes anything. */
 export const REREAD_HINT =
-  "Has the text reader read again the finds it could not read, and the flagged ones whose text you have not typed, with the characters' color and tolerance as they are set now. Your ticks and the text you typed stay. The same color and tolerance read the same text, so Reread waits for you to change one of them, unless the text reader could not read a find at all.";
+  'Has the text reader read again the finds it could not read, and the flagged ones whose text you have not typed, with the text color and tolerance as they are set now. Your ticks and the text you typed stay. The same text color and tolerance read the same text, so Reread waits for you to change one of them, unless the text reader could not read a find at all.';
 
 /** The read interval's two waits. */
 export const READING_HINT = `AppyTappy reads a value only when its window draws something new. It waits the fastest read while a value changes, and up to the slowest read while it holds still. Each is ${LIMITS.fastestReadMs} to ${LIMITS.slowestReadMs} ms.`;

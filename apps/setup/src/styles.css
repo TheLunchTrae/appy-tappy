@@ -3094,6 +3094,23 @@ tr.draft-row > td:not(.end):not(.row-actions) {
   gap: 8px;
 }
 
+/* A setting most users leave alone, folded under its name until they open it. */
+.tucked {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tucked > summary {
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tucked[open] > summary {
+  margin-bottom: 10px;
+}
+
 /* Debug details under a live reading. */
 .reading-details {
   display: flex;

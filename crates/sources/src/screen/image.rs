@@ -1214,7 +1214,7 @@ mod tests {
 
         use super::*;
         use crate::screen::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
-        use crate::screen::digits::DigitReader;
+        use crate::screen::digits::{DigitReader, InkRule};
 
         const WHITE: Rgb = Rgb {
             red: 255,
@@ -1257,21 +1257,31 @@ mod tests {
             let [first, second] = screenshots();
             let glyphs =
                 Image::decode_png(include_bytes!("../../tests/fixtures/digits.png")).unwrap();
-            let mut reader = DigitReader::new(WHITE, 60);
-            reader.learn(&glyphs, "0123456789.%").unwrap();
             let counter = Region::new(120, 38, 100, 28).unwrap();
-            let check = Check::Number {
-                reader: reader.clone(),
-                whole: false,
+            let by_color = InkRule::Color {
+                color: WHITE,
+                tolerance: 60,
             };
-            assert_eq!(
-                read(&check, &first, counter),
-                Value::Number(Number::new(37.0).unwrap())
-            );
-            assert_eq!(
-                read(&check, &second, counter),
-                Value::Number(Number::new(90.5).unwrap())
-            );
+            for ink_rule in [InkRule::Contrast { tolerance: 60 }, by_color] {
+                let mut reader = DigitReader::new(ink_rule);
+                reader.learn(&glyphs, "0123456789.%").unwrap();
+                let check = Check::Number {
+                    reader,
+                    whole: false,
+                };
+                assert_eq!(
+                    read(&check, &first, counter),
+                    Value::Number(Number::new(37.0).unwrap()),
+                    "{ink_rule:?}"
+                );
+                assert_eq!(
+                    read(&check, &second, counter),
+                    Value::Number(Number::new(90.5).unwrap()),
+                    "{ink_rule:?}"
+                );
+            }
+            let mut reader = DigitReader::new(by_color);
+            reader.learn(&glyphs, "0123456789.%").unwrap();
             let whole = Check::Number {
                 reader,
                 whole: true,

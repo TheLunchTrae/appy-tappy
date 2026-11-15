@@ -23,7 +23,9 @@ use crate::recording::Recording;
 use crate::screenshots::Shots;
 use crate::words::sentence;
 
-use super::{Cut, Pictures, ReferenceRef, SpecError, cut, drawn, same_size, size_of, to_region};
+use super::{
+    Cut, Pictures, ReferenceRef, SpecError, contrast, cut, drawn, same_size, size_of, to_region,
+};
 
 /// The most characters a reference is saved as expecting: room for the
 /// digits, both cases of the English letters, and every other printable
@@ -60,7 +62,8 @@ pub(crate) struct RecordedLabel {
 
 /// The characters a reference is being taught, as the UI describes them:
 /// the saved samples of `reference`, when it is saved, then `labels`, then
-/// `recorded`, all in the color `ink` within `tolerance`.
+/// `recorded`, their characters told from the background by `ink` and
+/// `tolerance`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct CharactersSpec {
@@ -75,9 +78,12 @@ pub(crate) struct CharactersSpec {
     /// one.
     #[serde(default)]
     pub(crate) reference: Option<ReferenceRef>,
-    /// The characters' color.
-    pub(crate) ink: ColorDef,
-    /// How far from `ink` a pixel of a character may be.
+    /// The reference's text color, or `None` when it finds its characters
+    /// by contrast.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub(crate) ink: Option<ColorDef>,
+    /// The reference's tolerance, as `ReferenceDef` has it.
     pub(crate) tolerance: u8,
     /// The labeled screenshots.
     pub(crate) labels: Vec<Label>,
@@ -216,17 +222,7 @@ impl CharactersSpec {
         } else {
             made
         };
-        let labeled = self.labels.iter().map(|label| {
-            let image = label_image(session.screenshots, region, label)?;
-            Ok((image, label.text.as_str()))
-        });
-        let kept_readings = recorded.iter().map(|label| {
-            let image = recorded_image(session.recording, region, label.reading)?;
-            Ok((image.clone(), label.text.as_str()))
-        });
-        let new: Vec<(Image, &str)> = labeled
-            .chain(kept_readings)
-            .collect::<Result<_, SpecError>>()?;
+        let new = self.new_samples(session, region, recorded)?;
         let mut pictures = Vec::new();
         let mut number = samples.len();
         for (image, text) in new {
@@ -283,6 +279,66 @@ impl CharactersSpec {
             pictures,
             reader,
         })
+    }
+
+    /// The pictures and texts of the labeled screenshots and then, of the
+    /// recorded readings, `recorded`: the samples these characters add to
+    /// the saved ones, in the order the reference learns them.
+    fn new_samples<'a>(
+        &'a self,
+        session: Session<'_>,
+        region: Region,
+        recorded: &'a [RecordedLabel],
+    ) -> Result<Vec<(Image, &'a str)>, SpecError> {
+        let labeled = self.labels.iter().map(|label| {
+            let image = label_image(session.screenshots, region, label)?;
+            Ok((image, label.text.as_str()))
+        });
+        let kept_readings = recorded.iter().map(|label| {
+            let image = recorded_image(session.recording, region, label.reading)?;
+            Ok((image.clone(), label.text.as_str()))
+        });
+        labeled.chain(kept_readings).collect()
+    }
+
+    /// The tolerance the reference these characters teach finds its
+    /// characters by contrast with, chosen from its samples as
+    /// [`contrast::fitted`] describes: the spec's own while every sample
+    /// reads with it. A reference with a text color keeps its tolerance,
+    /// which the user sets. A saved sample whose picture cannot be read
+    /// has no say; teaching the reference reports it.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`SpecError`] for an empty region, or a region,
+    /// screenshot, recorded reading, or saved reference that does not
+    /// exist, and for a labeled screenshot or a recording of another
+    /// window size.
+    pub(crate) fn contrast_tolerance(&self, session: Session<'_>) -> Result<u8, SpecError> {
+        if self.ink.is_some() {
+            return Ok(self.tolerance);
+        }
+        let (region, window_size) = self.drawn(session.screenshots)?;
+        self.same_sizes(session, window_size)?;
+        let saved = self
+            .reference
+            .as_ref()
+            .map(|saved| (session.references)(saved).map_err(SpecError::Reference))
+            .transpose()?;
+        let mut samples: Vec<(Image, &str)> = saved
+            .iter()
+            .flat_map(|saved| {
+                saved.reference.samples.iter().filter_map(|sample| {
+                    let (_, png) = saved
+                        .pictures
+                        .iter()
+                        .find(|(name, _)| *name == sample.image)?;
+                    Some((Image::decode_png(png).ok()?, sample.text.as_str()))
+                })
+            })
+            .collect();
+        samples.extend(self.new_samples(session, region, &self.recorded)?);
+        Ok(contrast::fitted(&samples, self.tolerance))
     }
 
     /// Fails unless every labeled screenshot, and the recording when a
@@ -460,7 +516,7 @@ fn label_image(screenshots: &dyn Shots, region: Region, label: &Label) -> Result
 }
 
 /// The pixels of reading `reading` of `recording`, which must be of
-/// `region`. The reference relearns them with its own characters' color and
+/// `region`. The reference relearns them with its own text color and
 /// tolerance, like the labeled screenshots, so they need not match the
 /// recording's.
 fn recorded_image(

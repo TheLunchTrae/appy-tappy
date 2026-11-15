@@ -8,9 +8,11 @@
 //! machines. Its one allocation is the ink, a byte for each pixel of the
 //! region.
 //!
-//! 1. **Ink.** A pixel is ink when each of its red, green, and blue is within
-//!    the tolerance of the text color the user picked. [`Ink`] holds which
-//!    pixels are, found once, and the later passes read it.
+//! 1. **Ink.** A pixel is ink when it is further than the tolerance from
+//!    the region's background, the color of its border, or, for a reference
+//!    with a text color, within the tolerance of that color
+//!    ([`InkRule`]). [`Ink`] holds which pixels are, found once, and the
+//!    later passes read it.
 //! 2. **Line.** The run of adjacent inked rows that holds the most ink
 //!    ([`Ink::line`]).
 //! 3. **Characters.** Runs of columns that hold ink in the line, left to
@@ -36,13 +38,13 @@ use std::ops::Range;
 use appytappy_config::app_file::is_label_character;
 use appytappy_config::signal::Number;
 
-use super::{Image, Rgb, Size};
+use super::{Image, Region, Size};
 
 #[cfg(test)]
 pub(crate) mod drawn;
 mod ink;
 
-pub use ink::Ink;
+pub use ink::{Ink, InkRule};
 
 /// Grid rows: each character is scaled to this many cells tall.
 const GRID_ROWS: u32 = 16;
@@ -130,12 +132,11 @@ struct Span {
     right: u32,
 }
 
-/// Reads a number drawn in one text color, from glyphs learned from
-/// screenshots of the same counter.
+/// Reads a number from glyphs learned from screenshots of the same
+/// counter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DigitReader {
-    ink: Rgb,
-    tolerance: u8,
+    ink_rule: InkRule,
     /// The glyphs a read takes its characters from.
     glyphs: Vec<Glyph>,
     /// The glyphs of the characters a value leaves out, which
@@ -145,14 +146,12 @@ pub struct DigitReader {
 }
 
 impl DigitReader {
-    /// A reader for text of color `ink`, where a pixel counts as ink when
-    /// each of its red, green, and blue is within `tolerance` of the ink's.
-    /// It knows no glyphs until it learns some.
+    /// A reader that tells ink from background by `ink_rule`. It knows no
+    /// glyphs until it learns some.
     #[must_use]
-    pub const fn new(ink: Rgb, tolerance: u8) -> Self {
+    pub const fn new(ink_rule: InkRule) -> Self {
         Self {
-            ink,
-            tolerance,
+            ink_rule,
             glyphs: Vec::new(),
             left_out: Vec::new(),
         }
@@ -316,14 +315,6 @@ impl DigitReader {
         parsed.ok_or(ReadError::NoNumber { read })
     }
 
-    /// Whether `pixel`, as `[blue, green, red, unused]` like
-    /// [`Image::pixels`] holds it, is ink: each of its red, green, and blue
-    /// within the tolerance of the text color.
-    #[must_use]
-    pub fn is_ink(&self, pixel: [u8; 4]) -> bool {
-        Rgb::of_pixel(pixel).near(self.ink, self.tolerance)
-    }
-
     /// The shapes of the characters in `image`, left to right, as a read
     /// samples them. Two images with equal shapes teach a reader the same
     /// glyphs and read the same, so one adds nothing the other does not.
@@ -363,7 +354,18 @@ impl DigitReader {
     /// [`DigitReader::shapes`] each find them once and work from them.
     #[must_use]
     pub fn ink(&self, image: &Image) -> Ink {
-        Ink::new(image, |pixel| self.is_ink(pixel))
+        Ink::new(image, self.ink_rule, image)
+    }
+
+    /// Which pixels of the whole of `image` are ink like the text in
+    /// `region` of it, for a search of `image` for more such text: a
+    /// reader that finds ink by contrast takes the background from
+    /// `region`, where [`DigitReader::ink`] would take it from the border
+    /// of all of `image`. `None` when `region` reaches outside `image`.
+    #[must_use]
+    pub fn ink_like(&self, image: &Image, region: Region) -> Option<Ink> {
+        let backdrop = image.crop(region)?;
+        Some(Ink::new(image, self.ink_rule, &backdrop))
     }
 
     /// How each character in `image` scores against the learned glyphs:
@@ -834,7 +836,7 @@ impl fmt::Display for ReadText {
 /// A screenshot could not teach a reader its glyphs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LearnError {
-    /// No pixel was near the text color.
+    /// No pixel was ink.
     NoInk,
     /// The image held more than 24 characters.
     TooManyCharacters,
@@ -848,7 +850,7 @@ pub enum LearnError {
     },
     /// The image held more characters than the text, as when a character
     /// is drawn as marks with a gap between them, or something else in the
-    /// region has the characters' color.
+    /// region is ink.
     MoreCharacters {
         /// Characters in the image.
         found: usize,
@@ -880,7 +882,7 @@ impl fmt::Display for LearnError {
                 formatter,
                 "the region shows {found} characters but the text has {expected}; a character \
                  drawn as separate marks side by side, as some percent signs are, counts once \
-                 for each mark, and so does anything else in the characters' color"
+                 for each mark, and so does anything else that stands out as the characters do"
             ),
             Self::Conflict { learned, new } => write!(
                 formatter,
@@ -894,7 +896,8 @@ impl fmt::Display for LearnError {
 impl Error for LearnError {}
 
 /// What a read or a lesson says when the region has no ink.
-const NO_INK: &str = "no pixel in the region has the characters' color";
+const NO_INK: &str =
+    "no pixel in the region stands out from its background, or has the reference's text color";
 
 /// What a read or a lesson says when the region has too many characters.
 const TOO_MANY: &str = "the region holds more than 24 characters";
@@ -904,7 +907,7 @@ const _: () = assert!(MAX_CHARACTERS == 24, "TOO_MANY states the limit");
 /// stage of a read, in the order a read goes through them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadError {
-    /// No pixel was near the text color.
+    /// No pixel was ink.
     NoInk,
     /// The region held more than 24 characters.
     TooManyCharacters,
@@ -986,7 +989,7 @@ mod tests {
 
     use super::drawn::{Pen, Percent, draw as draw_text};
     use super::*;
-    use crate::screen::Size;
+    use crate::screen::{Rgb, Size};
 
     /// Whether `reader` has learned a glyph for `character`.
     fn knows(reader: &DigitReader, character: char) -> bool {
@@ -1008,7 +1011,8 @@ mod tests {
         for (error, message) in [
             (
                 LearnError::NoInk,
-                "no pixel in the region has the characters' color",
+                "no pixel in the region stands out from its background, or has the reference's text \
+                 color",
             ),
             (
                 LearnError::TooManyCharacters,
@@ -1029,7 +1033,7 @@ mod tests {
                 },
                 "the region shows 5 characters but the text has 3; a character drawn as \
                  separate marks side by side, as some percent signs are, counts once for each \
-                 mark, and so does anything else in the characters' color",
+                 mark, and so does anything else that stands out as the characters do",
             ),
             (
                 LearnError::Conflict {
@@ -1045,7 +1049,8 @@ mod tests {
         for (error, stage, seen) in [
             (
                 ReadError::NoInk,
-                "no pixel in the region has the characters' color",
+                "no pixel in the region stands out from its background, or has the reference's text \
+                 color",
                 "",
             ),
             (
@@ -1245,7 +1250,10 @@ mod tests {
 
     #[test]
     fn characters_learned_at_one_size_read_at_another() {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&draw(&TWELVE), "12").unwrap();
         let big = scaled(&TWELVE, 3);
         let rows: Vec<&str> = big.iter().map(String::as_str).collect();
@@ -1257,7 +1265,10 @@ mod tests {
 
     #[test]
     fn a_whole_read_ignores_the_digits_after_the_point() {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         // "1" and a "." that sits at the baseline.
         reader.learn(&draw(&["#..", "#..", "#.#"]), "1.").unwrap();
         // "1.", then a character never learned.
@@ -1282,7 +1293,10 @@ mod tests {
             "#.#.....#",
             "#.###.###",
         ]);
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&digits, "1 2 3").unwrap();
         assert!(knows(&reader, '2'));
         assert!(!knows(&reader, '4'));
@@ -1302,7 +1316,10 @@ mod tests {
     #[test]
     fn learning_fails_without_changing_the_reader() {
         let digits = draw(&["#.#"]);
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         assert_eq!(
             reader.learn(&digits, "1"),
             Err(LearnError::MoreCharacters {
@@ -1333,7 +1350,10 @@ mod tests {
 
     #[test]
     fn reading_fails_on_unknown_characters_and_missing_digits() {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader
             .learn(&draw(&["#.###", "#.#.#", "#.###"]), "1%")
             .unwrap();
@@ -1354,7 +1374,11 @@ mod tests {
             })
         );
         assert_eq!(
-            DigitReader::new(WHITE, 0).read(&draw(&["#"]), false),
+            DigitReader::new(InkRule::Color {
+                color: WHITE,
+                tolerance: 0
+            })
+            .read(&draw(&["#"]), false),
             Err(ReadError::UnknownCharacter {
                 position: 0,
                 closest: None,
@@ -1388,7 +1412,10 @@ mod tests {
             .map(|(letter, digit)| format!("{letter}.{digit}"))
             .collect();
         let rows: Vec<&str> = both.iter().map(String::as_str).collect();
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&draw(&rows), "O0").unwrap();
         let letter = ring(10);
         let letter = draw(&letter.iter().map(String::as_str).collect::<Vec<_>>());
@@ -1413,13 +1440,19 @@ mod tests {
         assert_eq!(reader.clone().reading(Some("%")), None);
         // A check that names none reads with them all, even before any.
         assert_eq!(reader.clone().reading(None), Some(reader));
-        let blank = DigitReader::new(WHITE, 0);
+        let blank = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         assert_eq!(blank.clone().reading(None), Some(blank));
     }
 
     #[test]
     fn text_after_a_finished_number_needs_no_glyphs() {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader
             .learn(&draw(&["#.###", "#.#.#", "#.###"]), "1%")
             .unwrap();
@@ -1441,7 +1474,10 @@ mod tests {
 
     #[test]
     fn a_stray_pixel_does_not_stretch_the_line() {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&draw(&TWELVE), "12").unwrap();
         let mut noisy = TWELVE.to_vec();
         noisy.extend([".....", "....#"]);
@@ -1474,7 +1510,10 @@ mod tests {
 
     #[test]
     fn a_number_reads_wherever_it_sits_in_a_larger_region() {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&draw(&TWELVE), "12").unwrap();
         for (left, right, above, below) in [(0, 9, 0, 6), (4, 5, 3, 3), (9, 0, 6, 0)] {
             let region = padded(&TWELVE, left, right, above, below);
@@ -1489,7 +1528,10 @@ mod tests {
 
     #[test]
     fn ink_beside_a_number_in_a_larger_region_is_read_with_it() {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&draw(&TWELVE), "12").unwrap();
         // A "1" three columns to the left of "12", on its rows.
         let digit: Vec<String> = TWELVE.iter().map(|row| format!("#...{row}")).collect();
@@ -1513,7 +1555,10 @@ mod tests {
 
     #[test]
     fn shapes_tell_characters_apart_but_not_their_size() {
-        let reader = DigitReader::new(WHITE, 0);
+        let reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         let twelve = reader.shapes(&draw(&TWELVE)).unwrap();
         let [one, two] = twelve.characters() else {
             panic!("two characters, not {twelve:?}");
@@ -1535,7 +1580,10 @@ mod tests {
 
     #[test]
     fn placed_characters_are_the_shapes_with_where_each_came_from() {
-        let reader = DigitReader::new(WHITE, 0);
+        let reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         // A stray pixel under the line widens no character.
         let mut noisy = TWELVE.to_vec();
         noisy.extend([".....", ".#..."]);
@@ -1556,20 +1604,122 @@ mod tests {
         );
     }
 
+    /// Draws `rows` in the colors `palette` gives their cells, as
+    /// `[blue, green, red]`.
+    fn paint(rows: &[&str], palette: impl Fn(char) -> [u8; 3]) -> Image {
+        let size = Size {
+            width: u32::try_from(rows[0].len()).unwrap(),
+            height: u32::try_from(rows.len()).unwrap(),
+        };
+        let bgra = rows
+            .iter()
+            .flat_map(|row| row.chars())
+            .flat_map(|cell| {
+                let [blue, green, red] = palette(cell);
+                [blue, green, red, 255]
+            })
+            .collect();
+        Image::new(size, bgra).unwrap()
+    }
+
     #[test]
-    fn ink_is_each_channel_within_the_tolerance() {
-        let reader = DigitReader::new(
-            Rgb {
-                red: 200,
-                green: 100,
-                blue: 50,
-            },
-            5,
+    fn a_reader_by_contrast_reads_characters_of_more_than_one_color() {
+        // "12" with a gold top and a dark red bottom on a gray panel, and
+        // "21" in two other tones on another panel.
+        let two_tone = |light: [u8; 3], dark: [u8; 3], back: [u8; 3]| {
+            move |cell| match cell {
+                'a' => light,
+                'b' => dark,
+                _ => back,
+            }
+        };
+        let gold = two_tone([40, 200, 250], [20, 30, 140], [90, 90, 90]);
+        let frost = two_tone([255, 240, 200], [200, 120, 60], [10, 20, 30]);
+        let twelve = [
+            ".......", //
+            ".a.aaa.", //
+            ".a...a.", //
+            ".b.bbb.", //
+            ".b.b...", //
+            ".b.bbb.", //
+            ".......", //
+        ];
+        let twenty_one = [
+            ".......", //
+            ".aaa.a.", //
+            "...a.a.", //
+            ".bbb.b.", //
+            ".b...b.", //
+            ".bbb.b.", //
+            ".......", //
+        ];
+        let mut reader = DigitReader::new(InkRule::Contrast { tolerance: 40 });
+        reader.learn(&paint(&twelve, gold), "12").unwrap();
+        assert_eq!(
+            reader.read(&paint(&twenty_one, frost), false),
+            Ok(Number::new(21.0).unwrap())
         );
-        assert!(reader.is_ink([55, 95, 205, 0]));
-        assert!(!reader.is_ink([56, 100, 200, 0]));
-        assert!(!reader.is_ink([50, 94, 200, 0]));
-        assert!(!reader.is_ink([50, 100, 206, 0]));
+        // One text color takes half of each character.
+        let mut by_color = DigitReader::new(InkRule::Color {
+            color: Rgb {
+                red: 250,
+                green: 200,
+                blue: 40,
+            },
+            tolerance: 40,
+        });
+        by_color.learn(&paint(&twelve, gold), "12").unwrap();
+        assert_eq!(
+            by_color.read(&paint(&twenty_one, frost), false),
+            Err(ReadError::NoInk)
+        );
+    }
+
+    #[test]
+    fn ink_like_a_region_stands_out_from_that_regions_background() {
+        // A panel of `p` holding a character `#`, on a scene of `s`.
+        let scene = paint(
+            &[
+                "ssssss", //
+                "sppppp", //
+                "spp#pp", //
+                "sppppp", //
+            ],
+            |cell| match cell {
+                's' => [200, 200, 200],
+                'p' => [20, 20, 20],
+                _ => [255, 255, 255],
+            },
+        );
+        let reader = DigitReader::new(InkRule::Contrast { tolerance: 40 });
+        let panel = Region::new(2, 1, 3, 3).unwrap();
+        let like = reader.ink_like(&scene, panel).unwrap();
+        let alone = reader.ink(&scene);
+        // (column, row): the scene, the panel, and the character.
+        for ((x, y), in_panel, by_itself) in [
+            ((0, 0), true, false),
+            ((1, 2), false, true),
+            ((3, 2), true, true),
+        ] {
+            assert_eq!(like.at(x, y), in_panel, "like the panel at {x}, {y}");
+            assert_eq!(alone.at(x, y), by_itself, "by itself at {x}, {y}");
+        }
+        assert_eq!(like.size(), scene.size());
+        assert!(
+            reader
+                .ink_like(&scene, Region::new(4, 2, 3, 2).unwrap())
+                .is_none()
+        );
+        let white = Rgb {
+            red: 255,
+            green: 255,
+            blue: 255,
+        };
+        let by_color = DigitReader::new(InkRule::Color {
+            color: white,
+            tolerance: 0,
+        });
+        assert_eq!(by_color.ink_like(&scene, panel), Some(by_color.ink(&scene)));
     }
 
     /// A shape from `rows` of cells, `#` set, from the top left.
@@ -1587,7 +1737,10 @@ mod tests {
 
     /// A reader that learned each of `glyphs`, in order.
     fn reader_of(glyphs: &[(char, Shape)]) -> DigitReader {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.glyphs = glyphs
             .iter()
             .map(|&(character, shape)| Glyph::new(character, shape))
@@ -1808,7 +1961,10 @@ mod tests {
 
     #[test]
     fn a_cell_is_set_when_at_least_half_its_pixels_are_ink() {
-        let reader = DigitReader::new(WHITE, 0);
+        let reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         // A line 32 pixels tall makes each grid cell 2 by 2 pixels.
         let line = 0..32;
         let span = Span { left: 0, right: 2 };
@@ -1823,7 +1979,10 @@ mod tests {
 
     #[test]
     fn of_two_lines_with_equal_ink_the_upper_one_is_read() {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&draw(&TWELVE), "12").unwrap();
         // Sixteen ink pixels, as many as "12", in one unlearned block.
         let mut tied = TWELVE.to_vec();
@@ -1836,7 +1995,10 @@ mod tests {
 
     #[test]
     fn a_reader_learns_at_most_256_glyphs() {
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         for index in 0..MAX_GLYPHS {
             let mut shape = Shape::default();
             shape[0] = u32::try_from(index).unwrap().wrapping_add(1) << 16;
@@ -1864,7 +2026,19 @@ mod tests {
     /// tall, each at another fraction of a pixel, as a user's few labeled
     /// screenshots show them.
     fn taught(height: u32, labels: &[&str]) -> DigitReader {
-        let mut reader = DigitReader::new(WHITE, 40);
+        taught_by(
+            InkRule::Color {
+                color: WHITE,
+                tolerance: 40,
+            },
+            height,
+            labels,
+        )
+    }
+
+    /// [`taught`], telling ink from background by `ink_rule`.
+    fn taught_by(ink_rule: InkRule, height: u32, labels: &[&str]) -> DigitReader {
+        let mut reader = DigitReader::new(ink_rule);
         for (text, across) in labels.iter().zip([3.1, 3.47, 3.84]) {
             reader.learn(&drawn(text, height, across), text).unwrap();
         }
@@ -1900,6 +2074,27 @@ mod tests {
                 Ok(Number::new(shown).unwrap()),
                 "{} at {}", text, across
             );
+        }
+    }
+
+    #[test]
+    fn outlined_text_reads_by_contrast_wherever_it_lands_on_the_pixel_grid() {
+        // The outline is as far from the background as the strokes are,
+        // so it is ink too, and the shapes are the outlined characters'.
+        for height in [16, 28] {
+            let reader = taught_by(InkRule::Contrast { tolerance: 40 }, height, &LABELS);
+            for (text, shown, across) in [
+                ("74.05%", 74.05, 3.0),
+                ("100%", 100.0, 3.25),
+                ("8.69%", 8.69, 3.6),
+                ("23%", 23.0, 3.93),
+            ] {
+                assert_eq!(
+                    reader.read(&drawn(text, height, across), false),
+                    Ok(Number::new(shown).unwrap()),
+                    "{text} at {across}, {height} tall"
+                );
+            }
         }
     }
 
@@ -2003,7 +2198,10 @@ mod tests {
     fn a_character_the_value_leaves_out_is_text_before_the_number() {
         // "L", a "." at the baseline, and "5".
         let label = draw(&["#.....###", "#.....#..", "###.#.###"]);
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&label, "L.5").unwrap();
         let five = Ok(Number::new(5.0).unwrap());
         assert_eq!(reader.read(&label, false), five);
@@ -2031,7 +2229,10 @@ mod tests {
     fn a_digit_the_value_leaves_out_fails_the_read() {
         // "1", a "." at the baseline, and "5".
         let label = draw(&["#...###", "#...#..", "#.#.###"]);
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&label, "1.5").unwrap();
         let ones = reader.reading(Some("1.")).unwrap();
         assert_eq!(
@@ -2082,7 +2283,10 @@ mod tests {
             .collect();
         let both: Vec<&str> = both.iter().map(String::as_str).collect();
         let nine = draw(&(0..16).map(nine).collect::<Vec<_>>());
-        let mut reader = DigitReader::new(WHITE, 0);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        });
         reader.learn(&draw(&both), "39").unwrap();
         assert_eq!(reader.read(&nine, false), Ok(Number::new(9.0).unwrap()));
 
@@ -2152,7 +2356,10 @@ mod tests {
             };
             draw_text(text, pen, canvas(20))
         };
-        let mut reader = DigitReader::new(WHITE, 40);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 40,
+        });
         assert_eq!(
             reader.learn(&apart("87%"), "87%"),
             Err(LearnError::MoreCharacters {

@@ -1,14 +1,15 @@
 //! Finding more text like one of a reference's boxes: the text elsewhere on
-//! the same screenshot in the characters' color and at their size, so the
-//! user adds it all at once instead of drawing a box around each.
+//! the same screenshot that stands out as the box's does and has its size,
+//! so the user adds it all at once instead of drawing a box around each.
 //!
-//! It looks at the ink of the whole screenshot, as the reference's color and
-//! tolerance tell ink from background, and joins touching ink pixels into
-//! blobs. Blobs side by side on one line, no further apart than the
+//! It looks at the ink of the whole screenshot, as the reference tells the
+//! box's ink from its background ([`DigitReader::ink_like`]): what stands
+//! out from the background the box has, or what has the reference's text
+//! color. It joins touching ink pixels into blobs. Blobs side by side on one line, no further apart than the
 //! sample's height, make a run of text. A run whose tallest character is as
 //! tall as the sample's, within [`SIZE_PERCENT`], is a find. Ink much
-//! taller than the sample, such as a panel in the characters' color, is left
-//! out, and so is the run inside the sample's own region.
+//! taller than the sample, such as the scene around the box's panel, is
+//! left out, and so is the run inside the sample's own region.
 //!
 //! A recording of the whole window looks the same way for text of several
 //! sizes at once, one for each example the user drew ([`Sizes`]).
@@ -125,7 +126,7 @@ pub(crate) struct Search {
     pub(crate) finds: Vec<Find>,
     /// Finds past [`MAX_FOUND`].
     pub(crate) more: usize,
-    /// Runs in the characters' color of another size.
+    /// Runs of such text of another size.
     pub(crate) other_sizes: usize,
 }
 
@@ -401,25 +402,22 @@ fn with_margin(run: Bounds, sample: u32, ink: &Ink) -> Option<Region> {
 }
 
 /// How tall the characters are that each of `regions` of `image` shows, in
-/// the ink `reader` tells from background: the sizes [`lines`] looks for.
-/// `None` for a region that holds no ink or lies outside `image`. The
-/// image's ink is read once for all of them.
+/// the ink `reader` tells from that region's background: the sizes
+/// [`lines`] looks for. `None` for a region that holds no ink or lies
+/// outside `image`.
 pub(crate) fn sample_heights(
     image: &Image,
     regions: &[Region],
     reader: &DigitReader,
 ) -> Vec<Option<u32>> {
-    let ink = reader.ink(image);
-    let lines: Vec<Option<u32>> = regions
-        .iter()
-        .map(|&region| line_height(&ink, region).filter(|_| region.fits(image.size())))
-        .collect();
-    let tallest = lines.iter().flatten().copied().max().unwrap_or(0);
-    let blobs = blobs(&ink, tallest.saturating_mul(2));
     regions
         .iter()
-        .zip(lines)
-        .map(|(&region, line)| Some(sample_of(&blobs, region, line?)))
+        .map(|&region| {
+            let ink = reader.ink_like(image, region)?;
+            let line = line_height(&ink, region)?;
+            let blobs = blobs(&ink, line.saturating_mul(2));
+            Some(sample_of(&blobs, region, line))
+        })
         .collect()
 }
 
@@ -434,13 +432,15 @@ fn distance(run: Bounds, near: Region) -> u64 {
 }
 
 /// Where `image` shows text with characters as tall as one of `sizes`,
-/// within [`SIZE_PERCENT`], in the ink `reader` tells from background: each
+/// within [`SIZE_PERCENT`], in the ink `reader` tells from the background
+/// of `near`, or from that of the image's border where `near` lies outside
+/// `image`: each
 /// run with a margin around its ink and the size it has, the run nearest
 /// the middle of `near` first, and of runs as near the higher one, then the
 /// one further left. A recording of the whole window reads these, so it
 /// takes the text beside its examples too, wherever the window shows it. It
-/// takes the [`MAX_LINES`] nearest, so a window full of text in the
-/// characters' color does not crowd out the text around the region.
+/// takes the [`MAX_LINES`] nearest, so a window full of such text does not
+/// crowd out the text around the region.
 ///
 /// Each size is looked for by itself, as [`like`] looks for one: among the
 /// ink no taller than twice the size, joined into runs no further apart
@@ -448,7 +448,9 @@ fn distance(run: Bounds, near: Region) -> u64 {
 /// the larger sizes' runs, so it is taken once, and text of a larger size
 /// beside it is still found.
 pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, reader: &DigitReader) -> Vec<Spot> {
-    let ink = reader.ink(image);
+    let ink = reader
+        .ink_like(image, near)
+        .unwrap_or_else(|| reader.ink(image));
     let largest = sizes.0.last().map_or(0, |size| size.height);
     let blobs = blobs(&ink, largest.saturating_mul(2));
     let mut found: Vec<(Bounds, TextSize)> = Vec::new();
@@ -480,7 +482,8 @@ pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, reader: &DigitRe
 }
 
 /// The text on `image` like the sample in `region`: in the ink `reader`
-/// tells from background and with characters as tall as the sample's,
+/// tells from the sample's background and with characters as tall as the
+/// sample's,
 /// leaving out text that meets any of `skip`, such as finds added already.
 /// `None` when `region` holds no ink or lies outside `image`.
 pub(crate) fn like(
@@ -489,10 +492,7 @@ pub(crate) fn like(
     skip: &[Region],
     reader: &DigitReader,
 ) -> Option<Search> {
-    if !region.fits(image.size()) {
-        return None;
-    }
-    let ink = reader.ink(image);
+    let ink = reader.ink_like(image, region)?;
     let line = line_height(&ink, region)?;
     let blobs = blobs(&ink, line.saturating_mul(2));
     let sample = sample_of(&blobs, region, line);
@@ -529,6 +529,7 @@ pub(crate) fn like(
 
 #[cfg(test)]
 mod tests {
+    use appytappy_sources::screen::digits::InkRule;
     use appytappy_sources::screen::{Rgb, Size};
 
     use super::*;
@@ -553,14 +554,14 @@ mod tests {
     }
 
     fn reader() -> DigitReader {
-        DigitReader::new(
-            Rgb {
+        DigitReader::new(InkRule::Color {
+            color: Rgb {
                 red: 255,
                 green: 0,
                 blue: 0,
             },
-            10,
-        )
+            tolerance: 10,
+        })
     }
 
     fn region(x: u32, y: u32, width: u32, height: u32) -> Region {
@@ -606,6 +607,64 @@ mod tests {
         assert_eq!(find.region, region(28, 18, 11, 12));
         let line = find.line.as_ref().expect("the find has ink");
         assert!(line.pixels.contains(&0), "the line carries the ink");
+    }
+
+    #[test]
+    fn text_is_found_by_contrast_with_the_sample_s_background() {
+        // A panel 40 wide on a brighter scene. The sample and the text
+        // below it each have a blue top half and a red bottom half.
+        let pairs = [pair(2, 2, 8), pair(20, 20, 8)].concat();
+        let pixels = (0..40_u32)
+            .flat_map(|y| (0..60_u32).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                let lettered = pairs.iter().any(|&(left, top, w, h)| {
+                    (left..left.saturating_add(w)).contains(&x)
+                        && (top..top.saturating_add(h)).contains(&y)
+                });
+                match (lettered, x < 40) {
+                    (true, _) if y % 20 < 6 => [255, 0, 0, 0],
+                    (true, _) => INK,
+                    (false, true) => PAPER,
+                    (false, false) => [200, 200, 200, 0],
+                }
+            })
+            .collect();
+        let image = Image::new(
+            Size {
+                width: 60,
+                height: 40,
+            },
+            pixels,
+        )
+        .expect("matching length");
+        let by_contrast = DigitReader::new(InkRule::Contrast { tolerance: 30 });
+        let sample = region(0, 0, 12, 12);
+        let search = like(&image, sample, &[], &by_contrast).expect("the sample has ink");
+        assert_eq!(
+            search
+                .finds
+                .iter()
+                .map(|find| find.region)
+                .collect::<Vec<_>>(),
+            [region(18, 18, 11, 12)],
+            "the scene beside the panel is taller than text"
+        );
+        assert_eq!(search.other_sizes, 0);
+        assert_eq!(
+            sample_heights(&image, &[sample], &by_contrast),
+            [Some(8)],
+            "both tones of a character are one blob"
+        );
+        assert_eq!(
+            lines(&image, &Sizes::of(8), sample, &by_contrast),
+            [spot(8, 0, 0, 11, 12), spot(8, 18, 18, 11, 12)]
+        );
+        // A place outside the picture has no background, so the picture's
+        // border is the background, and most of that is the panel's.
+        assert_eq!(
+            lines(&image, &Sizes::of(8), region(50, 30, 20, 20), &by_contrast).len(),
+            2
+        );
     }
 
     #[test]

@@ -439,11 +439,11 @@ mod tests {
             id: "counter".to_owned(),
             name: "Counter".to_owned(),
             origin: OriginDef::ByHand,
-            ink: ColorDef {
+            ink: Some(ColorDef {
                 red: 255,
                 green: 255,
                 blue: 255,
-            },
+            }),
             tolerance: 0,
             samples: vec![SampleDef {
                 image: "ref-counter-1.png".to_owned(),

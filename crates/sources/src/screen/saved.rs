@@ -21,10 +21,10 @@ use appytappy_config::app_file::{
 use appytappy_config::signal::StateName;
 
 use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
-use super::digits::{DigitReader, LearnError};
+use super::digits::{DigitReader, InkRule, LearnError};
 use super::mask::Mask;
 use super::scale::scaled;
-use super::{EmptyRegion, Image, ImageError, Region, Size};
+use super::{EmptyRegion, Image, ImageError, Region, Rgb, Size};
 
 /// A saved value's first drawing: the window size it was drawn at, its
 /// region, and its check.
@@ -511,7 +511,10 @@ pub fn reader(
     reference: &ReferenceDef,
     mut picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Result<DigitReader, SavedError> {
-    let mut reader = DigitReader::new(reference.ink.into(), reference.tolerance);
+    let mut reader = DigitReader::new(InkRule::new(
+        reference.ink.map(Rgb::from),
+        reference.tolerance,
+    ));
     for sample in &reference.samples {
         reader
             .learn(&load(&sample.image, &mut picture)?, &sample.text)
@@ -993,7 +996,7 @@ mod tests {
             id: "counter".to_owned(),
             name: "Counter".to_owned(),
             origin: OriginDef::ByHand,
-            ink: RED,
+            ink: Some(RED),
             tolerance: 10,
             samples: vec![SampleDef {
                 image: sample_name("counter", 1),
@@ -1077,11 +1080,11 @@ mod tests {
             id: "percent".to_owned(),
             name: "Percent".to_owned(),
             origin: OriginDef::ByHand,
-            ink: ColorDef {
+            ink: Some(ColorDef {
                 red: 255,
                 green: 255,
                 blue: 255,
-            },
+            }),
             tolerance: 40,
             samples,
             expects: None,
@@ -1401,8 +1404,13 @@ mod tests {
             .expect("read with the reader handed in, with no picture");
         assert_eq!(built, from_pictures);
         // A reader for no reference the application has is not kept.
-        let mut unknown =
-            Readers::new(&references).learned("other", DigitReader::new(RED.into(), 10));
+        let mut unknown = Readers::new(&references).learned(
+            "other",
+            DigitReader::new(InkRule::Color {
+                color: RED.into(),
+                tolerance: 10,
+            }),
+        );
         assert!(matches!(
             build(&number, &mut unknown, OFTEN, from(&BTreeMap::new())),
             Err(SavedError::Missing { .. })

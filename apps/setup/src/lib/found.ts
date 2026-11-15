@@ -2,6 +2,7 @@
 
 import type { ColorDef, FoundView, Label } from './bindings.ts';
 import type { NewBox } from './boxes.ts';
+import { sameTextColor } from './check.ts';
 import type { Rect } from './region.ts';
 
 /** The user's choice for one find: whether to add it, and the text the user typed, which `typed` says is theirs. */
@@ -23,8 +24,8 @@ export interface FoundRow {
   readonly reading: boolean;
   /** Whether the text reader could not read it and the user typed nothing. */
   readonly failed: boolean;
-  /** The characters' color and tolerance the text reader last read it with. */
-  readonly readWith: { readonly ink: ColorDef; readonly tolerance: number };
+  /** The text color, null for contrast, and the tolerance the text reader last read it with. */
+  readonly readWith: { readonly ink: ColorDef | null; readonly tolerance: number };
   /** Why it cannot be added as it is, found without asking the reference, or null. */
   readonly flag: string | null;
   /**
@@ -117,7 +118,7 @@ export function foundRows(
       typed,
       reading,
       failed,
-      readWith: { ink: find.ink, tolerance: find.tolerance },
+      readWith: { ink: find.ink ?? null, tolerance: find.tolerance },
       flag: fits ? flag : null,
       fits,
     };
@@ -230,14 +231,14 @@ export function withoutFlagged(
   );
 }
 
-/** Why Reread waits while every find it would read again was last read with the color and tolerance set now. */
-export const REREAD_SAME = "Change the characters' color or tolerance to read them differently.";
+/** Why Reread waits while every find it would read again was last read with the text color and tolerance set now. */
+export const REREAD_SAME = 'Set a text color, or change its tolerance, to read them differently.';
 
 /**
  * What Reread would do with `rows`, or null when it has nothing to offer. It is for the listed finds the text reader
  * could not read and the ones `flags` flags whose text is its guess; text the user typed is theirs. Of those it
  * reads again, by index, each one whose read failed, since a failure may pass, and each one last read with another
- * characters' color or tolerance than `ink` and `tolerance`, the ones set now. The same color and tolerance read the
+ * text color or tolerance than `ink`, null for contrast, and `tolerance`, the ones set now. The same two read the
  * same text, so when it would read none again, `blocked` says what to change.
  */
 export function rereadOffer(
@@ -247,18 +248,11 @@ export function rereadOffer(
   tolerance: number,
 ): { readonly indexes: readonly number[]; readonly blocked: string | null } | null {
   const offered = listed(rows).filter((row) => !row.typed && (row.failed || flags.has(row.index)));
-  if (offered.length === 0 || ink === null) {
+  if (offered.length === 0) {
     return null;
   }
   const indexes = offered
-    .filter(
-      (row) =>
-        row.failed ||
-        row.readWith.tolerance !== tolerance ||
-        row.readWith.ink.red !== ink.red ||
-        row.readWith.ink.green !== ink.green ||
-        row.readWith.ink.blue !== ink.blue,
-    )
+    .filter((row) => row.failed || row.readWith.tolerance !== tolerance || !sameTextColor(row.readWith.ink, ink))
     .map((row) => row.index);
   return { indexes, blocked: indexes.length === 0 ? REREAD_SAME : null };
 }

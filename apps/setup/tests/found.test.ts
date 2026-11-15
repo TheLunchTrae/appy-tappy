@@ -211,10 +211,11 @@ describe('flagged finds', () => {
     const unlisted = foundRows(view, new Map(), [], digits);
     expect(listed(unlisted).map((row) => row.index)).toEqual([1, 2, 3]);
     expect(rereadOffer(unlisted, new Map([[0, 'Nope.']]), gray, 40)).toEqual({ indexes: [3], blocked: null });
-    // With nothing flagged or failed, and with no characters' color, there is nothing to offer.
+    // With nothing flagged or failed, there is nothing to offer.
     const typedOver = foundRows(view, new Map([[3, { keep: true, text: '7', typed: true }]]), [], []);
     expect(rereadOffer(typedOver, new Map(), gray, 40)).toBeNull();
-    expect(rereadOffer(rows, flags, null, 40)).toBeNull();
+    // Contrast reads otherwise than the text color the finds were read with.
+    expect(rereadOffer(rows, flags, null, 40)).toEqual({ indexes: [2, 3], blocked: null });
   });
 
   test('Reread reads a guess again only with another color or tolerance, and a failed read whenever asked', () => {

@@ -112,7 +112,7 @@ mod tests {
     use super::*;
     use crate::screen::Size;
     use crate::screen::check::{BarFill, ColorMatch, ImageMatch, StateMatch};
-    use crate::screen::digits::DigitReader;
+    use crate::screen::digits::{DigitReader, InkRule};
 
     const WHITE: Rgb = Rgb {
         red: 255,
@@ -152,7 +152,10 @@ mod tests {
 
     #[test]
     fn a_number_scores_each_character_against_its_glyphs() {
-        let mut reader = DigitReader::new(WHITE, 10);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 10,
+        });
         reader.learn(&draw(&ONE_SEVEN), "17").expect("learn");
         let check = Check::Number {
             reader,
@@ -187,7 +190,10 @@ mod tests {
 
     #[test]
     fn a_number_with_one_character_has_no_runner_up() {
-        let mut reader = DigitReader::new(WHITE, 10);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 10,
+        });
         reader.learn(&draw(&["#", "#", "#"]), "1").expect("learn");
         let Ok(Workings::Number(characters)) = (Check::Number {
             reader,

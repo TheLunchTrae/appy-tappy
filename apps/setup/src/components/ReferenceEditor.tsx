@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import type { Coverage } from '../lib/expected.ts';
 import type { Color } from '../lib/pixels.ts';
@@ -11,7 +11,9 @@ import { ColorField, ToleranceField } from './Fields.tsx';
 interface Props {
   readonly name: string;
   readonly appName: string;
+  /** The reference's text color, or null while it finds its characters by contrast. */
   readonly ink: Color | null;
+  /** How far a pixel may be from the text color, which shows only with one. */
   readonly tolerance: number;
   readonly picking: boolean;
   readonly canPick: boolean;
@@ -32,12 +34,14 @@ interface Props {
   readonly boxes: ReactNode;
   /** The panel that finds more text like the selected box. */
   readonly findPanel: ReactNode;
-  /** The matching pixels preview of the characters' color. */
+  /** The matching pixels preview of what counts as the characters. */
   readonly preview: ReactNode;
   /** The recording panel. */
   readonly record: ReactNode;
   readonly onName: (name: string) => void;
   readonly onPick: () => void;
+  /** Goes back to finding the characters by contrast. */
+  readonly onNoTextColor: () => void;
   readonly onTolerance: (tolerance: number) => void;
   readonly onExpected: (expected: readonly string[]) => void;
 }
@@ -55,30 +59,55 @@ function learnedNote(saved: number, labeled: number, recorded: number): string {
   return parts.length === 0 ? 'Nothing learned yet.' : `Learned from ${andList(parts)}.`;
 }
 
-/** Characters the reference knows: tiles in their own color, or plain text until that color is picked. */
-function Known({
-  characters,
-  pending,
-  ink,
-}: {
-  readonly characters: readonly string[];
-  /** The ones that found text would teach once it is added, which show outlined. */
-  readonly pending: readonly string[];
-  readonly ink: Color | null;
-}) {
-  return ink === null ? (
-    <span className="note">{characters.length === 0 ? 'None yet.' : characters.join(' ')}</span>
-  ) : (
-    <CharacterChips
-      characters={characters}
-      ink={ink}
-      pending={pending.filter((character) => characters.includes(character))}
-      large
-    />
+/**
+ * The text color, folded away since most references need none. It stays open for a reference that has one, which
+ * also shows the tolerance and the way back to contrast.
+ */
+function TextColor(
+  props: Pick<Props, 'ink' | 'tolerance' | 'picking' | 'canPick' | 'onPick' | 'onNoTextColor' | 'onTolerance'>,
+) {
+  const { ink } = props;
+  const [opened, setOpened] = useState(false);
+  return (
+    <details
+      className="tucked"
+      open={opened || ink !== null}
+      onToggle={(event) => {
+        setOpened(event.currentTarget.open);
+      }}
+    >
+      <summary>Text color (optional)</summary>
+      <p className="note">
+        AppyTappy finds the characters by how they stand out from the background behind them. Pick a text color only
+        when that misreads because the background is busy, such as a scene that shows through behind the text.
+      </p>
+      <ColorField
+        label="Text color"
+        hint={INK_HINT}
+        color={ink}
+        unset="None"
+        picking={props.picking}
+        canPick={props.canPick}
+        onPick={props.onPick}
+      />
+      {ink === null ? null : (
+        <>
+          <ToleranceField
+            help="How far a pixel's color may be from the text color."
+            hint={INK_TOLERANCE_HINT}
+            value={props.tolerance}
+            onChange={props.onTolerance}
+          />
+          <button type="button" className="btn small" onClick={props.onNoTextColor}>
+            Remove text color
+          </button>
+        </>
+      )}
+    </details>
   );
 }
 
-/** The inspector of a reference: its name and color, the characters it needs, and the ones it learns. */
+/** The inspector of a reference: its name, the characters it needs, the ones it learns, and its text color. */
 export function ReferenceEditor(props: Props) {
   const { name, appName, ink, tolerance, saved, labeled, recorded, finding } = props;
   const { expected, coverage, readers } = props;
@@ -93,6 +122,8 @@ export function ReferenceEditor(props: Props) {
   const extra = chosen
     ? knownCharacters([...coverage.extra, ...pending.filter((character) => !needed(character))])
     : [];
+  const isKnown = (character: string): boolean => known.includes(character);
+  const isExtra = (character: string): boolean => extra.includes(character);
   return (
     <>
       <div className="field">
@@ -111,21 +142,6 @@ export function ReferenceEditor(props: Props) {
         <span>Application</span>
         <p>{appName}</p>
       </div>
-      <ColorField
-        label="Characters' color"
-        hint={INK_HINT}
-        color={ink}
-        picking={props.picking}
-        canPick={props.canPick}
-        onPick={props.onPick}
-      />
-      <ToleranceField
-        help="How far a pixel's color may be from the characters' color."
-        hint={INK_TOLERANCE_HINT}
-        value={tolerance}
-        onChange={props.onTolerance}
-      />
-      {props.preview}
       <ExpectedCharacters expected={expected} onExpected={props.onExpected} />
       {props.boxes}
       {props.findPanel}
@@ -147,11 +163,13 @@ export function ReferenceEditor(props: Props) {
       ) : null}
       <div className="field">
         <span>Characters it knows</span>
-        {known.length === 0 && extra.length > 0 ? null : <Known characters={known} pending={pending} ink={ink} />}
+        {known.length === 0 && extra.length > 0 ? null : (
+          <CharacterChips characters={known} ink={ink} pending={pending.filter(isKnown)} large />
+        )}
         {extra.length === 0 ? null : (
           <>
             <span className="note">Not among the characters it needs, which is fine:</span>
-            <Known characters={extra} pending={pending} ink={ink} />
+            <CharacterChips characters={extra} ink={ink} pending={pending.filter(isExtra)} large />
           </>
         )}
         <span className="note">
@@ -160,6 +178,16 @@ export function ReferenceEditor(props: Props) {
         </span>
       </div>
       {props.record}
+      <TextColor
+        ink={ink}
+        tolerance={tolerance}
+        picking={props.picking}
+        canPick={props.canPick}
+        onPick={props.onPick}
+        onNoTextColor={props.onNoTextColor}
+        onTolerance={props.onTolerance}
+      />
+      {props.preview}
       {readers.length === 0 ? null : (
         <p className="note">
           Used by {andList(readers)}. Changing it changes how {readers.length === 1 ? 'it is' : 'they are'} read.

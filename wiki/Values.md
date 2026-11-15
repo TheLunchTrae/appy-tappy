@@ -258,7 +258,7 @@ instant can then be missed.
 ## Checks
 
 - **Number** reads a number, such as `87%` or `-12.5`, with a
-  [reference](References.md): the color and shapes of the application's
+  [reference](References.md): the shapes of the application's
   characters. Pick one of the application's references, or select
   **New reference from this region** to make one from the region you drew.
   **Edit** changes the picked one, such as to teach it a digit it does not
@@ -409,8 +409,8 @@ at the size the value was drawn at, as the region does.
   value is yes while the distance is at most the tolerance. A region can read
   yes with few pixels tinted, or no with many, when its colors average out.
 
-A [reference](References.md#make-a-reference) has the same switch for its
-characters' color.
+A [reference](References.md#text-color) has the same switch for what counts
+as its characters.
 
 ## Detect a bar's colors
 
@@ -551,8 +551,9 @@ the check:
 - For a **Number** or a **Bar fill** check, draw the box around everywhere
   the value can show. The box is then a reading area, drawn with a dashed
   outline, and AppyTappy reads the number or the bar wherever it is inside
-  it. A **Number** check reads everything in the area that has the
-  characters' color, so keep other text and shapes of that color out. A
+  it. A **Number** check reads everything in the area that stands out from
+  the background, or that has the [text color](References.md#text-color) of
+  a reference that has one, so keep other text and shapes out. A
   **Bar fill** check counts everything in the area with a color near the
   bar's filled or empty color, so keep anything else of those colors out.
   Neither looks outside the area. The value keeps that its region is a

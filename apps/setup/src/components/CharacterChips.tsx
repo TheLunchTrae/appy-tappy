@@ -1,6 +1,12 @@
+import type { CSSProperties } from 'react';
 import { type Color, hex } from '../lib/pixels.ts';
 
-/** A reference's characters, each in a tile drawn in the characters' own color. */
+/** How a tile draws a character of a reference: in the reference's text color when it has one. */
+export function glyphStyle(ink: Color | null | undefined): CSSProperties | undefined {
+  return ink === null || ink === undefined ? undefined : { color: hex(ink) };
+}
+
+/** A reference's characters, each in a tile, drawn in the reference's text color when it has one. */
 export function CharacterChips({
   characters,
   ink,
@@ -8,7 +14,7 @@ export function CharacterChips({
   pending = [],
 }: {
   readonly characters: readonly string[];
-  readonly ink: Color;
+  readonly ink: Color | null | undefined;
   readonly large?: boolean;
   /** Characters of `characters` that only text not added yet would teach, which are outlined. */
   readonly pending?: readonly string[];
@@ -29,7 +35,7 @@ export function CharacterChips({
         <span
           key={character}
           className={pending.includes(character) ? 'glyph pending' : 'glyph'}
-          style={{ color: hex(ink) }}
+          style={glyphStyle(ink)}
           aria-hidden="true"
         >
           {character}

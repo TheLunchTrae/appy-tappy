@@ -59,12 +59,14 @@ interface ColorProps {
   /** What the ? beside the label explains, if the label needs explaining. */
   readonly hint?: ReactNode;
   readonly color: Color | null;
+  /** What shows in place of the color while none is picked. */
+  readonly unset?: string;
   readonly picking: boolean;
   readonly canPick: boolean;
   readonly onPick: () => void;
 }
 
-export function ColorField({ label, hint, color, picking, canPick, onPick }: ColorProps) {
+export function ColorField({ label, hint, color, unset = 'Not picked', picking, canPick, onPick }: ColorProps) {
   return (
     <div className="field">
       {hint === undefined ? (
@@ -78,7 +80,7 @@ export function ColorField({ label, hint, color, picking, canPick, onPick }: Col
       <div className="colorpick">
         <span className="chip">
           {color === null ? (
-            'Not picked'
+            unset
           ) : (
             <>
               <span className="swatch" style={{ background: hex(color) }} />

@@ -12,6 +12,7 @@ use appytappy_config::app_file::{
 use appytappy_config::names::sample_name;
 use appytappy_config::signal::Number;
 use appytappy_sources::screen::check::ImageMatch;
+use appytappy_sources::screen::digits::InkRule;
 use appytappy_sources::screen::saved;
 
 use super::characters::{RecordedLabel, Taught, expected_characters};
@@ -95,7 +96,7 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: RED,
+            ink: Some(RED),
             tolerance: 0,
             samples: vec![SampleDef {
                 image: sample_name("digits", 1),
@@ -150,7 +151,7 @@ fn characters(
         region,
         screenshot: 0,
         reference,
-        ink: RED,
+        ink: Some(RED),
         tolerance: 0,
         labels,
         recorded,
@@ -422,7 +423,7 @@ fn a_saved_reference_is_relearned_in_the_color_being_tried() {
     // The saved reference learned red characters. Tried in gray, its saved
     // sample is the gray half's shape, which the red square shows none of.
     let gray = CharactersSpec {
-        ink: GRAY,
+        ink: Some(GRAY),
         ..characters(whole(), Some(digits_ref()), Vec::new(), Vec::new())
     };
     let error = teach(&gray, session(&[screenshot()], None)).expect_err("no gray in the sample");
@@ -430,6 +431,79 @@ fn a_saved_reference_is_relearned_in_the_color_being_tried() {
         matches!(&error, SpecError::Learn { text, .. } if text == "1"),
         "{error:?}"
     );
+}
+
+/// A 5 by 5 screenshot, black but for two strokes of 200 with a shadow of
+/// 60 between them: two characters by contrast at the tolerances 60 to
+/// 199.
+fn shadowed() -> Image {
+    let blank = [0_u8; 5];
+    let strokes = [0, 200, 60, 200, 0];
+    let bgra = [blank, strokes, strokes, strokes, blank]
+        .concat()
+        .into_iter()
+        .flat_map(|gray| [gray, gray, gray, 0])
+        .collect();
+    Image::new(
+        Size {
+            width: 5,
+            height: 5,
+        },
+        bgra,
+    )
+    .expect("matching length")
+}
+
+#[test]
+fn a_reference_by_contrast_takes_a_tolerance_its_samples_read_with() {
+    let shots = [shadowed()];
+    let all = RegionDef {
+        x: 0,
+        y: 0,
+        width: 5,
+        height: 5,
+    };
+    let spec = |reference, ink, tolerance| CharactersSpec {
+        ink,
+        tolerance,
+        ..characters(
+            all,
+            reference,
+            vec![Label {
+                screenshot: 0,
+                region: None,
+                text: "11".to_owned(),
+            }],
+            Vec::new(),
+        )
+    };
+    let fitted = |spec: CharactersSpec| spec.contrast_tolerance(session(&shots, None));
+    assert_eq!(fitted(spec(None, None, 40)), Ok(128));
+    assert_eq!(fitted(spec(None, None, 100)), Ok(100), "it reads as it is");
+    assert_eq!(
+        fitted(spec(None, Some(RED), 40)),
+        Ok(40),
+        "a text color's tolerance is the user's to set"
+    );
+    // The saved reference's sample is one plain color, which shows no
+    // character by contrast, whatever the tolerance.
+    assert_eq!(fitted(spec(Some(digits_ref()), None, 40)), Ok(40));
+    assert_eq!(
+        fitted(CharactersSpec {
+            screenshot: 3,
+            ..spec(None, None, 40)
+        }),
+        Err(SpecError::NoScreenshot)
+    );
+    // The reference is saved without a text color, and reads by contrast.
+    let taught = teach(&spec(None, None, 128), session(&shots, None)).expect("learns the 1");
+    assert_eq!(taught.reference.ink, None);
+    assert_eq!(taught.reference.tolerance, 128);
+    assert_eq!(
+        taught.reader.read(&shadowed(), false),
+        Ok(Number::new(11.0).expect("finite"))
+    );
+    assert!(teach(&spec(None, None, 40), session(&shots, None)).is_err());
 }
 
 #[test]
@@ -561,7 +635,10 @@ fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
     let mut recording = Recording::new(
         Ticket::numbered(1),
         region,
-        (RED.into(), 0),
+        InkRule::Color {
+            color: RED.into(),
+            tolerance: 0,
+        },
         (small.size(), Follows::Drawn),
         now,
     );
@@ -656,11 +733,11 @@ fn the_ui_describes_checks_in_camel_case_json() {
             },
             screenshot: 0,
             reference: None,
-            ink: ColorDef {
+            ink: Some(ColorDef {
                 red: 1,
                 green: 2,
                 blue: 3
-            },
+            }),
             tolerance: 5,
             labels: vec![Label {
                 screenshot: 0,
@@ -700,7 +777,7 @@ fn a_new_reference_names_one_picture_per_label() {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: RED,
+            ink: Some(RED),
             tolerance: 0,
             // The one label teaches the one sample, whatever it expects.
             samples: vec![SampleDef {
@@ -847,7 +924,10 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
     let mut recording = Recording::new(
         Ticket::numbered(1),
         region,
-        (RED.into(), 0),
+        InkRule::Color {
+            color: RED.into(),
+            tolerance: 0,
+        },
         (screenshot().size(), Follows::Drawn),
         now,
     );
@@ -903,7 +983,10 @@ fn recorded_problems_judge_each_reading_after_the_saved_samples() {
     let mut recording = Recording::new(
         Ticket::numbered(1),
         region,
-        (RED.into(), 0),
+        InkRule::Color {
+            color: RED.into(),
+            tolerance: 0,
+        },
         (screenshot().size(), Follows::Drawn),
         now,
     );

@@ -292,7 +292,7 @@ export function heldStep(held: Held, event: HeldEvent): Held {
 /** What the check goes over besides the finds and the readings: the reference's boxes, and what it keeps. */
 export interface Taught {
   readonly boxes: readonly Box[];
-  /** The characters' color and tolerance, which split a box into its characters. */
+  /** The text color, or null for contrast, and the tolerance, which split a box into its characters. */
   readonly ink: Color | null;
   readonly tolerance: number;
   /** The readings the draft keeps, with their text. */
@@ -347,10 +347,10 @@ export function useCharacterCheck(
     [review.reviewing, review.keeping, recorded],
   );
   const places = useMemo(() => {
-    const drawn =
-      ink === null
-        ? []
-        : boxes.map((box) => ({ box, characters: shown.get(boxCharactersKey(box, ink, tolerance)) ?? null }));
+    const drawn = boxes.map((box) => ({
+      box,
+      characters: shown.get(boxCharactersKey(box, ink, tolerance)) ?? null,
+    }));
     return checkPlaces(
       drawn,
       finder.view?.finds ?? [],

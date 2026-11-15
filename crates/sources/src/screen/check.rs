@@ -462,6 +462,7 @@ impl Error for CheckError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::screen::digits::InkRule;
 
     #[test]
     fn errors_explain_themselves() {
@@ -492,9 +493,12 @@ mod tests {
         assert_eq!(CheckError::NoBar.stage(), CheckError::NoBar.to_string());
         // A number's error is its read's, so the reason shows wherever the
         // check's error does.
-        let read = DigitReader::new(WHITE, 0)
-            .read(&solid(1, WHITE), false)
-            .expect_err("no glyph learned");
+        let read = DigitReader::new(InkRule::Color {
+            color: WHITE,
+            tolerance: 0,
+        })
+        .read(&solid(1, WHITE), false)
+        .expect_err("no glyph learned");
         let number = CheckError::Number(read.clone());
         assert_eq!(number.to_string(), read.to_string());
         assert_eq!(number.stage(), read.stage());

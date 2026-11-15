@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use appytappy_config::app_file::{ColorDef, RegionDef};
 
-use crate::check_spec::{CharactersSpec, Label};
+use crate::check_spec::{self, CharactersSpec, Label};
 use crate::pixels;
 use crate::recording::character::{self, CharacterView};
 use crate::recording::{Line, Text, find, ocr};
@@ -31,7 +31,7 @@ pub(super) struct Found {
     items: Vec<Item>,
     /// Finds past the most a search keeps.
     more: usize,
-    /// Runs in the characters' color of another size.
+    /// Runs of ink of another size.
     other_sizes: usize,
 }
 
@@ -41,9 +41,9 @@ struct Item {
     region: Region,
     image: Image,
     text: Text,
-    /// The characters' color and tolerance its ink was last cut with for
+    /// The text color, if any, and tolerance its ink was last cut with for
     /// the text reader.
-    read_with: (ColorDef, u8),
+    read_with: (Option<ColorDef>, u8),
     /// Where each of its characters is in its pixels, as that color and
     /// tolerance split them.
     characters: Vec<CharacterView>,
@@ -63,7 +63,7 @@ pub(crate) struct FoundView {
     pub(crate) finds: Vec<FindView>,
     /// Finds past the most a search keeps.
     pub(crate) more: usize,
-    /// Runs in the characters' color of another size, left out.
+    /// Runs of ink of another size, left out.
     pub(crate) other_sizes: usize,
 }
 
@@ -76,9 +76,12 @@ pub(crate) struct FindView {
     pub(crate) region: RegionDef,
     /// What the text reader made of it.
     pub(crate) text: Text,
-    /// The characters' color its ink was last cut with for the text reader,
-    /// which reads the same ink as the same text.
-    pub(crate) ink: ColorDef,
+    /// The reference's text color its ink was last cut with for the text
+    /// reader, which reads the same ink as the same text, or `None` when
+    /// it was cut by contrast.
+    #[cfg_attr(test, ts(optional))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ink: Option<ColorDef>,
     /// The tolerance its ink was last cut with.
     pub(crate) tolerance: u8,
     /// Where each of its characters is in its region, left to right, as
@@ -110,8 +113,9 @@ impl Found {
 }
 
 impl<H: Host> Owner<H> {
-    /// Finds text like what `region` of screenshot `screenshot` shows,
-    /// in the characters' color `ink` within `tolerance` and at its size,
+    /// Finds text like what `region` of screenshot `screenshot` shows, as
+    /// a reference with the text color `ink`, if any, and `tolerance`
+    /// tells it from the region's background, and at its size,
     /// elsewhere on that screenshot and away from `added`, the finds added
     /// already, in place of any earlier search, and sends each find to the
     /// text reader.
@@ -120,7 +124,7 @@ impl<H: Host> Owner<H> {
         screenshot: usize,
         region: RegionDef,
         added: &[RegionDef],
-        ink: ColorDef,
+        ink: Option<ColorDef>,
         tolerance: u8,
     ) -> Result<FoundView, String> {
         self.forget_found();
@@ -137,14 +141,13 @@ impl<H: Host> Owner<H> {
                     .to_owned(),
             );
         }
-        let reader = DigitReader::new(ink.into(), tolerance);
+        let reader = DigitReader::new(check_spec::ink_rule(ink, tolerance));
         let added: Vec<Region> = added
             .iter()
             .filter_map(|&spec| Region::try_from(spec).ok())
             .collect();
         let search = find::like(image, region, &added, &reader).ok_or_else(|| {
-            "The box shows no characters in that color. Pick the characters' color first."
-                .to_owned()
+            "The box shows no characters. Draw it around some characters first.".to_owned()
         })?;
         let id = self.tickets.next();
         let mut items = Vec::with_capacity(search.finds.len());
@@ -195,8 +198,8 @@ impl<H: Host> Owner<H> {
     }
 
     /// Has the text reader read each of finds `indexes` of search `search`
-    /// again, as `ink` within `tolerance` tells their characters from the
-    /// background now, and answers the search; `None` when that search was
+    /// again, as a reference with the text color `ink`, if any, and
+    /// `tolerance` tells their characters from the background now, and answers the search; `None` when that search was
     /// replaced or forgotten. A find the reader has yet to answer for is
     /// left waiting, so one read at a time is out for a find and the
     /// reader's next answer for it is for its newest read. An index named
@@ -205,10 +208,10 @@ impl<H: Host> Owner<H> {
         &mut self,
         search: u64,
         indexes: &[usize],
-        ink: ColorDef,
+        ink: Option<ColorDef>,
         tolerance: u8,
     ) -> Option<FoundView> {
-        let reader = DigitReader::new(ink.into(), tolerance);
+        let reader = DigitReader::new(check_spec::ink_rule(ink, tolerance));
         let found = self.search(search)?;
         let id = found.id;
         let lines: Vec<(usize, Option<Line>)> = {
@@ -292,7 +295,8 @@ impl<H: Host> Owner<H> {
     }
 
     /// The characters the box `region` of screenshot `screenshot` shows, as
-    /// the characters' color `ink` within `tolerance` splits them, each
+    /// a reference with the text color `ink`, if any, and `tolerance`
+    /// splits them, each
     /// with the name a find's or a recorded reading's character of the same
     /// shape has; none for an unknown screenshot or a box that does not fit
     /// it.
@@ -300,10 +304,10 @@ impl<H: Host> Owner<H> {
         &self,
         screenshot: usize,
         region: RegionDef,
-        ink: ColorDef,
+        ink: Option<ColorDef>,
         tolerance: u8,
     ) -> Vec<CharacterView> {
-        let reader = DigitReader::new(ink.into(), tolerance);
+        let reader = DigitReader::new(check_spec::ink_rule(ink, tolerance));
         self.capture
             .screenshots()
             .get(screenshot)
@@ -392,7 +396,7 @@ mod tests {
     fn find_like(
         region: RegionDef,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<FoundView, String> {
-        move |owner: &mut Owner<FakeHost>| owner.find_like(0, region, &[], red(), 0)
+        move |owner: &mut Owner<FakeHost>| owner.find_like(0, region, &[], Some(red()), 0)
     }
 
     #[test]
@@ -465,7 +469,7 @@ mod tests {
         let (mut harness, _handler) = searchable();
         let found = harness
             .ask(move |owner: &mut Owner<FakeHost>| {
-                owner.find_like(0, region(0, 0, 4, 5), &[region(7, 0, 4, 5)], red(), 0)
+                owner.find_like(0, region(0, 0, 4, 5), &[region(7, 0, 4, 5)], Some(red()), 0)
             })
             .expect("found");
         let regions: Vec<RegionDef> = found.finds.iter().map(|find| find.region).collect();
@@ -526,7 +530,7 @@ mod tests {
         indexes: &'static [usize],
         ink: ColorDef,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Option<FoundView> {
-        move |owner: &mut Owner<FakeHost>| owner.reread_found(search, indexes, ink, 0)
+        move |owner: &mut Owner<FakeHost>| owner.reread_found(search, indexes, Some(ink), 0)
     }
 
     /// A harness with search 1 of [`marks`], whose two finds the reader
@@ -587,7 +591,7 @@ mod tests {
         let green: ColorDef =
             serde_json::from_str(r#"{"red":0,"green":255,"blue":0}"#).expect("valid JSON");
         let view = harness
-            .ask(move |owner: &mut Owner<FakeHost>| owner.reread_found(FIRST, &[1], green, 9))
+            .ask(move |owner: &mut Owner<FakeHost>| owner.reread_found(FIRST, &[1], Some(green), 9))
             .expect("kept");
         assert_eq!(view.finds[0].characters.len(), 1);
         assert_eq!(
@@ -595,14 +599,14 @@ mod tests {
             [],
             "split again with the color it was read with, which shows none"
         );
-        let read_with: Vec<(ColorDef, u8)> = view
+        let read_with: Vec<(Option<ColorDef>, u8)> = view
             .finds
             .iter()
             .map(|find| (find.ink, find.tolerance))
             .collect();
         assert_eq!(
             read_with,
-            [(red(), 0), (green, 9)],
+            [(Some(red()), 0), (Some(green), 9)],
             "only the find read again takes the new color and tolerance"
         );
     }
@@ -675,10 +679,7 @@ mod tests {
         );
         assert_eq!(
             harness.ask(find_like(region(14, 0, 4, 5))),
-            Err(
-                "The box shows no characters in that color. Pick the characters' color first."
-                    .to_owned()
-            )
+            Err("The box shows no characters. Draw it around some characters first.".to_owned())
         );
         harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
         assert!(
@@ -709,7 +710,9 @@ mod tests {
         let (mut harness, _handler) = searchable();
         let found = harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
         let characters = |screenshot: usize, region: RegionDef| {
-            move |owner: &mut Owner<FakeHost>| owner.box_characters(screenshot, region, red(), 0)
+            move |owner: &mut Owner<FakeHost>| {
+                owner.box_characters(screenshot, region, Some(red()), 0)
+            }
         };
         let drawn = harness.ask(characters(0, region(0, 0, 4, 5)));
         assert_eq!(drawn.len(), 1);

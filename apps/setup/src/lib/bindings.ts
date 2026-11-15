@@ -421,7 +421,8 @@ leftOut: boolean, }>;
 /**
  * The characters a reference is being taught, as the UI describes them:
  * the saved samples of `reference`, when it is saved, then `labels`, then
- * `recorded`, all in the color `ink` within `tolerance`.
+ * `recorded`, their characters told from the background by `ink` and
+ * `tolerance`.
  */
 export type CharactersSpec = DeepReadonly<{
 /**
@@ -441,11 +442,12 @@ screenshot: number,
  */
 reference: ReferenceRef | null,
 /**
- * The characters' color.
+ * The reference's text color, or `None` when it finds its characters
+ * by contrast.
  */
-ink: ColorDef,
+ink?: ColorDef,
 /**
- * How far from `ink` a pixel of a character may be.
+ * The reference's tolerance, as `ReferenceDef` has it.
  */
 tolerance: number,
 /**
@@ -894,10 +896,11 @@ region: RegionDef,
  */
 text: RecordedText,
 /**
- * The characters' color its ink was last cut with for the text reader,
- * which reads the same ink as the same text.
+ * The reference's text color its ink was last cut with for the text
+ * reader, which reads the same ink as the same text, or `None` when
+ * it was cut by contrast.
  */
-ink: ColorDef,
+ink?: ColorDef,
 /**
  * The tolerance its ink was last cut with.
  */
@@ -995,7 +998,7 @@ finds: Array<FindView>,
  */
 more: number,
 /**
- * Runs in the characters' color of another size, left out.
+ * Runs of ink of another size, left out.
  */
 otherSizes: number, }>;
 
@@ -1129,7 +1132,7 @@ kept: Array<number>, }>;
 /**
  * What makes a pixel match, as the UI describes it.
  */
-export type MatchRule = DeepReadonly<{ "kind": "ink", ink: ColorDef, tolerance: number, } | { "kind": "barFill", filled: ColorDef, empty: ColorDef, } | { "kind": "color", color: ColorDef, tolerance: number, }>;
+export type MatchRule = DeepReadonly<{ "kind": "ink", ink: ColorDef, tolerance: number, } | { "kind": "contrast", region: RegionDef, tolerance: number, } | { "kind": "barFill", filled: ColorDef, empty: ColorDef, } | { "kind": "color", color: ColorDef, tolerance: number, }>;
 
 /**
  * What a rule takes of a rectangle of a screenshot.
@@ -1415,11 +1418,12 @@ screenshot: number,
  */
 pin: PinDef | null,
 /**
- * The characters' color.
+ * The reference's text color, or `None` when it finds its characters
+ * by contrast.
  */
-ink: ColorDef,
+ink?: ColorDef,
 /**
- * How far from `ink` a pixel of a character may be.
+ * The reference's tolerance, as `ReferenceDef` has it.
  */
 tolerance: number,
 /**
@@ -1535,11 +1539,14 @@ export type RecordingSettings = DeepReadonly<{
  */
 region: RegionDef,
 /**
- * The characters' color.
+ * The reference's text color, or `None` when it finds its
+ * characters by contrast.
  */
-ink: ColorDef,
+ink?: ColorDef,
 /**
- * How far a pixel may be from the characters' color and still be ink.
+ * The reference's tolerance: how far a pixel may be from the text
+ * color and still be ink, or from the background and still be
+ * background.
  */
 tolerance: number,
 /**
@@ -1609,11 +1616,13 @@ readings: Array<RecordedReading>,
 shapes: Array<RecordedShape>, }>;
 
 /**
- * The characters of one font at one color, that number values read with.
+ * The characters of one font, that number values read with.
  *
  * It learns them from pictures of text in that font. One reference serves
  * every value drawn in its font, whatever the size: the reader scales each
- * character to its line's height.
+ * character to its line's height. It tells a picture's or a region's
+ * characters from the background by contrast with the background, or by
+ * their color when it has a text color.
  */
 export type ReferenceDef = DeepReadonly<{
 /**
@@ -1631,11 +1640,15 @@ name: string,
  */
 origin: OriginDef,
 /**
- * The characters' color.
+ * The text color, for text over a scene that is no one color: the
+ * characters are the pixels within `tolerance` of it. `None` finds the
+ * characters by contrast instead: they are the pixels further than
+ * `tolerance` from the background, so they may be of any colors.
  */
-ink: ColorDef,
+ink?: ColorDef,
 /**
- * How far a pixel may stray from `ink` and still count.
+ * How far a pixel may be from `ink` and still be a character's, or
+ * without `ink`, from the background and still be background.
  */
 tolerance: number,
 /**

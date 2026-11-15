@@ -28,6 +28,7 @@ import { knownCharacters } from './reference.ts';
 import { background } from './repeat.ts';
 import type { useBoxes } from './useBoxes.ts';
 import { useCharacterCheck } from './useCharacterCheck.ts';
+import { useContrastTolerance } from './useContrastTolerance.ts';
 import { useFound } from './useFound.ts';
 import { useRecording } from './useRecording.ts';
 import { focusNext, useRecordFocus, useReview } from './useReview.ts';
@@ -133,6 +134,11 @@ export function useReferenceTeaching({
       });
     },
   });
+  // A reference without a text color takes a tolerance its samples read with. A recording keeps the tolerance it
+  // records with, which Record more needs, so the tolerance waits until the recording is saved or discarded.
+  useContrastTolerance(recording === null && characters?.ok === true ? characters.spec : null, (tolerance) => {
+    setDraft((current) => ({ ...current, tolerance }));
+  });
   // The check, like review, shows in place of the window's picture.
   const checking = guided.guide !== null;
   // The recording review shows. Review is open only on a recording, and one name decides everything review changes
@@ -152,7 +158,7 @@ export function useReferenceTeaching({
     from: Pick<Draft, 'region' | 'ink' | 'tolerance' | 'drawnOn'> = { ...draft, ...reading },
   ): Promise<void> => {
     const { region, ink, tolerance, drawnOn } = from;
-    if (region === null || ink === null || drawnOn === null) {
+    if (region === null || drawnOn === null) {
       return;
     }
     // A reference taught by itself reads at its first box, which the recording is of.
@@ -289,7 +295,7 @@ export function useReferenceTeaching({
     /** Why it cannot record, or null when it can or no editor is open. */
     recordBlocked: editing === null ? null : recordBlocked(draft),
     /** Why Find more like it cannot search from the selected box, or null. */
-    findBlocked: findBlockedBy(draft, boxes.selected),
+    findBlocked: findBlockedBy(boxes.selected),
     /** Why no box can be drawn on the picture shown, or null. */
     boxBlock: editing === null ? null : boxBlocked(readingSize, shown),
     /** Whether it expects more characters than a reference saves. */

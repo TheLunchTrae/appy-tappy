@@ -124,7 +124,7 @@ impl Near {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_sources::screen::digits::DigitReader;
+    use appytappy_sources::screen::digits::{DigitReader, InkRule};
     use appytappy_sources::screen::{Image, Rgb, Size};
 
     use super::*;
@@ -149,7 +149,13 @@ mod tests {
             green: 255,
             blue: 255,
         };
-        Line::of(&DigitReader::new(white, 0).ink(&image))
+        Line::of(
+            &DigitReader::new(InkRule::Color {
+                color: white,
+                tolerance: 0,
+            })
+            .ink(&image),
+        )
     }
 
     #[test]
@@ -216,7 +222,13 @@ mod tests {
             green: 255,
             blue: 255,
         };
-        rows(&DigitReader::new(white, 0).ink(&image))
+        rows(
+            &DigitReader::new(InkRule::Color {
+                color: white,
+                tolerance: 0,
+            })
+            .ink(&image),
+        )
     }
 
     #[test]

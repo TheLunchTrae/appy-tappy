@@ -38,6 +38,10 @@ parts fit.
   has, so the automations that watch it stay linked.
 - **Fix.** A screen region value drawn again at one more window size, which
   it reads there exactly instead of scaled from its first drawing.
+- **Ink.** The pixels of a number's region that belong to its characters.
+  A reference finds them by contrast: the pixels that differ from the
+  region's background by more than its tolerance. A reference with a text
+  color finds the pixels within its tolerance of that color instead.
 - **Look.** What the whole of a value's region shows at one moment. Two looks
   are the same when the region's pixels differ by no more than a tolerance on
   average, the way a state check compares a region with a state's whole
@@ -73,6 +77,9 @@ parts fit.
   time.
 - **Reference.** The characters of one font in one application, learned from
   labeled pictures of its text. A number check reads with one, at any size.
+- **Text color.** A reference's optional color for its characters, for text
+  over a background too busy to find the characters by contrast. The UI
+  calls it **Text color**.
 - **Rule.** A condition on signals, the actions to run when it starts to hold,
   a cooldown, and whether those actions restore.
 - **Runtime.** The always-on background program.

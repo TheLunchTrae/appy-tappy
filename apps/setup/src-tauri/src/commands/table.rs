@@ -58,7 +58,7 @@ macro_rules! with_commands {
             commands::read_value() -> Option<Reading>;
             /// How the check reads the newest frame, for the debug details, or null without a check or a frame.
             commands::explain_reading() -> Option<ReadingDetails>;
-            /// Records the region of the picked window that `spec` names, in the characters' color. With
+            /// Records the region of the picked window that `spec` names. With
             /// `more`, goes on with the stopped recording, which needs the same region, ink and window size;
             /// otherwise starts a new one. Answers the recording's number, which going on keeps.
             commands::start_recording(spec: RecordSpec, more: bool) -> U64AsNumber;
@@ -85,23 +85,28 @@ macro_rules! with_commands {
             /// What the runtime copies out of each frame of a saved application's window at `width` by `height`, and
             /// where each of its saved values reads there.
             commands::capture_outline(application: String, width: u32, height: u32) -> CaptureOutline;
-            /// Finds text like what `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance` and
-            /// at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
+            /// The tolerance the reference `spec` teaches finds its characters by contrast with: `spec`'s own while every
+            /// sample reads with it, and otherwise one its samples read with, when there is one.
+            commands::contrast_tolerance(spec: CharactersSpec) -> u8;
+            /// Finds text like what `region` of screenshot `screenshot` shows, as a reference with the text color `ink`,
+            /// or by contrast without one, and `tolerance` tells it from the region's background, and at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
             /// earlier search.
-            commands::find_like(screenshot: usize, region: RegionDef, added: Vec<RegionDef>, ink: ColorDef, tolerance: u8) -> FoundView;
+            commands::find_like(screenshot: usize, region: RegionDef, added: Vec<RegionDef>, ink: Option<ColorDef>, tolerance: u8) -> FoundView;
             /// The search and the text read for each find so far, or null without one.
             commands::found_state() -> Option<FoundView>;
             /// A find of search `search` at most `maxWidth` wide, or null for an unknown index or a replaced search.
             commands::found_picture(search: U64AsNumber, index: usize, max_width: u32) -> Pixels;
-            /// Has the text reader read finds `indexes` of search `search` again, in the color `ink` within `tolerance`,
+            /// Has the text reader read finds `indexes` of search `search` again, as the text color `ink`, if any, and
+            /// `tolerance` tell their characters from the background,
             /// and answers the search, or null when that search was replaced or forgotten.
-            commands::reread_found(search: U64AsNumber, indexes: Vec<usize>, ink: ColorDef, tolerance: u8) -> Option<FoundView>;
+            commands::reread_found(search: U64AsNumber, indexes: Vec<usize>, ink: Option<ColorDef>, tolerance: u8) -> Option<FoundView>;
             /// Forgets the search.
             commands::forget_found() -> ();
-            /// The characters the box `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance`,
+            /// The characters the box `region` of screenshot `screenshot` shows, as the text color `ink`, if any, and
+            /// `tolerance` split them,
             /// each with the name a find's or a recorded reading's character of the same shape has. None for an unknown
             /// screenshot or a box that does not fit it.
-            commands::box_characters(screenshot: usize, region: RegionDef, ink: ColorDef, tolerance: u8) -> Vec<CharacterView>;
+            commands::box_characters(screenshot: usize, region: RegionDef, ink: Option<ColorDef>, tolerance: u8) -> Vec<CharacterView>;
             /// Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can.
             commands::found_problems(spec: CharactersSpec, found: Vec<Label>) -> Vec<Option<String>>;
             /// Captures a saved value's region on its application's window, replacing any capture, and returns the

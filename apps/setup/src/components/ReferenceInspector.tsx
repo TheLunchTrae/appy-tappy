@@ -4,7 +4,7 @@ import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
 import type { Editing } from '../lib/captureDraft.ts';
-import type { Built, Draft } from '../lib/check.ts';
+import { type Built, type Draft, withTextColor } from '../lib/check.ts';
 import { TOO_MANY } from '../lib/expected.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers } from '../lib/reference.ts';
@@ -102,7 +102,7 @@ interface Props {
   readonly file: AppFile | null;
   /** The value's steps, which wait while its reference is taught, or null for a reference made by itself. */
   readonly stepper: ReactNode;
-  /** Whether the characters' color is being picked from the picture. */
+  /** Whether the text color is being picked from the picture. */
   readonly pickingInk: boolean;
   readonly canPick: boolean;
   readonly onPickInk: (picking: boolean) => void;
@@ -180,6 +180,10 @@ export function ReferenceInspector({
         }}
         onPick={() => {
           onPickInk(!pickingInk);
+        }}
+        onNoTextColor={() => {
+          onPickInk(false);
+          setDraft((current) => withTextColor(current, null));
         }}
         onTolerance={(tolerance) => {
           setDraft((current) => ({ ...current, tolerance }));

@@ -1,7 +1,7 @@
 # References
 
-A reference is how AppyTappy knows an application's characters: their color,
-and the shape of each digit and sign. A [Number](Values.md#checks) value reads
+A reference is how AppyTappy knows an application's characters: the shape
+of each digit and sign, in any colors. A [Number](Values.md#checks) value reads
 its region with one of its application's references, so several values in the
 same font share one reference, and teaching it a new digit teaches all of
 them. A reference can know a whole font, and each value says which of its
@@ -28,27 +28,17 @@ select **Capture this window**, as the first step of
 1. **Name it,** such as `Percent font`, with a name no other reference of
    the application has. Capitals of the letters A to Z don't count:
    `Percent font` and `percent font` are one name.
-2. **Pick the color.** Next to **Characters' color**, select **Pick**, then
-   click the characters on a screenshot. **Tolerance** says how far a pixel's
-   color may be from it and still count: drag the slider or type a number.
-   Turn on **Show matching pixels** to tint every pixel on the screenshot
-   that counts as part of the characters, and watch the tint as you drag
-   **Tolerance**. Raise it until the characters are tinted whole, and lower it
-   if the background around them is tinted too. Under the switch, AppyTappy
-   counts the tinted pixels in the region and on the rest of the screenshot.
-   The tint is only a guide, as
-   [Show matching pixels](Values.md#show-matching-pixels) describes.
-3. **Choose the characters it needs.** Under **Characters it needs**, turn on
+2. **Choose the characters it needs.** Under **Characters it needs**, turn on
    what the numbers can show. A new reference starts with **Digits** on.
    [Choose what it needs](#choose-what-it-needs) describes the choices.
-4. **Teach it the characters.** On a screenshot, drag to draw a box tightly
+3. **Teach it the characters.** On a screenshot, drag to draw a box tightly
    around some characters, then type what the box shows, such as `87%`, in
    its row under **Boxes**. AppyTappy learns the shape of each character from
    what you type. [Boxes](#boxes) describes the boxes. Draw boxes until
    **Characters still missing** says it knows every character it needs,
    [find more like it](#find-more-like-it) on the same screenshot, or
    [record readings](#record-readings) to collect them as they show.
-5. **Save.** Select **Save reference**. A reference with characters still
+4. **Save.** Select **Save reference**. A reference with characters still
    missing saves too: the editor says so next to the button, and you can
    teach them later. When some of its characters are AppyTappy's guesses
    that nobody has confirmed, **Not confirmed yet** above the button
@@ -69,8 +59,9 @@ the same reference, where its value's region is at the window's size.
 
 To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. What it learned before stays;
-new boxes and readings add to it. Changing its color or tolerance changes how
-every value that reads with it reads, and the editor names them.
+new boxes and readings add to it. Changing it, such as giving it a
+[text color](#text-color), changes how every value that reads with it reads,
+and the editor names them.
 
 ## Boxes
 
@@ -156,10 +147,12 @@ it needs to see what is left to teach.
 ## Find more like it
 
 A screen often shows more numbers in the same font than the one you drew a
-box around, such as a stats panel. Pick the **Characters' color**, select a
-box, and then select **Find more like it**. AppyTappy looks on the box's
-screenshot for other text in that color and as tall as the text in the box,
-away from the boxes that are there already, and reads each as text.
+box around, such as a stats panel. Select a box, and then select
+**Find more like it**. AppyTappy looks on the box's screenshot for other
+text that stands out as the text in the box does and is as tall, away from
+the boxes that are there already, and reads each as text. It finds text on
+the same background as the box's; text on a panel of another color needs a
+box of its own first.
 
 The list holds only the finds that may show the characters the reference
 [needs](#choose-what-it-needs). A letter that is often read in place of a
@@ -180,13 +173,13 @@ added. A reference with no list of what it needs lists every find.
    two different characters. Type what it shows, or leave it out.
    **Deselect flagged**, which shows while a ticked find is flagged, clears
    the tick of every flagged find at once, so you can add the rest.
-3. **Reread, if the color was off.** **Reread** shows while AppyTappy could
+3. **Reread, if the text color was off.** **Reread** shows while AppyTappy could
    not read a find, or while a flagged find still has the text AppyTappy read.
-   It reads those finds again with the **Characters' color** and
+   It reads those finds again with the [text color](#text-color) and its
    **Tolerance** as they are set now, and keeps your ticks and the text you
-   typed. The same color and tolerance read the same text, so **Reread**
-   waits, and says so, until you change one of them, such as a tolerance
-   that left parts of the characters out. A find AppyTappy could not read at
+   typed. The same two read the same text, so **Reread** waits, and says so,
+   until you change one of them, such as a tolerance that left parts of the
+   characters out. A find AppyTappy could not read at
    all is read again whenever you select **Reread**.
 4. **Add them.** Select the button that says how many you add, such as
    **Add 3 to the reference**. Each becomes a [box](#boxes), which you can
@@ -314,8 +307,8 @@ AppyTappy says so when the two differ:
   for each of its marks that has blank space on both sides. Some percent
   signs are three such marks: a ring, a slash, and a ring. Type a character
   for each mark, such as `87o/o`; the number still reads as 87. Anything else
-  in the characters' color counts too, so draw the box around the number
-  alone.
+  that stands out from the background counts too, such as an icon or a
+  frame's edge, so draw the box around the number alone.
 
 A reference knows a character as it looked beside the others in its box.
 A sign that reaches above or below the digits, such as the `,` in `1,234`,
@@ -326,6 +319,38 @@ without it too.
 Small text takes more boxes. Where the characters are less than about 16
 pixels tall, draw boxes around several readings of each character, or
 [record](#record-readings) them.
+
+## Text color
+
+AppyTappy finds a reference's characters by how they stand out from the
+background behind them, so text in several colors reads as one: a gradient,
+an outline, a number that turns red when it is low. It takes the background
+from the edge of each box and region, and chooses how far a pixel must be
+from it to count from the boxes you type and the readings you keep, so there
+is nothing to set.
+
+That needs a background that is nearly one color around the number. Where a
+scene shows through behind the text, or the panel behind it has a pattern,
+the reference can't tell the characters from what is behind them, and its
+boxes show more characters than you typed. Give it a text color instead:
+
+1. Open **Text color (optional)** at the bottom of the reference editor.
+2. Next to **Text color**, select **Pick**, then click inside a character on
+   a screenshot, not on its edge.
+3. **Tolerance** says how far a pixel's color may be from the text color and
+   still count: drag the slider or type a number. Raise it until the
+   characters are whole, and lower it if the background counts too.
+
+Only pixels near the text color count as characters then, whatever is behind
+them, so the text has to be drawn in one color. **Remove text color** goes
+back to finding the characters by contrast.
+
+With or without a text color, turn on **Show matching pixels** to tint every
+pixel on the screenshot that counts as part of the characters. Without a
+text color, select a box first: the tint shows what stands out from that
+box's background. Under the switch, AppyTappy counts the tinted pixels in
+the box and on the rest of the screenshot. The tint is only a guide, as
+[Show matching pixels](Values.md#show-matching-pixels) describes.
 
 ## Record readings
 
@@ -357,8 +382,7 @@ offer one. If a character stays under **Still missing**, or its only reading
 cannot be typed, take a screenshot that shows the character without the
 stray shape and draw a box around it instead.
 
-1. **Start recording.** Draw a box around the characters and pick the
-   **Characters' color** first. Under **Record readings**, choose where to
+1. **Start recording.** Draw a box around the characters first. Under **Record readings**, choose where to
    **Look in**: **This place**, or **The whole window**, which
    [Record the whole window](#record-the-whole-window) describes. Then
    select **Start recording**. The region turns red while it records.
@@ -378,8 +402,8 @@ stray shape and draw a box around it instead.
    - **Without text** counts the shapes that no reading's text names, such as
      while a reading is still being read.
 
-   The newest kept readings show below. Moments when the region shows none of
-   the characters' color, such as while a menu covers it, are skipped.
+   The newest kept readings show below. Moments when the region shows no
+   characters, such as while a menu covers it, are skipped.
    Recording goes on until you stop it.
 
 3. **Stop and review.** Come back and select **Stop and review**. Each kept
@@ -423,7 +447,7 @@ stray shape and draw a box around it instead.
    is off while review is open, since the reference has only the readings
    you kept: keep them to save them with the reference, or go **Back** to
    save without review's changes. To record more, keep
-   the place it reads, the characters' color, and the tolerance as they
+   the place it reads and the [text color](#text-color) as they
    were, on a screenshot of the same window size: if you changed them,
    **Use its settings** puts them back. In a reference you teach by itself,
    that moves the box it recorded at back to where it was and to the top of
@@ -473,10 +497,10 @@ readings you want, then select **Save reference**, which still works after
 the window closed: **Change window** drops everything you have not saved. To
 record more, open the window again and **Edit** the reference.
 
-A recording finds its shapes with the characters' color and tolerance it was
-started with, and a reference learns the kept readings with the ones it has
-when you save. Keep them as they were until you save. With another color or
-tolerance a kept reading can show other shapes than the recording counted:
+A recording finds its shapes with the [text color](#text-color) and
+tolerance it was started with, and a reference learns the kept readings with
+the ones it has when you save. Keep them as they were until you save. With
+another text color or tolerance a kept reading can show other shapes than the recording counted:
 its text may not fit it anymore, which review and the save flag, and a shape
 the recording took for one it had may be in no kept reading. **Use its
 settings** puts the recording's own back.
@@ -508,8 +532,8 @@ often elsewhere in the window too: a stats panel, a second counter, a score
 on a results screen. With **Look in** set to **The whole window**, a
 recording collects characters from all of it. The place the reference
 reads, its first box or the value's region, is the example: AppyTappy looks
-for text in the **Characters' color** and as tall as the text that place
-shows on its screenshot, anywhere in the window, and reads each piece like
+for text that stands out as the text in that place does and is as tall as
+it shows on its screenshot, anywhere in the window, and reads each piece like
 the place itself. While it records, the window shows an
 outline around each piece it found the last time it looked, and **Recording
 the whole window** says in how many places that was.

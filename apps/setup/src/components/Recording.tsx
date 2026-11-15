@@ -6,9 +6,9 @@ import type { Size } from '../lib/region.ts';
 import type { RecordFocus } from '../lib/useReview.ts';
 import { Hint } from './Hint.tsx';
 import { PictureCanvas } from './canvas.tsx';
-import { CharacterChips, MissingChips } from './CharacterChips.tsx';
+import { CharacterChips, MissingChips, glyphStyle } from './CharacterChips.tsx';
 import type { Discovery } from '../lib/discovery.ts';
-import { type Color, type Picture, hex } from '../lib/pixels.ts';
+import type { Color, Picture } from '../lib/pixels.ts';
 import {
   type ReviewEntry,
   type Untaught,
@@ -131,7 +131,7 @@ function Discovered({
   readonly found: Discovery;
   /** Whether the reference says which characters it needs, so that some can be missing. */
   readonly needs: boolean;
-  readonly ink: Color;
+  readonly ink: Color | undefined;
 }) {
   return (
     <dl className="discovered" aria-live="polite">
@@ -153,7 +153,7 @@ function Discovered({
           <dd>
             <span className="glyphs unchecked" aria-label={`Characters: ${found.unchecked.join(' ')}`}>
               {found.unchecked.map((character) => (
-                <span key={character} className="glyph" style={{ color: hex(ink) }} aria-hidden="true">
+                <span key={character} className="glyph" style={glyphStyle(ink)} aria-hidden="true">
                   {character}
                 </span>
               ))}
@@ -358,7 +358,7 @@ export function RecordPanel(props: PanelProps) {
       {count === 0 ? null : <Discovered found={found} needs={needs} ink={view.settings.ink} />}
       {settingsChanged ? (
         <p className="note">
-          The region, color or tolerance changed since recording. Record more needs the recording&apos;s own.
+          The region, text color, or tolerance changed since recording. Record more needs the recording&apos;s own.
         </p>
       ) : null}
       <div className="row">
@@ -409,7 +409,7 @@ function Adds({
         {added.map((each, index) => (
           <li key={index}>
             <span className="glyphs">
-              <span className="glyph" style={{ color: hex(view.settings.ink) }}>
+              <span className="glyph" style={glyphStyle(view.settings.ink)}>
                 {each.character}
               </span>
             </span>

@@ -19,7 +19,7 @@
 //! region, is skipped.
 //!
 //! A recording of the whole window collects the same way from every place
-//! the window shows text like the region's: in the characters' color and as
+//! the window shows text like the region's: ink as the region's is, as
 //! tall as the characters the region showed when it started, or as those of
 //! another example the user drew ([`find`]), so text at each size the
 //! application draws the characters in is collected. A shape is a character
@@ -54,9 +54,9 @@ mod sightings;
 use std::time::{Duration, Instant};
 
 use appytappy_config::app_file::{ColorDef, RegionDef, SizeDef};
-use appytappy_sources::screen::digits::{DigitReader, ReadError, Shape};
+use appytappy_sources::screen::digits::{DigitReader, InkRule, ReadError, Shape};
 use appytappy_sources::screen::settle::Settle;
-use appytappy_sources::screen::{FrameMeaning, Image, Region, Rgb, Size};
+use appytappy_sources::screen::{FrameMeaning, Image, Region, Size};
 use serde::{Deserialize, Serialize};
 
 use crate::ticket::Ticket;
@@ -262,10 +262,8 @@ pub(crate) struct Recording {
     pub(crate) id: Ticket,
     /// The region of the window it records.
     pub(crate) region: Region,
-    /// The characters' color.
-    ink: Rgb,
-    /// How far a pixel may be from `ink` and still be ink.
-    tolerance: u8,
+    /// How it tells ink from background, which `reader` reads by.
+    ink_rule: InkRule,
     reader: DigitReader,
     /// The window's size when the region was drawn.
     window_size: Size,
@@ -290,23 +288,22 @@ pub(crate) struct Recording {
 }
 
 impl Recording {
-    /// Starts recording `region`, drawn on a window of `window_size`, where
-    /// a pixel within `tolerance` of the `ink` color is ink. It `follows`
+    /// Starts recording `region`, drawn on a window of `window_size`,
+    /// telling ink from background by `ink_rule`. It `follows`
     /// the window to another size, and is placed at the size it was drawn
     /// at until frames settle at another.
     pub(crate) const fn new(
         id: Ticket,
         region: Region,
-        (ink, tolerance): (Rgb, u8),
+        ink_rule: InkRule,
         (window_size, follows): (Size, Follows),
         started: Instant,
     ) -> Self {
         Self {
             id,
             region,
-            ink,
-            tolerance,
-            reader: DigitReader::new(ink, tolerance),
+            ink_rule,
+            reader: DigitReader::new(ink_rule),
             window_size,
             follows,
             settle: Settle::new(window_size),
@@ -454,16 +451,15 @@ impl Recording {
         let crop = frame.crop(region)?;
         let shapes = match self.reader.shapes(&crop) {
             Ok(shapes) => shapes,
-            // A crop with none of the characters' color, such as under a
-            // menu, is a moment to skip, not a problem.
+            // A crop with no ink, such as under a menu, is a moment to
+            // skip, not a problem.
             Err(ReadError::NoInk) => {
                 self.life.set_problem(None);
                 return None;
             },
             Err(error) => {
                 self.life.set_problem(Some(format!(
-                    "Nothing is recorded while {error}. Draw the region around the value alone, \
-                     or lower the tolerance."
+                    "Nothing is recorded while {error}. Draw the region around the value alone."
                 )));
                 return None;
             },
@@ -633,20 +629,19 @@ impl Recording {
         }
     }
 
-    /// Whether it records `region` of a window of `window_size`, with ink
-    /// within `tolerance` of `ink`, looking where `scope` says, so going on
-    /// with it records the same thing.
+    /// Whether it records `region` of a window of `window_size`, telling
+    /// ink from background by `ink_rule` and looking where `scope` says, so
+    /// going on with it records the same thing.
     pub(crate) fn records(
         &self,
         region: Region,
-        (ink, tolerance): (Rgb, u8),
+        ink_rule: InkRule,
         window_size: Size,
         scope: Scope,
     ) -> bool {
         self.region == region
             && self.scope() == scope
-            && self.ink == ink
-            && self.tolerance == tolerance
+            && self.ink_rule == ink_rule
             && self.window_size == window_size
     }
 
@@ -662,6 +657,10 @@ impl Recording {
 
     /// What the UI shows of it at `now`.
     pub(crate) fn view(&self, now: Instant) -> RecordingView {
+        let (ink, tolerance) = match self.ink_rule {
+            InkRule::Contrast { tolerance } => (None, tolerance),
+            InkRule::Color { color, tolerance } => (Some(color.into()), tolerance),
+        };
         RecordingView {
             id: self.id.number(),
             recording: self.life.is_recording(),
@@ -673,8 +672,8 @@ impl Recording {
             problem: self.life.problem().map(str::to_owned),
             settings: Settings {
                 region: self.region.into(),
-                ink: self.ink.into(),
-                tolerance: self.tolerance,
+                ink,
+                tolerance,
                 window_size: self.window_size.into(),
                 scope: self.scope(),
             },
@@ -716,7 +715,7 @@ fn full_message(full: Full, scope: Scope) -> String {
         ),
         (Full::Shapes, Scope::Window) => format!(
             "This recording is full: the window showed more than {MAX_SHAPES} different shapes \
-             in the characters' color and size, more than a reference learns. Stop and review \
+             of text like the value's, more than a reference learns. Stop and review \
              what it found. If the window shows much other text like the value's, record this \
              place alone instead."
         ),
@@ -784,9 +783,14 @@ pub(crate) struct RecordingView {
 pub(crate) struct Settings {
     /// The region of the window.
     pub(crate) region: RegionDef,
-    /// The characters' color.
-    pub(crate) ink: ColorDef,
-    /// How far a pixel may be from the characters' color and still be ink.
+    /// The reference's text color, or `None` when it finds its
+    /// characters by contrast.
+    #[cfg_attr(test, ts(optional))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ink: Option<ColorDef>,
+    /// The reference's tolerance: how far a pixel may be from the text
+    /// color and still be ink, or from the background and still be
+    /// background.
     pub(crate) tolerance: u8,
     /// The window's size when the region was drawn.
     pub(crate) window_size: SizeDef,
@@ -850,6 +854,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use appytappy_config::app_file::PinDef;
+    use appytappy_sources::screen::Rgb;
     use proptest::prelude::*;
 
     use super::*;
@@ -888,7 +893,10 @@ mod tests {
         Recording::new(
             Ticket::numbered(1),
             region(),
-            (RED, 0),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            },
             (size(), Follows::Drawn),
             started,
         )
@@ -900,7 +908,10 @@ mod tests {
         Recording::new(
             Ticket::numbered(1),
             region,
-            (RED, 0),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            },
             (Size { width, height }, Follows::Drawn),
             started,
         )
@@ -1079,7 +1090,7 @@ mod tests {
         ) {
             let start = Instant::now();
             let mut recording = recording_of(20, 6, start);
-            let reader = DigitReader::new(RED, 0);
+            let reader = DigitReader::new(InkRule::Color { color: RED, tolerance: 0 });
             // How many different readings among `shown` show `shape`.
             let readings_of = |shown: &[Vec<Shape>], shape: &Shape| {
                 let with = shown.iter().filter(|reading| reading.contains(shape));
@@ -1201,7 +1212,10 @@ mod tests {
         let mut recording = Recording::new(
             Ticket::numbered(1),
             region,
-            (RED, 0),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            },
             (tall, Follows::Drawn),
             start,
         );
@@ -1316,7 +1330,10 @@ mod tests {
         Recording::new(
             Ticket::numbered(1),
             region,
-            (RED, 0),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            },
             (size, Follows::Scaled(PinDef::TopLeft)),
             started,
         )
@@ -1431,7 +1448,10 @@ mod tests {
         let mut recording = Recording::new(
             Ticket::numbered(1),
             region,
-            (RED, 0),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            },
             (drawn, follows),
             start,
         );
@@ -1492,7 +1512,7 @@ mod tests {
             recording.view(start).problem.as_deref(),
             Some(
                 "Nothing is recorded while the region holds more than 24 characters. Draw the \
-                 region around the value alone, or lower the tolerance."
+                 region around the value alone."
             )
         );
         assert_eq!(recording.offer(&frame(60, 4, |_, _| false), start), None);
@@ -1586,21 +1606,85 @@ mod tests {
     #[test]
     fn it_records_only_the_same_region_ink_window_and_scope() {
         let recording = recording(Instant::now());
-        assert!(recording.records(region(), (RED, 0), size(), Scope::Place));
+        assert!(recording.records(
+            region(),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0
+            },
+            size(),
+            Scope::Place
+        ));
         let other_region = Region::new(1, 0, 7, 4).expect("not empty");
-        assert!(!recording.records(other_region, (RED, 0), size(), Scope::Place));
-        assert!(!recording.records(region(), (RED, 9), size(), Scope::Place));
+        assert!(!recording.records(
+            other_region,
+            InkRule::Color {
+                color: RED,
+                tolerance: 0
+            },
+            size(),
+            Scope::Place
+        ));
+        assert!(!recording.records(
+            region(),
+            InkRule::Color {
+                color: RED,
+                tolerance: 9
+            },
+            size(),
+            Scope::Place
+        ));
         let green = Rgb { green: 1, ..RED };
-        assert!(!recording.records(region(), (green, 0), size(), Scope::Place));
+        assert!(!recording.records(
+            region(),
+            InkRule::Color {
+                color: green,
+                tolerance: 0
+            },
+            size(),
+            Scope::Place
+        ));
         let other_size = Size {
             width: 9,
             height: 4,
         };
-        assert!(!recording.records(region(), (RED, 0), other_size, Scope::Place));
-        assert!(!recording.records(region(), (RED, 0), size(), Scope::Window));
+        assert!(!recording.records(
+            region(),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0
+            },
+            other_size,
+            Scope::Place
+        ));
+        assert!(!recording.records(
+            region(),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0
+            },
+            size(),
+            Scope::Window
+        ));
         let window = recording.across_window(4);
-        assert!(window.records(region(), (RED, 0), size(), Scope::Window));
-        assert!(!window.records(region(), (RED, 0), size(), Scope::Place));
+        assert!(window.records(
+            region(),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0
+            },
+            size(),
+            Scope::Window
+        ));
+        assert!(!window.records(
+            region(),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0
+            },
+            size(),
+            Scope::Place
+        ));
     }
 
     /// A 60 by 40 frame with ink inside each of `blocks`, as left, top,
@@ -1625,7 +1709,10 @@ mod tests {
         Recording::new(
             Ticket::numbered(1),
             region,
-            (RED, 0),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            },
             (size, Follows::Drawn),
             started,
         )
@@ -1952,7 +2039,10 @@ mod tests {
         let mut recording = Recording::new(
             Ticket::numbered(1),
             region,
-            (RED, 0),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            },
             (drawn, follows),
             start,
         )
@@ -2028,7 +2118,10 @@ mod tests {
         Recording::new(
             Ticket::numbered(1),
             region,
-            (RED, 0),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            },
             (drawn, follows),
             started,
         )
@@ -2095,7 +2188,10 @@ mod tests {
         let mut recording = Recording::new(
             Ticket::numbered(1),
             region,
-            (RED, 0),
+            InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            },
             (drawn, follows),
             start,
         )
@@ -2143,8 +2239,8 @@ mod tests {
         assert!(place.contains("the region showed more than 256 different shapes"));
         assert_eq!(
             full_message(Full::Shapes, Scope::Window),
-            "This recording is full: the window showed more than 256 different shapes in the \
-             characters' color and size, more than a reference learns. Stop and review what it \
+            "This recording is full: the window showed more than 256 different shapes of text \
+             like the value's, more than a reference learns. Stop and review what it \
              found. If the window shows much other text like the value's, record this place \
              alone instead."
         );
@@ -2160,7 +2256,10 @@ mod tests {
         let view = Recording::new(
             Ticket::numbered(1),
             region,
-            (RED, 7),
+            InkRule::Color {
+                color: RED,
+                tolerance: 7,
+            },
             (size(), Follows::Drawn),
             Instant::now(),
         )

@@ -471,7 +471,7 @@ mod tests {
     use appytappy_config::app_file::SizeChangesDef;
     use appytappy_config::signal::Number;
     use appytappy_sources::screen::check::Check;
-    use appytappy_sources::screen::digits::DigitReader;
+    use appytappy_sources::screen::digits::{DigitReader, InkRule};
     use appytappy_sources::screen::saved::SavedFix;
     use appytappy_sources::screen::settle::SETTLE;
     use appytappy_sources::screen::{Placement, Region};
@@ -952,7 +952,10 @@ mod tests {
         let (control, _control) = mpsc::channel();
         let mut value = red_at("count", 0, 0);
         value.check.drawn.check = Check::Number {
-            reader: DigitReader::new(RED, 10),
+            reader: DigitReader::new(InkRule::Color {
+                color: RED,
+                tolerance: 10,
+            }),
             whole: false,
         };
         let job = job(vec![value]);
@@ -962,7 +965,9 @@ mod tests {
         frames.handle(Ok(frame(&black, WINDOW)));
         assert_eq!(
             problems(&readings),
-            ["value 0 cannot be read: no pixel in the region has the characters' color"]
+            [
+                "value 0 cannot be read: no pixel in the region stands out from its background, or has the reference's text color"
+            ]
         );
     }
 
@@ -972,7 +977,10 @@ mod tests {
         let (control, _control) = mpsc::channel();
         let mut value = scaling("count", 4, 6, WINDOW, SizeChangesDef::Often);
         value.check.drawn.check = Check::Number {
-            reader: DigitReader::new(RED, 10),
+            reader: DigitReader::new(InkRule::Color {
+                color: RED,
+                tolerance: 10,
+            }),
             whole: false,
         };
         let job = job(vec![value]);
@@ -983,8 +991,8 @@ mod tests {
             problems(&readings),
             [
                 "value 0 cannot be read where its region scales to at the window's size now: \
-                 no pixel in the region has the characters' color; if the region is off the \
-                 value there, fix the value at this size in AppyTappy Setup"
+                 no pixel in the region stands out from its background, or has the \
+                 reference's text color; if the region is off the value there, fix the value at this size in AppyTappy Setup"
             ]
         );
     }
@@ -996,7 +1004,10 @@ mod tests {
         let mut value = red_at("count", 0, 0);
         value.check.drawn.region = Region::new(0, 0, 3, 2).expect("not empty");
         value.check.drawn.check = Check::Number {
-            reader: DigitReader::new(RED, 10),
+            reader: DigitReader::new(InkRule::Color {
+                color: RED,
+                tolerance: 10,
+            }),
             whole: false,
         };
         let job = job(vec![value]);
@@ -1023,7 +1034,9 @@ mod tests {
         }
         assert_eq!(
             problems(&readings),
-            ["value 0 cannot be read: no pixel in the region has the characters' color"]
+            [
+                "value 0 cannot be read: no pixel in the region stands out from its background, or has the reference's text color"
+            ]
         );
     }
 
@@ -1034,7 +1047,10 @@ mod tests {
         let mut value = red_at("count", 0, 0);
         value.check.drawn.region = Region::new(0, 0, 2, 1).expect("not empty");
         // A reader that knows a red pixel as a 1.
-        let mut reader = DigitReader::new(RED, 10);
+        let mut reader = DigitReader::new(InkRule::Color {
+            color: RED,
+            tolerance: 10,
+        });
         reader
             .learn(&frame_image(1, 1, |_, _| true), "1")
             .expect("one character");
@@ -1046,7 +1062,7 @@ mod tests {
         let mut frames = frames_at(&job, WINDOW, events, control);
         let none = frame_image(2, 1, |_, _| false);
         let one = frame_image(2, 1, |x, _| x == 0);
-        let no_ink = "value 0 cannot be read: no pixel in the region has the characters' color";
+        let no_ink = "value 0 cannot be read: no pixel in the region stands out from its background, or has the reference's text color";
         frames.handle(Ok(frame(&none, WINDOW)));
         frames.handle(Ok(frame(&none, WINDOW)));
         assert_eq!(problems(&readings), [no_ink]);

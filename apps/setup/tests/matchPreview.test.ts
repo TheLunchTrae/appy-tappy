@@ -62,7 +62,15 @@ describe('plan', () => {
       kind: 'ask',
       request: { screenshot: 3, area: WHOLE, rule: { kind: 'ink', ink: WHITE, tolerance: 40 } },
     });
-    expect(plan('ink', draft({}), 3, SIZE).kind).toBe('blocked');
+    expect(plan('ink', draft({ region: REGION }), 3, SIZE)).toEqual({
+      kind: 'ask',
+      request: { screenshot: 3, area: WHOLE, rule: { kind: 'contrast', region: REGION, tolerance: 40 } },
+    });
+    // Without a text color, the background comes from the selected box.
+    expect(plan('ink', draft({}), 3, SIZE)).toEqual({
+      kind: 'blocked',
+      why: 'Select a box on this screenshot to see what stands out from its background.',
+    });
     expect(plan('ink', draft({ ink: WHITE }), 3, null).kind).toBe('blocked');
   });
 
@@ -306,6 +314,7 @@ describe('tints', () => {
   test('take whichever of magenta and green stands out more against the picked color', () => {
     expect(tintsFor({ kind: 'ink', ink: GREEN, tolerance: 0 })).toEqual([{ color: magenta, striped: false }]);
     expect(tintsFor({ kind: 'ink', ink: PINK, tolerance: 0 })).toEqual([{ color: green, striped: false }]);
+    expect(tintsFor({ kind: 'contrast', region: REGION, tolerance: 0 })).toEqual([{ color: magenta, striped: false }]);
     expect(tintsFor({ kind: 'color', color: PINK, tolerance: 0 })).toEqual([{ color: green, striped: false }]);
   });
 
@@ -484,30 +493,33 @@ describe('what the tint shows, in words', () => {
       [12, 15],
       [40, 42],
     ]);
-    expect(inkLines(ink, WHOLE, REGION)).toEqual([
+    expect(inkLines(ink, WHOLE, REGION, 'ink')).toEqual([
       '3 of 8 pixels in the region (38%) count as characters, and 2 pixels elsewhere on the screenshot.',
     ]);
-    expect(inkLines(ink, WHOLE, null)).toEqual(['5 of 60 pixels on the screenshot (8%) count as characters.']);
+    expect(inkLines(ink, WHOLE, null, 'ink')).toEqual(['5 of 60 pixels on the screenshot (8%) count as characters.']);
     // A region drawn on a larger screenshot does not lie on this one.
-    expect(inkLines(ink, WHOLE, { x: 8, y: 1, width: 4, height: 2 })).toEqual([
+    expect(inkLines(ink, WHOLE, { x: 8, y: 1, width: 4, height: 2 }, 'ink')).toEqual([
       '5 of 60 pixels on the screenshot (8%) count as characters.',
     ]);
-    expect(inkLines(layer([[12, 15]]), WHOLE, REGION)).toEqual([
+    expect(inkLines(layer([[12, 15]]), WHOLE, REGION, 'ink')).toEqual([
       '3 of 8 pixels in the region (38%) count as characters, and none elsewhere on the screenshot.',
     ]);
   });
 
   test('says when no pixel matches, when the whole region does, and when only pixels outside it do', () => {
-    expect(inkLines(layer([]), WHOLE, REGION)).toEqual([
-      'No pixel on the screenshot counts as characters. Raise the tolerance, or pick the color again.',
+    expect(inkLines(layer([]), WHOLE, REGION, 'ink')).toEqual([
+      'No pixel on the screenshot counts as characters. Raise the tolerance, or pick the text color again.',
     ]);
-    expect(inkLines(layer([[0, 60]]), WHOLE, REGION)).toEqual([
+    expect(inkLines(layer([]), WHOLE, REGION, 'contrast')).toEqual([
+      'No pixel on the screenshot counts as characters. Draw the box around some characters.',
+    ]);
+    expect(inkLines(layer([[0, 60]]), WHOLE, REGION, 'ink')).toEqual([
       'Every pixel in the region counts as characters, and 52 pixels elsewhere on the screenshot. Lower the tolerance until only the characters do.',
     ]);
-    expect(inkLines(layer([[40, 41]]), WHOLE, REGION)).toEqual([
+    expect(inkLines(layer([[40, 41]]), WHOLE, REGION, 'ink')).toEqual([
       'No pixel in the region counts as characters; 1 pixel elsewhere on the screenshot does.',
     ]);
-    expect(inkLines(layer(null, 30), WHOLE, REGION)).toEqual([
+    expect(inkLines(layer(null, 30), WHOLE, REGION, 'ink')).toEqual([
       'Too many separate areas match to tint them all, so none is tinted. 30 of 60 pixels on the screenshot (50%) count as characters. Lower the tolerance.',
     ]);
   });

@@ -173,7 +173,7 @@ export async function explainReading(): Promise<ReadingDetails | null> {
 }
 
 /**
- * Records the region of the picked window that `spec` names, in the characters' color. With
+ * Records the region of the picked window that `spec` names. With
  * `more`, goes on with the stopped recording, which needs the same region, ink and window size;
  * otherwise starts a new one. Answers the recording's number, which going on keeps.
  */
@@ -239,11 +239,19 @@ export async function captureOutline(application: string, width: number, height:
 }
 
 /**
- * Finds text like what `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance` and
- * at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
+ * The tolerance the reference `spec` teaches finds its characters by contrast with: `spec`'s own while every
+ * sample reads with it, and otherwise one its samples read with, when there is one.
+ */
+export async function contrastTolerance(spec: CharactersSpec): Promise<number> {
+  return invoke<number>('contrast_tolerance', { spec });
+}
+
+/**
+ * Finds text like what `region` of screenshot `screenshot` shows, as a reference with the text color `ink`,
+ * or by contrast without one, and `tolerance` tells it from the region's background, and at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
  * earlier search.
  */
-export async function findLike(screenshot: number, region: RegionDef, added: ReadonlyArray<RegionDef>, ink: ColorDef, tolerance: number): Promise<FoundView> {
+export async function findLike(screenshot: number, region: RegionDef, added: ReadonlyArray<RegionDef>, ink: ColorDef | null, tolerance: number): Promise<FoundView> {
   return invoke<FoundView>('find_like', { screenshot, region, added, ink, tolerance });
 }
 
@@ -258,10 +266,11 @@ export async function foundPicture(search: number, index: number, maxWidth: numb
 }
 
 /**
- * Has the text reader read finds `indexes` of search `search` again, in the color `ink` within `tolerance`,
+ * Has the text reader read finds `indexes` of search `search` again, as the text color `ink`, if any, and
+ * `tolerance` tell their characters from the background,
  * and answers the search, or null when that search was replaced or forgotten.
  */
-export async function rereadFound(search: number, indexes: ReadonlyArray<number>, ink: ColorDef, tolerance: number): Promise<FoundView | null> {
+export async function rereadFound(search: number, indexes: ReadonlyArray<number>, ink: ColorDef | null, tolerance: number): Promise<FoundView | null> {
   return invoke<FoundView | null>('reread_found', { search, indexes, ink, tolerance });
 }
 
@@ -271,11 +280,12 @@ export async function forgetFound(): Promise<void> {
 }
 
 /**
- * The characters the box `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance`,
+ * The characters the box `region` of screenshot `screenshot` shows, as the text color `ink`, if any, and
+ * `tolerance` split them,
  * each with the name a find's or a recorded reading's character of the same shape has. None for an unknown
  * screenshot or a box that does not fit it.
  */
-export async function boxCharacters(screenshot: number, region: RegionDef, ink: ColorDef, tolerance: number): Promise<ReadonlyArray<ShownCharacter>> {
+export async function boxCharacters(screenshot: number, region: RegionDef, ink: ColorDef | null, tolerance: number): Promise<ReadonlyArray<ShownCharacter>> {
   return invoke<ReadonlyArray<ShownCharacter>>('box_characters', { screenshot, region, ink, tolerance });
 }
 

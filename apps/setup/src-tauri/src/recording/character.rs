@@ -50,6 +50,7 @@ pub(crate) fn of(image: &Image, reader: &DigitReader) -> Vec<CharacterView> {
 
 #[cfg(test)]
 mod tests {
+    use appytappy_sources::screen::digits::InkRule;
     use appytappy_sources::screen::{Rgb, Size};
 
     use super::*;
@@ -77,7 +78,10 @@ mod tests {
             green: 0,
             blue: 0,
         };
-        let reader = DigitReader::new(red, 0);
+        let reader = DigitReader::new(InkRule::Color {
+            color: red,
+            tolerance: 0,
+        });
         // A stroke one column wide, one three wide, and the first again.
         let shown = [true, false, true, true, true, false, false, true, false];
         let characters = of(&picture(shown), &reader);

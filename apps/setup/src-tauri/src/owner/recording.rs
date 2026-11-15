@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use appytappy_config::app_file::{ColorDef, PinDef, RegionDef};
 use appytappy_sources::screen::digits::DigitReader;
-use appytappy_sources::screen::{Image, Region, Rgb, Size};
+use appytappy_sources::screen::{Image, Region, Size};
 use serde::Deserialize;
 
 use crate::check_spec::{self, CharactersSpec};
@@ -38,9 +38,12 @@ pub(crate) struct RecordSpec {
     /// The side of the window the region stays at as the window changes
     /// size, or `None` for the side the region is nearest.
     pub(crate) pin: Option<PinDef>,
-    /// The characters' color.
-    pub(crate) ink: ColorDef,
-    /// How far from `ink` a pixel of a character may be.
+    /// The reference's text color, or `None` when it finds its characters
+    /// by contrast.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub(crate) ink: Option<ColorDef>,
+    /// The reference's tolerance, as `ReferenceDef` has it.
     pub(crate) tolerance: u8,
     /// Where to look for characters: in the region alone, or wherever the
     /// window shows text like the region's.
@@ -164,7 +167,7 @@ impl<H: Host> Owner<H> {
     }
 
     /// Records what `spec` names of the picked window, keeping each reading
-    /// it shows in the characters' color: in the region alone, or wherever
+    /// it shows: in the region alone, or wherever
     /// the window shows text like the region's. With `more`, goes on with
     /// the stopped recording, which must be of the same region, ink, window
     /// size, and scope; otherwise starts a new one in place of any
@@ -178,30 +181,30 @@ impl<H: Host> Owner<H> {
         let (region, window_size) = self.recordable(spec.region, spec.screenshot)?;
         let size_changes = self.stores()?.app(&spec.app)?.file.size_changes;
         let follows = Follows::of(size_changes, spec.pin, region, window_size);
-        let settings: (Rgb, u8) = (spec.ink.into(), spec.tolerance);
+        let ink_rule = check_spec::ink_rule(spec.ink, spec.tolerance);
         let now = Instant::now();
         // The whole window is searched for text as tall as each example's
         // on its screenshot.
-        let reader = DigitReader::new(settings.0, settings.1);
+        let reader = DigitReader::new(ink_rule);
         let examples = match spec.scope {
             Scope::Place => Vec::new(),
             Scope::Window => self.example_heights(&spec.examples, window_size, &reader),
         };
         match self.capture.recording_mut() {
             Some(Recorder::Readings(recording))
-                if more && recording.records(region, settings, window_size, spec.scope) =>
+                if more && recording.records(region, ink_rule, window_size, spec.scope) =>
             {
                 recording.resume(follows, now);
                 recording.look_for(examples);
                 Ok(recording.id.number())
             },
-            Some(Recorder::Readings(recording)) if more => Err(format!(
-                "Recording more needs the settings it was recorded with: the same place, \
-                 the characters' color, a tolerance of {}, a screenshot of the same window \
-                 size, and the same choice of where to look. Use its settings, or discard \
-                 the recording to start a new one.",
-                recording.view(now).settings.tolerance
-            )),
+            Some(Recorder::Readings(_)) if more => Err(
+                "Recording more needs the settings it was recorded with: the same place, the \
+                 same way to tell the characters from the background, a screenshot of the same \
+                 window size, and the same choice of where to look. Use its settings, or discard \
+                 the recording to start a new one."
+                    .to_owned(),
+            ),
             Some(Recorder::Looks(_)) | None if more => Err(
                 "That recording is gone, so there is nothing to record more of. Start a new \
                  recording."
@@ -216,7 +219,7 @@ impl<H: Host> Owner<H> {
                 };
                 let id = self.tickets.next();
                 let mut recording =
-                    Recording::new(id, region, settings, (window_size, follows), now);
+                    Recording::new(id, region, ink_rule, (window_size, follows), now);
                 if let Some(sample) = sample {
                     recording = recording.across_window(sample);
                     recording.look_for(examples);
@@ -241,9 +244,8 @@ impl<H: Host> Owner<H> {
             .get(screenshot)
             .and_then(|image| find::sample_heights(image, &[region], reader).pop()?)
             .ok_or_else(|| {
-                "That place shows no characters in that color, so there is nothing to look for in \
-                 the rest of the window. Draw it around some characters and pick their color \
-                 first."
+                "That place shows no characters, so there is nothing to look for in the rest of \
+                 the window. Draw it around some characters first."
                     .to_owned()
             })
     }
@@ -252,7 +254,6 @@ impl<H: Host> Owner<H> {
     /// `reader` tells from background. An example that shows none, or that
     /// is on a screenshot of another size than `window_size`, whose pixels
     /// measure another window, is no example of a size and is left out.
-    /// Each screenshot's ink is read once for all the examples on it.
     fn example_heights(
         &self,
         examples: &[ExampleSpec],
@@ -360,6 +361,14 @@ impl<H: Host> Owner<H> {
     ) -> Result<Vec<Option<String>>, String> {
         self.keep_reference(spec.reference.as_ref());
         self.with_session(|session| spec.recorded_problems(session))
+            .map_err(|error| error.to_string())
+    }
+
+    /// The tolerance the reference `spec` teaches finds its characters by
+    /// contrast with, as [`CharactersSpec::contrast_tolerance`] chooses it.
+    pub(crate) fn contrast_tolerance(&mut self, spec: &CharactersSpec) -> Result<u8, String> {
+        self.keep_reference(spec.reference.as_ref());
+        self.with_session(|session| spec.contrast_tolerance(session))
             .map_err(|error| error.to_string())
     }
 }
@@ -658,6 +667,22 @@ mod tests {
             "the labeled screenshot gave the same shape to another character"
         );
         assert_eq!(labeled[1], None);
+        let by_contrast = |screenshot: usize| -> CharactersSpec {
+            serde_json::from_str(&format!(
+                r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":{screenshot},
+                    "tolerance":7,"labels":[]}}"#
+            ))
+            .expect("valid JSON")
+        };
+        assert_eq!(
+            harness.ask(|owner| owner.contrast_tolerance(&by_contrast(0))),
+            Ok(7),
+            "nothing to learn from leaves the tolerance as it is"
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.contrast_tolerance(&by_contrast(9))),
+            Err("That screenshot is gone. Take a new one and try again.".to_owned())
+        );
         let number = |reading| -> CharactersSpec {
             serde_json::from_str(&format!(
                 r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,
@@ -719,9 +744,8 @@ mod tests {
         assert_eq!(
             harness.ask(start_window_recording(2, false)),
             Err(
-                "That place shows no characters in that color, so there is nothing to look for in \
-                 the rest of the window. Draw it around some characters and pick their color \
-                 first."
+                "That place shows no characters, so there is nothing to look for in the rest of \
+                 the window. Draw it around some characters first."
                     .to_owned()
             )
         );
@@ -1041,9 +1065,9 @@ mod tests {
             harness.ask(start_recording(200, true)),
             Err(
                 "Recording more needs the settings it was recorded with: the same place, the \
-                 characters' color, a tolerance of 0, a screenshot of the same window size, and \
-                 the same choice of where to look. Use its settings, or discard the recording \
-                 to start a new one."
+                 same way to tell the characters from the background, a screenshot of the same \
+                 window size, and the same choice of where to look. Use its settings, or discard \
+                 the recording to start a new one."
                     .to_owned()
             ),
             "recording more never replaces the recording"
