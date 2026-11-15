@@ -16,28 +16,31 @@ pub(crate) struct Line {
     pub(crate) pixels: Vec<u8>,
 }
 
+/// The white around a line's ink, in pixels on each side. The text reader's
+/// model takes a line cut close to its text, as the lines it learned from
+/// are, and scales it to its input height. White before the first character
+/// wider than about a fifth of the line's height makes it drop or double
+/// that character, white above and below shrinks the text it sees, and ink
+/// that touches an edge reads worse. Two pixels keep the ink off the edges
+/// at every text height.
+const MARGIN: u32 = 2;
+
 impl Line {
     /// `ink` as the text reader takes it: black ink on white, cut to the
-    /// line of text with a margin of white around it, as text on a page
-    /// has. Black on white reads better than the application's own colors,
-    /// which can be any pair. The line is [`rows`]. `None` without ink.
+    /// line of text with [`MARGIN`] of white around it. Black on white reads
+    /// better than the application's own colors, which can be any pair. The
+    /// line is [`rows`]. `None` without ink.
     pub(crate) fn of(ink: &Ink) -> Option<Self> {
         let size = ink.size();
         let rows = rows(ink)?;
         let inked = |x: &u32| rows.clone().any(|y| ink.at(*x, y));
         let left = (0..size.width).find(inked)?;
         let right = (0..size.width).rfind(inked)?.saturating_add(1);
-        // Half the line's height, at least two pixels.
-        let margin = (rows.end.saturating_sub(rows.start) / 2).max(2);
-        let width = right
-            .saturating_sub(left)
-            .saturating_add(margin.saturating_mul(2));
-        let height = rows
-            .end
-            .saturating_sub(rows.start)
-            .saturating_add(margin.saturating_mul(2));
+        let around = MARGIN.saturating_mul(2);
+        let width = right.saturating_sub(left).saturating_add(around);
+        let height = rows.end.saturating_sub(rows.start).saturating_add(around);
         let stride = usize::try_from(width).ok()?;
-        let skipped = usize::try_from(margin).ok()?;
+        let skipped = usize::try_from(MARGIN).ok()?;
         let mut pixels = vec![u8::MAX; stride.checked_mul(usize::try_from(height).ok()?)?];
         for (row, y) in pixels.chunks_exact_mut(stride).skip(skipped).zip(rows) {
             for (pixel, x) in row.iter_mut().skip(skipped).zip(left..right) {
@@ -187,8 +190,8 @@ mod tests {
         let line = line(|x, y| x == 1 && y != 1 && y != 5).expect("it shows ink");
         assert_eq!(
             (line.width, line.height),
-            (7, 13),
-            "seven rows and a margin of three"
+            (5, 11),
+            "seven rows and a margin of two"
         );
         let black: Vec<usize> = line
             .pixels
@@ -196,7 +199,7 @@ mod tests {
             .enumerate()
             .filter_map(|(index, &pixel)| (pixel == 0).then_some(index))
             .collect();
-        assert_eq!(black, [24, 38, 45, 52, 66], "the dot and the mark show");
+        assert_eq!(black, [12, 22, 27, 32, 42], "the dot and the mark show");
     }
 
     /// The rows of the line in ink drawn as `#`, one string a row.
@@ -278,12 +281,6 @@ mod tests {
             "...", "#..", "...", "#..",
         ];
         assert_eq!(rows_in(&specks), Some(6..14));
-    }
-
-    #[test]
-    fn a_tall_line_has_a_margin_of_half_its_height() {
-        let line = line(|x, y| x == 1 && y < 6).expect("it shows ink");
-        assert_eq!((line.width, line.height), (7, 12));
     }
 
     #[test]

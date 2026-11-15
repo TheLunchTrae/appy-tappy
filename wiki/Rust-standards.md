@@ -157,6 +157,11 @@ a test timeout derived from it is too short for a mutant's whole-workspace
 run; `.cargo/mutants.toml` sets a floor under it. Whether testing only the
 mutated package catches the same mutants is still to be measured.
 
+cargo-mutants leaves ignored files out of its copy of the tree, and the setup
+app's [text reader model](Setup-app.md#the-text-reader) is one. Both lanes
+depend on `ocr:model` and set `APPYTAPPY_TEXT_READER_MODEL` to the downloaded
+file, so the test that reads with the model finds it from the copy.
+
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. Every
 report needs exactly one successful baseline. A full report in which every
