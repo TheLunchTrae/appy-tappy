@@ -227,6 +227,24 @@ so one answer also fixes a box you drew by hand.
 
 **Skip** goes on without answering, and **Back** returns to the step before.
 
+### Check again after you find or record more
+
+AppyTappy keeps your answers until you save or discard the reference. When you select
+**Check characters** again, after **Find more like it** or a recording has
+added text, the check asks only about the characters you have not answered
+for yet. The new finds and readings get the answers you gave already: a
+character AppyTappy misread again has the character you gave it, and a find
+whose characters you all answered for is ticked. When nothing is left to
+ask, the check says **Nothing new to check**.
+
+A character is asked about again when you skipped its step, or when a text
+you typed since gives it another character than your answer.
+
+The last screen says how many characters were not asked about again.
+**Check all again** there goes through every character once more, with your
+answers in place, so that you can change one or take back
+**Not a character**.
+
 You can answer from the keyboard. The **?** beside the buttons lists the
 keys:
 

@@ -17,6 +17,11 @@
 // joins no step. Once every one of its shapes has an answer from the other places, its text is written from the
 // answers. One that is still left shows at the end, to type or leave out, and what the user types there answers for
 // its shapes.
+//
+// A check that opens after an earlier one goes on from it instead of starting over. The earlier answers stand, and
+// the places that show since get them as they join, so a search made after a check asks only about what it found
+// that no answer covers. A shape whose earlier answer still holds joins no step, and a character all of whose
+// shapes are answered that way has no step. The user asks for those steps with Check all again.
 
 import type { ShownCharacter } from './bindings.ts';
 import { labelCharacters } from './reference.ts';
@@ -97,6 +102,11 @@ export interface Guide {
   readonly cursor: Cursor;
   readonly answers: Answers;
   /**
+   * The shapes whose answer an earlier check gave and this one has not given again. While such an answer holds,
+   * the shape joins no step: the user answered for it once, and is not asked again.
+   */
+  readonly earlier: ReadonlySet<string>;
+  /**
    * The places, as {@link placeKey} names them, that the check left out for a shape that is no character. Taking
    * that answer back keeps them again, and until then they stay in the steps, so the answer can be taken back.
    */
@@ -123,7 +133,9 @@ export type Turn =
   /** One shape is no character, so the places that show it are left out. */
   | { readonly kind: 'setAside'; readonly shape: string }
   /** One shape is a character after all: takes back that it is none. */
-  | { readonly kind: 'restore'; readonly shape: string };
+  | { readonly kind: 'restore'; readonly shape: string }
+  /** Asks about every character again, the ones earlier checks answered for included, from the first step. */
+  | { readonly kind: 'again' };
 
 /** An edit of one place: its text and whether it is ticked or kept. */
 export interface Change {
@@ -133,8 +145,17 @@ export interface Change {
   readonly keep: boolean;
 }
 
-/** The answers and the places left out, which say what the steps are. */
-type Given = Pick<Guide, 'answers' | 'left'>;
+/** The answers, which of them are an earlier check's, and the places left out, which say what the steps are. */
+type Given = Pick<Guide, 'answers' | 'earlier' | 'left'>;
+
+/** What the checks before this one leave it: their answers, and the places that joined them. */
+export interface Earlier {
+  readonly answers: Answers;
+  readonly seen: ReadonlySet<string>;
+}
+
+/** What a reference's first check goes on from: no answer, and no place. */
+export const NO_EARLIER: Earlier = { answers: new Map(), seen: new Set() };
 
 /** A name for `place` that stays the same while the places around it change. */
 export function placeKey(place: Pick<Place, 'source' | 'index'>): string {
@@ -175,7 +196,9 @@ function ticked(place: Place, left: ReadonlySet<string>): boolean {
  * The steps for `places` with what is `given` so far: each character with its shapes, the characters among `needs`
  * first, in that order, then the rest as they first show. A shape goes with its answer, or else with the character
  * most places' texts give it, the first of equals; one that is no character stays with the character the texts
- * give it. A shape with an answer counts as answered only while no place's text gives it another character.
+ * give it. A shape with an answer counts as answered only while no place's text gives it another character. A
+ * shape that an earlier check answered joins no step while that answer holds, and a character left with no shape
+ * has no step.
  */
 export function steps(places: readonly Place[], given: Given, needs: readonly string[]): readonly Step[] {
   const uses = new Map<string, { spots: Spot[]; votes: Map<string, number> }>();
@@ -199,15 +222,13 @@ export function steps(places: readonly Place[], given: Given, needs: readonly st
     const voted = [...use.votes].find(([, count]) => count === most)?.[0] ?? '';
     const character = answer ?? voted;
     const also = [...use.votes.keys()].filter((other) => other !== character);
+    const answered = answer === null || (answer !== undefined && also.length === 0);
+    if (answered && given.earlier.has(shape)) {
+      continue;
+    }
     const shapes = byCharacter.get(character) ?? [];
     byCharacter.set(character, shapes);
-    shapes.push({
-      shape,
-      spots: use.spots,
-      also,
-      aside: answer === null,
-      answered: answer === null || (answer !== undefined && also.length === 0),
-    });
+    shapes.push({ shape, spots: use.spots, also, aside: answer === null, answered });
   }
   const order = [
     ...needs.filter((character) => byCharacter.has(character)),
@@ -364,10 +385,12 @@ function readKeys(places: readonly Place[]): ReadonlySet<string> {
   return new Set(places.flatMap((place) => (place.reading ? [] : [placeKey(place)])));
 }
 
-/** A check of `places` that starts at its first step, for a reference that needs the characters `needs`. */
-export function openGuide(places: readonly Place[], needs: readonly string[]): Guide {
-  const given: Given = { answers: new Map(), left: new Set() };
-  return { cursor: firstOpen(places, given, needs), ...given, seen: readKeys(places) };
+/** `places` with `edits` made: each edited place has the edit's text and keep. */
+function edited(places: readonly Place[], edits: readonly Change[]): readonly Place[] {
+  return places.map((place) => {
+    const edit = edits.find((change) => change.source === place.source && change.index === place.index);
+    return edit === undefined ? place : { ...place, text: edit.text, keep: edit.keep };
+  });
 }
 
 /**
@@ -393,7 +416,7 @@ export function join(
       left.add(placeKey(place));
     }
   }
-  const given: Given = { answers: guide.answers, left };
+  const given: Given = { answers: guide.answers, earlier: guide.earlier, left };
   const standing = new Set(guide.answers.keys());
   const none = new Set([...standing].filter((shape) => guide.answers.get(shape) === null));
   return {
@@ -411,6 +434,41 @@ export function join(
       ),
     ],
   };
+}
+
+/**
+ * A check of `places` for a reference that needs the characters `needs`, which goes on from `earlier`, and the
+ * edits that follow. The earlier answers stand. A place that was not part of an earlier check joins this one as
+ * {@link join} says, so it gets those answers. The check starts at the first stop that still asks something, and
+ * the shapes the earlier answers cover join no step.
+ */
+export function openGuide(
+  places: readonly Place[],
+  needs: readonly string[],
+  earlier: Earlier,
+): { readonly guide: Guide; readonly changes: readonly Change[] } {
+  const read = readKeys(places);
+  const joined = join(
+    {
+      cursor: { at: 'done' },
+      answers: earlier.answers,
+      earlier: new Set(earlier.answers.keys()),
+      left: new Set(),
+      seen: new Set([...read].filter((key) => earlier.seen.has(key))),
+    },
+    places,
+  );
+  const cursor = firstOpen(edited(places, joined.changes), joined.guide, needs);
+  return { guide: { ...joined.guide, cursor }, changes: joined.changes };
+}
+
+/**
+ * How many characters `guide` has no step for because earlier checks answered for every shape of them. Check all
+ * again asks about them.
+ */
+export function checkedEarlier(guide: Guide, places: readonly Place[], needs: readonly string[]): number {
+  const every = steps(places, { ...guide, earlier: new Set() }, needs);
+  return every.length - steps(places, guide, needs).length;
 }
 
 /**
@@ -440,7 +498,9 @@ export function listed(cursor: Cursor, places: readonly Place[]): readonly numbe
  * answers one shape with another character and stays at the step while it has shapes left; otherwise it goes to the
  * stop that took its place. Set aside answers that a shape is no character and leaves out the kept places that show
  * it; restore takes that back and keeps those places again. Both stay at the step. Skip and back move without
- * answering, and neither moves past the ends. A place that shows afterward gets these answers when it joins, as
+ * answering, and neither moves past the ends. An answer given here is this check's, so its shape stays in its step
+ * though an earlier check answered for it. Again makes every earlier answer one to ask about and goes to the first
+ * stop. A place that shows afterward gets these answers when it joins, as
  * {@link join} says.
  */
 export function turn(
@@ -456,11 +516,17 @@ export function turn(
     const to = Math.max(0, Math.min(before.length - 1, at + (event.kind === 'skip' ? 1 : -1)));
     return { guide: { ...guide, cursor: before[to] ?? { at: 'done' } }, changes: [] };
   }
+  if (event.kind === 'again') {
+    const all: Guide = { ...guide, earlier: new Set() };
+    return { guide: { ...all, cursor: stops(places, all, needs)[0] ?? { at: 'done' } }, changes: [] };
+  }
   const answers = new Map(guide.answers);
+  const earlier = new Set(guide.earlier);
   const left = new Set(guide.left);
   const touched = new Set<string>();
   const answer = (shape: string, character: string | null): void => {
     answers.set(shape, character);
+    earlier.delete(shape);
     touched.add(shape);
   };
   // What a restored shape's places get back, which the answers alone do not say.
@@ -506,14 +572,11 @@ export function turn(
       }
     }
   }
-  const given: Given = { answers, left };
+  const given: Given = { answers, earlier, left };
   const next: Guide = { ...guide, ...given };
   const edits = [...changes(places, given, touched), ...kept];
   // Where the check goes follows from the places as this turn leaves them, such as a text it just filled in.
-  const then = places.map((place) => {
-    const edit = edits.find((change) => change.source === place.source && change.index === place.index);
-    return edit === undefined ? place : { ...place, text: edit.text, keep: edit.keep };
-  });
+  const then = edited(places, edits);
   const after = stops(then, next, needs);
   let to: Cursor;
   if (event.kind === 'confirm' && cursor.at === 'unfitted') {
