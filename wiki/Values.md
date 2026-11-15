@@ -670,8 +670,8 @@ Each value has **Fix at this size** beside it there, unless the window is at
 the size the value was first drawn at. At that size, [edit the
 value](#edit-a-value) instead. **Matches no state** isn't always wrong: the
 region may show none of the states right now. A value that can't be read
-there says why, such as a character whose shape its reference hasn't
-learned.
+there says why, such as **Cannot read: a character has a shape the reference
+has not learned**.
 
 1. AppyTappy finds the application's window and takes a screenshot of it at
    its size now, with the region where the value would be read there: it
