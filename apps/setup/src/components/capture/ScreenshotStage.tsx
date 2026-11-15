@@ -13,6 +13,8 @@ import { ZoomView } from '../ZoomView.tsx';
 import { ScreenshotStrip } from './ScreenshotStrip.tsx';
 import { StageBar } from './StageBar.tsx';
 
+const NOTHING_TO_TAKE = async (): Promise<void> => Promise.resolve();
+
 /** The widest live frame asked for, which keeps a large window's preview cheap. */
 const LIVE_MAX_WIDTH = 1600;
 
@@ -53,6 +55,11 @@ interface Props {
   /** Whether there is a window to show and take screenshots of. */
   readonly watching?: boolean;
   /**
+   * What shows in place of the picture while the screen has no window yet and says so itself, and why Take
+   * screenshot waits.
+   */
+  readonly absent?: { readonly panel: ReactNode; readonly reason: string } | null;
+  /**
    * What shows in place of the picture, such as a recording's review: its buttons, which take the bar, and its
    * content. The picture is hidden rather than removed, so the view keeps its measured size.
    */
@@ -89,6 +96,7 @@ export function ScreenshotStage({
   actions = null,
   onTake,
   watching = true,
+  absent = null,
   sheet = null,
   notes = null,
   held = { frozen: false, picture: null },
@@ -99,8 +107,10 @@ export function ScreenshotStage({
 }: Props) {
   const { screenshots, shownPicture } = stage;
   const { selected, setSelected, position } = screenshots;
+  const windowShows = watching && absent === null;
   const take = onTake ?? screenshots.take;
-  const shortcut = useScreenshotShortcut(take);
+  // Without a window there is nothing to take, so the shortcut asks for nothing.
+  const shortcut = useScreenshotShortcut(windowShows ? take : NOTHING_TO_TAKE);
   const sheeted = sheet !== null;
   return (
     <section className="stage" aria-label={label}>
@@ -121,7 +131,8 @@ export function ScreenshotStage({
             <button
               type="button"
               className="btn primary"
-              disabled={!watching}
+              disabled={!windowShows}
+              title={absent?.reason}
               onClick={() => {
                 background(take());
               }}
@@ -141,32 +152,36 @@ export function ScreenshotStage({
       {screenshots.error === null ? null : <p className="warn">{screenshots.error}</p>}
       {notes}
       {sheet?.content}
-      <ZoomView
-        picture={selected === null ? stage.liveSize : shownPicture}
-        zoomable={shownPicture !== null}
-        hidden={sheeted}
-        hint={hint(shortcut.label)}
-      >
-        {(layout) => (
-          <>
-            {sheeted || !watching ? null : selected !== null ? (
-              shownPicture === null ? null : (
-                <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
-              )
-            ) : held.picture !== null ? (
-              <PictureCanvas picture={held.picture} label="The screenshot the region goes on" />
-            ) : (
-              <LiveCanvas
-                maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(layout.space.width * devicePixelRatio)))}
-                paused={held.frozen}
-                onFrame={stage.onFrame}
-                onError={stage.onLiveError}
-              />
-            )}
-            {children(layout)}
-          </>
-        )}
-      </ZoomView>
+      {absent === null ? (
+        <ZoomView
+          picture={selected === null ? stage.liveSize : shownPicture}
+          zoomable={shownPicture !== null}
+          hidden={sheeted}
+          hint={hint(shortcut.label)}
+        >
+          {(layout) => (
+            <>
+              {sheeted || !windowShows ? null : selected !== null ? (
+                shownPicture === null ? null : (
+                  <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
+                )
+              ) : held.picture !== null ? (
+                <PictureCanvas picture={held.picture} label="The screenshot the region goes on" />
+              ) : (
+                <LiveCanvas
+                  maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(layout.space.width * devicePixelRatio)))}
+                  paused={held.frozen}
+                  onFrame={stage.onFrame}
+                  onError={stage.onLiveError}
+                />
+              )}
+              {children(layout)}
+            </>
+          )}
+        </ZoomView>
+      ) : sheeted ? null : (
+        absent.panel
+      )}
       <ScreenshotStrip
         shots={strip.shots ?? screenshots.shots}
         selected={selected}

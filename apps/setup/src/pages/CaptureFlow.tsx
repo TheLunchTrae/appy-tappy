@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import type { AppSummary } from '../lib/bindings.ts';
 import { restoreDraftScreenshots } from '../lib/api.ts';
 import { useCapture } from '../lib/capture.ts';
+import { AntiCheatRunning } from '../components/AntiCheatRunning.tsx';
 import { Capture, type CaptureMode, type Restored } from '../components/Capture.tsx';
+import { WindowAbsent } from '../components/capture/WindowAbsent.tsx';
+import { MatchEdit } from '../components/MatchEdit.tsx';
 import { type Choice, Picker } from '../components/Picker.tsx';
 import type { Changing, Made, RefFlow, ValueFlow } from '../lib/flow.ts';
 import type { Held } from '../lib/unsaved.ts';
+import { useWindowSearch } from '../lib/useWindowSearch.ts';
 import type { ReportDraft } from '../lib/drafts.ts';
 
 interface Props {
@@ -66,11 +70,88 @@ function subject(flow: ValueFlow | RefFlow): {
       };
 }
 
-/**
- * Making a value, fixing a saved one at another window size, editing one, or making or changing a reference: choose
- * the application, then capture its window and check what to read or teach the reference its characters.
- */
-export function CaptureFlow({
+/** The editor of a saved value or reference, which shows with or without its application's window. */
+function SavedCapture({
+  app,
+  mode,
+  trail,
+  onCancel,
+  onSaved,
+  onDrafted,
+  onEditApplication,
+  draftedApps,
+  onHeld,
+  onDraft,
+}: Props & { readonly app: string; readonly mode: CaptureMode }) {
+  // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at.
+  const { pick, stop } = useCapture();
+  const { absence, found, antiCheat, refresh, choose, restart } = useWindowSearch(app, pick);
+  // Each start over is a new editor, as each pick of a window is.
+  const [startedOver, setStartedOver] = useState(0);
+  const [held, setHeld] = useState<Held>('nothing');
+  const reportHeld = useCallback(
+    (now: Held): void => {
+      setHeld(now);
+      onHeld(now);
+    },
+    [onHeld],
+  );
+  return (
+    <Capture
+      key={startedOver}
+      choice={{ app, name: found?.name ?? 'the application' }}
+      absent={
+        absence === null
+          ? null
+          : {
+              reason: absence.reason,
+              panel: (
+                <WindowAbsent
+                  absence={absence}
+                  onRefresh={refresh}
+                  onChoose={choose}
+                  matchEdit={
+                    found !== null && absence.offersMatchEdit ? (
+                      <MatchEdit
+                        app={found}
+                        drafted={draftedApps.has(app)}
+                        disabled={absence.busy}
+                        blocked={
+                          held === 'nothing'
+                            ? null
+                            : "Save or discard what you changed here first: changing how it's found leaves this editor."
+                        }
+                        onEdit={() => {
+                          onEditApplication(found.summary);
+                        }}
+                      />
+                    ) : null
+                  }
+                />
+              ),
+            }
+      }
+      windowNotes={<AntiCheatRunning products={antiCheat} />}
+      mode={mode}
+      resumed={null}
+      restored={null}
+      trail={trail}
+      onCancel={onCancel}
+      onChangeWindow={() => {
+        stop();
+        restart();
+        setStartedOver((count) => count + 1);
+      }}
+      onSaved={onSaved}
+      onDrafted={onDrafted}
+      onHeld={reportHeld}
+      onDraft={onDraft}
+    />
+  );
+}
+
+/** The picker, then the capture of the window it picked. */
+function PickedCapture({
   flow,
   trail,
   continued,
@@ -82,15 +163,16 @@ export function CaptureFlow({
   draftedApps,
   onHeld,
   onDraft,
-}: Props) {
+  lockedApp,
+  mode,
+  heading,
+}: Props & { readonly lockedApp: string | null; readonly mode: CaptureMode; readonly heading: string }) {
   const draft = flow.resumed;
   const [choice, setChoice] = useState<Choice | null>(null);
   const [picking, setPicking] = useState(true);
   const [restored, setRestored] = useState<Restored | null>(null);
   // Whether a window was picked before: only the first pick brings a draft's screenshots back.
   const [pickedBefore, setPickedBefore] = useState(false);
-  // What the flow started for: its mode stays the same object while it shows.
-  const [{ mode, lockedApp, heading }] = useState(() => subject(flow));
   // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at.
   const { pick, stop } = useCapture();
   if (picking || choice === null) {
@@ -122,6 +204,8 @@ export function CaptureFlow({
   return (
     <Capture
       choice={choice}
+      absent={null}
+      windowNotes={null}
       mode={mode}
       resumed={draft}
       restored={restored}
@@ -137,5 +221,21 @@ export function CaptureFlow({
       onHeld={onHeld}
       onDraft={onDraft}
     />
+  );
+}
+
+/**
+ * Making a value, fixing a saved one at another window size, editing one, or making or changing a reference. A
+ * saved value or reference opens in its editor at once, which looks for its application's window itself. Anything
+ * new, and a draft, whose screenshots come back only with a window, chooses the application and captures its window
+ * first.
+ */
+export function CaptureFlow(props: Props) {
+  // What the flow started for: its mode stays the same object while it shows.
+  const [{ mode, lockedApp, heading }] = useState(() => subject(props.flow));
+  return lockedApp !== null && props.flow.resumed === null ? (
+    <SavedCapture {...props} app={lockedApp} mode={mode} />
+  ) : (
+    <PickedCapture {...props} lockedApp={lockedApp} mode={mode} heading={heading} />
   );
 }

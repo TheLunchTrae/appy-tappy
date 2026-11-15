@@ -12,7 +12,9 @@ type StageStatus =
   | { readonly kind: 'reviewing'; readonly recording: RecordingView }
   /** The check of the characters is open, at step `step` of `of`, or past its steps. */
   | { readonly kind: 'checking'; readonly step: { readonly step: number; readonly of: number } | null }
-  | { readonly kind: 'live'; readonly appName: string };
+  | { readonly kind: 'live'; readonly appName: string }
+  /** No window is captured yet. */
+  | { readonly kind: 'absent' };
 
 interface BarProps {
   /** The flows the current one is under, outermost first. */
@@ -49,6 +51,8 @@ export function StageBar({ path, current, status, size, children }: BarProps) {
           {status.recording.readings.length === 1 ? '1 reading' : `${status.recording.readings.length} readings`} from{' '}
           {clock(status.recording.elapsedMs)}
         </span>
+      ) : status.kind === 'absent' ? (
+        <span className="pill">No window</span>
       ) : (
         <span className="pill">
           <span className="dot live" />

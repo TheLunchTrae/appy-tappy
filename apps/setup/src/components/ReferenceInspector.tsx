@@ -116,6 +116,8 @@ interface Props {
   readonly built: Built<unknown>;
   /** The try of the characters on the live window. */
   readonly check: LiveCheck;
+  /** Why there is no live window to read, or null while one is captured. */
+  readonly windowless: string | null;
   readonly busy: boolean;
   readonly draftError: ReactNode;
   readonly draftButton: ReactNode;
@@ -143,6 +145,7 @@ export function ReferenceInspector({
   preview,
   built,
   check,
+  windowless,
   busy,
   draftError,
   draftButton,
@@ -259,7 +262,12 @@ export function ReferenceInspector({
           />
         }
       />
-      <ReadingBox built={built.ok ? null : built.next} state={check.state} reads={check.reads} />
+      <ReadingBox
+        built={built.ok ? null : built.next}
+        state={check.state}
+        reads={check.reads}
+        windowless={windowless}
+      />
       {/* Scores are of the characters alone here, so they need no key by the check's kind. */}
       <ReadingDetailsBox ask={check.state.kind === 'set' ? explainReading : null} />
       <div className="sep" />

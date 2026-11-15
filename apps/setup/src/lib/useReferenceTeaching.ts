@@ -51,6 +51,8 @@ interface TeachingSetup {
   readonly characters: Built<CharactersSpec> | null;
   /** The side a recording's region stays at. */
   readonly pin: PinDef | null;
+  /** Why nothing can be recorded for want of a window, or null while one is captured. */
+  readonly windowless: string | null;
   /** Each screenshot's pixels. */
   readonly full: ReadonlyMap<number, Picture>;
   /** The picture the stage shows, or null while it shows none. */
@@ -81,6 +83,7 @@ export function useReferenceTeaching({
   reference,
   characters,
   pin,
+  windowless,
   full,
   shown,
   setSelected,
@@ -287,7 +290,7 @@ export function useReferenceTeaching({
     checkStep,
     recordError: recorder.commandError ?? review.error ?? recorder.pollError,
     /** Why it cannot record, or null when it can or no editor is open. */
-    recordBlocked: editing === null ? null : recordBlocked(draft),
+    recordBlocked: editing === null ? null : (windowless ?? recordBlocked(draft)),
     /** Why Find more like it cannot search from the selected box, or null. */
     findBlocked: findBlockedBy(draft, boxes.selected),
     /** Why no box can be drawn on the picture shown, or null. */
