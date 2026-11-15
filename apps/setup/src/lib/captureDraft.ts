@@ -1,7 +1,7 @@
 // What a draft of a value, a fix, or a reference keeps of the capture screen, and what it still needs.
 
 import type { AppSummary, DraftDef, ReferenceDef, ValueDef } from './bindings.ts';
-import { type Built, type Draft, fixDraft } from './check.ts';
+import { type Built, type CheckKind, type Draft, fixDraft } from './check.ts';
 import { type Kept, draftProblem, isKept } from './drafts.ts';
 import { sameContent } from './unsaved.ts';
 
@@ -25,6 +25,16 @@ export type Step = 'where' | 'how' | 'check';
  */
 export function shownOnStep(step: Step, drawnOn: number | null, selected: number | null): number | null {
   return step === 'where' && drawnOn !== null ? drawnOn : selected;
+}
+
+/**
+ * Whether the stage outlines the value's region, and lets it be drawn, in `step`. A number's later steps pick and
+ * check its characters, so its region shows there only while a recording of looks, started before the check became
+ * a number, still runs over it; other checks read colors and looks inside the region in their second step, so it shows
+ * there too.
+ */
+export function regionOnStage(step: Step, kind: CheckKind, recording: boolean): boolean {
+  return step === 'where' || kind !== 'number' || recording;
 }
 
 /**

@@ -76,6 +76,7 @@ import {
   captureMissing,
   refreshedEditing,
   restoreSetup,
+  regionOnStage,
   shownOnStep,
   storeSetup,
 } from '../lib/captureDraft.ts';
@@ -759,7 +760,8 @@ export function Capture({
     recordingNow === null &&
     !sheeted &&
     picking === null;
-  const drawing: Drawing = drawsLive ? 'live' : editing !== null ? 'boxes' : 'region';
+  const regionShown = regionOnStage(shownStep, draft.kind, recordingNow !== null);
+  const drawing: Drawing = drawsLive ? 'live' : editing !== null ? 'boxes' : regionShown ? 'region' : 'none';
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
   const placeShot = draft.drawnOn ?? selected;
   const stripShots = setsPlace ? shots.filter((shot) => shot.index === placeShot) : shots;
@@ -1031,11 +1033,11 @@ export function Capture({
                 size={native}
                 shown={shown}
                 screenshot={selected}
-                region={otherSize === null ? draft.region : null}
+                region={regionShown && otherSize === null ? draft.region : null}
                 recording={recordingNow !== null && selected === null}
                 area={area}
                 label={regionLabel(valueName, moving)}
-                editable={shownPicture !== null && (otherSize === null || picking !== null)}
+                editable={shownPicture !== null && (picking !== null || (regionShown && otherSize === null))}
                 tool={selecting}
                 ignored={selection.ignored}
                 onRegion={(region) => {

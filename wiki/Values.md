@@ -54,7 +54,9 @@ back to the automation with the value picked.
 
 3. **Characters,** for a **Number**. Pick the reference the number reads
    with, make one with **New reference from this region**, or teach one with
-   **Record readings**, as [Checks](#checks) describes. Then select
+   **Record readings**, as [Checks](#checks) describes. This step and
+   **Check and save** don't show the region, apart from a recording's
+   outline; go back to **Where to read** to change it. Then select
    **Next: check and save**.
 4. **Check and save,** for a **Number**, or **How to read it** for the other
    checks, which set up the check here, as [Checks](#checks) describes, and
@@ -637,8 +639,9 @@ region may show none of the states right now.
    The fix compares with the first drawing's tolerance.
    For a **Number** check, **Read with** keeps the reference the value reads
    with at every size, or **Learn a reference at this size** teaches a new
-   one from this size's screenshots. A **Bar fill** or **Color** check keeps
-   its colors.
+   one from this size's screenshots. A **Number**'s region doesn't show in
+   this step; go back to **Where to read** to move it. A **Bar fill** or
+   **Color** check keeps its colors.
 4. Select **Save fix**.
 
 At that size AppyTappy then reads the fix exactly, instead of scaling. The
