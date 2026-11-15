@@ -32,7 +32,7 @@ import {
   withState,
 } from '../lib/check.ts';
 import { boxNumber } from '../lib/boxes.ts';
-import { type Placed, useLiveDraw } from '../lib/liveDraw.ts';
+import { type Placed, liveDrawFrame, useLiveDraw } from '../lib/liveDraw.ts';
 import { boxTextId } from './BoxList.tsx';
 import { DraftButtons } from './capture/DraftButtons.tsx';
 import { ReadWith } from './capture/ReadWith.tsx';
@@ -750,18 +750,16 @@ export function Capture({
   // A number's characters and its check are steps of their own; other kinds read and save in their second step.
   const threeSteps = draft.kind === 'number' && fixing === null;
   const shownStep: Step = !threeSteps && step === 'check' ? 'how' : step;
-  // The value's place is drawn over the live window while it has none, and the press takes the screenshot.
-  const drawsLive =
-    shownStep === 'where' &&
-    editing === null &&
-    selected === null &&
-    draft.region === null &&
-    liveSize !== null &&
-    recordingNow === null &&
-    !sheeted &&
-    picking === null;
+  // The value's place is drawn over the live window, and the press takes the screenshot it goes on.
+  const liveFrame = liveDrawFrame({
+    settingPlace: shownStep === 'where' && editing === null,
+    live: selected === null ? liveSize : null,
+    hasRegion: draft.region !== null,
+    editsSaved: edited !== null,
+    occupied: recordingNow !== null || sheeted || picking !== null,
+  });
   const regionShown = regionOnStage(shownStep, draft.kind, recordingNow !== null);
-  const drawing: Drawing = drawsLive ? 'live' : editing !== null ? 'boxes' : regionShown ? 'region' : 'none';
+  const drawing: Drawing = liveFrame !== null ? 'live' : editing !== null ? 'boxes' : regionShown ? 'region' : 'none';
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
   const placeShot = draft.drawnOn ?? selected;
   const stripShots = setsPlace ? shots.filter((shot) => shot.index === placeShot) : shots;
@@ -978,9 +976,9 @@ export function Capture({
             {recording?.recording === true && selected === null ? (
               <RecordingSpots view={recording} shown={shown} />
             ) : null}
-            {drawsLive ? (
+            {liveFrame !== null ? (
               <RegionSurface
-                size={liveSize}
+                size={liveFrame}
                 shown={shown}
                 screenshot={null}
                 // The box drawn stays outlined from when the pointer is let go until its screenshot arrives.
@@ -996,7 +994,7 @@ export function Capture({
                   }
                 }}
                 onRegion={(rect) => {
-                  live.drew({ rect, at: liveSize });
+                  live.drew({ rect, at: liveFrame });
                 }}
               />
             ) : editing !== null ? (

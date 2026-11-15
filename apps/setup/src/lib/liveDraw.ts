@@ -108,6 +108,28 @@ export function liveSizeAfter(current: Size | null, frame: Size, frozen: boolean
   return frame;
 }
 
+/** What decides whether a drag over the live view draws the value's region. */
+export interface LiveDrawScene {
+  /** Whether Where to read shows, with no reference being taught. */
+  readonly settingPlace: boolean;
+  /** The size of the live frame shown, or null while a screenshot shows or no frame has arrived. */
+  readonly live: Size | null;
+  readonly hasRegion: boolean;
+  /** Whether a saved value is edited, whose region keeps to the window size it was drawn at. */
+  readonly editsSaved: boolean;
+  /** Whether a recording runs, a review covers the picture, or a click picks a color. */
+  readonly occupied: boolean;
+}
+
+/**
+ * The live frame the stage draws the value's region over, or null when it draws none there. A region already placed
+ * is drawn again over it, on the screenshot the drag takes, except an edited value's, since the live window can have
+ * another size than the one its region is drawn at.
+ */
+export function liveDrawFrame({ settingPlace, live, hasRegion, editsSaved, occupied }: LiveDrawScene): Size | null {
+  return settingPlace && !occupied && (!hasRegion || !editsSaved) ? live : null;
+}
+
 /**
  * Drawing over the live view with `take`, which takes a screenshot without showing it; `onPlaced` hears what each
  * press made. `shown` is what the stage shows of the press under way, and `isFrozen` says, as of the last event

@@ -5,6 +5,7 @@ import {
   type LiveDraw,
   type LiveDrawEvent,
   liveDraw,
+  liveDrawFrame,
   liveShown,
   liveSizeAfter,
 } from '../src/lib/liveDraw.ts';
@@ -117,5 +118,23 @@ describe('drawing over the live view', () => {
     expect(liveSizeAfter(held, { width: 640, height: 480 }, false)).toEqual({ width: 640, height: 480 });
     expect(liveSizeAfter(held, { ...held }, false)).toBe(held);
     expect(liveSizeAfter(null, held, false)).toBe(held);
+  });
+});
+
+describe('where the live view takes a drawn region', () => {
+  const frame = { width: 800, height: 450 };
+  const scene = { settingPlace: true, live: frame, hasRegion: false, editsSaved: false, occupied: false };
+  test("draws a new value's region over it again once one is placed, on the screenshot the drag takes", () => {
+    expect(liveDrawFrame(scene)).toBe(frame);
+    expect(liveDrawFrame({ ...scene, hasRegion: true })).toBe(frame);
+  });
+  test("leaves an edited value's placed region to screenshots of the size it was drawn at", () => {
+    expect(liveDrawFrame({ ...scene, editsSaved: true })).toBe(frame);
+    expect(liveDrawFrame({ ...scene, editsSaved: true, hasRegion: true })).toBeNull();
+  });
+  test('draws nothing outside Where to read, without a frame, or while the live view is busy', () => {
+    expect(liveDrawFrame({ ...scene, settingPlace: false })).toBeNull();
+    expect(liveDrawFrame({ ...scene, live: null })).toBeNull();
+    expect(liveDrawFrame({ ...scene, occupied: true })).toBeNull();
   });
 });

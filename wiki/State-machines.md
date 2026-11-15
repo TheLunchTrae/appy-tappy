@@ -2129,10 +2129,10 @@ stateDiagram-v2
 
 ### Live draw
 
-While a value has no place yet, the capture screen's first step lays a region
+While the live view shows, the capture screen's first step lays a region
 surface over the live window, so the user can drag where the value shows
 without taking a screenshot first. The press takes the screenshot the region
-goes on. `liveDraw` in `apps/setup/src/lib/liveDraw.ts` is the pure
+goes on, and a region already placed moves onto it. `liveDraw` in `apps/setup/src/lib/liveDraw.ts` is the pure
 `(state, event)` transition, and `useLiveDraw` there holds the state, numbers
 the presses, and takes the screenshot.
 
@@ -2181,10 +2181,11 @@ stateDiagram-v2
   it. One that arrives for another press than the one under way is dropped,
   and so is one that arrives once its press already has a screenshot.
 
-The surface shows only while the first step sets a new value's place, the
-live view shows, the value has no region, no recording runs, no review is
-open, and no color is being picked (`drawsLive` in
-`apps/setup/src/components/Capture.tsx`).
+The surface shows only while the first step sets the value's place, the live
+view shows, no recording runs, no review is open, and no color is being
+picked, and only while an edited saved value has no region, since the live
+window can have another size than the one its region is drawn at
+(`liveDrawFrame` in `apps/setup/src/lib/liveDraw.ts`).
 
 ### Value steps
 
