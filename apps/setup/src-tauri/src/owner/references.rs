@@ -240,7 +240,6 @@ impl<H: Host> Owner<H> {
     }
 }
 
-/// `names` as a list in a sentence, such as `A, B and C`.
 /// The saved reference `id` of `app` with those of its samples' pictures
 /// that can be read.
 fn reference_of(app: &SavedApp, id: &str) -> Result<SavedReference, String> {
@@ -278,6 +277,7 @@ fn named_apart(file: &AppFile, id: &str, name: &str) -> Result<(), String> {
         })
 }
 
+/// `names` as a list in a sentence, such as `A, B and C`.
 pub(super) fn and_list(names: &[&str]) -> String {
     match names.split_last() {
         None => String::new(),

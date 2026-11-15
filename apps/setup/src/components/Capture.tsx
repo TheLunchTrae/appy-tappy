@@ -39,6 +39,7 @@ import { boxTextId } from './BoxList.tsx';
 import { DraftButtons } from './capture/DraftButtons.tsx';
 import { ReadWith } from './capture/ReadWith.tsx';
 import { useLanding } from '../lib/landing.ts';
+import { showsNewCloseSign } from '../lib/windowSearch.ts';
 import { ScreenshotStage, useScreenshotStage } from './capture/ScreenshotStage.tsx';
 import { ChangeWindow } from './capture/StageBar.tsx';
 import { Stepper, nextFromWhere, stepTabs } from './capture/Stepper.tsx';
@@ -182,8 +183,11 @@ interface Props {
   readonly absent: { readonly panel: ReactNode; readonly reason: string } | null;
   /** What the flow says about the window, above the picture. */
   readonly windowNotes: ReactNode;
-  /** Hears each failure of the window's live view, or null for a flow that does not look for its window again. */
-  readonly onLiveFailed: (() => void) | null;
+  /**
+   * Hears each sign that the window may have closed: a failure of its live view, a refused screenshot, and a
+   * recording that stopped or could not start.
+   */
+  readonly onWindowFailed: () => void;
   /**
    * Whether the flow shows because another flow ended, so the focus has to land somewhere, and the control it lands
    * on, or null while that is not known.
@@ -212,7 +216,7 @@ export function Capture({
   choice,
   absent,
   windowNotes,
-  onLiveFailed,
+  onWindowFailed,
   landing,
   mode,
   resumed,
@@ -408,6 +412,24 @@ export function Capture({
   const { recording, finder, reviewed, sheeted, checking } = teaching;
   // The recording that runs now, of readings or of looks: the owner records one thing at a time.
   const recordingNow = recording?.recording === true ? recording : looks.view?.recording === true ? looks.view : null;
+  const closeSigns = useMemo(
+    () => [screenshots.error, recording?.problem ?? null, looks.view?.problem ?? null, looks.error],
+    [screenshots.error, recording?.problem, looks.view?.problem, looks.error],
+  );
+  const closeSignsShown = useRef(closeSigns);
+  useEffect(() => {
+    if (showsNewCloseSign(closeSignsShown.current, closeSigns)) {
+      onWindowFailed();
+    }
+    closeSignsShown.current = closeSigns;
+  }, [closeSigns, onWindowFailed]);
+  // A window that goes shows its panel, whatever screenshot showed, so the way back to it is in view.
+  const hasWindow = windowless === null;
+  useEffect(() => {
+    if (!hasWindow) {
+      setSelected(null);
+    }
+  }, [hasWindow, setSelected]);
   const busy = saving || drafting.saving;
   const holds = held(busy, start, {
     screenshots: shots.length,
@@ -973,7 +995,7 @@ export function Capture({
           ) : null
         }
         absent={absent}
-        onLiveFailed={onLiveFailed}
+        onLiveFailed={onWindowFailed}
         onTake={takeShot}
         sheet={teachingSheet(teaching)}
         notes={

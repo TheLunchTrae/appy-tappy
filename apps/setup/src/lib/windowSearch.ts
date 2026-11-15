@@ -169,3 +169,43 @@ export function fallbackWarning(capture: WindowCapture, name: string): string | 
     ? `${name}'s window is “${capture.window.title}”.${fallbackNote('It is', true)}`
     : null;
 }
+
+/** How long after one ask whether the capture ended the next one waits, so a view that fails with every frame asks seldom. */
+export const ENDED_ASK_PAUSE_MS = 1000;
+
+/**
+ * Asks whether the window's capture ended, with `asks`, each time something suggests the window closed, and calls
+ * `ended` when it did. One ask runs at a time, and the next waits `pauseMs` after the last one started, as `now`
+ * counts them: a live view that fails without ending the capture fails again with every frame.
+ */
+export function endedAsks(
+  asks: () => Promise<boolean>,
+  pauseMs: number,
+  now: () => number,
+): (ended: () => void) => Promise<void> {
+  let asking = false;
+  let asked: number | null = null;
+  return async (ended) => {
+    const time = now();
+    if (asking || (asked !== null && time - asked < pauseMs)) {
+      return;
+    }
+    asking = true;
+    asked = time;
+    try {
+      if (await asks()) {
+        ended();
+      }
+    } finally {
+      asking = false;
+    }
+  };
+}
+
+/**
+ * Whether the capture screen shows a sign that its window may have closed which it did not show `before`: a
+ * screenshot that was refused, or a recording that stopped or could not start, each with its reason or null.
+ */
+export function showsNewCloseSign(before: readonly (string | null)[], signs: readonly (string | null)[]): boolean {
+  return signs.some((sign, index) => sign !== null && sign !== before[index]);
+}

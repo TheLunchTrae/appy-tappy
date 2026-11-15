@@ -331,10 +331,7 @@ impl<H: Host> Owner<H> {
             let recording = recording.life_mut();
             let error = sentence(&failure.error);
             if failure.ended {
-                recording.end(
-                    Instant::now(),
-                    format!("Recording stopped: {error} Change window to pick it again."),
-                );
+                recording.end(Instant::now(), format!("Recording stopped: {error}"));
             } else {
                 recording.fail(Instant::now(), format!("Recording stopped: {error} {next}"));
             }
@@ -363,12 +360,12 @@ impl<H: Host> Owner<H> {
     pub(crate) fn screenshot(&mut self) -> Result<usize, String> {
         let image = self
             .newest_frame(|failure| {
-                let next = if failure.ended {
-                    "Change window to pick it again."
+                let error = sentence(&failure.error);
+                if failure.ended {
+                    error
                 } else {
-                    "Take it once the window shows again."
-                };
-                format!("{} {next}", sentence(&failure.error))
+                    format!("{error} Take it once the window shows again.")
+                }
             })?
             .clone();
         let picked = self
@@ -663,7 +660,7 @@ mod tests {
         );
         assert_eq!(
             harness.ask(Owner::screenshot),
-            Err("The captured window closed. Change window to pick it again.".to_owned())
+            Err("The captured window closed.".to_owned())
         );
     }
 

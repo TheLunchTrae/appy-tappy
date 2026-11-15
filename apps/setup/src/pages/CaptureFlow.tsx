@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
 
 import type { AppSummary } from '../lib/bindings.ts';
-import { restoreDraftScreenshots } from '../lib/api.ts';
+import { captureEnded, restoreDraftScreenshots } from '../lib/api.ts';
+import { background } from '../lib/repeat.ts';
 import { useCapture } from '../lib/capture.ts';
 import { AntiCheatRunning } from '../components/AntiCheatRunning.tsx';
 import { Capture, type CaptureMode, type Restored } from '../components/Capture.tsx';
@@ -11,7 +12,7 @@ import { type Choice, Picker } from '../components/Picker.tsx';
 import type { Made, RefFlow, ValueFlow } from '../lib/flow.ts';
 import type { Held } from '../lib/unsaved.ts';
 import { useWindowSearch } from '../lib/useWindowSearch.ts';
-import { windowLanding } from '../lib/windowSearch.ts';
+import { ENDED_ASK_PAUSE_MS, endedAsks, windowLanding } from '../lib/windowSearch.ts';
 import type { ReportDraft } from '../lib/drafts.ts';
 
 interface Props {
@@ -53,12 +54,16 @@ function subject(flow: ValueFlow | RefFlow): { readonly mode: CaptureMode; reado
     : { mode: { kind: changing.how, value: changing.value }, lockedApp: changing.app };
 }
 
-/** The picker's heading for `flow`. Of the saved values, it shows only for the draft of a fix. */
+/** The picker's heading for `flow`. */
 function pickerHeading(flow: ValueFlow | RefFlow): string {
   if (flow.kind === 'reference') {
     return flow.existing === null ? 'New reference' : `Edit ${flow.existing.reference.name}`;
   }
-  return flow.changing === null ? 'New value' : `Fix ${flow.changing.value.name} at this size`;
+  const { changing } = flow;
+  if (changing === null) {
+    return 'New value';
+  }
+  return changing.how === 'fix' ? `Fix ${changing.value.name} at this size` : `Edit ${changing.value.name}`;
 }
 
 const NO_LANDING = { owed: false, target: null };
@@ -80,7 +85,10 @@ function SavedCapture({
   // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at. A window that
   // closed and opened again is picked in place of the capture that ended, so the editor keeps its screenshots.
   const { pickAgain, stop } = useCapture();
-  const { absence, found, antiCheat, fallback, liveFailed, refresh, choose, restart } = useWindowSearch(app, pickAgain);
+  const { absence, found, antiCheat, fallback, windowFailed, refresh, choose, restart } = useWindowSearch(
+    app,
+    pickAgain,
+  );
   // Each start over is a new editor, as each pick of a window is.
   const [startedOver, setStartedOver] = useState(0);
   const [held, setHeld] = useState<Held>('nothing');
@@ -137,7 +145,7 @@ function SavedCapture({
           )}
         </>
       }
-      onLiveFailed={liveFailed}
+      onWindowFailed={windowFailed}
       landing={{ owed: continued, target: windowLanding(absence) }}
       mode={mode}
       resumed={null}
@@ -181,6 +189,16 @@ function PickedCapture({
   const [pickedBefore, setPickedBefore] = useState(false);
   // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at.
   const { pick, stop } = useCapture();
+  // Whether the picked window closed, which only another pick gets past.
+  const [closed, setClosed] = useState(false);
+  const [askEnded] = useState(() => endedAsks(captureEnded, ENDED_ASK_PAUSE_MS, Date.now));
+  const windowFailed = useCallback((): void => {
+    background(
+      askEnded(() => {
+        setClosed(true);
+      }),
+    );
+  }, [askEnded]);
   if (picking || choice === null) {
     return (
       <Picker
@@ -211,8 +229,8 @@ function PickedCapture({
     <Capture
       choice={choice}
       absent={null}
-      windowNotes={null}
-      onLiveFailed={null}
+      windowNotes={closed ? <p className="warn">The window closed. Select Change window to pick it again.</p> : null}
+      onWindowFailed={windowFailed}
       landing={NO_LANDING}
       mode={mode}
       resumed={draft}
@@ -222,6 +240,7 @@ function PickedCapture({
       onChangeWindow={() => {
         // The capture ends here, not when another window is picked, so nothing keeps its screenshots meanwhile.
         stop();
+        setClosed(false);
         setPicking(true);
       }}
       onSaved={onSaved}
