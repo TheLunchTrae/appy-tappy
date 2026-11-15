@@ -179,6 +179,22 @@ export function nowCell(
   return problem === null ? { kind: 'waiting' } : { kind: 'unread', problem, from };
 }
 
+/** What a value's cell for the window's size `size` now says: its reading, or why it has none. */
+export function nowText(cell: NowCell, size: SizeDef): string {
+  switch (cell.kind) {
+    case 'reading':
+      return cell.text;
+    case 'waiting':
+      return 'Reading…';
+    case 'noState':
+      return 'Matches no state';
+    case 'unread':
+      return cell.problem;
+    case 'notDrawn':
+      return `Not read at ${sizeText(size)}, the window's size now`;
+  }
+}
+
 /** Whether the cell offers Fix at this size: for a value that is not drawn here, or that reads here, wrongly or not
  * at all, from a scaled drawing or a fix, which a new fix replaces. At the size it was first drawn at, a value that
  * reads wrong is edited instead. */

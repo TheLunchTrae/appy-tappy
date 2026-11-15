@@ -6,6 +6,7 @@ import {
   guessPin,
   type NowCell,
   nowCell,
+  nowText,
   offersFix,
   pinOf,
   placement,
@@ -98,6 +99,14 @@ describe('nowCell', () => {
     });
     // Read only at its drawn sizes, it says so whatever the window read.
     expect(nowCell(screen, 'rarely', larger, reading, 'Not read.')).toEqual({ kind: 'notDrawn' });
+  });
+});
+
+describe('nowText', () => {
+  test('says why a value does not read, not only that it does not', () => {
+    const problem = 'Cannot read: a character has a shape the reference has not learned.';
+    expect(nowText({ kind: 'unread', problem, from: 'drawn' }, window)).toBe(problem);
+    expect(nowText({ kind: 'notDrawn' }, larger)).toBe("Not read at 3440 × 1440, the window's size now");
   });
 });
 

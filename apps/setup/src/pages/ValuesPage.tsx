@@ -23,6 +23,7 @@ import {
   NOW_HINT,
   type NowCell,
   nowCell,
+  nowText,
   offersFix,
   REMOVE_FIX_HINT,
   regionText,
@@ -103,22 +104,6 @@ interface AppRowsProps {
   readonly rows: DraftRows;
 }
 
-/** What a value's cell for the window's size now says, in a few words. */
-function nowText(cell: NowCell, size: SizeDef): string {
-  switch (cell.kind) {
-    case 'reading':
-      return cell.text;
-    case 'waiting':
-      return 'Reading…';
-    case 'noState':
-      return 'Matches no state';
-    case 'unread':
-      return "Doesn't read";
-    case 'notDrawn':
-      return `Not read at ${sizeText(size)}, the window's size now`;
-  }
-}
-
 interface NowProps {
   readonly value: ValueDef;
   readonly cell: NowCell;
@@ -134,9 +119,7 @@ function NowCellView({ value, cell, size, onFix, onRemoveFix }: NowProps) {
   const fixed = cell.kind !== 'notDrawn' && cell.kind !== 'waiting' && cell.from === 'fixed';
   return (
     <span className="now">
-      <span className={tone} title={cell.kind === 'unread' ? cell.problem : undefined}>
-        {nowText(cell, size)}
-      </span>
+      <span className={tone}>{nowText(cell, size)}</span>
       {fixed ? <small className="note">fixed at this size</small> : null}
       {offersFix(cell) ? (
         <>
