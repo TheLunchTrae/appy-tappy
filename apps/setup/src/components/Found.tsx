@@ -132,9 +132,6 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
     unlisted === 0
       ? null
       : `Skipped ${plural(unlisted, 'find that shows', 'finds that show')} characters the reference does not need. A find you ticked before its text was read is skipped the same way.`,
-    view.otherSizes === 0
-      ? null
-      : `Skipped ${plural(view.otherSizes, 'run', 'runs')} of other sizes. To find those, select a box around text of that size first.`,
     view.more === 0 ? null : `${plural(view.more, 'more was', 'more were')} left out; add these, then find again.`,
   ].filter((part) => part !== null);
   return (
@@ -147,14 +144,14 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
       </div>
       {rows.length === 0 ? (
         <p className="note">
-          No other text on this screenshot that the boxes leave out has the same color and size and shows only the
-          characters the reference needs.
+          No other text on this screenshot that the boxes leave out stands out as the text in the box does and shows
+          only the characters the reference needs.
         </p>
       ) : (
         <>
           <p className="note">
-            Text in the same color and size on this screenshot, read as text. Tick the ones to add; each becomes a box
-            the reference learns from.
+            Text on this screenshot that stands out as the text in the box does, read as text. Text of the box's size
+            comes first, then other sizes. Tick the ones to add; each becomes a box the reference learns from.
           </p>
           <div className="row">
             <KeepAll rows={rows} onKeepAll={finder.keepAll} />
@@ -219,6 +216,10 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
               const number = row.index + 1;
               const flag = flags.get(row.index);
               const flagId = `found-${row.index}-flag`;
+              const sizeId = `found-${row.index}-size`;
+              const described = [row.otherSize === null ? null : sizeId, flag === undefined ? null : flagId].filter(
+                (id) => id !== null,
+              );
               return (
                 <li key={row.index} className={row.keep ? undefined : 'off'}>
                   <input
@@ -238,7 +239,7 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
                     placeholder={placeholder(row)}
                     aria-label={`Text of find ${number}`}
                     aria-invalid={flag !== undefined}
-                    aria-describedby={flag === undefined ? undefined : flagId}
+                    aria-describedby={described.length === 0 ? undefined : described.join(' ')}
                     value={row.text}
                     onChange={(event) => {
                       finder.edit(row.index, {
@@ -248,6 +249,11 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
                       });
                     }}
                   />
+                  {row.otherSize === null ? null : (
+                    <span id={sizeId} className="size">
+                      Text {row.otherSize} px tall
+                    </span>
+                  )}
                   {flag === undefined ? null : (
                     <span id={flagId} className="flag">
                       {flag}

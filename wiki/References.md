@@ -134,10 +134,16 @@ there, and neither does it when the value needs no characters.
 A screen often shows more numbers in the same font than the one you drew a
 box around, such as a stats panel. Select a box, and then select
 **Find more like it**. AppyTappy looks on the box's screenshot for other
-text that stands out as the text in the box does and is as tall, away from
+text that stands out as the text in the box does, at any size, away from
 the boxes that are there already, and reads each as text. It finds text on
 the same background as the box's; text on a panel of another color needs a
 box of its own first.
+
+Text as tall as the text in the box comes first in the list, then text of
+other sizes, starting with the size nearest the box's. A find of another
+size says how tall its characters are, such as **Text 28 px tall**. Add
+those too when a value shows that size: a reference reads a size best once
+it has learned from it.
 
 While you teach a reference for a value, the list holds only the finds that
 may show the characters the value
@@ -176,11 +182,11 @@ characters, lists every find.
    teach, and they still count under **Characters still missing**.
    **Not these** closes the list without adding any.
 
-Draw the box tightly around the text first, since the finds' characters must
-be about as tall as the text in it; a comma or a mark below them does not
-count. Text of another size is skipped, and the list says how much. To find
-that text, select a box around some text of that size, or draw one, and then
-select **Find more like it**. One search
+Draw the box tightly around the text first, since the list starts with the
+finds whose characters are about as tall as the text in it; a comma or a
+mark below them does not count. Text with characters under 8 pixels tall is
+found only when the text in the box is that small too, and anything taller
+than a quarter of the screenshot is not taken for text. One search
 lists at most 12 finds; add those, then select **Find more like it** again, and
 it lists the rest, leaving out what you added.
 

@@ -767,7 +767,7 @@ describe('the places a check goes over', () => {
   const region = { x: 0, y: 0, width: 9, height: 4 };
   const ink = { red: 255, green: 255, blue: 255 };
   const characters = [{ shape: 's', left: 0, right: 3 }];
-  const row = { region, typed: false, failed: false, readWith: { ink, tolerance: 40 }, flag: null };
+  const row = { region, otherSize: null, typed: false, failed: false, readWith: { ink, tolerance: 40 }, flag: null };
 
   test('are every box, listed find and reading; it asks about all but readings left out; a save learns the boxes with text and the kept readings', () => {
     const finds = [0, 1, 2].map(() => ({ region, text: { kind: 'pending' as const }, ink, tolerance: 40, characters }));

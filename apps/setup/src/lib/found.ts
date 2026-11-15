@@ -16,6 +16,8 @@ export interface FoundEntry {
 export interface FoundRow {
   readonly index: number;
   readonly region: Rect;
+  /** How tall its characters are, in pixels, when that is another size than the selected box's text, or null. */
+  readonly otherSize: number | null;
   readonly keep: boolean;
   readonly text: string;
   /** Whether the user typed its text, rather than keeping the text reader's guess. */
@@ -113,6 +115,7 @@ export function foundRows(
     return {
       index,
       region: find.region,
+      otherSize: find.otherSize ?? null,
       keep: keep && fits,
       text,
       typed,

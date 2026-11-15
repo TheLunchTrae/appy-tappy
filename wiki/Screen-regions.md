@@ -155,6 +155,14 @@ character that reaches above or below the digits, such as a `,`, makes the
 line taller and every shape beside it another, so the reference learns the
 digits again from pictures that show it.
 
+A reference reads each size it learned. At another size a character's
+strokes can land more than a cell from the learned shape's, and the read
+then fails rather than take the closest character on trust. So a font that
+an application shows at several sizes is taught at each:
+[Find more like it](References.md#find-more-like-it) lists the text of
+every size on a screenshot, and the pictures of each size add its shapes to
+the reference.
+
 ### Why a number is not read
 
 A read fails at one of five stages, `ReadError` in `screen/digits.rs`, and

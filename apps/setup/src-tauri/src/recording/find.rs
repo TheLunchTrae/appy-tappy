@@ -1,21 +1,22 @@
 //! Finding more text like one of a reference's boxes: the text elsewhere on
-//! the same screenshot that stands out as the box's does and has its size,
-//! so the user adds it all at once instead of drawing a box around each.
+//! the same screenshot that stands out as the box's does, at any size, so
+//! the user adds it all at once instead of drawing a box around each.
 //!
 //! It looks at the ink of the whole screenshot, as the reference tells the
 //! box's ink from its background ([`DigitReader::ink_like`]): what stands
 //! out from the background the box has, or what has the reference's text
-//! color. It joins touching ink pixels into blobs. Blobs side by side on
-//! one line, no further apart than the sample's height, make a run of
-//! text. A run whose tallest character is as tall as the sample's, within
-//! [`SIZE_PERCENT`], is a find. Ink much taller than the sample, such as
-//! the scene around the box's panel, is left out, and so is the run inside
-//! the sample's own region.
+//! color. It joins touching ink pixels into blobs, and takes each height
+//! the blobs have as a size of text to look for, the sample's first. Blobs
+//! side by side on one line, no further apart than a size, make a run of
+//! text, and a run whose tallest character is as tall as the size, within
+//! [`SIZE_PERCENT`], is a find. Ink too tall to be text, such as the scene
+//! around the box's panel, is left out, and so is the run inside the
+//! sample's own region.
 //!
-//! A recording of the whole window looks the same way for text of several
-//! sizes at once, one for each example the user drew ([`Sizes`]).
+//! A recording of the whole window looks the same way for the sizes of the
+//! examples the user drew ([`Sizes`]).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use appytappy_sources::screen::digits::{DigitReader, Ink};
 use appytappy_sources::screen::{Image, Region};
@@ -29,9 +30,18 @@ pub(crate) const MAX_FOUND: usize = 12;
 /// recording's region first.
 pub(crate) const MAX_LINES: usize = 32;
 
-/// How far a run's height may be from the sample's and still be the same
-/// size, in percent of the sample's.
+/// How far a run's height may be from a size's and still be that size, in
+/// percent of the size's.
 pub(crate) const SIZE_PERCENT: u32 = 15;
+
+/// The shortest characters a search takes as text of another size than
+/// its sample's, in pixels: shorter ink is the specks and the marks of
+/// other text, and characters that short run together.
+const SHORTEST_OTHER_SIZE: u32 = 8;
+
+/// The tallest characters a search takes, as a part of the screenshot's
+/// height: one in this many. Taller ink is the scene, not text.
+const TALLEST_PART: u32 = 4;
 
 /// One size of text a look over a whole window takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,10 +54,11 @@ pub(crate) struct TextSize {
     pub(crate) example: u32,
 }
 
-/// The sizes of text a look over a whole window takes, smallest first: one
-/// for each example of text the user drew. An example's height is held
-/// unless a look for one held before it takes text that tall, within
-/// [`SIZE_PERCENT`].
+/// The sizes of text a look takes, smallest first: for a recording of a
+/// whole window, one for each example of text the user drew; for a search,
+/// its sample's and one for each other height the screenshot's ink has. A
+/// height is held unless a look for one held before it takes text that
+/// tall, within [`SIZE_PERCENT`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Sizes(Vec<TextSize>);
 
@@ -118,21 +129,24 @@ pub(crate) struct Find {
     pub(crate) region: Region,
     /// Its ink for the text reader, or `None` when the margin left none.
     pub(crate) line: Option<Line>,
+    /// How tall its characters are, in pixels, when that is another size
+    /// than the sample's.
+    pub(crate) other_size: Option<u32>,
 }
 
 /// What a search found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Search {
-    /// The finds, top to bottom and left to right, at most [`MAX_FOUND`].
+    /// The finds, at most [`MAX_FOUND`]: those of the sample's size first,
+    /// then each other size from the nearest to the sample's, and each
+    /// size's top to bottom and left to right.
     pub(crate) finds: Vec<Find>,
     /// Finds past [`MAX_FOUND`].
     pub(crate) more: usize,
-    /// Runs of such text of another size.
-    pub(crate) other_sizes: usize,
 }
 
 /// A rectangle of ink, edges exclusive at the right and bottom.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct Bounds {
     left: u32,
     top: u32,
@@ -159,14 +173,6 @@ impl Bounds {
             && region.x() < self.right
             && self.top < region.bottom()
             && region.y() < self.bottom
-    }
-
-    /// Whether all of it lies inside `other`.
-    const fn within(self, other: Self) -> bool {
-        other.left <= self.left
-            && self.right <= other.right
-            && other.top <= self.top
-            && self.bottom <= other.bottom
     }
 
     fn centered_in(self, region: Region) -> bool {
@@ -307,15 +313,15 @@ fn bands(top: u32, bottom: u32, band: u32) -> std::ops::RangeInclusive<u32> {
     first..=last
 }
 
-/// Joins `blobs` into runs of text: a blob whose rows meet a run's and that
-/// starts no further than `gap` past its right edge joins the first such
-/// run. Runs are looked up by the bands of `band` rows they cross, and a run
+/// Joins `blobs` into runs of text, each with the blobs that joined it: a
+/// blob whose rows meet a run's and that starts no further than `gap` past
+/// its right edge joins the first such run. Runs are looked up by the bands of `band` rows they cross, and a run
 /// the next blobs start too far right of is dropped from that lookup, so the
 /// work grows with the blobs, not with blobs times runs.
-fn runs(mut blobs: Vec<Bounds>, gap: u32, band: u32) -> Vec<Run> {
+fn runs(mut blobs: Vec<Bounds>, gap: u32, band: u32) -> Vec<(Run, Vec<Bounds>)> {
     blobs.sort_by_key(|blob| (blob.left, blob.top));
     let band = band.max(1);
-    let mut runs: Vec<Run> = Vec::new();
+    let mut runs: Vec<(Run, Vec<Bounds>)> = Vec::new();
     let mut open: HashMap<u32, Vec<usize>> = HashMap::new();
     for blob in blobs {
         let mut joined: Option<usize> = None;
@@ -327,12 +333,15 @@ fn runs(mut blobs: Vec<Bounds>, gap: u32, band: u32) -> Vec<Run> {
             // right of is too far from every later one too.
             ids.retain(|&id| {
                 runs.get(id)
-                    .is_some_and(|run| blob.left <= run.bounds.right.saturating_add(gap))
+                    .is_some_and(|(run, _)| blob.left <= run.bounds.right.saturating_add(gap))
             });
             let first = ids
                 .iter()
                 .copied()
-                .filter(|&id| runs.get(id).is_some_and(|run| run.bounds.rows_meet(blob)))
+                .filter(|&id| {
+                    runs.get(id)
+                        .is_some_and(|(run, _)| run.bounds.rows_meet(blob))
+                })
                 .min();
             joined = match (joined, first) {
                 (Some(a), Some(b)) => Some(a.min(b)),
@@ -340,14 +349,15 @@ fn runs(mut blobs: Vec<Bounds>, gap: u32, band: u32) -> Vec<Run> {
             };
         }
         let joined = joined.and_then(|id| runs.get_mut(id).map(|run| (id, run)));
-        let id = if let Some((id, run)) = joined {
+        let id = if let Some((id, (run, members))) = joined {
             *run = run.join(blob);
+            members.push(blob);
             id
         } else {
-            runs.push(Run::of(blob));
+            runs.push((Run::of(blob), vec![blob]));
             runs.len().saturating_sub(1)
         };
-        if let Some(run) = runs.get(id) {
+        if let Some((run, _)) = runs.get(id) {
             for key in bands(run.bounds.top, run.bounds.bottom, band) {
                 let ids = open.entry(key).or_default();
                 if !ids.contains(&id) {
@@ -432,60 +442,124 @@ fn distance(run: Bounds, near: Region) -> u64 {
     x.saturating_mul(x).saturating_add(y.saturating_mul(y))
 }
 
+/// One size of text [`sized_runs`] looks for.
+#[derive(Debug, Clone, Copy)]
+struct Sought<T> {
+    /// What names the size to the caller, which each run of it comes with.
+    size: T,
+    /// How tall its characters are.
+    height: u32,
+    /// The tallest ink that can join a run of it.
+    tallest: u32,
+}
+
+impl<T> Sought<T> {
+    /// A size `height` tall, whose runs ink up to twice as tall joins.
+    const fn of(size: T, height: u32) -> Self {
+        Self {
+            size,
+            height,
+            tallest: height.saturating_mul(2),
+        }
+    }
+}
+
+/// The runs of text among `blobs` whose characters are as tall as one of
+/// `sizes`, within [`SIZE_PERCENT`], each with the size it has.
+///
+/// Each size is looked for by itself, in the order given: among the ink no
+/// taller than the size takes, joined into runs no further apart than the
+/// size. The blobs that joined an earlier size's run are left out of the
+/// later sizes' runs, so ink is taken once. A blob that only lies inside
+/// such a run's bounds joined nothing, and stays for the later sizes.
+fn sized_runs<T: Copy>(mut blobs: Vec<Bounds>, sizes: &[Sought<T>]) -> Vec<(Run, T)> {
+    let mut found = Vec::new();
+    for sought in sizes {
+        let inked = blobs
+            .iter()
+            .copied()
+            .filter(|blob| blob.height() <= sought.tallest)
+            .collect();
+        let mut taken: HashSet<Bounds> = HashSet::new();
+        for (run, members) in runs(inked, sought.height, sought.height) {
+            if same_size(run.tallest, sought.height) {
+                taken.extend(members);
+                found.push((run, sought.size));
+            }
+        }
+        blobs.retain(|blob| !taken.contains(blob));
+    }
+    found
+}
+
 /// Where `image` shows text with characters as tall as one of `sizes`,
 /// within [`SIZE_PERCENT`], in the ink `reader` tells from the background
 /// around `near`, or from the image's outermost pixels where `near` lies
-/// outside `image`: each run with a margin around its ink and the size it
-/// has, the run nearest the middle of `near` first, and of runs as near
-/// the higher one, then the one further left. A recording of the whole
-/// window reads these, so it takes the text beside its examples too,
-/// wherever the window shows it. It takes the [`MAX_LINES`] nearest, so a
-/// window full of such text does not crowd out the text around the region.
-///
-/// Each size is looked for by itself, as [`like`] looks for one: among the
-/// ink no taller than twice the size, joined into runs no further apart
-/// than the size. Ink that is part of a smaller size's run is left out of
-/// the larger sizes' runs, so it is taken once, and text of a larger size
-/// beside it is still found.
+/// outside `image`: each run [`sized_runs`] finds, with a margin around its
+/// ink and the size it has, the run nearest the middle of `near` first, and
+/// of runs as near the higher one, then the one further left. It looks for
+/// the smallest size first, so small text beside larger text is a run of
+/// its own. A recording of the whole window reads these, so it takes the
+/// text beside its examples too, wherever the window shows it. It takes the
+/// [`MAX_LINES`] nearest, so a window full of such text does not crowd out
+/// the text around the region.
 pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, reader: &DigitReader) -> Vec<Spot> {
     let ink = reader
         .ink_like(image, near)
         .unwrap_or_else(|| reader.ink(image));
     let largest = sizes.0.last().map_or(0, |size| size.height);
-    let blobs = blobs(&ink, largest.saturating_mul(2));
-    let mut found: Vec<(Bounds, TextSize)> = Vec::new();
-    for &size in &sizes.0 {
-        let height = size.height;
-        let tallest = height.saturating_mul(2);
-        // The ink of a smaller size's run is left out before the runs are
-        // joined, so text of this size beside it is still a run of its own.
-        let inked = blobs
-            .iter()
-            .copied()
-            .filter(|blob| blob.height() <= tallest)
-            .filter(|blob| !found.iter().any(|&(taken, _)| blob.within(taken)))
-            .collect();
-        let lines = runs(inked, height, height)
-            .into_iter()
-            .filter(|run| same_size(run.tallest, height));
-        found.extend(lines.map(|run| (run.bounds, size)));
-    }
-    found.sort_by_key(|&(run, _)| (distance(run, near), run.top, run.left));
+    let sought: Vec<Sought<TextSize>> = sizes
+        .0
+        .iter()
+        .map(|&size| Sought::of(size, size.height))
+        .collect();
+    let mut found = sized_runs(blobs(&ink, largest.saturating_mul(2)), &sought);
+    found.sort_by_key(|&(run, _)| (distance(run.bounds, near), run.bounds.top, run.bounds.left));
     found
         .into_iter()
         .filter_map(|(run, size)| {
-            let region = with_margin(run, size.height, &ink)?;
+            let region = with_margin(run.bounds, size.height, &ink)?;
             Some(Spot { region, size })
         })
         .take(MAX_LINES)
         .collect()
 }
 
+/// The sizes of text a search with the sample height `sample` looks for
+/// among `blobs`, in the order it looks for them: the sample's, then one
+/// for each other height a blob has from [`SHORTEST_OTHER_SIZE`] up, so
+/// every blob that tall is as tall as one of them, largest first.
+///
+/// The sample's size comes first, so the look for another size takes no
+/// ink from text of the sample's size. A larger size comes before a smaller one, so
+/// the marks and parts of large characters, such as a comma or the rings
+/// of a percent sign, stay with their text and are no small text of their
+/// own.
+fn sizes_among(blobs: &[Bounds], sample: u32) -> Vec<u32> {
+    let mut heights: Vec<u32> = blobs
+        .iter()
+        .map(|blob| blob.height())
+        .filter(|&height| height >= SHORTEST_OTHER_SIZE)
+        .collect();
+    heights.sort_unstable();
+    heights.dedup();
+    let mut sizes = Sizes::of(sample);
+    for height in heights {
+        sizes.add(height);
+    }
+    let others = sizes.heights().into_iter().rev();
+    std::iter::once(sample)
+        .chain(others.filter(|&height| height != sample))
+        .collect()
+}
+
 /// The text on `image` like the sample in `region`: in the ink `reader`
-/// tells from the sample's background and with characters as tall as the
-/// sample's,
-/// leaving out text that meets any of `skip`, such as finds added already.
-/// `None` when `region` holds no ink or lies outside `image`.
+/// tells from the sample's background, at the sample's size and at each
+/// other size the ink has ([`sizes_among`]), up to characters as tall as
+/// one part in [`TALLEST_PART`] of the image, or twice the sample's line
+/// where that is taller. It leaves out text that meets any of `skip`, such
+/// as finds added already. `None` when `region` holds no ink or lies
+/// outside `image`.
 pub(crate) fn like(
     image: &Image,
     region: Region,
@@ -494,37 +568,53 @@ pub(crate) fn like(
 ) -> Option<Search> {
     let ink = reader.ink_like(image, region)?;
     let line = line_height(&ink, region)?;
-    let blobs = blobs(&ink, line.saturating_mul(2));
+    let tallest = line
+        .saturating_mul(2)
+        .max(image.size().height.checked_div(TALLEST_PART).unwrap_or(0));
+    let blobs = blobs(&ink, tallest);
     let sample = sample_of(&blobs, region, line);
-    let mut finds = Vec::new();
-    let mut other_sizes = 0_usize;
-    for run in runs(blobs, sample, sample) {
-        if run.bounds.meets(region) || skip.iter().any(|&added| run.bounds.meets(added)) {
-            continue;
-        }
-        if same_size(run.tallest, sample) {
-            finds.push(run.bounds);
-        } else if run.tallest.saturating_mul(2) >= sample {
-            // Specks of ink are not text of another size.
-            other_sizes = other_sizes.saturating_add(1);
-        }
-    }
-    finds.sort_by_key(|run| (run.top, run.left));
-    let more = finds.len().saturating_sub(MAX_FOUND);
-    let finds = finds
+    // Ink up to twice the sample's line joins text of the sample's size, so
+    // a mark that makes the line taller than the characters stays with them.
+    let sizes: Vec<Sought<u32>> = sizes_among(&blobs, sample)
         .into_iter()
-        .take(MAX_FOUND)
-        .filter_map(|run| {
-            let region = with_margin(run, sample, &ink)?;
-            let line = image.crop(region).and_then(|crop| ink_line(&crop, reader));
-            Some(Find { region, line })
+        .map(|height| Sought {
+            tallest: if height == sample {
+                line.saturating_mul(2)
+            } else {
+                height.saturating_mul(2)
+            },
+            ..Sought::of(height, height)
         })
         .collect();
-    Some(Search {
-        finds,
-        more,
-        other_sizes,
-    })
+    let mut found: Vec<(Run, u32)> = sized_runs(blobs, &sizes)
+        .into_iter()
+        .filter(|(run, _)| {
+            !run.bounds.meets(region) && !skip.iter().any(|&added| run.bounds.meets(added))
+        })
+        .collect();
+    found.sort_by_key(|&(run, height)| {
+        (
+            height.abs_diff(sample),
+            height,
+            run.bounds.top,
+            run.bounds.left,
+        )
+    });
+    let more = found.len().saturating_sub(MAX_FOUND);
+    let finds = found
+        .into_iter()
+        .take(MAX_FOUND)
+        .filter_map(|(run, height)| {
+            let region = with_margin(run.bounds, height, &ink)?;
+            let line = image.crop(region).and_then(|crop| ink_line(&crop, reader));
+            Some(Find {
+                region,
+                line,
+                other_size: (height != sample).then_some(run.tallest),
+            })
+        })
+        .collect();
+    Some(Search { finds, more })
 }
 
 #[cfg(test)]
@@ -600,9 +690,9 @@ mod tests {
         let search =
             like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
         assert_eq!(search.more, 0);
-        assert_eq!(search.other_sizes, 0);
         assert_eq!(search.finds.len(), 1);
         let find = &search.finds[0];
+        assert_eq!(find.other_size, None);
         // Ink 30..37 by 20..28, with a margin of a quarter of 8.
         assert_eq!(find.region, region(28, 18, 11, 12));
         let line = find.line.as_ref().expect("the find has ink");
@@ -649,7 +739,6 @@ mod tests {
             [region(18, 18, 11, 12)],
             "the scene beside the panel is taller than text"
         );
-        assert_eq!(search.other_sizes, 0);
         assert_eq!(
             sample_heights(&image, &[sample], &by_contrast),
             [Some(8)],
@@ -854,28 +943,144 @@ mod tests {
         );
     }
 
-    #[test]
-    fn text_of_another_size_is_counted_and_left_out() {
-        let boxes = [pair(2, 2, 8), pair(30, 20, 14), pair(30, 2, 9)].concat();
-        let image = screenshot(60, 40, &boxes);
-        let search =
-            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
-        // 9 is within 15% of 8 (a slack of 2); 14 is not.
-        assert_eq!(search.finds.len(), 1);
-        assert_eq!(search.finds[0].region, region(28, 0, 11, 13));
-        assert_eq!(search.other_sizes, 1);
+    /// Each find's left, top, and other size.
+    fn places(search: &Search) -> Vec<(u32, u32, Option<u32>)> {
+        search
+            .finds
+            .iter()
+            .map(|find| (find.region.x(), find.region.y(), find.other_size))
+            .collect()
     }
 
     #[test]
-    fn specks_and_tall_ink_are_neither_finds_nor_other_sizes() {
-        // A 1 by 2 speck, and a 6 by 30 bar more than twice the sample's 8.
-        let mut boxes = pair(2, 2, 8).to_vec();
-        boxes.extend([(40, 30, 1, 2), (50, 2, 6, 30)]);
+    fn text_of_other_sizes_comes_after_the_sample_s_size_nearest_in_size_first() {
+        // Text 30, 14, and 9 tall, top to bottom, then text 20 tall. 9 is
+        // within 15% of the sample's 8 (a slack of 2), so it is the same
+        // size; 14 is 6 from it, 20 is 12, and 30 is 22.
+        let boxes = [
+            pair(2, 2, 8),
+            pair(30, 2, 30),
+            pair(30, 40, 14),
+            pair(30, 60, 9),
+            pair(30, 75, 20),
+        ]
+        .concat();
+        let image = screenshot(60, 120, &boxes);
+        let search =
+            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+        assert_eq!(
+            places(&search),
+            // Each with a margin of a quarter of its own size.
+            [
+                (28, 58, None),
+                (27, 37, Some(14)),
+                (25, 70, Some(20)),
+                (23, 0, Some(30))
+            ]
+        );
+        assert_eq!(search.more, 0);
+    }
+
+    #[test]
+    fn ink_shorter_than_the_shortest_other_size_or_too_tall_for_text_is_no_find() {
+        // Beside the sample 12 tall: a 1 by 2 speck, text 7 tall, and a 6
+        // by 31 bar, over a quarter of the screenshot's 120 rows and over
+        // twice the sample's line.
+        let mut boxes = pair(2, 2, 12).to_vec();
+        boxes.extend([(40, 30, 1, 2), (50, 2, 6, 31)]);
+        boxes.extend(pair(20, 60, 7));
+        let image = screenshot(60, 120, &boxes);
+        let sample = region(0, 0, 12, 16);
+        let search = like(&image, sample, &[], &reader()).expect("the sample has ink");
+        assert_eq!(search.finds, []);
+        // Text 8 tall and a bar 30 tall are finds.
+        let mut boxes = pair(2, 2, 12).to_vec();
+        boxes.push((50, 2, 6, 30));
+        boxes.extend(pair(20, 60, 8));
+        let image = screenshot(60, 120, &boxes);
+        let search = like(&image, sample, &[], &reader()).expect("the sample has ink");
+        assert_eq!(places(&search), [(18, 58, Some(8)), (43, 0, Some(30))]);
+    }
+
+    #[test]
+    fn ink_up_to_twice_the_sample_s_line_is_text_on_a_short_screenshot() {
+        // A quarter of 40 rows is 10; the text 16 tall is twice the sample's
+        // 8, and the text 17 tall is over it.
+        let boxes = [pair(2, 2, 8), pair(20, 2, 16), pair(40, 2, 17)].concat();
         let image = screenshot(60, 40, &boxes);
         let search =
             like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
-        assert_eq!(search.finds, []);
-        assert_eq!(search.other_sizes, 0);
+        assert_eq!(places(&search), [(16, 0, Some(16))]);
+    }
+
+    #[test]
+    fn the_marks_of_larger_text_stay_with_it() {
+        // Text 30 tall with a mark 9 tall, the sample's size, at its foot
+        // and far enough from the sample's run: for the sample's size the
+        // mark is a find, since the text over twice as tall is left out.
+        let mut boxes = pair(2, 2, 8).to_vec();
+        boxes.extend(pair(30, 40, 30));
+        boxes.push((38, 62, 2, 9));
+        let image = screenshot(60, 120, &boxes);
+        let sample = region(0, 0, 12, 12);
+        let search = like(&image, sample, &[], &reader()).expect("the sample has ink");
+        assert_eq!(places(&search), [(36, 60, None), (23, 33, Some(30))]);
+        // A mark 12 tall is another size than the sample's, and part of
+        // the larger text's run, which is looked for before text 12 tall.
+        let mut boxes = pair(2, 2, 8).to_vec();
+        boxes.extend(pair(30, 40, 30));
+        boxes.push((38, 62, 2, 12));
+        let image = screenshot(60, 120, &boxes);
+        let search = like(&image, sample, &[], &reader()).expect("the sample has ink");
+        assert_eq!(places(&search), [(23, 33, Some(30))]);
+        assert_eq!(search.finds[0].region, region(23, 33, 24, 48));
+    }
+
+    #[test]
+    fn small_text_beside_a_large_run_it_never_joined_is_still_found() {
+        // An icon 60 tall, a label 12 tall below its rows, and a stroke
+        // right of both that reaches down past the label. The look for ink
+        // 60 tall joins the stroke to the icon, so the run's bounds hold
+        // the label, which joined nothing.
+        let mut boxes = pair(2, 2, 8).to_vec();
+        boxes.push((20, 40, 40, 60));
+        boxes.extend(pair(70, 104, 12));
+        boxes.push((100, 90, 4, 30));
+        let image = screenshot(120, 240, &boxes);
+        let search =
+            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+        assert_eq!(places(&search), [(67, 101, Some(12)), (5, 25, Some(60))]);
+    }
+
+    #[test]
+    fn ink_up_to_twice_the_sample_s_line_joins_text_of_its_size() {
+        // The sample's characters are 8 tall, and the second sits lower,
+        // so its line is 12 tall. A stroke 20 tall beside other text 8 tall
+        // is within twice that line, so it joins that text, which is then
+        // text 20 tall and none of the sample's size.
+        let mut boxes = vec![(2, 2, 3, 8), (6, 6, 3, 8)];
+        boxes.extend(pair(30, 60, 8));
+        boxes.push((40, 50, 3, 20));
+        let image = screenshot(80, 120, &boxes);
+        let search =
+            like(&image, region(0, 0, 14, 16), &[], &reader()).expect("the sample has ink");
+        assert_eq!(places(&search), [(25, 45, Some(20))]);
+    }
+
+    #[test]
+    fn a_find_of_another_size_says_how_tall_its_own_characters_are() {
+        // 22 and 25 are one size, 22's: 25 is within 15% of it (a slack of
+        // 4).
+        let boxes = [pair(2, 2, 8), pair(20, 40, 22), pair(40, 40, 25)].concat();
+        let image = screenshot(80, 120, &boxes);
+        let search =
+            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+        assert_eq!(places(&search), [(15, 35, Some(25))]);
+        let boxes = [pair(2, 2, 8), pair(20, 40, 22), pair(20, 80, 25)].concat();
+        let image = screenshot(80, 120, &boxes);
+        let search =
+            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+        assert_eq!(places(&search), [(15, 35, Some(22)), (15, 75, Some(25))]);
     }
 
     #[test]
@@ -948,13 +1153,12 @@ mod tests {
         let image = screenshot(60, 40, &boxes);
         let search =
             like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
-        assert_eq!(search.other_sizes, 0);
         assert_eq!(search.finds.len(), 1);
         assert_eq!(search.finds[0].region, region(28, 18, 14, 16));
     }
 
     #[test]
-    fn text_meeting_a_skipped_region_is_neither_found_nor_counted() {
+    fn text_meeting_a_skipped_region_is_not_found() {
         // Fourteen single characters, as above; the first twelve finds were
         // added, so a second search offers the last two.
         let mut boxes = vec![(1, 1, 4, 6)];
@@ -969,7 +1173,6 @@ mod tests {
         let second =
             like(&image, region(0, 0, 6, 8), &added, &reader()).expect("the sample has ink");
         assert_eq!(second.more, 0);
-        assert_eq!(second.other_sizes, 0);
         let rest: Vec<(u32, u32)> = second
             .finds
             .iter()
@@ -995,7 +1198,7 @@ mod tests {
         );
         let bounds: Vec<(u32, u32, u32, u32)> = found
             .iter()
-            .map(|run| {
+            .map(|(run, _)| {
                 (
                     run.bounds.left,
                     run.bounds.top,
