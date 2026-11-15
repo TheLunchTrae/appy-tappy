@@ -71,7 +71,7 @@ export const REFERENCE_HINT =
 
 /** A reference's text color, which most references leave unset. */
 export const INK_HINT =
-  'A reference finds its characters by how they stand out from the background behind them, whatever their colors. Over a busy background, such as a scene that shows through behind the text, pick the text color instead: select a pixel inside a character, not on its edge. Then only pixels within the tolerance of that color count as part of the characters.';
+  'A reference finds its characters by how they stand out from the background behind them, whatever their colors. Over a busy background, such as a scene that shows through behind the text, or for bold text with a thick outline, pick the text color instead: select a pixel inside a character, not on its edge or outline. Then only pixels within the tolerance of that color count as part of the characters.';
 
 /** The boxes a reference learns from. */
 export const BOXES_HINT =
@@ -134,3 +134,7 @@ export const ORIGIN_HINT =
 /** Confirming the anti-cheat setting of an imported application. */
 export const IMPORT_ANTI_CHEAT_HINT =
   'AppyTappy presses keys into an application, and clicks while it runs, only once its anti-cheat is set to None, because anti-cheat can treat those keys and clicks as cheating. A file from someone else could say None for an application that has anti-cheat, so the file never sets this: you do. You can change it later on this page.';
+
+/** Why two characters a reference learned can look alike, and what changes that. */
+export const LOOKALIKE_HINT =
+  'AppyTappy reads a character as the learned shape it matches, and forgives an edge that is a little off. When the shapes it learned for two characters are that close, it can read one as the other. This happens most with bold text that has a thick outline, found by how it stands out: the outline counts as part of each character and fills the holes in 0, 6, 8, and 9. A text color counts only the pixels of that color, so the holes stay open.';

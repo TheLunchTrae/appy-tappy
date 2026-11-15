@@ -890,6 +890,19 @@ pub(crate) async fn contrast_tolerance(app: AppHandle, spec: CharactersSpec) -> 
     .await
 }
 
+/// The pairs of characters the reference `spec` teaches may read as each
+/// other.
+#[tauri::command]
+pub(crate) async fn lookalike_characters(
+    app: AppHandle,
+    spec: CharactersSpec,
+) -> Result<Vec<(char, char)>, String> {
+    try_ask(&app, "lookalike_characters", move |owner| {
+        owner.lookalike_characters(&spec)
+    })
+    .await
+}
+
 /// Finds text like what `region` of screenshot `screenshot` shows, as its
 /// characters stand out from its background and at their size, elsewhere
 /// on that screenshot and away from `added` and `passed`, in place of any

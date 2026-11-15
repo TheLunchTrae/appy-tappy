@@ -1,7 +1,7 @@
 // The tolerance of a reference that finds its characters by contrast, which the setup app chooses from the samples
 // the reference learns from.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { CharactersSpec } from './bindings.ts';
 import { contrastTolerance } from './api.ts';
@@ -28,25 +28,39 @@ export function fitArrived(asked: string, wanted: string | null, tolerance: numb
 }
 
 /**
- * Keeps the tolerance of the reference `spec` teaches at one its samples read with by contrast, through
- * `setTolerance`. It asks again once a sample, the region, or the tolerance changed and then rested. The setup app
- * answers with the tolerance asked about while every sample reads with it, so a fit settles after one more ask. A
- * fit that fails leaves the tolerance alone, and the check of the characters says what is wrong with the samples.
+ * Whether the fit asked for under `asked`, answering `fitted` for the tolerance `tolerance`, leaves the reference that
+ * asks under `wanted` as it is: it still asks for that fit, and every sample reads with the tolerance it has.
  */
-export function useContrastTolerance(spec: CharactersSpec | null, setTolerance: (tolerance: number) => void): void {
+export function fitSettles(asked: string, wanted: string | null, tolerance: number, fitted: number): boolean {
+  return asked === wanted && fitted === tolerance;
+}
+
+/**
+ * Keeps the tolerance of the reference `spec` teaches at one its samples read with by contrast, through
+ * `setTolerance`, and answers whether it is there: the fit answered for the spec as it is, or none is asked for. It
+ * asks again once a sample, the region, or the tolerance changed and then rested. The setup app answers with the
+ * tolerance asked about while every sample reads with it, so a fit settles after one more ask. A fit that fails
+ * leaves the tolerance alone and never settles, and the check of the characters says what is wrong with the samples.
+ */
+export function useContrastTolerance(spec: CharactersSpec | null, setTolerance: (tolerance: number) => void): boolean {
   const key = fitKey(spec);
   const latest = useRef({ spec, key, setTolerance });
   latest.current = { spec, key, setTolerance };
+  // The key of the last fit that left the tolerance as it was.
+  const [settled, setSettled] = useState<string | null>(null);
   useEffect(() => {
     const asked = latest.current;
     if (asked.spec === null || asked.key === null) {
       return undefined;
     }
     const { key: askedKey, spec: askedSpec } = asked;
-    return ask(
+    const cancel = ask(
       () => contrastTolerance(askedSpec),
       (fitted) => {
         const now = latest.current;
+        if (fitSettles(askedKey, now.key, askedSpec.tolerance, fitted)) {
+          setSettled(askedKey);
+        }
         const next = fitArrived(askedKey, now.key, askedSpec.tolerance, fitted);
         if (next !== null) {
           now.setTolerance(next);
@@ -57,5 +71,11 @@ export function useContrastTolerance(spec: CharactersSpec | null, setTolerance: 
       },
       FIT_DELAY_MS,
     );
+    return () => {
+      cancel();
+      // A reference saved again keeps its ID and so its key, so a fit for the samples it had before never counts.
+      setSettled(null);
+    };
   }, [key]);
+  return key === null || settled === key;
 }

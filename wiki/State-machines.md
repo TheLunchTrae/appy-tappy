@@ -103,7 +103,14 @@ it was about has gone. Fifteen guards drop such stale messages:
   answer depends on: the region, the samples, and the tolerance
   (`fitKey` in `apps/setup/src/lib/useContrastTolerance.ts`). An answer
   under another key than the reference asks under now is dropped
-  (`fitArrived`).
+  (`fitArrived`), and settles nothing (`fitSettles`).
+- **Look-alike keys.** The [look-alike characters](#look-alike-characters)
+  of a reference being taught are asked for under a key made of its whole
+  spec: the region, the samples, the text color, and the tolerance
+  (`lookalikeKey` in `apps/setup/src/lib/useLookalikes.ts`). An answer under
+  another key than the reference asks under now is not shown
+  (`pairsArrived`), and a change of key clears the answer, so one for a
+  reference saved again under the same ID never shows.
 - **Pointer IDs.** A region drag keeps the ID of the pointer that started it
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
@@ -3065,6 +3072,12 @@ stateDiagram-v2
   reference's own messages say what is wrong with the sample: the box's row,
   the character check, and the save. A change to a sample or the region asks
   again.
+- **Settled** is what the page tells the [look-alike
+  check](#look-alike-characters), which waits for it, so it asks about the
+  tolerance the reference keeps (`fitSettles`). A key that names no fit,
+  such as one with a text color, counts as settled. Each new key starts
+  unsettled, even a key the page settled before, since a reference saved
+  again keeps its ID and so its key.
 - An answer sets the tolerance only under the key the reference asks under
   now (`fitArrived`). One that arrives after a sample changed, a text color
   was picked, a recording started, or the editor closed is dropped, since
@@ -3073,6 +3086,50 @@ stateDiagram-v2
   starts the tolerance at 40 (`withTextColor`), since the two ways measure
   different distances. One text color in place of another keeps the
   tolerance.
+
+### Look-alike characters
+
+The reference editor warns about two learned characters the reference may
+read as each other, as [Setup app](Setup-app.md#look-alike-characters)
+describes (`apps/setup/src/lib/useLookalikes.ts`, used by
+`useReferenceTeaching.ts`). Its state is the key the reference asks under
+now (`lookalikeKey`), or none, and the last answer with the key it was asked
+under. The owner keeps nothing for it; each request is one
+`lookalike_characters` command, which teaches the reference and compares
+its shapes.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Resting
+    Resting --> Asking: the reference builds, its tolerance is fitted, and a quarter of a second passes
+    Asking --> Shown: the answer arrives under the key asked
+    Asking --> Asking: a sample, the region, the text color, or the tolerance changes
+    Asking --> Unanswered: the request fails
+    Shown --> Asking: a sample, the region, the text color, or the tolerance changes
+    Unanswered --> Asking: a sample, the region, the text color, or the tolerance changes
+    Asking --> Resting: the reference no longer builds, its tolerance is being fitted, or the editor closes
+    Shown --> Resting: the reference no longer builds, its tolerance is being fitted, or the editor closes
+    Unanswered --> Resting: the reference no longer builds, its tolerance is being fitted, or the editor closes
+```
+
+- **Resting** asks nothing and warns about nothing: no reference is taught,
+  what it is taught from does not build, which the boxes and the save say,
+  or a reference found by contrast waits for its
+  [contrast tolerance](#contrast-tolerance) to settle, since the fit would
+  change the key and drop the answer.
+- **Asking** waits a quarter of a second under the key and then has a
+  request out for it. It shows no warning: each change of the key drops the
+  last answer (`pairsArrived`, and the effect's cleanup clears it), so the
+  warning goes while a label is typed and comes back once the answer for the
+  new text arrives. A closed editor that opens again on the same key asks
+  afresh, since a reference saved again keeps its ID and so its key.
+- **Shown** warns about the pairs of the answer with a character the value
+  needs, or about every pair when it needs none (`neededPairs`). A reference
+  made or edited by itself takes the characters that the values reading with
+  it need between them (`readersNeed`), and every pair when one of them needs
+  none or none reads with it. It warns about nothing when no pair is left.
+- **Unanswered** is a failed request. The failure is logged and no warning
+  shows; the reference's own messages say what is wrong with its samples.
 
 ### Bar detection
 

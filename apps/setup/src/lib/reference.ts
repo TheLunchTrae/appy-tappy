@@ -1,4 +1,4 @@
-import type { AppFile, ReferenceDef } from './bindings.ts';
+import type { AppFile, ReferenceDef, ValueDef } from './bindings.ts';
 // How references read on the capture screen and the References page.
 
 /** The digits `0` to `9` before other characters, then by code point, so the order is the same on every machine. */
@@ -40,15 +40,29 @@ export function referenceCharacters(reference: ReferenceDef): readonly string[] 
   return knownCharacters(reference.samples.map((sample) => sample.text));
 }
 
+/** `file`'s values that read with the reference `id`, in their check or in a fix. */
+function readingValues(file: AppFile, id: string): readonly ValueDef[] {
+  return file.values.filter(
+    ({ screen }) =>
+      (screen.check.kind === 'number' && screen.check.reference === id) ||
+      screen.fixes.some((fix) => fix.reference === id),
+  );
+}
+
 /** The names of `file`'s values that read with the reference `id`, in their check or in a fix. */
 export function readers(file: AppFile, id: string): readonly string[] {
-  return file.values
-    .filter(
-      ({ screen }) =>
-        (screen.check.kind === 'number' && screen.check.reference === id) ||
-        screen.fixes.some((fix) => fix.reference === id),
-    )
-    .map((value) => value.name);
+  return readingValues(file, id).map((value) => value.name);
+}
+
+/**
+ * The characters `file`'s values that read with the reference `id` need between them, or none when one of them reads
+ * every character the reference knows or no value reads with it. A fix reads the characters its value needs.
+ */
+export function readersNeed(file: AppFile, id: string): readonly string[] {
+  const needs = readingValues(file, id).map(({ screen }) =>
+    screen.check.kind === 'number' ? (screen.check.characters ?? '') : '',
+  );
+  return needs.includes('') ? [] : knownCharacters(needs);
 }
 
 /** `names` as a sentence's list: `A`, `A and B`, or `A, B and C`. */

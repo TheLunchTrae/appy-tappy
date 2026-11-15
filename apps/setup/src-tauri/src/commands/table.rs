@@ -91,6 +91,9 @@ macro_rules! with_commands {
             /// The tolerance the reference `spec` teaches finds its characters by contrast with: `spec`'s own while every
             /// sample reads with it, and otherwise one its samples read with, when there is one.
             commands::contrast_tolerance(spec: CharactersSpec) -> u8;
+            /// The pairs of characters whose learned shapes, as the reference `spec` teaches them, match each other, so
+            /// it may read one as the other: each pair once, in the order it learned them.
+            commands::lookalike_characters(spec: CharactersSpec) -> Vec<(char, char)>;
             /// Finds text like what `region` of screenshot `screenshot` shows, as a reference with the text color `ink`,
             /// or by contrast without one, and `tolerance` tells it from the region's background, at any size,
             /// elsewhere on that screenshot and away from the finds `added` already and those an earlier search offered

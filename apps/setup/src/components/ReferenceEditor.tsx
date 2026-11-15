@@ -4,10 +4,12 @@ import type { NeedsField } from '../lib/captureDraft.ts';
 import type { Coverage } from '../lib/expected.ts';
 import type { Color } from '../lib/pixels.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
-import { INK_HINT, INK_TOLERANCE_HINT } from '../lib/hints.ts';
+import { INK_HINT, INK_TOLERANCE_HINT, LOOKALIKE_HINT } from '../lib/hints.ts';
+import { lookalikeWarning } from '../lib/useLookalikes.ts';
 import { CharacterChips, MissingChips } from './CharacterChips.tsx';
 import { ExpectedCharacters } from './ExpectedCharacters.tsx';
 import { ColorField, ToleranceField } from './Fields.tsx';
+import { Hint } from './Hint.tsx';
 
 interface Props {
   readonly name: string;
@@ -27,6 +29,8 @@ interface Props {
   readonly expected: readonly string[];
   /** How the characters in those texts compare with the ones it needs. */
   readonly coverage: Coverage;
+  /** The pairs of characters it may read as each other, of those with a character the value needs. */
+  readonly lookalikes: readonly (readonly [string, string])[];
   /** The texts of found text not added yet, whose new characters are outlined. */
   readonly finding: readonly string[];
   /** The values that read with the saved reference. */
@@ -85,7 +89,8 @@ function TextColor(
       <summary>Text color (optional)</summary>
       <p className="note">
         AppyTappy finds the characters by how they stand out from the background behind them. Pick a text color only
-        when that misreads because the background is busy, such as a scene that shows through behind the text.
+        when that misreads: the background is busy, such as a scene that shows through behind the text, or a thick
+        outline makes characters look alike.
       </p>
       <ColorField
         label="Text color"
@@ -117,6 +122,7 @@ function TextColor(
 export function ReferenceEditor(props: Props) {
   const { name, appName, ink, tolerance, saved, labeled, recorded, finding } = props;
   const { expected, coverage, readers } = props;
+  const lookalike = lookalikeWarning(props.lookalikes, ink, props.tolerance);
   // With no characters needed, every character it learned shows as one group.
   const chosen = expected.length > 0;
   // Characters of found text not added yet show outlined beside the ones it knows.
@@ -195,6 +201,12 @@ export function ReferenceEditor(props: Props) {
           {learnedNote(saved.length, labeled.length, recorded.length)}
           {pending.length === 0 ? '' : ' Outlined characters come from the found text, once you add it.'}
         </span>
+        {lookalike === null ? null : (
+          <div className="row">
+            <p className="warn">{lookalike}</p>
+            <Hint topic="Characters that look alike">{LOOKALIKE_HINT}</Hint>
+          </div>
+        )}
       </div>
       {props.record}
       <TextColor

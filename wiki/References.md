@@ -124,6 +124,14 @@ list without the choices; edit the value to change it.
   it learned that the value does not need show below them. They are fine to
   keep: another value in the same font can need them.
 
+When two characters look so alike in what the reference learned that it may
+read one as the other, and the value needs at least one of them, a warning
+under **Characters it knows** names them. On the References page, it goes by
+what the values that read with the reference need. By contrast, this happens
+most with bold text that has a thick outline: give it a
+[text color](#text-color). With a text color, lower the **Tolerance**, or
+pick the color again from the middle of a character.
+
 AppyTappy learns a character from a box, found text you add, or a kept
 reading, never because a value needs it. A reference you make or edit from
 the References page is taught for no value, so nothing shows as missing
@@ -374,7 +382,9 @@ part of each character, so the strokes are thicker, the holes in `0`, `6`,
 `8`, and `9` are small, and the reference can read one of them as another,
 such as `0` as `8`. Give such text a text color: pick the color inside a
 character, not on its outline, so that only the inside counts and the
-reference tells the digits apart. Without a text color, draw each box and the
+reference tells the digits apart. The editor warns about this under
+[**Characters it knows**](#what-it-has-learned). Without a text color, draw
+each box and the
 value's region around the whole character, outline included. A box that cuts
 through the outline leaves part of the character out.
 

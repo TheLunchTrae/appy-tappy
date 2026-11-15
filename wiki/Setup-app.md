@@ -750,6 +750,26 @@ it. A saved reference with no box has no samples in the draft to ask
 about, so `save_reference_settings` chooses the tolerance the same way,
 from the saved samples, when it saves the reference without a text color.
 
+### Look-alike characters
+
+Two learned characters whose shapes match each other, as a reading matches
+a shape (`DigitReader::lookalikes`), are characters the runtime can read as
+each other. Bold text with a thick outline does this by contrast, since the
+outline counts as part of each character and closes the holes in `0`, `6`,
+`8`, and `9`; with a text color only the fill counts. The page asks the
+owner for the pairs of the reference it teaches once its samples rest for a
+quarter of a second (`lookalike_characters`, `useLookalikes` in
+`lib/useLookalikes.ts`), and the editor warns about the pairs with a
+character the value needs, or about every pair when it needs none
+(`neededPairs`). A pair with only one needed character is still a risk: a
+read takes a shown letter or symbol the value doesn't need for a kept
+lookalike, and fails on a left-out digit that is closer. A reference made
+by itself takes what the values that read with it need (`readersNeed`). A
+reference found by contrast asks once its tolerance is fitted, since the fit
+changes the spec.
+[Look-alike characters](State-machines.md#look-alike-characters) has its
+states. Only the setup app checks this, so the runtime is unchanged.
+
 ### Checking characters
 
 [Check characters](References.md#check-characters-one-at-a-time) goes by

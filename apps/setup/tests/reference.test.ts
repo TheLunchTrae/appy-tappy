@@ -1,7 +1,14 @@
 import { expect, test } from 'bun:test';
 
 import type { AppFile } from '../src/lib/bindings.ts';
-import { andList, knownCharacters, labelCharacters, readers, referenceCharacters } from '../src/lib/reference.ts';
+import {
+  andList,
+  knownCharacters,
+  labelCharacters,
+  readers,
+  readersNeed,
+  referenceCharacters,
+} from '../src/lib/reference.ts';
 
 const white = { red: 255, green: 255, blue: 255 };
 
@@ -81,6 +88,24 @@ test('readers names the number values that read with a reference, in a check or 
   expect(readers(file, 'percent')).toEqual(['Progress', 'Lives', 'Best run']);
   expect(readers(file, 'digits')).toEqual(['Lives']);
   expect(readers(file, 'none')).toEqual([]);
+  // Every reader of `percent` reads every character it knows, so none is left out.
+  expect(readersNeed(file, 'percent')).toEqual([]);
+  const needing = (characters: readonly string[]): AppFile => ({
+    ...file,
+    values: file.values.map((value, index) =>
+      value.screen.check.kind === 'number'
+        ? {
+            ...value,
+            screen: { ...value.screen, check: { ...value.screen.check, characters: characters[index] ?? '' } },
+          }
+        : value,
+    ),
+  });
+  // A fix reads the characters its value needs, so Lives adds its 1.
+  expect(readersNeed(needing(['8%', '1', '', '%']), 'percent')).toEqual(['1', '8', '%']);
+  // Best run reads every character the reference knows.
+  expect(readersNeed(needing(['8%', '1', '', '']), 'percent')).toEqual([]);
+  expect(readersNeed(needing(['8%', '1', '', '%']), 'none')).toEqual([]);
 });
 
 test('andList joins names as a sentence does', () => {

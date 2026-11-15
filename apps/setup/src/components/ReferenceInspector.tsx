@@ -6,7 +6,8 @@ import { boxOf } from '../lib/boxes.ts';
 import type { Editing, NeedsField } from '../lib/captureDraft.ts';
 import { type Built, type Draft, type ReferenceSaving, withTextColor } from '../lib/check.ts';
 import type { Picture } from '../lib/pixels.ts';
-import { readers } from '../lib/reference.ts';
+import { readers, readersNeed } from '../lib/reference.ts';
+import { neededPairs } from '../lib/useLookalikes.ts';
 import { background } from '../lib/repeat.ts';
 import { checkBackLabel, referenceSave } from '../lib/teaching.ts';
 import type { useBoxes } from '../lib/useBoxes.ts';
@@ -159,6 +160,14 @@ export function ReferenceInspector({
 }: Props) {
   const { taught, finder, guided, review, recorder, checking, covered } = teaching;
   const chosen = boxes.selected;
+  // A look-alike pair warns when it has one of these characters: the value's, or for a reference by itself those of
+  // every value that reads with it.
+  const lookalikeNeeds =
+    needsField !== 'hidden'
+      ? teaching.needs
+      : editing.existing === null || file === null
+        ? []
+        : readersNeed(file, editing.existing.id);
   const settingsOnly = saving.ok && saving.spec.kind === 'settings';
   const refSave = referenceSave({
     named: editing.name.trim().length > 0,
@@ -184,6 +193,7 @@ export function ReferenceInspector({
         finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
         expected={teaching.needs}
         coverage={covered}
+        lookalikes={neededPairs(teaching.lookalikes, lookalikeNeeds)}
         readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
         onName={(name) => {
           setEditing((current) => (current === null ? null : { ...current, name }));

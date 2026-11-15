@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import type { CharactersSpec } from '../src/lib/bindings.ts';
-import { fitArrived, fitKey } from '../src/lib/useContrastTolerance.ts';
+import { fitArrived, fitKey, fitSettles } from '../src/lib/useContrastTolerance.ts';
 
 const spec: CharactersSpec = {
   region: { x: 0, y: 0, width: 10, height: 10 },
@@ -29,4 +29,13 @@ test('a fit sets the tolerance only while the reference still asks for that fit'
   expect(fitArrived(asked, fitKey({ ...spec, labels: [] }), 40, 60)).toBeNull();
   // The reference took a text color since.
   expect(fitArrived(asked, null, 40, 60)).toBeNull();
+});
+
+test('a fit settles once it leaves the tolerance of the spec that still asks for it as it is', () => {
+  const asked = fitKey(spec) ?? '';
+  expect(fitSettles(asked, asked, 40, 40)).toBe(true);
+  // The fit moves the tolerance, which asks again under the new one.
+  expect(fitSettles(asked, asked, 40, 60)).toBe(false);
+  // A sample changed since.
+  expect(fitSettles(asked, fitKey({ ...spec, labels: [] }), 40, 40)).toBe(false);
 });

@@ -239,6 +239,27 @@ impl DigitReader {
         (!self.glyphs.is_empty()).then_some(self)
     }
 
+    /// The pairs of characters this reader learned glyphs so alike for that
+    /// either glyph matches the other: a read can take one of the two for
+    /// the other. Each pair once, in the order the reader learned the pair's
+    /// first glyph, and the character learned first comes first.
+    #[must_use]
+    pub fn lookalikes(&self) -> Vec<(char, char)> {
+        let mut pairs: Vec<(char, char)> = Vec::new();
+        for (position, glyph) in self.glyphs.iter().enumerate() {
+            for other in self.glyphs.iter().skip(position.saturating_add(1)) {
+                let pair = (glyph.character, other.character);
+                if pair.0 != pair.1
+                    && !pairs.iter().any(|&(a, b)| (a, b) == pair || (b, a) == pair)
+                    && GlyphScore::of(&glyph.shape, &glyph.grown, other).matches()
+                {
+                    pairs.push(pair);
+                }
+            }
+        }
+        pairs
+    }
+
     /// Reads the first number in `image`: an optional `-`, digits, and an
     /// optional `.` with more digits. A number that starts with its `.`
     /// reads as `0.`, so `-.5` reads as -0.5, unless letters came before,
@@ -2171,6 +2192,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn outlined_digits_look_alike_by_contrast_and_not_by_their_text_color() {
+        // By contrast the black outline is ink too, so the strokes thicken
+        // and the holes of 6 and 8 close until the two match.
+        for height in [16, 28, 40] {
+            let by_contrast = taught_by(InkRule::Contrast { tolerance: 40 }, height, &LABELS);
+            assert!(
+                by_contrast.lookalikes().contains(&('6', '8')),
+                "by contrast at {height} px"
+            );
+            assert_eq!(
+                taught(height, &LABELS).lookalikes(),
+                [],
+                "white at {height} px"
+            );
+        }
+    }
+
+    #[test]
+    fn lookalikes_name_each_pair_of_characters_once_in_the_order_learned() {
+        let block = shape_of(&["####", "####", "####", "####"]);
+        let mut reader = DigitReader::new(InkRule::Contrast { tolerance: 40 });
+        reader.glyphs = vec![
+            Glyph::new('8', block),
+            Glyph::new('6', block),
+            Glyph::new('8', block),
+            Glyph::new('1', shape_of(&["#", "#", "#", "#"])),
+            Glyph::new('6', block),
+        ];
+        assert_eq!(reader.lookalikes(), [('8', '6')]);
     }
 
     #[test]
