@@ -409,7 +409,6 @@ mod tests {
         ReferenceSaveSpec {
             app: "example".to_owned(),
             reference_name: name.to_owned(),
-            expects: String::new(),
             characters: serde_json::from_str(&format!(
                 r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,{editing}
                     "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,

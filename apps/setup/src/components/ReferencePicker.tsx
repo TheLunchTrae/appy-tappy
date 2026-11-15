@@ -1,10 +1,10 @@
 import type { AppFile } from '../lib/bindings.ts';
-import { referenceCoverage } from '../lib/expected.ts';
+import { coverage } from '../lib/expected.ts';
 import { readers, referenceCharacters } from '../lib/reference.ts';
 import { REFERENCE_HINT } from '../lib/hints.ts';
 import { draftHolds } from '../lib/teaching.ts';
 import { CharacterChips, MissingNote } from './CharacterChips.tsx';
-import { CharactersRead } from './CharactersRead.tsx';
+import { ExpectedCharacters } from './ExpectedCharacters.tsx';
 import { Hint } from './Hint.tsx';
 
 /** The id of the note that says the picked reference has a draft of changes, which Record readings points at. */
@@ -18,8 +18,8 @@ interface Props {
   /** Whether a region is drawn to make a reference from. */
   readonly hasRegion: boolean;
   readonly whole: boolean;
-  /** The characters the value reads of its reference, or null for every character it knows. */
-  readonly characters: readonly string[] | null;
+  /** The characters the value needs, or none for every character its reference knows. */
+  readonly characters: readonly string[];
   readonly onSelect: (reference: string) => void;
   readonly onEdit: (reference: string) => void;
   /** The references that have a draft of changes, which are changed by finishing it instead: no Edit, no recording. */
@@ -28,11 +28,11 @@ interface Props {
   /** Opens the picked reference, or a new one, to record the region's readings. */
   readonly onRecord: () => void;
   readonly onWhole: (whole: boolean) => void;
-  readonly onCharacters: (characters: readonly string[] | null) => void;
+  readonly onCharacters: (characters: readonly string[]) => void;
 }
 
 /**
- * How a number value is read: one of its application's references, which of its characters, and whether only whole
+ * How a number value is read: the characters it needs, one of its application's references, and whether only whole
  * numbers count.
  */
 export function ReferencePicker(props: Props) {
@@ -40,8 +40,12 @@ export function ReferencePicker(props: Props) {
   const references = file?.references ?? [];
   const chosen = references.find((reference) => reference.id === selected) ?? null;
   const held = chosen === null ? null : draftHolds(chosen, props.drafted);
+  const { characters } = props;
+  const knowsNone =
+    chosen !== null && characters.length > 0 && coverage(characters, referenceCharacters(chosen)).known.length === 0;
   return (
     <>
+      <ExpectedCharacters expected={characters} onExpected={props.onCharacters} />
       <div className="field">
         <span className="name">
           <span id="reference-title">Reference</span>
@@ -71,12 +75,17 @@ export function ReferencePicker(props: Props) {
                     <small>{used === 0 ? 'No values yet' : `Used by ${used} ${used === 1 ? 'value' : 'values'}`}</small>
                   </span>
                   <CharacterChips characters={referenceCharacters(reference)} ink={reference.ink} />
-                  <MissingNote characters={referenceCoverage(reference).missing} />
+                  <MissingNote characters={coverage(characters, referenceCharacters(reference)).missing} />
                 </button>
               );
             })}
           </div>
         )}
+        {knowsNone ? (
+          <span className="warn" role="status">
+            {chosen.name} knows none of these characters yet. Teach it them, or choose another reference.
+          </span>
+        ) : null}
         <div className="choices">
           {chosen === null ? null : held !== null ? (
             // Changing it here would change it apart from its draft, which finishing later would undo.
@@ -119,9 +128,6 @@ export function ReferencePicker(props: Props) {
           {chosen === null ? 'a new reference' : chosen.name} its characters.
         </span>
       </div>
-      {chosen === null ? null : (
-        <CharactersRead reference={chosen} characters={props.characters} onCharacters={props.onCharacters} />
-      )}
       <div className="field">
         <label className="toggle">
           <input

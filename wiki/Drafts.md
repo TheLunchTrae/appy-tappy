@@ -34,8 +34,8 @@ automation and pick the value in it.
 - **A value, fix, or reference** keeps its screenshots, each the whole
   window, and what you set up on them: the region, **Stays at**,
   **This content may move**, the check with its colors, states, and
-  tolerances, the reference it reads with, the labels, the characters a
-  reference needs, and the text you added with **Find more like it**.
+  tolerances, the reference it reads with, the characters a number
+  needs, the labels, and the text you added with **Find more like it**.
   Screenshots that **Record screenshots** kept stay marked as recorded, so a
   [value](Values.md#how-a-value-was-made) or
   [reference](References.md#how-a-reference-was-made) you finish on one of

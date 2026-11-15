@@ -162,7 +162,6 @@ describe('what a draft keeps', () => {
       editing: {
         existing: null,
         name: 'Digits',
-        expects: ['1', '2', '%'],
       },
       draft,
     };
@@ -179,7 +178,7 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(4);
+    expect(DRAFT_FORMAT).toBe(5);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -322,7 +321,7 @@ describe('what an unfinished item still needs', () => {
     expect(captureMissing(drawn, next, false)).toEqual(['Pick the reference.']);
     const editing = {
       ...drawn,
-      editing: { existing: null, name: '', expects: [] },
+      editing: { existing: null, name: '' },
     };
     expect(captureMissing(editing, next, false)).toEqual(['Name the reference.']);
   });
@@ -392,7 +391,7 @@ describe('a draft and what it belongs to', () => {
       samples: [],
     };
     const taught = { ...saved, tolerance: 12 };
-    const editing = { existing: saved, name: 'Percent', expects: ['1'] };
+    const editing = { existing: saved, name: 'Percent' };
     expect(refreshedEditing(editing, [taught])).toEqual({ ...editing, existing: taught });
     // A reference deleted since is made as a new one, and a new one stays new.
     expect(refreshedEditing(editing, [])).toEqual({ ...editing, existing: null });

@@ -289,7 +289,6 @@ fn a_number_fix_names_its_reference_only_when_it_is_not_the_first_drawing_s() {
         let reference = ReferenceSaveSpec {
             app: "example".to_owned(),
             reference_name: name.to_owned(),
-            expects: String::new(),
             characters: serde_json::from_str(
                 r#"{"region":{"x":0,"y":0,"width":2,"height":2},
                     "screenshot":0,"reference":null,"ink":{"red":255,"green":0,"blue":0},

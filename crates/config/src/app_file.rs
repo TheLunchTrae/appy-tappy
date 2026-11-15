@@ -348,9 +348,13 @@ pub struct ValueDef {
 /// character to its line's height. It tells a picture's or a region's
 /// characters from the background by contrast with the background, or by
 /// their color when it has a text color.
+///
+/// It is a font and no more: which of its characters a value needs is the
+/// value's to say, in its number check. A key of a reference that this
+/// version does not know is ignored and left out of the next save, so a
+/// file that names the characters a reference needs still loads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(deny_unknown_fields)]
 pub struct ReferenceDef {
     /// The reference's ID, unique within the file, such as `percent_font`.
     /// Number checks refer to it by this.
@@ -373,18 +377,6 @@ pub struct ReferenceDef {
     pub tolerance: u8,
     /// The pictures it learns from.
     pub samples: Vec<SampleDef>,
-    /// The characters the user says it needs to know, such as
-    /// `0123456789.%`, or `None` when the user chose none.
-    ///
-    /// Setup guidance only. The setup app shows which of them the samples
-    /// have yet to teach, and writes them each once, in order, when it saves
-    /// the reference. Nothing that learns or reads looks at it, and no rule
-    /// of the file covers it: it adds no glyph, labels no shape, leaves how
-    /// a number is read as it is, and never stops a file from loading,
-    /// whatever text it holds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
-    pub expects: Option<String>,
 }
 
 /// A value read from a region of the window's frame.
@@ -646,8 +638,11 @@ pub enum CheckDef {
         /// Whether only the whole part counts: every digit after the decimal
         /// point is ignored, so `87.5%` reads as 87.
         whole: bool,
-        /// The characters the value reads, such as `0123456789%`, or `None`
-        /// for every character its reference knows.
+        /// The characters the value needs of its reference, such as
+        /// `0123456789%`, or `None` for every character its reference
+        /// knows. A reference is a font that may know more than one value
+        /// shows, so each value says what it needs. The setup app also
+        /// shows which of them the reference has yet to learn.
         ///
         /// The value matches what it sees against these characters alone,
         /// so a value that shows only digits cannot read a `0` as an `O`
@@ -947,8 +942,7 @@ impl AppFile {
     /// [`CheckDef::check`], and a reading area only for a check that reads
     /// anywhere in its region. Whether a value's pictures and region can be
     /// read is up to `appytappy-sources`' `saved::build`, so a value that
-    /// cannot be read stops only itself. A reference's expected characters
-    /// are setup guidance, which no rule covers.
+    /// cannot be read stops only itself.
     ///
     /// # Errors
     ///
@@ -1016,7 +1010,7 @@ fn check_reference(reference: &ReferenceDef) -> Result<(), String> {
 ///
 /// A reference learns one shape for each such character of a sample's text,
 /// exactly as typed: `A` and `a` are two characters, and nothing folds case
-/// or combines marks. The setup app counts a reference's expected characters
+/// or combines marks. The setup app counts the characters a value needs
 /// the same way.
 #[must_use]
 pub fn is_label_character(character: char) -> bool {
@@ -1170,7 +1164,6 @@ mod tests {
                     image: sample_name("percent", 1),
                     text: "87%".to_owned(),
                 }],
-                expects: None,
             }],
         }
     }
@@ -1205,15 +1198,16 @@ mod tests {
     }
 
     #[test]
-    fn a_reference_s_expected_characters_are_left_out_until_chosen_and_round_trip() {
-        let mut file = dash();
+    fn a_reference_ignores_a_key_it_does_not_know() {
+        let file = dash();
         let json = file.to_json();
-        assert!(!json.contains("expects"), "{json}");
-        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
-        file.references[0].expects = Some("0123456789.%Aa".to_owned());
-        let json = file.to_json();
-        assert!(json.contains("\"expects\": \"0123456789.%Aa\""), "{json}");
-        assert_eq!(AppFile::parse(&json), Ok(file));
+        let with_more = json.replacen(
+            "\"samples\": [",
+            "\"expects\": \"0123456789%\",\n      \"samples\": [",
+            1,
+        );
+        assert_ne!(with_more, json);
+        assert_eq!(AppFile::parse(&with_more), Ok(file));
     }
 
     #[test]
@@ -1242,23 +1236,6 @@ mod tests {
         let json = file.to_json();
         assert!(json.contains("\"characters\": \"0123456789 %\""), "{json}");
         assert_eq!(AppFile::parse(&json), Ok(file));
-    }
-
-    #[test]
-    fn no_rule_covers_what_a_reference_expects() {
-        // Setup guidance that a person edited by hand: repeats, whitespace,
-        // a control character, nothing at all, or far more than the setup
-        // app saves. The file loads as it does without it.
-        let plain = dash();
-        for odd in ["11 ", "", "0 1\u{7}\n", &"x".repeat(5000)] {
-            let mut file = dash();
-            file.references[0].expects = Some(odd.to_owned());
-            assert_eq!(file.check(), Ok(()), "{odd:?}");
-            let read = AppFile::parse(&file.to_json()).expect("loads");
-            assert_eq!(read.references[0].expects.as_deref(), Some(odd));
-            assert_eq!(read.values, plain.values);
-            assert_eq!(read.references[0].samples, plain.references[0].samples);
-        }
     }
 
     #[test]

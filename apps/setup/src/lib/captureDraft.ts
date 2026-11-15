@@ -9,8 +9,6 @@ import { sameContent } from './unsaved.ts';
 export interface Editing {
   readonly existing: ReferenceDef | null;
   readonly name: string;
-  /** The characters it needs, each once. */
-  readonly expects: readonly string[];
 }
 
 /**

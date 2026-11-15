@@ -31,7 +31,7 @@ import {
 
 /** Where a reading's characters are in its picture, which review does not look at. */
 const cut = { width: 0, characters: [] };
-// Most tests are of a reference that does not say which characters it needs, with nothing decided and no clash.
+// Most tests are of a reference taught for no value, so no characters are needed, with nothing decided and no clash.
 const NO_NEEDS: readonly string[] = [];
 type Entries = ReadonlyMap<number, review.ReviewEntry>;
 const decide = (

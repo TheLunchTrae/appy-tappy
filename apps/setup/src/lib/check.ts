@@ -14,9 +14,8 @@ import {
   type StateSpec,
 } from './bindings.ts';
 import { type Box, boxLabels } from './boxes.ts';
-import { forReference, savedCharacters } from './charactersRead.ts';
+import { DIGITS, TOO_MANY, expectedSet, tooMany } from './expected.ts';
 import { AUTOMATIC, type PinChoice } from './pin.ts';
-import { knownCharacters, referenceCharacters } from './reference.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { sameSize, sizeText } from './sizes.ts';
@@ -75,8 +74,8 @@ export interface Draft {
   readonly reference: string | null;
   /** Whether a number check ignores every digit after the decimal point. */
   readonly whole: boolean;
-  /** The characters a number check reads of its reference, each once, or null for every character it knows. */
-  readonly characters: readonly string[] | null;
+  /** The characters a number check needs of its reference, each once, or none for every character it knows. */
+  readonly characters: readonly string[];
 }
 
 /**
@@ -103,7 +102,8 @@ export const EMPTY_DRAFT: Draft = {
   colorMatch: DEFAULT_COLOR_MATCH,
   ignoreBackground: true,
   whole: false,
-  characters: null,
+  // Numbers are mostly digits, so a new value starts with them.
+  characters: DIGITS.characters,
 };
 
 /** Where the region is: its rectangle and the screenshot it was drawn on. */
@@ -422,11 +422,14 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
       if (draft.reference === null) {
         return missing('Pick a reference to read the number with, or make one from this region.');
       }
-      if (draft.characters?.length === 0) {
-        return missing('Choose at least one character for the value to read.');
+      if (tooMany(draft.characters)) {
+        return missing(TOO_MANY);
       }
       const spec = { kind: 'number', region, reference: { app, id: draft.reference }, whole: draft.whole } as const;
-      return { ok: true, spec: draft.characters === null ? spec : { ...spec, characters: draft.characters.join('') } };
+      return {
+        ok: true,
+        spec: draft.characters.length === 0 ? spec : { ...spec, characters: draft.characters.join('') },
+      };
     },
     summary: (check, references) => {
       const reference = references.find((saved) => saved.id === check.reference);
@@ -436,14 +439,14 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
       return {
         name:
           `Number, read with ${reference.name}${check.whole ? ', whole only' : ''}` +
-          (check.characters === undefined ? '' : `, reading ${knownCharacters([check.characters]).join('')}`),
+          (check.characters === undefined ? '' : `, needing ${expectedSet(check.characters).join('')}`),
         colors: reference.ink === undefined ? [] : [reference.ink],
       };
     },
     kept: (check) => ({
       reference: check.reference,
       whole: check.whole,
-      characters: savedCharacters(check.characters),
+      characters: expectedSet(check.characters ?? ''),
     }),
   },
   barFill: {
@@ -644,58 +647,6 @@ export function fixDraft(check: CheckDef): Draft {
  */
 export function withFixRegion(draft: Draft, region: Rect | null, shot: number): Draft {
   return region === null || draft.region !== null ? draft : { ...draft, region, drawnOn: shot };
-}
-
-/**
- * `draft`, a number value's, reading with `reference` of `references`, its application's, and the characters of it
- * that its choice of characters comes to, as {@link forReference} says. `before` is the references as they were
- * when the draft's own reference was picked, when a save changed them since, such as by teaching that reference
- * more. A reference that `references` do not hold, such as while the file cannot be read, leaves the choice as it
- * is: nothing says what it knows.
- */
-export function withReference(
-  draft: Draft,
-  reference: string,
-  references: readonly ReferenceDef[],
-  before: readonly ReferenceDef[] = references,
-): Draft {
-  const known = (id: string | null, among: readonly ReferenceDef[]): readonly string[] | null => {
-    const saved = among.find((each) => each.id === id);
-    return saved === undefined ? null : referenceCharacters(saved);
-  };
-  const to = known(reference, references);
-  const characters =
-    to === null ? draft.characters : forReference(draft.characters, known(draft.reference, before) ?? [], to);
-  return { ...draft, reference, characters };
-}
-
-/** `characters`, a number's choice, as a live check takes it: null for every character, and until it names one. */
-export function readsOf(characters: readonly string[] | null): string | null {
-  return characters === null || characters.length === 0 ? null : characters.join('');
-}
-
-/**
- * The characters the number `draft` describes reads once the reference `taught` teaches is saved and the number
- * reads with it, or null for every character it knows. `references` are its application's before that save. The
- * number's choice stays the one that was picked, as {@link forReference} says, from what the reference it reads
- * with knows now to what the taught one will know: its saved samples, when it is saved already, and what `taught`
- * labels. So Digits and symbols takes up a symbol that is being taught.
- */
-export function charactersOnceTaught(
-  draft: Draft,
-  references: readonly ReferenceDef[],
-  taught: CharactersSpec,
-): readonly string[] | null {
-  const known = (id: string | null | undefined): readonly string[] => {
-    const saved = references.find((each) => each.id === id);
-    return saved === undefined ? [] : referenceCharacters(saved);
-  };
-  const to = knownCharacters([
-    ...known(taught.reference?.id),
-    ...taught.labels.map((label) => label.text),
-    ...taught.recorded.map((label) => label.text),
-  ]);
-  return forReference(draft.characters, known(draft.reference), to);
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

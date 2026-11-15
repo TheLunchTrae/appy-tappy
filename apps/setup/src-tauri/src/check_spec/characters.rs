@@ -7,12 +7,9 @@
 //! `saved::reader`, as the runtime does. So the reader the editor tries on
 //! the live window is the one the saved file gives.
 
-use std::collections::BTreeSet;
 use std::io;
 
-use appytappy_config::app_file::{
-    ColorDef, OriginDef, ReferenceDef, RegionDef, SampleDef, is_label_character,
-};
+use appytappy_config::app_file::{ColorDef, OriginDef, ReferenceDef, RegionDef, SampleDef};
 use appytappy_config::names::sample_name;
 use appytappy_sources::screen::digits::{DigitReader, InkRule};
 use appytappy_sources::screen::saved::{self, SavedError};
@@ -27,11 +24,6 @@ use super::{
     Cut, Pictures, ReferenceRef, SpecError, contrast, cut, drawn, ink_rule, same_size, size_of,
     to_region,
 };
-
-/// The most characters a reference is saved as expecting: room for the
-/// digits, both cases of the English letters, and every other printable
-/// ASCII character, with some to spare.
-pub(crate) const MAX_EXPECTED_CHARACTERS: usize = 128;
 
 /// The ID a reference is taught under before it is saved under its own.
 const UNSAVED: &str = "unsaved";
@@ -105,24 +97,21 @@ pub(crate) struct SavedReference {
 
 impl SavedReference {
     /// The reference as it is saved under the name `name`, with the text
-    /// color `ink`, or none to find its characters by contrast, the
-    /// tolerance `tolerance`, and the characters `expected` that it needs,
-    /// as [`expected_characters`] lists them. Its samples stay as they are
-    /// saved, so no screenshot is needed, and it learns them back with the
-    /// new text color and tolerance. Without a text color, the tolerance
-    /// is the one [`contrast::fitted`] chooses from those samples:
-    /// `tolerance` while every sample reads with it.
+    /// color `ink`, or none to find its characters by contrast, and the
+    /// tolerance `tolerance`. Its samples stay as they are saved, so no
+    /// screenshot is needed, and it learns them back with the new text
+    /// color and tolerance. Without a text color, the tolerance is the one
+    /// [`contrast::fitted`] chooses from those samples: `tolerance` while
+    /// every sample reads with it.
     ///
     /// # Errors
     ///
-    /// Returns [`SpecError::TooManyExpected`] for more expected characters
-    /// than a reference saves, or why a sample cannot be learned.
+    /// Returns why a sample cannot be learned.
     pub(crate) fn with_settings(
         self,
         name: &str,
         ink: Option<ColorDef>,
         tolerance: u8,
-        expected: &str,
     ) -> Result<ReferenceDef, SpecError> {
         let saved_name = self.reference.name.clone();
         let tolerance = match ink {
@@ -133,7 +122,6 @@ impl SavedReference {
             name: name.to_owned(),
             ink,
             tolerance,
-            expects: expected_characters(expected)?,
             ..self.reference
         };
         learned(&reference, self.pictures.iter(), Some(saved_name)).map(|_reader| reference)
@@ -235,28 +223,20 @@ impl CharactersSpec {
     /// recorded readings. `None` for `id` teaches a saved reference under
     /// its own ID, or a new one under a stand-in.
     ///
-    /// `expected` is the characters the user says it needs, saved as
-    /// [`expected_characters`] lists them. It is guidance for the setup
-    /// app: no sample is learned or left out because of it.
-    ///
     /// # Errors
     ///
     /// Returns [`SpecError::NoLabels`] when there is nothing to learn from,
-    /// [`SpecError::TooManyExpected`] for more expected characters than a
-    /// reference saves, or what [`Self::learn`] does.
+    /// or what [`Self::learn`] does.
     pub(crate) fn teach(
         &self,
         session: Session<'_>,
         id: Option<&str>,
         name: &str,
-        expected: &str,
     ) -> Result<Taught, SpecError> {
         if self.reference.is_none() && self.labels.is_empty() && self.recorded.is_empty() {
             return Err(SpecError::NoLabels);
         }
-        let mut taught = self.learn(session, id, name, &self.recorded)?;
-        taught.reference.expects = expected_characters(expected)?;
-        Ok(taught)
+        self.learn(session, id, name, &self.recorded)
     }
 
     /// The reference the saved samples, the labeled screenshots and, of the
@@ -339,7 +319,6 @@ impl CharactersSpec {
             ink: self.ink,
             tolerance: self.tolerance,
             samples,
-            expects: None,
         };
         let reader = learned(&reference, pictures.iter().chain(&kept), saved_name)?;
         Ok(Taught {
@@ -537,33 +516,6 @@ pub(crate) fn sample_problem_of(error: &SavedError, reference: &ReferenceDef) ->
 /// [`sample_problem_of`], or the error in `saved::reader`'s own words.
 fn sample_problem(error: SavedError, reference: &ReferenceDef) -> SpecError {
     sample_problem_of(&error, reference).unwrap_or_else(|| error.into())
-}
-
-/// The characters of `expected` as a reference saves them, or `None` when
-/// it has none: each character a label teaches, as [`is_label_character`]
-/// says, that is no control character, once, the digits `0` to `9` first
-/// and the rest by code point.
-///
-/// # Errors
-///
-/// Returns [`SpecError::TooManyExpected`] for more than
-/// [`MAX_EXPECTED_CHARACTERS`] of them.
-pub(crate) fn expected_characters(expected: &str) -> Result<Option<String>, SpecError> {
-    // A digit sorts before every other character, and each group by code
-    // point.
-    let characters: BTreeSet<(bool, char)> = expected
-        .chars()
-        .filter(|&character| is_label_character(character) && !character.is_control())
-        .map(|character| (!character.is_ascii_digit(), character))
-        .collect();
-    if characters.len() > MAX_EXPECTED_CHARACTERS {
-        return Err(SpecError::TooManyExpected);
-    }
-    let list: String = characters
-        .into_iter()
-        .map(|(_, character)| character)
-        .collect();
-    Ok((!list.is_empty()).then_some(list))
 }
 
 /// What `label` labels, as a reference that tells ink from background by

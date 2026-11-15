@@ -144,8 +144,8 @@ is there when the window doesn't match, once you saved or discarded what you
 changed in the editor.
 
 Everything that doesn't need the window works meanwhile: names, the check's
-settings, **Stays at**, the tolerance of a reference's text color and
-**Characters it needs**, and saving a change that needs no new screenshot.
+settings, **Characters it needs**, **Stays at**, the tolerance of a
+reference's text color, and saving a change that needs no new screenshot.
 What needs the window is off and says why: **Take screenshot**, recording,
 detecting a bar, and the box that shows what the value reads on the live
 window. The screenshot shortcut does nothing meanwhile, and the first tile
@@ -299,25 +299,21 @@ instant can then be missed.
 
 - **Number** reads a number, such as `87%` or `-12.5`, with a
   [reference](References.md): the shapes of the application's
-  characters. Pick one of the application's references, or select
+  characters. **Characters it needs** says what the value can show, as
+  [Characters a number needs](#characters-a-number-needs) describes. Pick
+  one of the application's references, or select
   **New reference from this region** to make one from the region you drew.
   **Edit** changes the picked one, such as to teach it a digit it does not
-  know yet. A reference that has yet to learn characters it needs lists them
-  after **Missing**; it still reads the characters it knows.
+  know yet. A reference that has yet to learn characters the value needs
+  lists them after **Missing**; it still reads the characters it knows.
   **Record readings** teaches the picked one, or a new one, from
   what the region shows while you use the application, as
-  [Record screenshots](#record-screenshots) describes.
-  **Characters it reads** says which of the reference's characters the value
-  reads, as [Characters a number reads](#characters-a-number-reads)
-  describes. Turn on
+  [Record screenshots](#record-screenshots) describes. Turn on
   **Whole number only** to ignore every digit after the
   decimal point, so `87.5%` reads as 87. The reference still has to know the
   point, so teach it on a screenshot that shows one.
-  To read numbers with a thousands separator, such as `1,234`, teach the
-  reference the `,` too. Turning on **Decimal point** and **Comma** under the
-  reference's [**Characters it needs**](References.md#choose-what-it-needs)
-  lists them as missing until it has learned them. That list only says what
-  is left to teach: it does not change how a number reads. A `.` is always
+  To read numbers with a thousands separator, such as `1,234`, turn on
+  **Comma** and teach the reference the `,` too. A `.` is always
   the decimal point, and a `,` only
   separates thousands: it counts only between groups of three digits, so
   `12,5` reads as 12. Any other character after the digits ends the number,
@@ -359,63 +355,71 @@ differs from it only in capitals**. A name that breaks a rule says which under
 it, and the value waits with **Fix each state name that has a message under
 it** until every name can be saved.
 
-### Characters a number reads
+### Characters a number needs
 
-A reference can know a whole font: digits, signs, and letters. A value that
-shows only some of them reads better when it reads only those, since it can
-then no longer take one character for a lookalike, such as a `0` for an `O`
-or a `2` for a `Z`. Under the reference you picked, **Characters it reads**
-chooses them:
+A reference is a font: it can know digits, signs, and letters, and several
+values can share it. Each Number value says which characters it needs, under
+**Characters it needs** in the step that picks its reference. Turn on
+everything the value shows: its digits and any sign right after them, such
+as the `%` in `87%`. A new value starts with **Digits** on.
 
-- **All it knows** reads every character the reference knows, and any it
-  learns later. A new value starts with it.
-- **Digits** reads `0` to `9` and nothing else. A digit the reference learns
-  later is read too.
-- **Digits and symbols** reads the digits and each character the reference
-  knows that is neither a digit nor a letter, such as `%`, `.`, `,`, `:`,
-  `/`, `-`, and `+`. It shows while the reference knows such a character. A
-  symbol the reference learns later from another value or the References
-  page is not added: the value then shows
-  **Choose…** with the characters it reads turned on, and choosing
-  **Digits and symbols** again adds the new symbol.
-- **Choose…** shows each character the reference knows with a box, with the
-  ones the value reads so far turned on. Turn on the ones the value shows, at
-  least one. Choosing it keeps every character the value reads so far,
-  learned or not, so choosing it after **Digits** keeps all ten digits. A
-  character the value reads that the reference has yet to learn shows too,
-  outlined, and a note under the list says the reference has yet to learn
-  it: it reads once the reference learns it, and you can turn it off.
+- **Digits** is `0` to `9`.
+- **Decimal point**, **Comma**, **Percent**, **Minus**, **Plus**, and
+  **Colon** are each one sign. Turn on the ones the value shows. For how a
+  number reads around a `:` or `/`, see [Checks](#checks).
+- **Uppercase** and **Lowercase** are the English letters `A` to `Z` and `a`
+  to `z`, each case on its own, and **Question mark** and
+  **Exclamation mark** are the punctuation that goes with them. A number
+  value reads no text. Turn letters on only when the value's region shows
+  them with the number, such as the `Lv` in `Lv.5`.
+- **Other characters** takes anything else: type each character the region
+  shows, such as `/` or `°`. Delete a character there to stop needing it.
+  Spaces do not count. A value with more characters than it can need waits
+  with **A value needs at most 128 characters. Remove some.** until you
+  remove some.
 
-Picking another reference keeps **All it knows** and **Digits**, takes
-**Digits and symbols** from the new reference's symbols, and keeps a
-**Choose…** set as it is: a character the new reference has yet to learn
-shows outlined, so you can turn it off. Teaching
-the reference from this value, with **Edit** or **Record readings**, adds a
-new symbol to **Digits and symbols** and changes no other choice.
+A choice that holds only some of its characters, such as **Digits** with `0`
+to `5`, shows as partly on with how many it holds, and its characters show
+in **Other characters**, where you can remove each. Select the choice to turn
+all of it on, and again to turn all of it off.
 
-Under the list, the value shows the characters it reads. The choice belongs
-to the value. The reference keeps every character it knows, so another value
-can read more of the same reference, and the References page still lists them
-all.
+The characters are the value's. Its reference keeps every character it
+knows, so another value can need more of the same reference, the References
+page still lists them all, and picking another reference changes nothing
+you turned on.
 
-The value takes its number from the characters it reads alone. A character
-it does not read, and its reference knows, is text to it: it ends the number
-or comes before it, and is never part of it. So **Digits** reads `87%` as 87
-and `Lv.5` as 5.
+The list does two things. It says what to teach: the list of references
+shows after **Missing** which needed characters each has yet to learn, and a
+reference you make or edit from the value shows the same list, as
+**Characters the value needs**, and what is
+[still missing](References.md#what-it-has-learned). When the reference you
+picked knows none of them, a note under the references says so: teach it
+them, or choose another reference.
+
+It also says what the value reads. A value that shows only some of a font
+reads better when it reads only those characters, since it can then no
+longer take one for a lookalike, such as a `0` for an `O` or a `2` for a
+`Z`. The value takes its number from the characters it needs alone. A
+character it does not need, and its reference knows, is text to it: it ends
+the number or comes before it, and is never part of it. So a value that
+needs only **Digits** reads `87%` as 87 and `Lv.5` as 5.
 
 The value reads nothing while a character it leaves out is a part of the
 number its region shows, and says that it leaves out a character its number
-holds, since the number would be another number without it. So **Digits**
-reads none of `-5`, `.5`, `87.5%`, and `1,234`: add the `-`, the `.`, or the
-`,`. With **Whole number only** on, the number ends at its `.` anyway, so
-**Digits** reads `87.5%` as 87. A digit the value leaves out fails the read
-the same way. A shape the reference has not learned still fails the read
-before the number ends, whatever the value reads: text needs no teaching
-only after a character the reference knows has ended the number, such as the
-`HP` in `37% HP`.
+holds, since the number would be another number without it. So a value that
+needs only **Digits** reads none of `-5`, `.5`, `87.5%`, and `1,234`: turn
+on **Minus**, **Decimal point**, or **Comma**. With **Whole number only**
+on, the number ends at its `.` anyway, so such a value reads `87.5%` as 87.
+A digit the value leaves out fails the read the same way. A shape the
+reference has not learned still fails the read before the number ends,
+whatever the value needs: text needs no teaching only after a character the
+reference knows has ended the number, such as the `HP` in `37% HP`.
 
-A [fix](#fix-a-value-at-one-size) that reads with its own reference reads the
-same characters of that reference.
+With nothing turned on, the value reads every character its reference
+knows, and any it learns later, and no character shows as missing.
+
+A [fix](#fix-a-value-at-one-size) that reads with its own reference needs
+the same characters as its value.
 
 ### Show matching pixels
 

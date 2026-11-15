@@ -129,7 +129,7 @@ function Discovered({
   ink,
 }: {
   readonly found: Discovery;
-  /** Whether the reference says which characters it needs, so that some can be missing. */
+  /** Whether the value the reference is taught for needs characters, so that some can be missing. */
   readonly needs: boolean;
   readonly ink: Color | undefined;
 }) {
@@ -191,7 +191,7 @@ interface PanelProps {
   readonly view: RecordingView | null;
   /** The characters the recording found so far. */
   readonly found: Discovery;
-  /** Whether the reference says which characters it needs. */
+  /** Whether the value the reference is taught for needs characters. */
   readonly needs: boolean;
   readonly reviewing: boolean;
   /** How many readings the check learns from now. */

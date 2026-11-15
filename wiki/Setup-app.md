@@ -24,8 +24,8 @@ This page covers what the user guide leaves out.
   `try_edit` judges the trial against the saved files, `reading`,
   `explain_reading`, and `window_size` answer nothing, `edit_value` saves
   what names no screenshot, and `save_reference_settings` saves a saved
-  reference's name, text color, tolerance, and needed characters with its
-  samples as they are. `set_characters` and `save_reference` learn from a
+  reference's name, text color, and tolerance with its samples as they
+  are. `set_characters` and `save_reference` learn from a
   region on a screenshot, so they need a session that has one. The
   anti-cheat products the look found show above the stage, and so does a
   window taken only as the fallback. When the window closes, the editor
@@ -153,9 +153,9 @@ This page covers what the user guide leaves out.
   reads as a number in its region, placed as a value of its application
   is. A reference opened from a number is tried as that number will read
   with it once both are saved (`ReferenceTrial`): whole when the number
-  is, at its side of the window, and with the characters its choice comes
-  to for the reference as taught (`charactersOnceTaught` in
-  `lib/check.ts`), which the save then gives the number.
+  is, at its side of the window, and with the characters the number
+  needs. A reference made by itself is tried with every character it
+  knows.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
@@ -344,28 +344,33 @@ This page covers what the user guide leaves out.
   reference belongs to a saved application. Its name and ID follow the
   rules a value's do, so it keeps its ID when renamed.
   One that a value reads with cannot be deleted.
-- **Expected characters.** A reference may list the characters the user says
-  it needs, as [Choose what it needs](References.md#choose-what-it-needs)
-  describes. The list guides and never decides. `appytappy-sources` builds a
-  reference's reader from its text color, if it has one, its tolerance, and
-  its samples alone, so the
-  list adds no glyph, labels no shape, and leaves number parsing as it is.
-  No rule of the file covers it either: the runtime and the setup app load
-  an application whatever its list holds. The save is the one place that
-  shapes it. `expected_characters` in `check_spec.rs` writes each character a
+- **Expected characters.** A number value may list the characters it needs,
+  as [Characters a number needs](Values.md#characters-a-number-needs)
+  describes, in its check's `characters`. The list is the value's: a
+  reference is a font with no list of its own, so values that need different
+  characters share one. The list does two jobs. The value reads only those
+  characters of its reference, as [Checks](Screen-regions.md#checks)
+  describes, and the page compares the list with what a reference learned,
+  to show what is left to teach. `appytappy-sources` builds a reference's
+  reader from its text color, if it has one, its tolerance, and its samples
+  alone, so the list adds no glyph and labels no shape. The save shapes the
+  list: `expected_characters` in `check_spec.rs` writes each character a
   label teaches that is no control character, once, the digits `0` to `9`
-  first and the rest by code point, and refuses more than
-  `MAX_EXPECTED_CHARACTERS`, which the page reads as
-  `LIMITS.maxExpectedCharacters` to say so before the save. The page keeps
-  the list as one set of characters. `lib/expected.ts` reads a saved list as
-  that same set, so one written by hand shows as its characters and the next
-  save writes it in order; it reads each preset's state back from the set;
-  and its `coverage` splits the set and the learned characters into known,
-  missing, and extra, for the editor, the References page, and the reference
-  picker. The learned characters are those of the saved samples, the labeled
-  screenshots, and the kept readings. The save sends the set beside the
-  `characters` check, not in it, and it replaces what the saved reference
-  expected. A character is counted as a label's is: `is_label_character` in
+  first and the rest by code point, leaves `characters` out for an empty
+  list, and refuses more than `MAX_EXPECTED_CHARACTERS`, which the page
+  reads as `LIMITS.maxExpectedCharacters` to say so before the save. A
+  reference's trial takes its list through the same function. The page
+  keeps the list as one set of characters on the value's draft
+  (`Draft.characters`), empty for every character the reference knows.
+  `lib/expected.ts` reads a saved list as that same set, so one written by
+  hand shows as its characters and the next save writes it in order; it
+  reads each preset's state back from the set; and its `coverage` splits the
+  set and the learned characters into known, missing, and extra, for the
+  reference picker and the reference editor. The editor shows and edits the
+  list only when it is opened from a value, and teaches a reference opened
+  from the References page for no characters. The learned characters are
+  those of the saved samples, the labeled screenshots, and the kept
+  readings. A character is counted as a label's is: `is_label_character` in
   `appytappy-config` serves the learner and the save, and the samples in
   `PARSE_CASES` hold the page's reading of labels and lists to the Rust
   side's.
@@ -572,7 +577,7 @@ character is one shape.
 The page works out what the shapes mean, because the labels live there
 (`lib/review.ts`, `lib/discovery.ts`). A reading's text names its shapes
 when it has one character for each. From that, while recording and in
-review, the page shows the characters the reference needs that nothing
+review, the page shows the characters the value needs that nothing
 shows, using the [expected characters](#behavior-the-guide-leaves-out) and
 `coverage`; the ones only the text reader's unchecked guesses show; and the
 ones the reference knows or a reading the user checked shows. A reading is
@@ -665,7 +670,7 @@ forgets it; reads already
 queued for a forgotten search still run, and their text is dropped. Pictures
 of finds are asked for by the search's number, so an answer for a replaced
 search is empty. The UI lists
-the finds that may show the characters the reference needs (`fitsNeeds` in
+the finds that may show the characters the value needs (`fitsNeeds` in
 `lib/found.ts`), polls while text is still being read, and asks which kept
 finds the reference cannot learn (`found_problems`), learning them after the
 draft's own boxes the way review learns recorded readings. **Reread**
@@ -933,8 +938,7 @@ saved file still names.
       "name": "Percent font",
       "origin": { "kind": "recording" },
       "tolerance": 40,
-      "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }],
-      "expects": "0123456789.%"
+      "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }]
     }
   ]
 }
@@ -1019,7 +1023,7 @@ check may have it, and it changes nothing the value reads. Each of its `fixes` h
 region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
 
-A number check's `characters` is the characters the value reads of its
+A number check's `characters` is the characters the value needs of its
 reference, such as `"0123456789%"`, and is left out when it reads every
 character the reference knows. Whitespace in it does not count, and neither
 does a character the reference has yet to learn. A check that names
@@ -1037,12 +1041,9 @@ and its `tolerance` is then how far a pixel may be from that color and still
 be ink. `ink` is left out when the reference finds its characters by
 contrast.
 
-A reference's `expects` is the characters the user says it needs to know,
-and is left out when the user chose none. Only the setup app reads it, to
-show which characters a reference has yet to learn, so no rule covers it and
-a file loads whatever it holds. The setup app writes each character once,
-exactly as labels spell them, so `A` and `a` are two characters: the digits
-first, then the rest by code point.
+A reference takes only the keys above. A key it does not know, such as one
+another version of AppyTappy wrote, is ignored when the file loads and
+dropped by the next save.
 
 An application's `overlay` is left out until the user first picks one. Its
 `mode` is `overlay` or `pictureInPicture`, and once the panel has been moved
@@ -1239,11 +1240,11 @@ format was saved by another version and can only be deleted.
 
 What each kind keeps in `state`:
 
-| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                 | What it does not keep                                                                                                                  |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                   | A value or application flow the editor had opened, and what such a flow would hand back                                                |
-| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                              | The window picked in the list                                                                                                          |
-| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference, the characters it reads and **Whole number only**), the reference being edited with the characters it needs | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
+| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                        | What it does not keep                                                                                                                  |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                          | A value or application flow the editor had opened, and what such a flow would hand back                                                |
+| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                     | The window picked in the list                                                                                                          |
+| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference, the characters it needs and **Whole number only**), and the reference being edited | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
 
 Screenshots follow one rule, however they were kept: every screenshot the
 capture holds when the draft is saved goes into the draft, those a

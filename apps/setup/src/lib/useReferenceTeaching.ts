@@ -23,7 +23,7 @@ import {
 } from './check.ts';
 import { progress } from './confirm.ts';
 import { discovery } from './discovery.ts';
-import { coverage, startingExpected, tooMany } from './expected.ts';
+import { coverage } from './expected.ts';
 import type { Picture } from './pixels.ts';
 import { knownCharacters } from './reference.ts';
 import { background } from './repeat.ts';
@@ -34,9 +34,6 @@ import { useFound } from './useFound.ts';
 import { useRecording } from './useRecording.ts';
 import { focusNext, useRecordFocus, useReview } from './useReview.ts';
 
-/** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
-const NO_NEEDS: readonly string[] = [];
-
 /** What the capture screen gives the teaching of its reference. */
 interface TeachingSetup {
   /** The saved application the reference belongs to. */
@@ -44,6 +41,8 @@ interface TeachingSetup {
   /** The reference the editor teaches, or null while no editor is open. */
   readonly editing: Editing | null;
   readonly setEditing: Dispatch<SetStateAction<Editing | null>>;
+  /** The characters the value it is taught for needs, which what it learns is compared with; none filters no find. */
+  readonly needs: readonly string[];
   readonly draft: Draft;
   readonly setDraft: Dispatch<SetStateAction<Draft>>;
   readonly boxes: ReturnType<typeof useBoxes>;
@@ -79,6 +78,7 @@ export function useReferenceTeaching({
   app,
   editing,
   setEditing,
+  needs,
   draft,
   setDraft,
   boxes,
@@ -100,8 +100,6 @@ export function useReferenceTeaching({
   // Why the reference was not saved. It is the editor's own, and goes when the editor closes, so it never shows as
   // the value's.
   const [error, setError] = useState<string | null>(null);
-  // The characters it needs, which what it learns from is compared with.
-  const needs = editing?.expects ?? NO_NEEDS;
   const focus = useRecordFocus();
   const review = useReview(recording, draft, setDraft, reference, needs, focus);
   // What the reference being edited learns from: its saved pictures, its boxes with text, and its kept readings.
@@ -218,10 +216,9 @@ export function useReferenceTeaching({
     focusNext(focus.more);
   };
 
-  // Opens the editor on `existing`, or on a new reference read from the value's region, which starts with what
-  // `like` expects: the reference it is learned again for at this size, if any.
-  const open = (existing: ReferenceDef | null, like: ReferenceDef | null): void => {
-    setEditing({ existing, name: existing?.name ?? '', expects: startingExpected(existing, like) });
+  // Opens the editor on `existing`, or on a new reference read from the value's region.
+  const open = (existing: ReferenceDef | null): void => {
+    setEditing({ existing, name: existing?.name ?? '' });
     setDraft((current) => toReference(current, existing));
     boxes.select(null);
     stopPicking();
@@ -247,7 +244,7 @@ export function useReferenceTeaching({
       return;
     }
     const { spec } = saving;
-    const named = { referenceName: editing.name.trim(), expects: editing.expects.join('') };
+    const named = { referenceName: editing.name.trim() };
     onSaving(true);
     try {
       const saved = await (spec.kind === 'taught'
@@ -307,8 +304,6 @@ export function useReferenceTeaching({
     findBlocked: findBlockedBy(boxes.selected),
     /** Why no box can be drawn on the picture shown, or null. */
     boxBlock: editing === null ? null : boxBlocked(readingSize, shown),
-    /** Whether it expects more characters than a reference saves. */
-    overLimit: editing !== null && tooMany(editing.expects),
     /** The name the editor's reference shows under. */
     name: editing === null || editing.name.trim() === '' ? 'New reference' : editing.name.trim(),
     settingsChanged,

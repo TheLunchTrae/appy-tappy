@@ -22,7 +22,7 @@ interface Props {
   /** The labeled boxes' texts. */
   readonly labeled: readonly string[];
   readonly recorded: readonly string[];
-  /** The characters it needs, each once. */
+  /** The characters the value it is taught for needs, each once; none for a reference made by itself. */
   readonly expected: readonly string[];
   /** How the characters in those texts compare with the ones it needs. */
   readonly coverage: Coverage;
@@ -43,7 +43,8 @@ interface Props {
   /** Goes back to finding the characters by contrast. */
   readonly onNoTextColor: () => void;
   readonly onTolerance: (tolerance: number) => void;
-  readonly onExpected: (expected: readonly string[]) => void;
+  /** Changes the characters the value needs, or null for a reference made by itself. */
+  readonly onExpected: ((expected: readonly string[]) => void) | null;
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -107,11 +108,11 @@ function TextColor(
   );
 }
 
-/** The inspector of a reference: its name, the characters it needs, the ones it learns, and its text color. */
+/** The inspector of a reference: its name, the characters its value needs, the ones it learns, and its text color. */
 export function ReferenceEditor(props: Props) {
   const { name, appName, ink, tolerance, saved, labeled, recorded, finding } = props;
   const { expected, coverage, readers } = props;
-  // Without a choice of what it needs, every character it learned shows as one group.
+  // With no characters needed, every character it learned shows as one group.
   const chosen = expected.length > 0;
   // Characters of found text not added yet show outlined beside the ones it knows.
   const pending = knownCharacters(finding).filter(
@@ -142,14 +143,16 @@ export function ReferenceEditor(props: Props) {
         <span>Application</span>
         <p>{appName}</p>
       </div>
-      <ExpectedCharacters expected={expected} onExpected={props.onExpected} />
+      {props.onExpected === null ? null : (
+        <ExpectedCharacters label="Characters the value needs" expected={expected} onExpected={props.onExpected} />
+      )}
       {props.boxes}
       {props.findPanel}
       {chosen ? (
         <div className="field">
           <span>Characters still missing</span>
           {coverage.missing.length === 0 ? (
-            <span className="ok">None. It knows every character it needs.</span>
+            <span className="ok">None. It knows every character the value needs.</span>
           ) : (
             <>
               <MissingChips characters={coverage.missing} large />
@@ -168,7 +171,7 @@ export function ReferenceEditor(props: Props) {
         )}
         {extra.length === 0 ? null : (
           <>
-            <span className="note">Not among the characters it needs, which is fine:</span>
+            <span className="note">Not among the characters the value needs, which is fine:</span>
             <CharacterChips characters={extra} ink={ink} pending={pending.filter(isExtra)} large />
           </>
         )}

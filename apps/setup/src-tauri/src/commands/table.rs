@@ -201,7 +201,7 @@ macro_rules! with_commands {
             commands::delete_value(application: String, value: String) -> ();
             /// Saves a reference, over the one `spec.check.reference` names when it names one.
             commands::save_reference(spec: ReferenceSaveSpec) -> SavedReferenceId;
-            /// Saves a saved reference's name, color, tolerance, and the characters it needs, with its samples as they are, so it needs no screenshot.
+            /// Saves a saved reference's name, color, and tolerance, with its samples as they are, so it needs no screenshot.
             commands::save_reference_settings(spec: ReferenceSettingsSpec) -> SavedReferenceId;
             /// Removes a saved reference and its pictures; refused while a value reads with it.
             commands::delete_reference(application: String, reference: String) -> ();

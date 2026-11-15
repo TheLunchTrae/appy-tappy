@@ -51,7 +51,7 @@ byte for each pixel of its region, for which of them are ink.
   text, characters that touch, or text whose background the reference cannot
   tell it from; those need a different check. A character drawn as marks
   with blank columns between them, as some fonts draw `%`, is one character
-  for each mark. A value may name the characters it reads, `characters` in
+  for each mark. A value may name the characters it needs, `characters` in
   its check, and then takes its number from its reference's glyphs for them
   alone: a shape takes the closest of those glyphs first, so a value of
   digits cannot read a `0` as the `O` its font also has. A digit the value

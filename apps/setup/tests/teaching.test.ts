@@ -13,13 +13,12 @@ const READY: ReferenceSave = {
   built: true,
   tried: true,
   busy: false,
-  overLimit: false,
   reviewing: false,
 };
 
 test('a reference saves once it is named, built and tried', () => {
   expect(referenceSave(READY)).toEqual({ can: true, waits: null });
-  for (const missing of [{ named: false }, { built: false }, { tried: false }, { busy: true }, { overLimit: true }]) {
+  for (const missing of [{ named: false }, { built: false }, { tried: false }, { busy: true }]) {
     expect(referenceSave({ ...READY, ...missing })).toEqual({ can: false, waits: null });
   }
 });

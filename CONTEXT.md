@@ -30,9 +30,10 @@ parts fit.
   to the window, which move neither the cursor nor the focus.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
-- **Expected characters.** The characters the user says a reference needs to
-  know. They guide teaching in the setup app, which shows the ones still
-  missing; nothing learns or reads with them. The UI calls them
+- **Expected characters.** The characters the user says a number value
+  needs. The value reads only these characters of its reference, and the
+  setup app shows which of them the reference has yet to learn. With none,
+  the value reads every character its reference knows. The UI calls them
   **Characters it needs**.
 - **Edit.** A saved value changed as it was first drawn, under the ID it
   has, so the automations that watch it stay linked.

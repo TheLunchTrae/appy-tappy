@@ -63,8 +63,9 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
-use crate::check_spec::characters::expected_characters;
-use crate::check_spec::{CharactersSpec, CheckSpec, Label, MAX_EXPECTED_CHARACTERS};
+use crate::check_spec::{
+    CharactersSpec, CheckSpec, Label, MAX_EXPECTED_CHARACTERS, expected_characters,
+};
 use crate::commands::Upload;
 use crate::debug::bundle::BundleSpec;
 use crate::debug::outline::CaptureOutline;
@@ -655,8 +656,8 @@ fn cases(samples: &[String], parse: impl Fn(&str) -> Option<String>) -> serde_js
 /// ideographic space; a byte order mark and a zero width space, which are
 /// not white space; control characters; a combining mark; and characters
 /// outside the Basic Multilingual Plane, which UTF-16 sorts before the
-/// fullwidth forms. The last two hold as many characters as a reference
-/// expects, and one more.
+/// fullwidth forms. The last two hold as many characters as a value
+/// needs, and one more.
 fn character_samples() -> Vec<String> {
     let distinct = |count: usize| ('\u{100}'..).take(count).collect::<String>();
     let mut samples: Vec<String> = [
@@ -1020,7 +1021,7 @@ fn constants() -> String {
     });
     [
         format!(
-            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states and the longest state name in characters, the most characters a reference expects, the settings'\n * ranges, the highest tolerance, and the most pixels a click's search area holds, as the saved files take them.\n */\nexport const LIMITS = {} as const;\n",
+            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states and the longest state name in characters, the most characters a value needs, the settings'\n * ranges, the highest tolerance, and the most pixels a click's search area holds, as the saved files take them.\n */\nexport const LIMITS = {} as const;\n",
             literal(&limits)
         ),
         format!(
