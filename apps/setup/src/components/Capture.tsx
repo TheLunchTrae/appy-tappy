@@ -32,7 +32,7 @@ import {
   withState,
 } from '../lib/check.ts';
 import { boxNumber } from '../lib/boxes.ts';
-import { type Placed, liveDrawFrame, useLiveDraw } from '../lib/liveDraw.ts';
+import { type Placed, liveDrawFrame, regionFromLiveBox, regionOverFrame, useLiveDraw } from '../lib/liveDraw.ts';
 import { boxTextId } from './BoxList.tsx';
 import { DraftButtons } from './capture/DraftButtons.tsx';
 import { ReadWith } from './capture/ReadWith.tsx';
@@ -55,7 +55,7 @@ import { colorAt } from '../lib/pixels.ts';
 import { RecordingSpots } from './Recording.tsx';
 import { LookPanel } from './LookRecording.tsx';
 import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
-import { type Point, scaleRect } from '../lib/region.ts';
+import type { Point } from '../lib/region.ts';
 import { CaptureOutlineNote, CaptureOutlines, useCaptureOutline } from './CaptureOutlines.tsx';
 import { RegionSurface } from './RegionSurface.tsx';
 import { PinGuides } from './PinGuides.tsx';
@@ -488,12 +488,14 @@ export function Capture({
     }
     const size = shot.size;
     const fits = regionSize !== null && sameSize(regionSize, size);
-    const region = box === null ? null : scaleRect(box.rect, box.at, size);
+    const region = regionFromLiveBox(box, size, edited?.screen.windowSize ?? null);
     if (region === null) {
-      // A click that drew no box takes a screenshot, but leaves a region placed at another size where it is.
+      // A press that places nothing takes a screenshot, but leaves a region placed at another size where it is.
       if (draft.region === null || fits) {
         setSelected(shot.index);
         onValuePicture(shot);
+      } else {
+        background(screenshots.remove([shot.index]));
       }
       return;
     }
@@ -759,11 +761,9 @@ export function Capture({
   const liveFrame = liveDrawFrame({
     settingPlace: shownStep === 'where' && editing === null,
     live: selected === null ? liveSize : null,
-    drawnAt: edited?.screen.windowSize ?? null,
     occupied: recordingNow !== null || sheeted || picking !== null,
   });
-  const regionOnLive =
-    liveFrame !== null && regionSize !== null && sameSize(regionSize, liveFrame) ? draft.region : null;
+  const regionOnLive = liveFrame === null ? null : regionOverFrame(draft.region, regionSize, liveFrame);
   const regionShown = regionOnStage(shownStep, draft.kind, recordingNow !== null);
   const drawing: Drawing = liveFrame !== null ? 'live' : editing !== null ? 'boxes' : regionShown ? 'region' : 'none';
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
@@ -949,6 +949,7 @@ export function Capture({
             area,
             otherSize: otherSize !== null,
             drawing,
+            drawnAt: edited === null ? null : sizeText(edited.screen.windowSize),
             boxBlock: teaching.boxBlock,
           })
         }
