@@ -143,6 +143,8 @@ pub(crate) struct Search {
     pub(crate) finds: Vec<Find>,
     /// Finds past [`MAX_FOUND`].
     pub(crate) more: usize,
+    /// Finds left out for being at one of the regions passed over.
+    pub(crate) passed: usize,
 }
 
 /// A rectangle of ink, edges exclusive at the right and bottom.
@@ -590,16 +592,15 @@ pub(crate) fn like(
             ..Sought::of(height, height)
         })
         .collect();
-    let mut found: Vec<(Run, u32, Region)> = sized_runs(blobs, &sizes)
+    let (passed_over, mut found): (Vec<_>, Vec<(Run, u32, Region)>) = sized_runs(blobs, &sizes)
         .into_iter()
         .filter(|(run, _)| {
             !run.bounds.meets(region) && !skip.iter().any(|&added| run.bounds.meets(added))
         })
         .filter_map(|(run, height)| {
-            let at = with_margin(run.bounds, height, &ink)?;
-            (!passed.contains(&at)).then_some((run, height, at))
+            with_margin(run.bounds, height, &ink).map(|at| (run, height, at))
         })
-        .collect();
+        .partition(|&(_, _, at)| passed.contains(&at));
     found.sort_by_key(|&(run, height, _)| {
         (
             height.abs_diff(sample),
@@ -621,7 +622,11 @@ pub(crate) fn like(
             }
         })
         .collect();
-    Some(Search { finds, more })
+    Some(Search {
+        finds,
+        more,
+        passed: passed_over.len(),
+    })
 }
 
 #[cfg(test)]
@@ -1206,11 +1211,11 @@ mod tests {
         let image = screenshot(64, 66, &boxes);
         let first =
             like(&image, region(0, 0, 6, 8), &[], &[], &reader()).expect("the sample has ink");
-        assert_eq!(first.more, 2);
+        assert_eq!((first.more, first.passed), (2, 0));
         let passed: Vec<Region> = first.finds.iter().map(|find| find.region).collect();
         let second =
             like(&image, region(0, 0, 6, 8), &[], &passed, &reader()).expect("the sample has ink");
-        assert_eq!(second.more, 0);
+        assert_eq!((second.more, second.passed), (0, 12));
         let rest: Vec<(u32, u32)> = second
             .finds
             .iter()
@@ -1228,6 +1233,7 @@ mod tests {
             .expect("the sample has ink");
         let regions: Vec<Region> = search.finds.iter().map(|find| find.region).collect();
         assert_eq!(regions, [region(28, 18, 11, 12)]);
+        assert_eq!(search.passed, 0);
     }
 
     #[test]

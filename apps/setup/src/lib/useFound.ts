@@ -48,15 +48,16 @@ export interface Finder {
   /** Why the last search, or the last check of the finds, failed. */
   readonly error: string | null;
   readonly searching: boolean;
-  /** Whether the search shown left out finds the user passed over before. */
-  readonly skipping: boolean;
   /**
    * Searches the screenshot `sample` is on for text like it, away from the boxes there already and from the finds
    * the user passed over there.
    */
   readonly search: (sample: Box) => Promise<void>;
-  /** Searches as {@link Finder.search} does, but forgets which finds the user passed over on `sample`'s screenshot. */
-  readonly searchSkipped: (sample: Box) => Promise<void>;
+  /**
+   * Searches again from the box the search shown started from, forgetting which finds the user passed over on its
+   * screenshot, so it offers them too.
+   */
+  readonly searchSkipped: () => Promise<void>;
   readonly edit: (index: number, entry: FoundEntry) => void;
   /** Ticks every listed find, or with `keep` false leaves every one out. */
   readonly keepAll: (keep: boolean) => void;
@@ -97,7 +98,8 @@ export function useFound(
   const [edits, setEdits] = useState<ReadonlyMap<number, FoundEntry>>(new Map());
   // The finds each screenshot's searches offered that the user did not add, which a later search there skips.
   const [passed, setPassed] = useState<ReadonlyMap<number, readonly PassedFind[]>>(new Map());
-  const [skipping, setSkipping] = useState(false);
+  // The box the search shown started from, which Show them again searches from.
+  const [sample, setSample] = useState<Box | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   // Each search, reread and dismissal begins a turn, so an answer sent before one is ignored.
@@ -223,7 +225,7 @@ export function useFound(
       const result = await findLike(screenshot, region, added, [...skip], ink, tolerance);
       if (current()) {
         setView(result);
-        setSkipping(skip.length > 0);
+        setSample(sample);
         setEdits(new Map());
         setError(null);
       }
@@ -239,13 +241,17 @@ export function useFound(
 
   const search = (sample: Box): Promise<void> => find(sample, skippedOn(passed, sample.screenshot, draft.ink));
 
-  const searchSkipped = (sample: Box): Promise<void> => {
+  const searchSkipped = async (): Promise<void> => {
+    if (sample === null) {
+      return;
+    }
+    const { screenshot } = sample;
     setPassed((current) => {
       const left = new Map(current);
-      left.delete(sample.screenshot);
+      left.delete(screenshot);
       return left;
     });
-    return find(sample, []);
+    await find(sample, []);
   };
 
   return {
@@ -256,7 +262,6 @@ export function useFound(
     blocked: addBlocked(rows, flags, checked),
     error,
     searching,
-    skipping,
     search,
     searchSkipped,
     edit: (index, entry) => {

@@ -192,9 +192,9 @@ lists at most 12 finds. Add the ones you want, then select
 added, and every find an earlier list on that screenshot had that you
 didn't add, including the lists you closed with **Not these** and the finds
 it skipped for showing characters the reference does not need. A list that
-leaves some out says so; select **Show them again** to see them. Changing
-the text color, or closing the reference editor, also brings them
-back.
+leaves some out says how many; select **Show them again** to see them.
+A search with another text color than the one they were read with offers
+them too, and closing the reference editor forgets them.
 
 ## Check characters one at a time
 

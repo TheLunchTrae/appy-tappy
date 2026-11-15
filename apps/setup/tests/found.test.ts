@@ -35,6 +35,7 @@ const view: FoundView = {
     { region: at(120), text: { kind: 'failed', text: 'The text reader stopped. Type what this shows.' }, ...readWith },
   ],
   more: 0,
+  passed: 0,
 };
 
 describe('foundRows', () => {

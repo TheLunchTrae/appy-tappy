@@ -685,7 +685,8 @@ A run that touches neither the region nor a find added already is a find,
 unless an earlier search on the screenshot offered a find at the same
 region, margin included, and the user didn't add it (`passed`). Only that
 exact region is skipped, so text inside a large find the user passed over,
-such as part of the scene, is still found. A find's region follows the
+such as part of the scene, is still found, and the search counts the finds
+it skipped that way. A find's region follows the
 sizes and ink the sample gives, so a search from another box can offer a
 passed-over find again at a slightly other region. Finds of the sample's
 size come first, then each other size from the one nearest the sample's,

@@ -31,6 +31,8 @@ pub(super) struct Found {
     items: Vec<Item>,
     /// Finds past the most a search keeps.
     more: usize,
+    /// Finds left out for being at a region the user passed over.
+    passed: usize,
 }
 
 /// One find.
@@ -66,6 +68,8 @@ pub(crate) struct FoundView {
     pub(crate) finds: Vec<FindView>,
     /// Finds past the most a search keeps.
     pub(crate) more: usize,
+    /// Finds left out for being at a region the user passed over.
+    pub(crate) passed: usize,
 }
 
 /// One find as the UI shows it.
@@ -114,6 +118,7 @@ impl Found {
                 })
                 .collect(),
             more: self.more,
+            passed: self.passed,
         }
     }
 }
@@ -184,6 +189,7 @@ impl<H: Host> Owner<H> {
             screenshot,
             items,
             more: search.more,
+            passed: search.passed,
         };
         let view = found.view();
         if let Some(picked) = self.capture.picked_mut() {

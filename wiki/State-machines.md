@@ -2776,9 +2776,9 @@ stateDiagram-v2
   text color each was read with (`passOver`), and each later search on that
   screenshot with that text color sends them (`skippedOn`), so the owner
   leaves out a find at exactly such a region and the list reaches finds it
-  hasn't offered. A search that sent some says so (`skipping`), and **Show
-  them again** forgets the screenshot's and searches again
-  (`searchSkipped`). Closing the reference editor forgets them all
+  hasn't offered. The owner counts the finds it left out that way
+  (`passed`), and **Show them again** forgets the screenshot's and searches
+  again from the box the shown search started from (`searchSkipped`). Closing the reference editor forgets them all
   (`reset`). A find
   starts unticked. It is listed when its text may show only characters the
   value the reference is taught for needs, a lookalike digit counted as its
