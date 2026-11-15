@@ -132,7 +132,9 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
     unlisted === 0
       ? null
       : `Skipped ${plural(unlisted, 'find that shows', 'finds that show')} characters the reference does not need. A find you ticked before its text was read is skipped the same way.`,
-    view.more === 0 ? null : `${plural(view.more, 'more was', 'more were')} left out; add these, then find again.`,
+    view.more === 0
+      ? null
+      : `${plural(view.more, 'more was', 'more were')} left out. Add the ones you want, then find again for the rest.`,
   ].filter((part) => part !== null);
   return (
     <section className="autofill" aria-labelledby="found-title">

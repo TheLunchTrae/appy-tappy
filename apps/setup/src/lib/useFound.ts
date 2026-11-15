@@ -16,11 +16,13 @@ import {
   foundRows,
   keepAll,
   keptFound,
+  passOver,
   rereadOffer,
   rowFlags,
   withoutFlagged,
 } from './found.ts';
 import type { Picture } from './pixels.ts';
+import type { Rect } from './region.ts';
 import { background, useRepeat } from './repeat.ts';
 import { ask, useNewest } from './request.ts';
 
@@ -61,10 +63,12 @@ export interface Finder {
    * and the flagged ones whose text is its guess and was read with another. Ticks and typed text stay.
    */
   readonly reread: () => Promise<void>;
-  /** Adds the kept finds to the draft and forgets the search. */
+  /** Adds the kept finds to the draft and forgets the search; a later search skips the rest. */
   readonly add: () => void;
-  /** Forgets the search without adding any of it. */
+  /** Forgets the search without adding any of it; a later search skips its finds. */
   readonly dismiss: () => void;
+  /** Forgets the search and which finds the user passed over, for a reference edited afresh. */
+  readonly reset: () => void;
 }
 
 /**
@@ -82,6 +86,8 @@ export function useFound(
 ): Finder {
   const [view, setView] = useState<FoundView | null>(null);
   const [edits, setEdits] = useState<ReadonlyMap<number, FoundEntry>>(new Map());
+  // The finds each screenshot's searches offered that the user did not add, which a later search there skips.
+  const [passed, setPassed] = useState<ReadonlyMap<number, readonly Rect[]>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   // Each search, reread and dismissal begins a turn, so an answer sent before one is ignored.
@@ -188,17 +194,23 @@ export function useFound(
     );
   };
 
+  const passOverRest = (): void => {
+    if (view !== null) {
+      setPassed((current) => passOver(current, view.screenshot, rows));
+    }
+  };
+
   const search = async (sample: Box): Promise<void> => {
     const { ink, tolerance, boxes } = draft;
     const { screenshot, region } = sample;
-    // The server leaves these out, so a search after adding offers the rest.
+    // The server leaves these out, so a search after adding or passing over finds offers the rest.
     const added = boxesOn(boxes, screenshot)
       .filter((box) => box.id !== sample.id)
       .map((box) => box.region);
     const current = turn.begin();
     setSearching(true);
     try {
-      const result = await findLike(screenshot, region, added, ink, tolerance);
+      const result = await findLike(screenshot, region, added, passed.get(screenshot) ?? [], ink, tolerance);
       if (current()) {
         setView(result);
         setEdits(new Map());
@@ -257,8 +269,16 @@ export function useFound(
         return;
       }
       addBoxes(keptFound(view.screenshot, rows));
+      passOverRest();
       forget();
     },
-    dismiss: forget,
+    dismiss: () => {
+      passOverRest();
+      forget();
+    },
+    reset: () => {
+      setPassed(new Map());
+      forget();
+    },
   };
 }

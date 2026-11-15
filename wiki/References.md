@@ -187,8 +187,12 @@ finds whose characters are about as tall as the text in it; a comma or a
 mark below them does not count. Text with characters under 8 pixels tall is
 found only when the text in the box is that small too, and anything taller
 than a quarter of the screenshot is not taken for text. One search
-lists at most 12 finds; add those, then select **Find more like it** again, and
-it lists the rest, leaving out what you added.
+lists at most 12 finds. Add the ones you want, then select
+**Find more like it** again, and it lists the rest: it leaves out what you
+added, and every find an earlier list showed you that you left unticked,
+including the lists you closed with **Not these**. A find it skipped for
+showing characters the reference does not need is left out too. Closing the
+reference editor forgets what you left unticked.
 
 ## Check characters one at a time
 

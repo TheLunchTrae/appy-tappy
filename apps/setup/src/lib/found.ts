@@ -259,3 +259,19 @@ export function rereadOffer(
     .map((row) => row.index);
   return { indexes, blocked: indexes.length === 0 ? REREAD_SAME : null };
 }
+
+/**
+ * `passed`, the regions by screenshot that a later search there skips, with each find of `rows` on screenshot
+ * `screenshot` that is not added, ticked or not, listed or not: the finds the user passed over.
+ */
+export function passOver(
+  passed: ReadonlyMap<number, readonly Rect[]>,
+  screenshot: number,
+  rows: readonly FoundRow[],
+): ReadonlyMap<number, readonly Rect[]> {
+  const left = rows.filter((row) => !row.keep).map((row) => row.region);
+  if (left.length === 0) {
+    return passed;
+  }
+  return new Map(passed).set(screenshot, [...(passed.get(screenshot) ?? []), ...left]);
+}

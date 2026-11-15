@@ -558,12 +558,16 @@ fn sizes_among(blobs: &[Bounds], sample: u32) -> Vec<u32> {
 /// other size the ink has ([`sizes_among`]), up to characters as tall as
 /// one part in [`TALLEST_PART`] of the image, or twice the sample's line
 /// where that is taller. It leaves out text that meets any of `skip`, such
-/// as finds added already. `None` when `region` holds no ink or lies
+/// as finds added already, and each find at one of `passed`, such as the
+/// finds an earlier search offered and the user left out. A find only
+/// inside a passed one is still found, so passing over a large find does
+/// not hide the text it covers. `None` when `region` holds no ink or lies
 /// outside `image`.
 pub(crate) fn like(
     image: &Image,
     region: Region,
     skip: &[Region],
+    passed: &[Region],
     reader: &DigitReader,
 ) -> Option<Search> {
     let ink = reader.ink_like(image, region)?;
@@ -586,13 +590,17 @@ pub(crate) fn like(
             ..Sought::of(height, height)
         })
         .collect();
-    let mut found: Vec<(Run, u32)> = sized_runs(blobs, &sizes)
+    let mut found: Vec<(Run, u32, Region)> = sized_runs(blobs, &sizes)
         .into_iter()
         .filter(|(run, _)| {
             !run.bounds.meets(region) && !skip.iter().any(|&added| run.bounds.meets(added))
         })
+        .filter_map(|(run, height)| {
+            let at = with_margin(run.bounds, height, &ink)?;
+            (!passed.contains(&at)).then_some((run, height, at))
+        })
         .collect();
-    found.sort_by_key(|&(run, height)| {
+    found.sort_by_key(|&(run, height, _)| {
         (
             height.abs_diff(sample),
             height,
@@ -604,14 +612,13 @@ pub(crate) fn like(
     let finds = found
         .into_iter()
         .take(MAX_FOUND)
-        .filter_map(|(run, height)| {
-            let region = with_margin(run.bounds, height, &ink)?;
+        .map(|(run, height, region)| {
             let line = image.crop(region).and_then(|crop| ink_line(&crop, reader));
-            Some(Find {
+            Find {
                 region,
                 line,
                 other_size: (height != sample).then_some(run.tallest),
-            })
+            }
         })
         .collect();
     Some(Search { finds, more })
@@ -688,7 +695,7 @@ mod tests {
         let boxes = [pair(2, 2, 8), pair(30, 20, 8)].concat();
         let image = screenshot(60, 40, &boxes);
         let search =
-            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(search.more, 0);
         assert_eq!(search.finds.len(), 1);
         let find = &search.finds[0];
@@ -729,7 +736,7 @@ mod tests {
         .expect("matching length");
         let by_contrast = DigitReader::new(InkRule::Contrast { tolerance: 30 });
         let sample = region(0, 0, 12, 12);
-        let search = like(&image, sample, &[], &by_contrast).expect("the sample has ink");
+        let search = like(&image, sample, &[], &[], &by_contrast).expect("the sample has ink");
         assert_eq!(
             search
                 .finds
@@ -967,7 +974,7 @@ mod tests {
         .concat();
         let image = screenshot(60, 120, &boxes);
         let search =
-            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(
             places(&search),
             // Each with a margin of a quarter of its own size.
@@ -991,14 +998,14 @@ mod tests {
         boxes.extend(pair(20, 60, 7));
         let image = screenshot(60, 120, &boxes);
         let sample = region(0, 0, 12, 16);
-        let search = like(&image, sample, &[], &reader()).expect("the sample has ink");
+        let search = like(&image, sample, &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(search.finds, []);
         // Text 8 tall and a bar 30 tall are finds.
         let mut boxes = pair(2, 2, 12).to_vec();
         boxes.push((50, 2, 6, 30));
         boxes.extend(pair(20, 60, 8));
         let image = screenshot(60, 120, &boxes);
-        let search = like(&image, sample, &[], &reader()).expect("the sample has ink");
+        let search = like(&image, sample, &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(places(&search), [(18, 58, Some(8)), (43, 0, Some(30))]);
     }
 
@@ -1009,7 +1016,7 @@ mod tests {
         let boxes = [pair(2, 2, 8), pair(20, 2, 16), pair(40, 2, 17)].concat();
         let image = screenshot(60, 40, &boxes);
         let search =
-            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(places(&search), [(16, 0, Some(16))]);
     }
 
@@ -1023,7 +1030,7 @@ mod tests {
         boxes.push((38, 62, 2, 9));
         let image = screenshot(60, 120, &boxes);
         let sample = region(0, 0, 12, 12);
-        let search = like(&image, sample, &[], &reader()).expect("the sample has ink");
+        let search = like(&image, sample, &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(places(&search), [(36, 60, None), (23, 33, Some(30))]);
         // A mark 12 tall is another size than the sample's, and part of
         // the larger text's run, which is looked for before text 12 tall.
@@ -1031,7 +1038,7 @@ mod tests {
         boxes.extend(pair(30, 40, 30));
         boxes.push((38, 62, 2, 12));
         let image = screenshot(60, 120, &boxes);
-        let search = like(&image, sample, &[], &reader()).expect("the sample has ink");
+        let search = like(&image, sample, &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(places(&search), [(23, 33, Some(30))]);
         assert_eq!(search.finds[0].region, region(23, 33, 24, 48));
     }
@@ -1048,7 +1055,7 @@ mod tests {
         boxes.push((100, 90, 4, 30));
         let image = screenshot(120, 240, &boxes);
         let search =
-            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(places(&search), [(67, 101, Some(12)), (5, 25, Some(60))]);
     }
 
@@ -1063,7 +1070,7 @@ mod tests {
         boxes.push((40, 50, 3, 20));
         let image = screenshot(80, 120, &boxes);
         let search =
-            like(&image, region(0, 0, 14, 16), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 14, 16), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(places(&search), [(25, 45, Some(20))]);
     }
 
@@ -1074,12 +1081,12 @@ mod tests {
         let boxes = [pair(2, 2, 8), pair(20, 40, 22), pair(40, 40, 25)].concat();
         let image = screenshot(80, 120, &boxes);
         let search =
-            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(places(&search), [(15, 35, Some(25))]);
         let boxes = [pair(2, 2, 8), pair(20, 40, 22), pair(20, 80, 25)].concat();
         let image = screenshot(80, 120, &boxes);
         let search =
-            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(places(&search), [(15, 35, Some(22)), (15, 75, Some(25))]);
     }
 
@@ -1089,7 +1096,7 @@ mod tests {
         let boxes = [pair(2, 2, 8), pair(2, 20, 8), pair(20, 20, 8)].concat();
         let image = screenshot(60, 40, &boxes);
         let search =
-            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
         let lefts: Vec<u32> = search.finds.iter().map(|find| find.region.x()).collect();
         assert_eq!(lefts, [0, 18]);
     }
@@ -1104,7 +1111,8 @@ mod tests {
             }
         }
         let image = screenshot(64, 66, &boxes);
-        let search = like(&image, region(0, 0, 6, 8), &[], &reader()).expect("the sample has ink");
+        let search =
+            like(&image, region(0, 0, 6, 8), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(search.finds.len(), MAX_FOUND);
         assert_eq!(search.more, 14 - MAX_FOUND);
         let first: Vec<(u32, u32)> = search
@@ -1119,8 +1127,11 @@ mod tests {
     #[test]
     fn a_region_without_ink_or_outside_the_screenshot_finds_nothing() {
         let image = screenshot(20, 20, &pair(10, 10, 6));
-        assert_eq!(like(&image, region(0, 0, 5, 5), &[], &reader()), None);
-        assert_eq!(like(&image, region(15, 15, 10, 10), &[], &reader()), None);
+        assert_eq!(like(&image, region(0, 0, 5, 5), &[], &[], &reader()), None);
+        assert_eq!(
+            like(&image, region(15, 15, 10, 10), &[], &[], &reader()),
+            None
+        );
     }
 
     #[test]
@@ -1128,7 +1139,7 @@ mod tests {
         let boxes = [pair(30, 2, 8), pair(0, 32, 8)].concat();
         let image = screenshot(40, 40, &boxes);
         let search =
-            like(&image, region(28, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+            like(&image, region(28, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(search.finds[0].region, region(0, 30, 9, 10));
     }
 
@@ -1140,7 +1151,7 @@ mod tests {
         boxes.extend(pair(30, 20, 8));
         let image = screenshot(60, 40, &boxes);
         let search =
-            like(&image, region(0, 0, 12, 14), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 12, 14), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(search.finds.len(), 1);
     }
 
@@ -1152,7 +1163,7 @@ mod tests {
         boxes.push((38, 25, 2, 7));
         let image = screenshot(60, 40, &boxes);
         let search =
-            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
         assert_eq!(search.finds.len(), 1);
         assert_eq!(search.finds[0].region, region(28, 18, 14, 16));
     }
@@ -1168,10 +1179,11 @@ mod tests {
             }
         }
         let image = screenshot(64, 66, &boxes);
-        let first = like(&image, region(0, 0, 6, 8), &[], &reader()).expect("the sample has ink");
+        let first =
+            like(&image, region(0, 0, 6, 8), &[], &[], &reader()).expect("the sample has ink");
         let added: Vec<Region> = first.finds.iter().map(|find| find.region).collect();
         let second =
-            like(&image, region(0, 0, 6, 8), &added, &reader()).expect("the sample has ink");
+            like(&image, region(0, 0, 6, 8), &added, &[], &reader()).expect("the sample has ink");
         assert_eq!(second.more, 0);
         let rest: Vec<(u32, u32)> = second
             .finds
@@ -1179,6 +1191,43 @@ mod tests {
             .map(|find| (find.region.x(), find.region.y()))
             .collect();
         assert_eq!(rest, [(19, 54), (39, 54)]);
+    }
+
+    #[test]
+    fn finds_passed_over_are_not_found_again_and_the_search_reaches_the_rest() {
+        // Fourteen single characters; the user left the first twelve finds
+        // out, so a second search offers the last two.
+        let mut boxes = vec![(1, 1, 4, 6)];
+        for row in 0..7 {
+            for column in 0..2 {
+                boxes.push((20 + column * 20, 1 + row * 9, 4, 6));
+            }
+        }
+        let image = screenshot(64, 66, &boxes);
+        let first =
+            like(&image, region(0, 0, 6, 8), &[], &[], &reader()).expect("the sample has ink");
+        assert_eq!(first.more, 2);
+        let passed: Vec<Region> = first.finds.iter().map(|find| find.region).collect();
+        let second =
+            like(&image, region(0, 0, 6, 8), &[], &passed, &reader()).expect("the sample has ink");
+        assert_eq!(second.more, 0);
+        let rest: Vec<(u32, u32)> = second
+            .finds
+            .iter()
+            .map(|find| (find.region.x(), find.region.y()))
+            .collect();
+        assert_eq!(rest, [(19, 54), (39, 54)]);
+    }
+
+    #[test]
+    fn text_inside_a_find_passed_over_is_still_found() {
+        let boxes = [pair(2, 2, 8), pair(30, 20, 8)].concat();
+        let image = screenshot(60, 40, &boxes);
+        let around = region(20, 10, 30, 30);
+        let search = like(&image, region(0, 0, 12, 12), &[], &[around], &reader())
+            .expect("the sample has ink");
+        let regions: Vec<Region> = search.finds.iter().map(|find| find.region).collect();
+        assert_eq!(regions, [region(28, 18, 11, 12)]);
     }
 
     #[test]

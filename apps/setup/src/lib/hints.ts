@@ -83,7 +83,7 @@ export const EXPECTED_HINT =
 
 /** Finding more text like the selected box. */
 export const FIND_LIKE_HINT =
-  "Looks on the selected box's screenshot for other text that stands out as the text in the box does, at any size, and reads each as text. Text as tall as the box's comes first, and a find of another size says how tall it is. For a reference you teach from a value, it lists only text that shows characters the value needs. Each one you tick and add becomes a box, and a reference that learns a size reads it better. Draw the box tightly around the text first, so its size is right.";
+  "Looks on the selected box's screenshot for other text that stands out as the text in the box does, at any size, and reads each as text. Text as tall as the box's comes first, and a find of another size says how tall it is. For a reference you teach from a value, it lists only text that shows characters the value needs. Each one you tick and add becomes a box, and a reference that learns a size reads it better. A later search skips the finds you left unticked, so it lists ones it hasn't shown you. Draw the box tightly around the text first, so its size is right.";
 
 /** What the found text's list shows, and what each row's box and field do. */
 export const FOUND_HINT =
