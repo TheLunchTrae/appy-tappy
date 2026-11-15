@@ -491,8 +491,10 @@ tray stops on its own, the runtime logs why and keeps running without it.
 
 ### Footprint
 
-The runtime runs all day beside games, so it has to stay small and use next to
-no CPU. `mise run rust:footprint` builds the runtime the installer ships, with
+The runtime runs all day beside games, so it has to use little memory and next
+to no CPU. Its file size matters far less: the owner's decision is that a
+larger binary is fine, and its target only catches growth that is out of all
+proportion. `mise run rust:footprint` builds the runtime the installer ships, with
 the `dist` profile, and
 [`scripts/footprint.ps1`](https://github.com/TheLunchTrae/appy-tappy/blob/main/scripts/footprint.ps1)
 runs it on Windows and fails when a measurement exceeds its target. The
