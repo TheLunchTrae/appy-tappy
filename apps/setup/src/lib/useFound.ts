@@ -16,9 +16,11 @@ import {
   foundRows,
   keepAll,
   keptFound,
+  type PassedFind,
   passOver,
   rereadOffer,
   rowFlags,
+  skippedOn,
   withoutFlagged,
 } from './found.ts';
 import type { Picture } from './pixels.ts';
@@ -46,8 +48,15 @@ export interface Finder {
   /** Why the last search, or the last check of the finds, failed. */
   readonly error: string | null;
   readonly searching: boolean;
-  /** Searches the screenshot `sample` is on for text like it, away from the boxes there already. */
+  /** Whether the search shown left out finds the user passed over before. */
+  readonly skipping: boolean;
+  /**
+   * Searches the screenshot `sample` is on for text like it, away from the boxes there already and from the finds
+   * the user passed over there.
+   */
   readonly search: (sample: Box) => Promise<void>;
+  /** Searches as {@link Finder.search} does, but forgets which finds the user passed over on `sample`'s screenshot. */
+  readonly searchSkipped: (sample: Box) => Promise<void>;
   readonly edit: (index: number, entry: FoundEntry) => void;
   /** Ticks every listed find, or with `keep` false leaves every one out. */
   readonly keepAll: (keep: boolean) => void;
@@ -87,7 +96,8 @@ export function useFound(
   const [view, setView] = useState<FoundView | null>(null);
   const [edits, setEdits] = useState<ReadonlyMap<number, FoundEntry>>(new Map());
   // The finds each screenshot's searches offered that the user did not add, which a later search there skips.
-  const [passed, setPassed] = useState<ReadonlyMap<number, readonly Rect[]>>(new Map());
+  const [passed, setPassed] = useState<ReadonlyMap<number, readonly PassedFind[]>>(new Map());
+  const [skipping, setSkipping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   // Each search, reread and dismissal begins a turn, so an answer sent before one is ignored.
@@ -200,7 +210,7 @@ export function useFound(
     }
   };
 
-  const search = async (sample: Box): Promise<void> => {
+  const find = async (sample: Box, skip: readonly Rect[]): Promise<void> => {
     const { ink, tolerance, boxes } = draft;
     const { screenshot, region } = sample;
     // The server leaves these out, so a search after adding or passing over finds offers the rest.
@@ -210,9 +220,10 @@ export function useFound(
     const current = turn.begin();
     setSearching(true);
     try {
-      const result = await findLike(screenshot, region, added, passed.get(screenshot) ?? [], ink, tolerance);
+      const result = await findLike(screenshot, region, added, [...skip], ink, tolerance);
       if (current()) {
         setView(result);
+        setSkipping(skip.length > 0);
         setEdits(new Map());
         setError(null);
       }
@@ -226,6 +237,17 @@ export function useFound(
     }
   };
 
+  const search = (sample: Box): Promise<void> => find(sample, skippedOn(passed, sample.screenshot, draft.ink));
+
+  const searchSkipped = (sample: Box): Promise<void> => {
+    setPassed((current) => {
+      const left = new Map(current);
+      left.delete(sample.screenshot);
+      return left;
+    });
+    return find(sample, []);
+  };
+
   return {
     view,
     rows,
@@ -234,7 +256,9 @@ export function useFound(
     blocked: addBlocked(rows, flags, checked),
     error,
     searching,
+    skipping,
     search,
+    searchSkipped,
     edit: (index, entry) => {
       setEdits((current) => new Map(current).set(index, entry));
     },

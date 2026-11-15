@@ -16,6 +16,7 @@ import {
   listed,
   passOver,
   rowFlags,
+  skippedOn,
   withoutFlagged,
 } from '../src/lib/found.ts';
 
@@ -240,20 +241,32 @@ describe('passOver', () => {
     ),
   };
   const rows = foundRows(unfit, new Map([[0, { keep: true, text: '93.4', typed: true }]]), [], digits);
+  const passedAt = (x: number) => ({ region: at(x), ink: white });
 
   test('a later search skips every find that was not added, listed or not', () => {
     const passed = passOver(new Map(), view.screenshot, rows);
-    expect(passed.get(view.screenshot)).toEqual([at(40), at(80), at(120)]);
+    expect(passed.get(view.screenshot)).toEqual([passedAt(40), passedAt(80), passedAt(120)]);
+    expect(skippedOn(passed, view.screenshot, white)).toEqual([at(40), at(80), at(120)]);
   });
 
   test('passing over adds to what earlier searches passed over on the same screenshot only', () => {
     const earlier = new Map([
-      [view.screenshot, [at(200)]],
-      [9, [at(0)]],
+      [view.screenshot, [passedAt(200)]],
+      [9, [passedAt(0)]],
     ]);
     const passed = passOver(earlier, view.screenshot, rows);
-    expect(passed.get(view.screenshot)).toEqual([at(200), at(40), at(80), at(120)]);
-    expect(passed.get(9)).toEqual([at(0)]);
+    expect(skippedOn(passed, view.screenshot, white)).toEqual([at(200), at(40), at(80), at(120)]);
+    expect(skippedOn(passed, 9, white)).toEqual([at(0)]);
+    expect(skippedOn(passed, 5, white)).toEqual([]);
+  });
+
+  test('a search with another text color offers again what was passed over as read with the old one', () => {
+    const red = { red: 255, green: 0, blue: 0 };
+    const passed = new Map([
+      [view.screenshot, [passedAt(0), { region: at(40), ink: null }, { region: at(80), ink: red }]],
+    ]);
+    expect(skippedOn(passed, view.screenshot, white)).toEqual([at(0)]);
+    expect(skippedOn(passed, view.screenshot, null)).toEqual([at(40)]);
   });
 
   test('adding every find passes over none', () => {
@@ -263,7 +276,7 @@ describe('passOver', () => {
       [],
       [],
     );
-    const earlier = new Map([[view.screenshot, [at(200)]]]);
+    const earlier = new Map([[view.screenshot, [passedAt(200)]]]);
     expect(passOver(earlier, view.screenshot, all)).toBe(earlier);
   });
 });

@@ -15,6 +15,8 @@ interface PanelProps {
   readonly findBlocked: string | null;
   /** Starts the search, from the selected box. */
   readonly onFind: () => void;
+  /** Searches again from the selected box, offering the finds the user left out of earlier lists too. */
+  readonly onFindSkipped: () => void;
   /** Opens the check of the finds' characters, or null while it is open. */
   readonly onCheck: (() => void) | null;
 }
@@ -66,7 +68,7 @@ function KeepAll({
 }
 
 /** The inspector's part for finding more text like the selected box, and adding what the user ticks as boxes. */
-export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps) {
+export function FoundPanel({ finder, findBlocked, onFind, onFindSkipped, onCheck }: PanelProps) {
   const { view, blocked: addBlocked, error, searching, flags, crops } = finder;
   // Finds that show characters the reference does not need are left out of the list.
   const rows = listed(finder.rows);
@@ -268,6 +270,14 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
         </>
       )}
       {skipped.length === 0 ? null : <p className="note">{skipped.join(' ')}</p>}
+      {finder.skipping ? (
+        <div className="row">
+          <p className="note">It skips the finds you didn't add from earlier lists on this screenshot.</p>
+          <button type="button" className="btn small" disabled={searching} onClick={onFindSkipped}>
+            Show them again
+          </button>
+        </div>
+      ) : null}
       {error === null ? null : <p className="warn">{error}</p>}
       <div className="row">
         {rows.length === 0 ? null : (

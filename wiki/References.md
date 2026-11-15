@@ -189,10 +189,12 @@ found only when the text in the box is that small too, and anything taller
 than a quarter of the screenshot is not taken for text. One search
 lists at most 12 finds. Add the ones you want, then select
 **Find more like it** again, and it lists the rest: it leaves out what you
-added, and every find an earlier list showed you that you left unticked,
-including the lists you closed with **Not these**. A find it skipped for
-showing characters the reference does not need is left out too. Closing the
-reference editor forgets what you left unticked.
+added, and every find an earlier list on that screenshot had that you
+didn't add, including the lists you closed with **Not these** and the finds
+it skipped for showing characters the reference does not need. A list that
+leaves some out says so; select **Show them again** to see them. Changing
+the text color, or closing the reference editor, also brings them
+back.
 
 ## Check characters one at a time
 

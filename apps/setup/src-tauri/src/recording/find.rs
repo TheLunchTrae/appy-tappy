@@ -559,8 +559,8 @@ fn sizes_among(blobs: &[Bounds], sample: u32) -> Vec<u32> {
 /// one part in [`TALLEST_PART`] of the image, or twice the sample's line
 /// where that is taller. It leaves out text that meets any of `skip`, such
 /// as finds added already, and each find at one of `passed`, such as the
-/// finds an earlier search offered and the user left out. A find only
-/// inside a passed one is still found, so passing over a large find does
+/// finds an earlier search offered and the user left out. Only a find at
+/// exactly such a region is left out, so passing over a large find does
 /// not hide the text it covers. `None` when `region` holds no ink or lies
 /// outside `image`.
 pub(crate) fn like(

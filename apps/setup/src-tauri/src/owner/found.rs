@@ -427,6 +427,25 @@ mod tests {
     }
 
     #[test]
+    fn a_search_leaves_out_the_finds_passed_over() {
+        let (mut harness, _handler) = searchable();
+        let found = harness
+            .ask(|owner| {
+                owner.find_like(
+                    0,
+                    region(0, 0, 4, 5),
+                    &[],
+                    &[region(7, 0, 4, 5)],
+                    Some(red()),
+                    0,
+                )
+            })
+            .expect("found");
+        let regions: Vec<RegionDef> = found.finds.iter().map(|find| find.region).collect();
+        assert_eq!(regions, [region(0, 6, 4, 5)]);
+    }
+
+    #[test]
     fn a_search_finds_the_other_marks_and_has_each_read() {
         let (mut harness, _handler) = searchable();
         let found = harness.ask(find_like(region(0, 0, 4, 5))).expect("found");

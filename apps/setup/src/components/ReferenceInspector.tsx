@@ -235,6 +235,11 @@ export function ReferenceInspector({
                   background(finder.search(chosen));
                 }
               }}
+              onFindSkipped={() => {
+                if (chosen !== null) {
+                  background(finder.searchSkipped(chosen));
+                }
+              }}
             />
           )
         }

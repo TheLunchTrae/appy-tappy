@@ -2772,10 +2772,13 @@ stateDiagram-v2
 - The UI keeps each find's tick, its text, and whether the user typed it
   (`useFound`) until a new search or a dismissal; a reread keeps them.
   **Add** and **Not these** also pass over the finds not added, ticked or
-  not and listed or not: the UI keeps their regions by screenshot
-  (`passOver`), and each later search on that screenshot sends them, so the
-  owner leaves out a find at exactly such a region and the list reaches
-  finds it hasn't offered. Closing the reference editor forgets them
+  not and listed or not: the UI keeps their regions by screenshot, with the
+  text color each was read with (`passOver`), and each later search on that
+  screenshot with that text color sends them (`skippedOn`), so the owner
+  leaves out a find at exactly such a region and the list reaches finds it
+  hasn't offered. A search that sent some says so (`skipping`), and **Show
+  them again** forgets the screenshot's and searches again
+  (`searchSkipped`). Closing the reference editor forgets them all
   (`reset`). A find
   starts unticked. It is listed when its text may show only characters the
   value the reference is taught for needs, a lookalike digit counted as its
