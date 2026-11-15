@@ -2129,12 +2129,13 @@ stateDiagram-v2
 
 ### Live draw
 
-While a value has no place yet, the capture screen's first step lays a region
+While the live view shows, the capture screen's first step lays a region
 surface over the live window, so the user can drag where the value shows
 without taking a screenshot first. The press takes the screenshot the region
-goes on. `liveDraw` in `apps/setup/src/lib/liveDraw.ts` is the pure
-`(state, event)` transition, and `useLiveDraw` there holds the state, numbers
-the presses, and takes the screenshot.
+goes on, and the box drawn replaces any region already placed. `liveDraw` in
+`apps/setup/src/lib/liveDraw.ts` is the pure `(state, event)` transition,
+and `useLiveDraw` there holds the state, numbers the presses, and takes the
+screenshot.
 
 ```mermaid
 stateDiagram-v2
@@ -2181,10 +2182,17 @@ stateDiagram-v2
   it. One that arrives for another press than the one under way is dropped,
   and so is one that arrives once its press already has a screenshot.
 
-The surface shows only while the first step sets a new value's place, the
-live view shows, the value has no region, no recording runs, no review is
-open, and no color is being picked (`drawsLive` in
-`apps/setup/src/components/Capture.tsx`).
+The surface shows only while the first step sets the value's place, the live
+view shows, no recording runs, no review is open, and no color is being
+picked (`liveDrawFrame` in `apps/setup/src/lib/liveDraw.ts`). The live frame
+is the window shrunk to the stage's width, so its size alone doesn't tell the
+window's. A placed region shows over it, scaled, while the frame is one of a
+window of the size the region is drawn at (`regionOverFrame`), until a press.
+The box goes on the screenshot its press takes, except that an edited saved
+value's goes only on a screenshot of the window size it was drawn at
+(`regionFromLiveBox`). A press that places nothing takes a screenshot like
+**Take screenshot**, except that a region placed at another size stays where
+it is and that screenshot is removed again.
 
 ### Value steps
 

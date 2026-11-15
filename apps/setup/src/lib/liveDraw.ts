@@ -4,7 +4,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 
-import type { Rect, Size } from './region.ts';
+import { type Rect, type Size, scaleRect } from './region.ts';
 import type { Taken } from './useScreenshots.ts';
 
 /** A box drawn over the live view, in the pixels of the live frame of size `at`. */
@@ -106,6 +106,51 @@ export function liveSizeAfter(current: Size | null, frame: Size, frozen: boolean
     return current;
   }
   return frame;
+}
+
+/** What decides whether a drag over the live view draws the value's region. */
+export interface LiveDrawScene {
+  /** Whether Where to read shows, with no reference being taught. */
+  readonly settingPlace: boolean;
+  /** The size of the live frame shown, or null while a screenshot shows or no frame has arrived. */
+  readonly live: Size | null;
+  /** Whether a recording runs, a review covers the picture, or a click picks a color. */
+  readonly occupied: boolean;
+}
+
+/** The live frame the stage draws the value's region over, placed or not, or null when it draws none there. */
+export function liveDrawFrame({ settingPlace, live, occupied }: LiveDrawScene): Size | null {
+  return settingPlace && !occupied ? live : null;
+}
+
+/**
+ * Whether `frame` is a live frame of a `window`-sized window: the preview shrinks a window to a width and rounds its
+ * height down, so a frame alone does not tell the window's size.
+ */
+function isFrameOf(frame: Size, window: Size): boolean {
+  if (window.width <= 0 || frame.width > window.width) {
+    return false;
+  }
+  return frame.height === Math.max(1, Math.floor((window.height * frame.width) / window.width));
+}
+
+/**
+ * `region`, drawn on a screenshot of size `drawnAt`, outlined over a live frame of size `frame`, or null when the
+ * frame is not one of a window of that size, where it would land beside the value.
+ */
+export function regionOverFrame(region: Rect | null, drawnAt: Size | null, frame: Size): Rect | null {
+  return region === null || drawnAt === null || !isFrameOf(frame, drawnAt) ? null : scaleRect(region, drawnAt, frame);
+}
+
+/**
+ * The region a box drawn over the live view places on `shot`, the screenshot its press took, or null when it places
+ * none: no box was drawn, or an edited saved value keeps its region to window size `keepsTo` and the shot has another.
+ */
+export function regionFromLiveBox(box: LiveBox | null, shot: Size, keepsTo: Size | null): Rect | null {
+  if (box === null || (keepsTo !== null && (keepsTo.width !== shot.width || keepsTo.height !== shot.height))) {
+    return null;
+  }
+  return scaleRect(box.rect, box.at, shot);
 }
 
 /**

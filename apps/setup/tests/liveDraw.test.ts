@@ -5,8 +5,11 @@ import {
   type LiveDraw,
   type LiveDrawEvent,
   liveDraw,
+  liveDrawFrame,
   liveShown,
   liveSizeAfter,
+  regionFromLiveBox,
+  regionOverFrame,
 } from '../src/lib/liveDraw.ts';
 
 const box = { rect: { x: 1, y: 2, width: 30, height: 10 }, at: { width: 800, height: 450 } };
@@ -117,5 +120,38 @@ describe('drawing over the live view', () => {
     expect(liveSizeAfter(held, { width: 640, height: 480 }, false)).toEqual({ width: 640, height: 480 });
     expect(liveSizeAfter(held, { ...held }, false)).toBe(held);
     expect(liveSizeAfter(null, held, false)).toBe(held);
+  });
+});
+
+describe('where the live view takes a drawn region', () => {
+  const frame = { width: 800, height: 450 };
+  const scene = { settingPlace: true, live: frame, occupied: false };
+  test('draws the region over it, placed or not, only in Where to read with a frame and nothing else under way', () => {
+    expect(liveDrawFrame(scene)).toBe(frame);
+    expect(liveDrawFrame({ ...scene, settingPlace: false })).toBeNull();
+    expect(liveDrawFrame({ ...scene, live: null })).toBeNull();
+    expect(liveDrawFrame({ ...scene, occupied: true })).toBeNull();
+  });
+  test('outlines a placed region over a frame shrunk from a window of the size it was drawn at', () => {
+    const region = { x: 1440, y: 54, width: 400, height: 108 };
+    expect(regionOverFrame(region, { width: 1920, height: 1080 }, { width: 1200, height: 675 })).toEqual({
+      x: 900,
+      y: 33,
+      width: 250,
+      height: 69,
+    });
+    expect(regionOverFrame(region, { width: 1920, height: 1080 }, { width: 1920, height: 1080 })).toEqual(region);
+    // A window of another shape, or a frame wider than the window, is not the window the region was drawn on.
+    expect(regionOverFrame(region, { width: 1920, height: 1080 }, { width: 1200, height: 900 })).toBeNull();
+    expect(regionOverFrame(region, { width: 1600, height: 900 }, { width: 1920, height: 1080 })).toBeNull();
+    expect(regionOverFrame(null, { width: 1920, height: 1080 }, frame)).toBeNull();
+  });
+  test("places a box on the screenshot its press took, except an edit's on a window of another size", () => {
+    const box = { rect: { x: 600, y: 20, width: 100, height: 25 }, at: frame };
+    const shot = { width: 1920, height: 1080 };
+    expect(regionFromLiveBox(box, shot, null)).toEqual({ x: 1440, y: 48, width: 240, height: 60 });
+    expect(regionFromLiveBox(box, shot, shot)).toEqual({ x: 1440, y: 48, width: 240, height: 60 });
+    expect(regionFromLiveBox(box, shot, { width: 1600, height: 900 })).toBeNull();
+    expect(regionFromLiveBox(null, shot, null)).toBeNull();
   });
 });
