@@ -31,8 +31,6 @@ pub(super) struct Found {
     items: Vec<Item>,
     /// Finds past the most a search keeps.
     more: usize,
-    /// Runs of ink of another size.
-    other_sizes: usize,
 }
 
 /// One find.
@@ -41,6 +39,9 @@ struct Item {
     region: Region,
     image: Image,
     text: Text,
+    /// How tall its characters are, in pixels, when that is another size
+    /// than the sample's.
+    other_size: Option<u32>,
     /// The text color, if any, and tolerance its ink was last cut with for
     /// the text reader.
     read_with: (Option<ColorDef>, u8),
@@ -59,12 +60,12 @@ pub(crate) struct FoundView {
     pub(crate) id: u64,
     /// The screenshot it searched.
     pub(crate) screenshot: usize,
-    /// Each find, top to bottom and left to right.
+    /// Each find: those of the sample's size first, then each other size
+    /// from the nearest to the sample's, and each size's top to bottom and
+    /// left to right.
     pub(crate) finds: Vec<FindView>,
     /// Finds past the most a search keeps.
     pub(crate) more: usize,
-    /// Runs of ink of another size, left out.
-    pub(crate) other_sizes: usize,
 }
 
 /// One find as the UI shows it.
@@ -76,6 +77,11 @@ pub(crate) struct FindView {
     pub(crate) region: RegionDef,
     /// What the text reader made of it.
     pub(crate) text: Text,
+    /// How tall its characters are, in pixels, when that is another size
+    /// than the sample's.
+    #[cfg_attr(test, ts(optional))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) other_size: Option<u32>,
     /// The reference's text color its ink was last cut with for the text
     /// reader, which reads the same ink as the same text, or `None` when
     /// it was cut by contrast.
@@ -101,13 +107,13 @@ impl Found {
                 .map(|item| FindView {
                     region: RegionDef::from(item.region),
                     text: item.text.clone(),
+                    other_size: item.other_size,
                     ink: item.read_with.0,
                     tolerance: item.read_with.1,
                     characters: item.characters.clone(),
                 })
                 .collect(),
             more: self.more,
-            other_sizes: self.other_sizes,
         }
     }
 }
@@ -115,7 +121,7 @@ impl Found {
 impl<H: Host> Owner<H> {
     /// Finds text like what `region` of screenshot `screenshot` shows, as
     /// a reference with the text color `ink`, if any, and `tolerance`
-    /// tells it from the region's background, and at its size,
+    /// tells it from the region's background, at any size,
     /// elsewhere on that screenshot and away from `added`, the finds added
     /// already, in place of any earlier search, and sends each find to the
     /// text reader.
@@ -164,6 +170,7 @@ impl<H: Host> Owner<H> {
                 characters: character::of(&cropped, &reader),
                 image: cropped,
                 text,
+                other_size: found.other_size,
                 read_with: (ink, tolerance),
             });
         }
@@ -172,7 +179,6 @@ impl<H: Host> Owner<H> {
             screenshot,
             items,
             more: search.more,
-            other_sizes: search.other_sizes,
         };
         let view = found.view();
         if let Some(picked) = self.capture.picked_mut() {

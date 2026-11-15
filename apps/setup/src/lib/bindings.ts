@@ -900,6 +900,11 @@ region: RegionDef,
  */
 text: RecordedText,
 /**
+ * How tall its characters are, in pixels, when that is another size
+ * than the sample's.
+ */
+otherSize?: number,
+/**
  * The reference's text color its ink was last cut with for the text
  * reader, which reads the same ink as the same text, or `None` when
  * it was cut by contrast.
@@ -994,17 +999,15 @@ id: number,
  */
 screenshot: number,
 /**
- * Each find, top to bottom and left to right.
+ * Each find: those of the sample's size first, then each other size
+ * from the nearest to the sample's, and each size's top to bottom and
+ * left to right.
  */
 finds: Array<FindView>,
 /**
  * Finds past the most a search keeps.
  */
-more: number,
-/**
- * Runs of ink of another size, left out.
- */
-otherSizes: number, }>;
+more: number, }>;
 
 /**
  * How close a character is to one glyph.

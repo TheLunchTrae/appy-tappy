@@ -2154,9 +2154,17 @@ div.match-answer {
   border-color: var(--warn);
 }
 
+.autofill .size,
 .autofill .flag {
   grid-column: 3 / 5;
   font-size: 12px;
+}
+
+.autofill .size {
+  color: var(--muted);
+}
+
+.autofill .flag {
   color: var(--warn);
 }
 

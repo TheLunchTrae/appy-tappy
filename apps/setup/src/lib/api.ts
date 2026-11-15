@@ -257,7 +257,7 @@ export async function contrastTolerance(spec: CharactersSpec): Promise<number> {
 
 /**
  * Finds text like what `region` of screenshot `screenshot` shows, as a reference with the text color `ink`,
- * or by contrast without one, and `tolerance` tells it from the region's background, and at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
+ * or by contrast without one, and `tolerance` tells it from the region's background, at any size, elsewhere on that screenshot and away from the finds `added` already, in place of any
  * earlier search.
  */
 export async function findLike(screenshot: number, region: RegionDef, added: ReadonlyArray<RegionDef>, ink: ColorDef | null, tolerance: number): Promise<FoundView> {

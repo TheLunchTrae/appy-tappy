@@ -649,19 +649,38 @@ in the region with `Ink::line`, the rule a read finds its line by, so the two
 cannot differ. A search by contrast finds text on the box's background
 alone: text on a panel of another color is ink together with its panel, too
 tall a blob to be a run. It joins touching ink, corners included, into blobs, leaving
-out blobs over twice that band's height, such as a panel in the same color.
+out blobs taller than a quarter of the screenshot (`TALLEST_PART`), or than
+twice that band's height where that is taller, such as a panel in the same
+color.
 The sample's height is its tallest blob centered in the region,
 and a run's is its tallest blob, so a comma or a mark below the characters
-measures neither. Blobs whose rows meet and that start no further than the
-sample's height past each other join into a run of text; runs are looked up by
-bands of rows and dropped from the lookup once the next blobs start too far
-right of them, so a screenshot full of ink takes well under a second. A run
-within 15% of the sample's height (`SIZE_PERCENT`) that touches neither the
-region nor a find added already is a find; a shorter or taller run, at least
-half the sample's height, counts as another size, and smaller specks are
-ignored. Finds go top to bottom, then left to right; the first 12
-(`MAX_FOUND`) are kept with a margin of a quarter
-of the sample's height, and the rest are counted.
+measures neither.
+
+The search looks for one size of text at a time (`sizes_among`): the
+sample's height first, then each other height a blob has from 8 pixels up
+(`SHORTEST_OTHER_SIZE`), largest first, where heights within 15% of one
+another (`SIZE_PERCENT`) are one size. For each size, the blobs up to twice
+as tall whose rows meet and that start no further than the size past each
+other join into a run of text, and a run whose tallest blob is within 15% of
+the size is text of that size (`sized_runs`). Its blobs are left out of the
+sizes after it. So text of the sample's size is found as it is without the
+other sizes, and the marks and parts of larger characters, such as a comma
+or the rings of a percent sign, stay with their text and are no small text
+of their own. Runs are looked up by bands of rows and dropped from the
+lookup once the next blobs start too far right of them, and filling the
+blobs is most of the work, so the other sizes add little: a 1920 by 1080
+screenshot with 98 runs of text takes about 26 ms with them and without. A
+recording of the whole window joins runs the same way, for the sizes of its
+examples, smallest first.
+
+A run that touches neither the region nor a find added already is a find.
+Finds of the sample's size come first, then each other size from the one
+nearest the sample's, and each size's go top to bottom, then left to right.
+The first 12 (`MAX_FOUND`) are kept with a margin of a quarter of their
+size, each of another size with how tall its characters are, and the rest
+are counted. A reference reads best at the sizes it learned
+([Matching](Screen-regions.md#matching)), so the finds of other sizes are
+how one screenshot teaches several.
 
 The owner keeps the search (`owner/found.rs`) with each find's pixels and
 sends each to the text reader. A new search replaces it, and dismissing,
