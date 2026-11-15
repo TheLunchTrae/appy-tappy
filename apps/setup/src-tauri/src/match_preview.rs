@@ -105,15 +105,34 @@ pub(crate) enum MatchView {
     },
 }
 
-/// The pixels of `image` that are ink like the text in `region` of it, as
-/// a reference that tells ink from background by `rule` finds them.
-fn ink_view(image: &Image, region: Region, rule: InkRule) -> Result<MatchView, SpecError> {
-    let ink = DigitReader::new(rule)
-        .ink_like(image, region)
+/// The pixels of `area` of `image` that are ink like the text in `region`
+/// of it, as a reference that tells ink from background by `rule` finds
+/// them. A rule of contrast takes the background from around `region`, so
+/// it reads the pixels around `area` too.
+fn ink_view(
+    image: &Image,
+    area: Region,
+    region: Region,
+    rule: InkRule,
+) -> Result<MatchView, SpecError> {
+    let read = rule.reads(area, image.size());
+    let within = |part: Region| {
+        Region::new(
+            part.x().checked_sub(read.x())?,
+            part.y().checked_sub(read.y())?,
+            part.size().width,
+            part.size().height,
+        )
+    };
+    let ink = image
+        .crop(read)
+        .zip(within(region))
+        .and_then(|(read, region)| DigitReader::new(rule).ink_like(&read, region))
         .ok_or(SpecError::Outside)?;
-    let (ink, size) = (&ink, image.size());
+    let (ink, area) = (&ink, within(area).ok_or(SpecError::Outside)?);
     let [ink] = layers(
-        (0..size.height).flat_map(|y| (0..size.width).map(move |x| ink.at(x, y).then_some(0))),
+        (area.y()..area.bottom())
+            .flat_map(|y| (area.x()..area.right()).map(move |x| ink.at(x, y).then_some(0))),
     );
     Ok(MatchView::Ink { ink })
 }
@@ -137,20 +156,18 @@ pub(crate) fn find(
     let pixels = cropped.pixels().iter().copied();
     Ok(match rule {
         MatchRule::Ink { ink, tolerance } => {
-            let whole = Region::whole(cropped.size()).ok_or(SpecError::EmptyRegion)?;
-            ink_view(&cropped, whole, ink_rule(Some(ink), tolerance))?
+            ink_view(image, area, area, ink_rule(Some(ink), tolerance))?
         },
         MatchRule::Contrast { region, tolerance } => {
             let region = Region::try_from(region).map_err(|_empty| SpecError::EmptyRegion)?;
-            // Where the region lies in the rectangle asked about.
-            let within = Region::new(
-                region.x().checked_sub(area.x()).ok_or(SpecError::Outside)?,
-                region.y().checked_sub(area.y()).ok_or(SpecError::Outside)?,
-                region.size().width,
-                region.size().height,
-            )
-            .ok_or(SpecError::EmptyRegion)?;
-            ink_view(&cropped, within, ink_rule(None, tolerance))?
+            let inside = region.x() >= area.x()
+                && region.y() >= area.y()
+                && region.right() <= area.right()
+                && region.bottom() <= area.bottom();
+            if !inside {
+                return Err(SpecError::Outside);
+            }
+            ink_view(image, area, region, ink_rule(None, tolerance))?
         },
         MatchRule::BarFill { filled, empty } => {
             let bar = BarFill::new(filled.into(), empty.into())
@@ -291,6 +308,15 @@ mod tests {
         assert_eq!(
             find(&image, panel, contrast(panel, 70)),
             Ok(MatchView::Ink { ink: layer(0, &[]) })
+        );
+        // A region as tight as its character still tells it from the
+        // panel around it, which the rectangle asked about leaves out.
+        let character = area(2, 1, 1, 1);
+        assert_eq!(
+            find(&image, character, contrast(character, 30)),
+            Ok(MatchView::Ink {
+                ink: layer(1, &[[0, 1]])
+            })
         );
         assert_eq!(
             find(&image, area(2, 0, 3, 3), contrast(panel, 30)),

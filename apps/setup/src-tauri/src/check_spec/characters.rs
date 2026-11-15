@@ -14,7 +14,7 @@ use appytappy_config::app_file::{
     ColorDef, OriginDef, ReferenceDef, RegionDef, SampleDef, is_label_character,
 };
 use appytappy_config::names::sample_name;
-use appytappy_sources::screen::digits::DigitReader;
+use appytappy_sources::screen::digits::{DigitReader, InkRule};
 use appytappy_sources::screen::saved::{self, SavedError};
 use appytappy_sources::screen::{Image, Region, Size};
 use serde::Deserialize;
@@ -24,7 +24,8 @@ use crate::screenshots::Shots;
 use crate::words::sentence;
 
 use super::{
-    Cut, Pictures, ReferenceRef, SpecError, contrast, cut, drawn, same_size, size_of, to_region,
+    Cut, Pictures, ReferenceRef, SpecError, contrast, cut, drawn, ink_rule, same_size, size_of,
+    to_region,
 };
 
 /// The most characters a reference is saved as expecting: room for the
@@ -108,7 +109,9 @@ impl SavedReference {
     /// tolerance `tolerance`, and the characters `expected` that it needs,
     /// as [`expected_characters`] lists them. Its samples stay as they are
     /// saved, so no screenshot is needed, and it learns them back with the
-    /// new text color and tolerance.
+    /// new text color and tolerance. Without a text color, the tolerance
+    /// is the one [`contrast::fitted`] chooses from those samples:
+    /// `tolerance` while every sample reads with it.
     ///
     /// # Errors
     ///
@@ -122,6 +125,10 @@ impl SavedReference {
         expected: &str,
     ) -> Result<ReferenceDef, SpecError> {
         let saved_name = self.reference.name.clone();
+        let tolerance = match ink {
+            Some(_) => tolerance,
+            None => contrast::fitted(&self.samples(), tolerance),
+        };
         let reference = ReferenceDef {
             name: name.to_owned(),
             ink,
@@ -130,6 +137,24 @@ impl SavedReference {
             ..self.reference
         };
         learned(&reference, self.pictures.iter(), Some(saved_name)).map(|_reader| reference)
+    }
+}
+
+impl SavedReference {
+    /// Each sample's picture and the text it shows, in order. A sample
+    /// whose picture cannot be read is left out.
+    fn samples(&self) -> Vec<(Image, &str)> {
+        self.reference
+            .samples
+            .iter()
+            .filter_map(|sample| {
+                let (_, png) = self
+                    .pictures
+                    .iter()
+                    .find(|(name, _)| *name == sample.image)?;
+                Some((Image::decode_png(png).ok()?, sample.text.as_str()))
+            })
+            .collect()
     }
 }
 
@@ -187,6 +212,11 @@ pub(crate) struct Taught {
 }
 
 impl CharactersSpec {
+    /// How the reference tells ink from background.
+    fn ink_rule(&self) -> InkRule {
+        ink_rule(self.ink, self.tolerance)
+    }
+
     /// The region and the window size of the screenshot it was drawn on,
     /// which must hold it.
     ///
@@ -331,7 +361,7 @@ impl CharactersSpec {
         recorded: &'a [RecordedLabel],
     ) -> Result<Vec<(Image, &'a str)>, SpecError> {
         let labeled = self.labels.iter().map(|label| {
-            let image = label_image(session.screenshots, region, label)?;
+            let image = label_image(session.screenshots, region, label, self.ink_rule())?;
             Ok((image, label.text.as_str()))
         });
         let kept_readings = recorded.iter().map(|label| {
@@ -365,18 +395,8 @@ impl CharactersSpec {
             .as_ref()
             .map(|saved| (session.references)(saved).map_err(SpecError::Reference))
             .transpose()?;
-        let mut samples: Vec<(Image, &str)> = saved
-            .iter()
-            .flat_map(|saved| {
-                saved.reference.samples.iter().filter_map(|sample| {
-                    let (_, png) = saved
-                        .pictures
-                        .iter()
-                        .find(|(name, _)| *name == sample.image)?;
-                    Some((Image::decode_png(png).ok()?, sample.text.as_str()))
-                })
-            })
-            .collect();
+        let mut samples: Vec<(Image, &str)> =
+            saved.iter().flat_map(SavedReference::samples).collect();
         samples.extend(self.new_samples(session, region, &self.recorded)?);
         Ok(contrast::fitted(&samples, self.tolerance))
     }
@@ -440,7 +460,7 @@ impl CharactersSpec {
         found: &[Label],
     ) -> Result<Vec<Option<String>>, SpecError> {
         self.problems(session, found, |region, label| {
-            label_image(session.screenshots, region, label)
+            label_image(session.screenshots, region, label, self.ink_rule())
         })
     }
 
@@ -546,13 +566,19 @@ pub(crate) fn expected_characters(expected: &str) -> Result<Option<String>, Spec
     Ok((!list.is_empty()).then_some(list))
 }
 
-/// What `label` labels: its own region of its screenshot, or `region`.
-fn label_image(screenshots: &dyn Shots, region: Region, label: &Label) -> Result<Image, SpecError> {
+/// What `label` labels, as a reference that tells ink from background by
+/// `rule` is given it: its own region of its screenshot, or `region`.
+fn label_image(
+    screenshots: &dyn Shots,
+    region: Region,
+    label: &Label,
+    rule: InkRule,
+) -> Result<Image, SpecError> {
     let region = match label.region {
         Some(own) => to_region(own)?,
         None => region,
     };
-    cut(screenshots, region, label.screenshot)
+    cut(screenshots, region, label.screenshot, rule)
 }
 
 /// The pixels of reading `reading` of `recording`, which must be of

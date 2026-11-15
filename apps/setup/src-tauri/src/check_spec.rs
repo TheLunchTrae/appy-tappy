@@ -350,12 +350,18 @@ pub(crate) fn drawn(
     }
 }
 
-/// The `region` of screenshot `screenshot`.
-fn cut(screenshots: &dyn Shots, region: Region, screenshot: usize) -> Result<Image, SpecError> {
-    screenshots
-        .get(screenshot)
-        .ok_or(SpecError::NoScreenshot)?
-        .crop(region)
+/// The pixels of screenshot `screenshot` that a reference that tells ink
+/// from background by `rule` is given to read `region`
+/// ([`InkRule::reads`]).
+fn cut(
+    screenshots: &dyn Shots,
+    region: Region,
+    screenshot: usize,
+    rule: InkRule,
+) -> Result<Image, SpecError> {
+    let image = screenshots.get(screenshot).ok_or(SpecError::NoScreenshot)?;
+    image
+        .crop(rule.reads(region, image.size()))
         .ok_or(SpecError::Outside)
 }
 

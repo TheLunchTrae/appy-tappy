@@ -59,7 +59,7 @@ pub(crate) fn look(job: &Job) -> Vec<Seen> {
         .map(|find::Spot { region, size }| Seen {
             spot: region,
             size,
-            reading: job.frame.crop(region).and_then(|crop| {
+            reading: job.reader.cut(&job.frame, region).and_then(|crop| {
                 let shapes = job.reader.shapes(&crop).ok()?.characters().to_vec();
                 Some((crop, shapes))
             }),

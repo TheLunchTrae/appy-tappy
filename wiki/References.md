@@ -349,7 +349,9 @@ boxes show more characters than you typed. Give it a text color instead:
 
 Only pixels near the text color count as characters then, whatever is behind
 them, so the text has to be drawn in one color. **Remove text color** goes
-back to finding the characters by contrast.
+back to finding the characters by contrast. A box that was drawn while the
+reference had a text color needs a little room around its text for that. If
+the reference then can't learn a box, draw it again.
 
 With or without a text color, turn on **Show matching pixels** to tint every
 pixel on the screenshot that counts as part of the characters. Without a

@@ -6,10 +6,11 @@
 //! box's ink from its background ([`DigitReader::ink_like`]): what stands
 //! out from the background the box has, or what has the reference's text
 //! color. It joins touching ink pixels into blobs. Blobs side by side on
-//! one line, no further apart than the sample's height, make a run of text. A run whose tallest character is as
-//! tall as the sample's, within [`SIZE_PERCENT`], is a find. Ink much
-//! taller than the sample, such as the scene around the box's panel, is
-//! left out, and so is the run inside the sample's own region.
+//! one line, no further apart than the sample's height, make a run of
+//! text. A run whose tallest character is as tall as the sample's, within
+//! [`SIZE_PERCENT`], is a find. Ink much taller than the sample, such as
+//! the scene around the box's panel, is left out, and so is the run inside
+//! the sample's own region.
 //!
 //! A recording of the whole window looks the same way for text of several
 //! sizes at once, one for each example the user drew ([`Sizes`]).
@@ -433,13 +434,13 @@ fn distance(run: Bounds, near: Region) -> u64 {
 
 /// Where `image` shows text with characters as tall as one of `sizes`,
 /// within [`SIZE_PERCENT`], in the ink `reader` tells from the background
-/// of `near`, or from that of the image's border where `near` lies outside
-/// `image`: each run with a margin around its ink and the size it has, the run nearest
-/// the middle of `near` first, and of runs as near the higher one, then the
-/// one further left. A recording of the whole window reads these, so it
-/// takes the text beside its examples too, wherever the window shows it. It
-/// takes the [`MAX_LINES`] nearest, so a window full of such text does not
-/// crowd out the text around the region.
+/// around `near`, or from the image's outermost pixels where `near` lies
+/// outside `image`: each run with a margin around its ink and the size it
+/// has, the run nearest the middle of `near` first, and of runs as near
+/// the higher one, then the one further left. A recording of the whole
+/// window reads these, so it takes the text beside its examples too,
+/// wherever the window shows it. It takes the [`MAX_LINES`] nearest, so a
+/// window full of such text does not crowd out the text around the region.
 ///
 /// Each size is looked for by itself, as [`like`] looks for one: among the
 /// ink no taller than twice the size, joined into runs no further apart

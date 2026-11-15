@@ -448,7 +448,7 @@ impl Recording {
         }
         let region = self.place(frame.size(), at)?;
         // A region placed at the frame's size lies inside the frame.
-        let crop = frame.crop(region)?;
+        let crop = self.reader.cut(frame, region)?;
         let shapes = match self.reader.shapes(&crop) {
             Ok(shapes) => shapes,
             // A crop with no ink, such as under a menu, is a moment to

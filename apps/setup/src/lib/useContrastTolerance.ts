@@ -5,7 +5,10 @@ import { useEffect, useRef } from 'react';
 
 import type { CharactersSpec } from './bindings.ts';
 import { contrastTolerance } from './api.ts';
-import { background } from './repeat.ts';
+import { ask } from './request.ts';
+
+/** How long the samples must rest before a fit is asked for, so a label asks once it is typed, not at each key. */
+const FIT_DELAY_MS = 250;
 
 /**
  * A name for the fit `spec` asks for, which stays while nothing the fit depends on changes, or null when it asks
@@ -26,9 +29,9 @@ export function fitArrived(asked: string, wanted: string | null, tolerance: numb
 
 /**
  * Keeps the tolerance of the reference `spec` teaches at one its samples read with by contrast, through
- * `setTolerance`. It asks again whenever a sample, the region, or the tolerance changes. The setup app answers with
- * the tolerance asked about while every sample reads with it, so a fit settles after one more ask. A fit that fails
- * leaves the tolerance alone, and the check of the characters says what is wrong with the samples.
+ * `setTolerance`. It asks again once a sample, the region, or the tolerance changed and then rested. The setup app
+ * answers with the tolerance asked about while every sample reads with it, so a fit settles after one more ask. A
+ * fit that fails leaves the tolerance alone, and the check of the characters says what is wrong with the samples.
  */
 export function useContrastTolerance(spec: CharactersSpec | null, setTolerance: (tolerance: number) => void): void {
   const key = fitKey(spec);
@@ -37,17 +40,22 @@ export function useContrastTolerance(spec: CharactersSpec | null, setTolerance: 
   useEffect(() => {
     const asked = latest.current;
     if (asked.spec === null || asked.key === null) {
-      return;
+      return undefined;
     }
     const { key: askedKey, spec: askedSpec } = asked;
-    background(
-      contrastTolerance(askedSpec).then((fitted) => {
+    return ask(
+      () => contrastTolerance(askedSpec),
+      (fitted) => {
         const now = latest.current;
         const next = fitArrived(askedKey, now.key, askedSpec.tolerance, fitted);
         if (next !== null) {
           now.setTolerance(next);
         }
-      }),
+      },
+      (error) => {
+        console.error(error);
+      },
+      FIT_DELAY_MS,
     );
   }, [key]);
 }

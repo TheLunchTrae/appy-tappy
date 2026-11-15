@@ -638,8 +638,8 @@ the selected box is on for more text like the box shows
 (`recording/find.rs`). It reads the screenshot's ink with
 `DigitReader::ink_like`: the reference's text color wherever it shows, or,
 for a reference that finds its characters by contrast, every pixel that
-stands out from the background of the box, which the box's border gives as a
-read's region does. It takes the band of inked rows with the most ink
+stands out from the background of the box, which the pixels around the box
+give as they do for a read's region. It takes the band of inked rows with the most ink
 in the region with `Ink::line`, the rule a read finds its line by, so the two
 cannot differ. A search by contrast finds text on the box's background
 alone: text on a panel of another color is ink together with its panel, too
@@ -696,15 +696,20 @@ anti-aliased edge counts as background. When no tolerance reads every
 sample, the reference keeps the one it has, and the save or the character
 check names the sample that fails.
 
-The page asks whenever a sample, the region, or the tolerance of the draft
-changes (`useContrastTolerance` in `lib/useContrastTolerance.ts`), and sets
+The page asks once a sample, the region, or the tolerance of the draft
+changed and then rested for a quarter of a second, so a label asks when it
+is typed and not at each key (`useContrastTolerance` in
+`lib/useContrastTolerance.ts`), and sets
 the draft's tolerance to the answer;
 [Contrast tolerance](State-machines.md#contrast-tolerance) has its states.
 It does not ask while the capture holds a recording, which keeps the
 tolerance it records with. A reference with a text color has its tolerance
 from the user, on a slider under **Text color**, and the page asks for none.
-Changing between the two starts the tolerance at 40 again, since it measures
-a distance from another color.
+Changing between the two starts the tolerance at 40, since it measures
+a distance from another color; one text color in place of another keeps
+it. A saved reference with no box has no samples in the draft to ask
+about, so `save_reference_settings` chooses the tolerance the same way,
+from the saved samples, when it saves the reference without a text color.
 
 ### Checking characters
 
@@ -1360,7 +1365,11 @@ reference that is edited learns its saved samples again with the text color
 and tolerance the editor has then, which can count pixels as ink that a box
 cut for the saved settings would have dropped, and a reference that finds
 its characters by contrast takes each sample's background from the sample's
-border, as a read takes its region's. A
+outermost pixels, as a read takes its region's: its samples are cut with
+the pixels around the box, where a reference with a text color keeps the
+box alone. A reference that loses its text color keeps the pictures it has,
+so each of those samples needs room around its text; one drawn edge to edge
+is drawn again. A
 state's picture is the whole region because that is what the check compares.
 An added find's sample is the box the search cut around its text, with a
 margin of a quarter of the text's height, so a text color or tolerance that

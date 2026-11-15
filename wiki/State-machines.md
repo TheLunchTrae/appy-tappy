@@ -2991,7 +2991,7 @@ no key at all. The owner keeps nothing for it; each request is one
 ```mermaid
 stateDiagram-v2
     [*] --> Resting
-    Resting --> Asking: a sample is typed, kept, or changed, or the region moves
+    Resting --> Asking: a sample is typed, kept, or changed, or the region moves, and a quarter of a second passes
     Asking --> Settled: the answer is the tolerance asked about
     Asking --> Asking: the answer is another tolerance, which the draft takes and asks about
     Asking --> Asking: a sample or the region changes, which asks under a new key
@@ -3008,9 +3008,12 @@ stateDiagram-v2
   capture holds a recording, which records and goes on with the tolerance it
   started with. Discarding the recording, or saving and leaving the editor,
   ends that wait.
-- **Asking** has a request out for the key. The owner answers the tolerance
-  asked about while the reference learns every sample with it, so an answer
-  that changes the tolerance is followed by one more request, which settles.
+- **Asking** waits a quarter of a second under the key and then has a
+  request out for it. A change within the wait starts it again under the
+  new key, so a label that is being typed asks once. The owner answers the
+  tolerance asked about while the reference learns every sample with it, so
+  an answer that changes the tolerance is followed by one more request,
+  which settles.
 - **Settled** has the tolerance the owner chose, and asks again only under a
   new key.
 - **Unanswered** is a failed request, such as for a box on a screenshot of
@@ -3022,8 +3025,10 @@ stateDiagram-v2
   now (`fitArrived`). One that arrives after a sample changed, a text color
   was picked, a recording started, or the editor closed is dropped, since
   each of those changes the key or leaves none.
-- Picking a text color, or removing it, starts the tolerance at 40 again
-  (`withTextColor`), since the two ways measure different distances.
+- Picking a text color for a reference that has none, or removing it,
+  starts the tolerance at 40 (`withTextColor`), since the two ways measure
+  different distances. One text color in place of another keeps the
+  tolerance.
 
 ### Bar detection
 

@@ -152,6 +152,8 @@ impl<H: Host> Owner<H> {
         let id = self.tickets.next();
         let mut items = Vec::with_capacity(search.finds.len());
         for found in search.finds {
+            // A find has a margin around its ink, so its own pixels read
+            // as the ones a reference is given of it do.
             let Some(cropped) = image.crop(found.region) else {
                 continue;
             };
@@ -199,8 +201,9 @@ impl<H: Host> Owner<H> {
 
     /// Has the text reader read each of finds `indexes` of search `search`
     /// again, as a reference with the text color `ink`, if any, and
-    /// `tolerance` tells their characters from the background now, and answers the search; `None` when that search was
-    /// replaced or forgotten. A find the reader has yet to answer for is
+    /// `tolerance` tells their characters from the background now, and
+    /// answers the search; `None` when that search was replaced or
+    /// forgotten. A find the reader has yet to answer for is
     /// left waiting, so one read at a time is out for a find and the
     /// reader's next answer for it is for its newest read. An index named
     /// twice is read once.
@@ -296,10 +299,9 @@ impl<H: Host> Owner<H> {
 
     /// The characters the box `region` of screenshot `screenshot` shows, as
     /// a reference with the text color `ink`, if any, and `tolerance`
-    /// splits them, each
-    /// with the name a find's or a recorded reading's character of the same
-    /// shape has; none for an unknown screenshot or a box that does not fit
-    /// it.
+    /// splits them, each where it is in the box and with the name a find's
+    /// or a recorded reading's character of the same shape has; none for
+    /// an unknown screenshot or a box that does not fit it.
     pub(crate) fn box_characters(
         &self,
         screenshot: usize,
@@ -312,8 +314,22 @@ impl<H: Host> Owner<H> {
             .screenshots()
             .get(screenshot)
             .zip(Region::try_from(region).ok())
-            .and_then(|(image, region)| image.crop(region))
-            .map(|crop| character::of(&crop, &reader))
+            .and_then(|(image, region)| {
+                let read = reader.reads(region, image.size());
+                // The page marks each character on the box itself.
+                let around = region.x().saturating_sub(read.x());
+                let characters = character::of(&image.crop(read)?, &reader);
+                Some(
+                    characters
+                        .into_iter()
+                        .map(|character| CharacterView {
+                            left: character.left.saturating_sub(around),
+                            right: character.right.saturating_sub(around),
+                            ..character
+                        })
+                        .collect(),
+                )
+            })
             .unwrap_or_default()
     }
 
@@ -720,6 +736,19 @@ mod tests {
         assert_eq!(harness.ask(characters(1, region(0, 0, 4, 5))), []);
         assert_eq!(harness.ask(characters(0, region(18, 0, 4, 5))), []);
         assert_eq!(harness.ask(characters(0, region(0, 0, 0, 5))), []);
+        // A reference without a text color is given the pixels around a
+        // box as tight as its mark, and the mark is still where it is in
+        // the box.
+        let tight = harness.ask(|owner: &mut Owner<FakeHost>| {
+            owner.box_characters(0, region(8, 1, 2, 3), None, 0)
+        });
+        assert_eq!(
+            tight
+                .iter()
+                .map(|character| (character.left, character.right))
+                .collect::<Vec<_>>(),
+            [(0, 2)]
+        );
     }
 
     #[test]

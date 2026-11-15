@@ -98,22 +98,30 @@ byte for each pixel of its region, for which of them are ink.
 A game draws text in more than one color: a gradient, an outline, a number
 that turns red when it is low. So a reference finds its characters by
 contrast with what is behind them rather than by one color
-(`InkRule::Contrast` in `screen/digits/ink.rs`). The background of a region
-is the median red, the median green, and the median blue of the pixels on
-its border, which a region drawn around a number leaves to the background.
-A pixel is ink when its red, green, or blue is more than the reference's
-tolerance from the background's. The same rule finds a fill, an outline, and
-a shadow, in any colors, and a number over a plain or gently shaded panel.
+(`InkRule::Contrast` in `screen/digits/ink.rs`). Such a reference is given
+a region together with the pixels around it, one on each side
+(`InkRule::reads`): `SavedValue::at` places a number there, so the capture
+copies them, and the setup app cuts its samples the same way
+(`DigitReader::cut`). Those outermost pixels are the background and never
+ink: the background is their median red, median green, and median blue. So
+a region may be as tight as its text, even where a character fills it edge
+to edge, and text beside the region does not change the background while it
+covers less than half of the pixels around. On a side at the window's edge
+there is no pixel past the region, and the region's own outermost pixels
+stand in. A pixel inside is ink when its red, green, or blue is more than
+the reference's tolerance from the background's. The same rule finds a fill,
+an outline, and a shadow, in any colors, and a number over a plain or gently
+shaded panel.
 
 The tolerance is the reference's saved `tolerance`. The setup app chooses it
 from the reference's samples, as
 [Setup app](Setup-app.md#contrast-tolerance) describes, so a read does no
-more than count the border's colors and compare each pixel: integers only,
-with no allocation beyond the ink itself, and the same answer for the same
-pixels.
+more than count the colors around the region and compare each pixel:
+integers only, with no allocation beyond the ink itself, and the same answer
+for the same pixels.
 
-Contrast needs a background that is nearly one color along the region's
-border. Text over a scene that shows through takes a text color instead, the
+Contrast needs a background that is nearly one color around the region.
+Text over a scene that shows through takes a text color instead, the
 reference's optional `ink` (`InkRule::Color`): a pixel is then ink when its
 red, green, and blue are each within the tolerance of that color, whatever
 the background.

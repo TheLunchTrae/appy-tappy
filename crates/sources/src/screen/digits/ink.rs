@@ -13,17 +13,18 @@
 
 use std::ops::Range;
 
-use super::super::{Image, Rgb, Size};
+use super::super::{Image, Region, Rgb, Size};
 
 /// How a reader tells an image's ink from its background.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InkRule {
     /// A pixel is ink when its red, green, or blue is more than `tolerance`
-    /// from the background's. The background is the color of the image's
-    /// border: for each of red, green, and blue, the median among the
-    /// pixels along its four edges, so characters that reach an edge, or
-    /// a frame along one, do not change it while they cover less than
-    /// half the border.
+    /// from the background's. The image is the text's region and the
+    /// pixels around it ([`InkRule::reads`]). Those outermost pixels are
+    /// the background, and none of them is ink: for each of red, green,
+    /// and blue, the background has the median among them, so text
+    /// beside the region does not change it while it covers less than
+    /// half of them. So a region may be as tight as its text.
     Contrast {
         /// How far a pixel may be from the background and still be
         /// background.
@@ -50,6 +51,28 @@ impl InkRule {
             None => Self::Contrast { tolerance },
         }
     }
+
+    /// The pixels of a window of size `window` that a reader with this
+    /// rule is given to read `region`: for a rule of contrast, `region`
+    /// and the pixels around it, one on each side the window has one.
+    /// On a side at the window's edge, the region's own outermost pixels
+    /// are the ones around it.
+    #[must_use]
+    pub fn reads(self, region: Region, window: Size) -> Region {
+        let grown = |start: u32, end: u32, most: u32| {
+            let from = start.saturating_sub(1);
+            (
+                from,
+                end.saturating_add(1).min(most.max(end)).abs_diff(from),
+            )
+        };
+        let (x, width) = grown(region.x(), region.right(), window.width);
+        let (y, height) = grown(region.y(), region.bottom(), window.height);
+        match self {
+            Self::Contrast { .. } => Region::new(x, y, width, height).unwrap_or(region),
+            Self::Color { .. } => region,
+        }
+    }
 }
 
 /// Which pixels of an image are ink, as [`DigitReader::ink`] finds them
@@ -64,23 +87,44 @@ pub struct Ink {
 }
 
 impl Ink {
-    /// The ink of `image` by `rule`. A rule of contrast takes the
-    /// background from `backdrop`: `image` itself for a region read by
-    /// itself, or the part of `image` whose text is looked for in the rest
-    /// of it.
-    pub(super) fn new(image: &Image, rule: InkRule, backdrop: &Image) -> Self {
+    /// The ink of `image` by `rule`. Without `like`, `image` is what the
+    /// rule reads a region from ([`InkRule::reads`]). With it, `image` is
+    /// searched for text like some part's: a rule of contrast takes the
+    /// background from the outermost pixels of `like`, what it reads that
+    /// part from, and any pixel of `image` can be ink.
+    pub(super) fn new(image: &Image, rule: InkRule, like: Option<&Image>) -> Self {
         // One pass serves both rules: a pixel is ink when it is near the
         // text color, or when it is not near the background.
         let (color, tolerance, near_is_ink) = match rule {
-            InkRule::Contrast { tolerance } => (background(backdrop), tolerance, false),
+            InkRule::Contrast { tolerance } => {
+                (background(like.unwrap_or(image)), tolerance, false)
+            },
             InkRule::Color { color, tolerance } => (color, tolerance, true),
         };
+        let mut inked: Vec<bool> = image
+            .pixels()
+            .iter()
+            .map(|&pixel| Rgb::of_pixel(pixel).near(color, tolerance) == near_is_ink)
+            .collect();
+        if !near_is_ink && like.is_none() {
+            // `chunks_exact_mut` refuses a width of 0, which no image has.
+            let mut rows = inked.chunks_exact_mut(index(image.size().width).max(1));
+            let top = rows.next();
+            let bottom = rows.next_back();
+            for row in top.into_iter().chain(bottom) {
+                row.fill(false);
+            }
+            for row in rows {
+                if let [left, .., right] = row {
+                    *left = false;
+                    *right = false;
+                } else {
+                    row.fill(false);
+                }
+            }
+        }
         Self {
-            inked: image
-                .pixels()
-                .iter()
-                .map(|&pixel| Rgb::of_pixel(pixel).near(color, tolerance) == near_is_ink)
-                .collect(),
+            inked,
             size: image.size(),
         }
     }
@@ -266,7 +310,7 @@ mod tests {
 
     /// `picture` as rows of `#` for ink.
     fn inked(picture: &Image, rule: InkRule) -> Vec<String> {
-        let found = Ink::new(picture, rule, picture);
+        let found = Ink::new(picture, rule, None);
         let Size { width, height } = found.size();
         (0..height)
             .map(|y| {
@@ -338,29 +382,96 @@ mod tests {
     }
 
     #[test]
-    fn the_background_is_the_color_of_the_border() {
+    fn the_background_is_the_color_of_the_outermost_pixels_and_none_of_them_is_ink() {
         let (back, text) = (gray(30), gray(220));
-        // Most of the picture is text, and none of its border.
+        let by_contrast = InkRule::Contrast { tolerance: 0 };
+        // Every pixel inside is text, as in a region as tight as a
+        // character that fills it.
         let filled = image(&[
             &[back, back, back, back, back],
-            &[back, text, text, text, back],
-            &[back, text, text, text, back],
             &[back, text, text, text, back],
             &[back, text, text, text, back],
             &[back, back, back, back, back],
         ]);
         assert_eq!(background(&filled), back);
-        // Text reaches 5 of the 12 pixels of the border.
-        let cut = image(&[
+        assert_eq!(
+            inked(&filled, by_contrast),
+            [".....", ".###.", ".###.", "....."]
+        );
+        // Text beside the region reaches 5 of the 12 pixels around it.
+        let beside = image(&[
             &[text, text, text, back],
             &[text, text, text, back],
-            &[text, back, back, back],
+            &[text, back, text, back],
             &[back, back, back, back],
         ]);
-        assert_eq!(background(&cut), back);
+        assert_eq!(background(&beside), back);
         assert_eq!(
-            inked(&cut, InkRule::Contrast { tolerance: 0 }),
-            ["###.", "###.", "#...", "...."]
+            inked(&beside, by_contrast),
+            ["....", ".##.", "..#.", "...."]
+        );
+        // An image too small to hold anything inside holds no ink.
+        assert_eq!(
+            inked(
+                &image(&[&[back, text], &[text, text], &[back, back]]),
+                by_contrast
+            ),
+            ["..", "..", ".."]
+        );
+        assert_eq!(
+            inked(&image(&[&[back], &[text], &[back]]), by_contrast),
+            [".", ".", "."]
+        );
+        // A text color counts the outermost pixels like any other.
+        assert_eq!(
+            inked(
+                &beside,
+                InkRule::Color {
+                    color: text,
+                    tolerance: 0
+                }
+            ),
+            ["###.", "###.", "#.#.", "...."]
+        );
+    }
+
+    #[test]
+    fn a_rule_of_contrast_reads_a_region_from_the_pixels_around_it_too() {
+        let window = Size {
+            width: 20,
+            height: 10,
+        };
+        let region = |x, y, width, height| Region::new(x, y, width, height).unwrap();
+        let by_contrast = InkRule::Contrast { tolerance: 0 };
+        assert_eq!(
+            by_contrast.reads(region(5, 3, 4, 2), window),
+            region(4, 2, 6, 4)
+        );
+        // A side at the window's edge has no pixel past it.
+        assert_eq!(
+            by_contrast.reads(region(0, 0, 4, 2), window),
+            region(0, 0, 5, 3)
+        );
+        assert_eq!(
+            by_contrast.reads(region(16, 8, 4, 2), window),
+            region(15, 7, 5, 3)
+        );
+        assert_eq!(
+            by_contrast.reads(region(0, 0, 20, 10), window),
+            region(0, 0, 20, 10)
+        );
+        // A region that reaches outside the window still does.
+        assert_eq!(
+            by_contrast.reads(region(18, 9, 4, 2), window),
+            region(17, 8, 5, 3)
+        );
+        let by_color = InkRule::Color {
+            color: gray(0),
+            tolerance: 0,
+        };
+        assert_eq!(
+            by_color.reads(region(5, 3, 4, 2), window),
+            region(5, 3, 4, 2)
         );
     }
 

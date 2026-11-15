@@ -350,22 +350,39 @@ impl DigitReader {
             .collect())
     }
 
+    /// The pixels of a window of size `window` that this reader is given
+    /// to read `region`, as [`InkRule::reads`] says: `region`, and for a
+    /// reader that finds ink by contrast the pixels around it.
+    #[must_use]
+    pub fn reads(&self, region: Region, window: Size) -> Region {
+        self.ink_rule.reads(region, window)
+    }
+
+    /// The pixels of `frame`, a whole window's frame, that this reader is
+    /// given to read `region` ([`Self::reads`]), or `None` when `region`
+    /// reaches outside the frame.
+    #[must_use]
+    pub fn cut(&self, frame: &Image, region: Region) -> Option<Image> {
+        frame.crop(self.reads(region, frame.size()))
+    }
+
     /// Which pixels of `image` are ink. A read, a lesson, and
     /// [`DigitReader::shapes`] each find them once and work from them.
     #[must_use]
     pub fn ink(&self, image: &Image) -> Ink {
-        Ink::new(image, self.ink_rule, image)
+        Ink::new(image, self.ink_rule, None)
     }
 
     /// Which pixels of the whole of `image` are ink like the text in
     /// `region` of it, for a search of `image` for more such text: a
-    /// reader that finds ink by contrast takes the background from
-    /// `region`, where [`DigitReader::ink`] would take it from the border
-    /// of all of `image`. `None` when `region` reaches outside `image`.
+    /// reader that finds ink by contrast takes the background from around
+    /// `region`, and any pixel of `image` can be ink, where
+    /// [`DigitReader::ink`] would take the outermost pixels of `image` for
+    /// the background. `None` when `region` reaches outside `image`.
     #[must_use]
     pub fn ink_like(&self, image: &Image, region: Region) -> Option<Ink> {
-        let backdrop = image.crop(region)?;
-        Some(Ink::new(image, self.ink_rule, &backdrop))
+        let backdrop = self.cut(image, region)?;
+        Some(Ink::new(image, self.ink_rule, Some(&backdrop)))
     }
 
     /// How each character in `image` scores against the learned glyphs:
@@ -1313,6 +1330,61 @@ mod tests {
         );
     }
 
+    /// A frame that shows `rows` a pixel in from each edge, and the region
+    /// exactly around them.
+    fn framed(rows: &[&str]) -> (Image, Region) {
+        let blank = format!(".{}.", ".".repeat(rows[0].len()));
+        let mut frame = vec![blank.clone()];
+        frame.extend(rows.iter().map(|row| format!(".{row}.")));
+        frame.push(blank);
+        let frame: Vec<&str> = frame.iter().map(String::as_str).collect();
+        let image = draw(&frame);
+        let Size { width, height } = image.size();
+        let inside = |length: u32| length.checked_sub(2).unwrap();
+        (
+            image,
+            Region::new(1, 1, inside(width), inside(height)).unwrap(),
+        )
+    }
+
+    #[test]
+    fn text_that_fills_its_region_reads_by_contrast() {
+        let eights = |count: usize| {
+            let digit = ["###", "#.#", "###", "#.#", "###"];
+            let rows: Vec<String> = digit
+                .iter()
+                .map(|row| vec![*row; count].join("."))
+                .collect();
+            framed(&rows.iter().map(String::as_str).collect::<Vec<_>>())
+        };
+        let ones = framed(&["#.#", "#.#", "#.#"]);
+        let mut reader = DigitReader::new(InkRule::Contrast { tolerance: 40 });
+        // Most of the outermost pixels of each region are text, and all of
+        // the ones' but the gap between them.
+        let (frame, region) = eights(2);
+        reader
+            .learn(&reader.cut(&frame, region).unwrap(), "88")
+            .unwrap();
+        reader
+            .learn(&reader.cut(&ones.0, ones.1).unwrap(), "11")
+            .unwrap();
+        let (frame, region) = eights(3);
+        assert_eq!(
+            reader.read(&reader.cut(&frame, region).unwrap(), false),
+            Ok(Number::new(888.0).unwrap())
+        );
+        // A reader taught from a region with room around its text reads
+        // the same text in a region with none.
+        let mut roomy = DigitReader::new(InkRule::Contrast { tolerance: 40 });
+        let (frame, _) = eights(2);
+        roomy.learn(&frame, "88").unwrap();
+        let (frame, region) = eights(3);
+        assert_eq!(
+            roomy.read(&roomy.cut(&frame, region).unwrap(), false),
+            Ok(Number::new(888.0).unwrap())
+        );
+    }
+
     #[test]
     fn learning_fails_without_changing_the_reader() {
         let digits = draw(&["#.#"]);
@@ -1680,10 +1752,11 @@ mod tests {
         // A panel of `p` holding a character `#`, on a scene of `s`.
         let scene = paint(
             &[
-                "ssssss", //
-                "sppppp", //
-                "spp#pp", //
-                "sppppp", //
+                "sssssss", //
+                "sssssss", //
+                "ssppppp", //
+                "sspp#pp", //
+                "ssppppp", //
             ],
             |cell| match cell {
                 's' => [200, 200, 200],
@@ -1692,14 +1765,16 @@ mod tests {
             },
         );
         let reader = DigitReader::new(InkRule::Contrast { tolerance: 40 });
-        let panel = Region::new(2, 1, 3, 3).unwrap();
+        let panel = Region::new(3, 2, 3, 3).unwrap();
         let like = reader.ink_like(&scene, panel).unwrap();
         let alone = reader.ink(&scene);
         // (column, row): the scene, the panel, and the character.
         for ((x, y), in_panel, by_itself) in [
+            ((1, 1), true, false),
+            ((2, 3), false, true),
+            ((4, 3), true, true),
+            // By itself, the scene's outermost pixels are its background.
             ((0, 0), true, false),
-            ((1, 2), false, true),
-            ((3, 2), true, true),
         ] {
             assert_eq!(like.at(x, y), in_panel, "like the panel at {x}, {y}");
             assert_eq!(alone.at(x, y), by_itself, "by itself at {x}, {y}");
@@ -1707,7 +1782,7 @@ mod tests {
         assert_eq!(like.size(), scene.size());
         assert!(
             reader
-                .ink_like(&scene, Region::new(4, 2, 3, 2).unwrap())
+                .ink_like(&scene, Region::new(5, 3, 3, 2).unwrap())
                 .is_none()
         );
         let white = Rgb {
@@ -2084,10 +2159,10 @@ mod tests {
         for height in [16, 28] {
             let reader = taught_by(InkRule::Contrast { tolerance: 40 }, height, &LABELS);
             for (text, shown, across) in [
-                ("74.05%", 74.05, 3.0),
-                ("100%", 100.0, 3.25),
-                ("8.69%", 8.69, 3.6),
-                ("23%", 23.0, 3.93),
+                ("74.05%", 74.05, 4.0),
+                ("100%", 100.0, 4.25),
+                ("8.69%", 8.69, 4.6),
+                ("23%", 23.0, 4.93),
             ] {
                 assert_eq!(
                     reader.read(&drawn(text, height, across), false),

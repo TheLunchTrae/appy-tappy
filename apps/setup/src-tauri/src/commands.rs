@@ -891,8 +891,9 @@ pub(crate) async fn contrast_tolerance(app: AppHandle, spec: CharactersSpec) -> 
 }
 
 /// Finds text like what `region` of screenshot `screenshot` shows, as its
-/// characters stand out from its background and at their size, elsewhere on that screenshot and
-/// away from `added`, in place of any earlier search.
+/// characters stand out from its background and at their size, elsewhere
+/// on that screenshot and away from `added`, in place of any earlier
+/// search.
 #[tauri::command]
 pub(crate) async fn find_like(
     app: AppHandle,

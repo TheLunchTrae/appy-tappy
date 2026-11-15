@@ -504,6 +504,66 @@ fn a_reference_by_contrast_takes_a_tolerance_its_samples_read_with() {
         Ok(Number::new(11.0).expect("finite"))
     );
     assert!(teach(&spec(None, None, 40), session(&shots, None)).is_err());
+    // A box as tight as the strokes learns them too: the sample is cut
+    // with the pixels around the box, which are its background.
+    let tight = CharactersSpec {
+        labels: vec![Label {
+            screenshot: 0,
+            region: Some(RegionDef {
+                x: 1,
+                y: 1,
+                width: 3,
+                height: 3,
+            }),
+            text: "11".to_owned(),
+        }],
+        ..spec(None, None, 128)
+    };
+    let taught = teach(&tight, session(&shots, None)).expect("learns the tight box");
+    let [(_, picture)] = taught.pictures.as_slice() else {
+        panic!("one sample, not {:?}", taught.pictures.len());
+    };
+    assert_eq!(
+        Image::decode_png(picture)
+            .ok()
+            .map(|picture| picture.size()),
+        Some(shadowed().size())
+    );
+}
+
+#[test]
+fn a_saved_reference_that_loses_its_text_color_takes_a_tolerance_its_samples_read_with() {
+    let white = ColorDef {
+        red: 200,
+        green: 200,
+        blue: 200,
+    };
+    let saved = || SavedReference {
+        reference: ReferenceDef {
+            ink: Some(white),
+            tolerance: 10,
+            samples: vec![SampleDef {
+                image: sample_name("digits", 1),
+                text: "11".to_owned(),
+            }],
+            ..digits(&digits_ref()).expect("saved").reference
+        },
+        pictures: vec![(
+            sample_name("digits", 1),
+            shadowed().encode_png().expect("encodes"),
+        )],
+    };
+    let settings = |ink, tolerance| saved().with_settings("Digits", ink, tolerance, "");
+    // The shadow between the strokes is ink at 40, so they read as one
+    // character there.
+    let by_contrast = settings(None, 40).expect("learns the strokes");
+    assert_eq!((by_contrast.ink, by_contrast.tolerance), (None, 128));
+    assert_eq!(settings(None, 100).map(|saved| saved.tolerance), Ok(100));
+    // A text color's tolerance is the user's to set.
+    assert_eq!(
+        settings(Some(white), 10).map(|saved| saved.tolerance),
+        Ok(10)
+    );
 }
 
 #[test]
