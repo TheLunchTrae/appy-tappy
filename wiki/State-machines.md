@@ -104,7 +104,7 @@ it was about has gone. Fifteen guards drop such stale messages:
   (`fitKey` in `apps/setup/src/lib/useContrastTolerance.ts`). An answer
   under another key than the reference asks under now is dropped
   (`fitArrived`), and settles nothing (`fitSettles`).
-- **Reading risk keys.** The [reading risks](#look-alike-characters)
+- **Reading risk keys.** The [reading risks](#reading-risks)
   of a reference being taught are asked for under a key made of its whole
   spec: the region, the samples, the text color, and the tolerance
   (`riskKey` in `apps/setup/src/lib/useReadingRisks.ts`). An answer under
@@ -3080,8 +3080,8 @@ stateDiagram-v2
   reference's own messages say what is wrong with the sample: the box's row,
   the character check, and the save. A change to a sample or the region asks
   again.
-- **Settled** is what the page tells the [look-alike
-  check](#look-alike-characters), which waits for it, so it asks about the
+- **Settled** is what the page tells the [reading risks
+  check](#reading-risks), which waits for it, so it asks about the
   tolerance the reference keeps (`fitSettles`). A key that names no fit,
   such as one with a text color, counts as settled. Each new key starts
   unsettled, even a key the page settled before, since a reference saved
@@ -3095,7 +3095,7 @@ stateDiagram-v2
   different distances. One text color in place of another keeps the
   tolerance.
 
-### Look-alike characters
+### Reading risks
 
 The reference editor warns about what may keep the reference from reading
 as its samples do: two learned characters it may read as each other, as

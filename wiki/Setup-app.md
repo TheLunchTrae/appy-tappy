@@ -769,7 +769,7 @@ lookalike, and fails on a left-out digit that is closer. A reference made
 by itself takes what the values that read with it need (`readersNeed`). A
 reference found by contrast asks once its tolerance is fitted, since the fit
 changes the spec.
-[Look-alike characters](State-machines.md#look-alike-characters) has its
+[Reading risks](State-machines.md#reading-risks) has its
 states. Only the setup app checks this, so the runtime is unchanged.
 
 ### Hidden outlines
@@ -788,15 +788,20 @@ stops reading when the application changes what is behind it.
 The same `reading_risks` answer says whether the reference does this
 (`hides_a_tone` in `check_spec/contrast.rs`), and the editor warns and
 points to a text color, which counts the fill alone over any background. A
-sample hides a tone when it has pixels that stand out from its background
-by more than 16, do not count as characters at the reference's tolerance,
-and lie on the far side of the background from the characters: the
-background's mean color is between them and the characters' mean color. An
-anti-aliased edge is between the background and the characters, so it does
-not count. The sample hides a tone when it has at least a quarter as many
-such pixels as character pixels. A sample cannot show an outline that is
-the background's own color, so the check finds nothing there, and it does
-not look at a reference with a text color.
+sample hides a tone when enough of the pixels inside its border are not
+characters at the reference's tolerance and have a color that neither its
+background nor its characters account for; `hides_a_tone` documents the
+test and the constants that set its limits. The sample's border is its
+background, so a gradient, grain, or a panel's line behind the text is not
+a tone of the text, and an anti-aliased edge blends the background and the
+characters, so it is not one either.
+
+The warning says the outline can count over another background, not that
+it does, because the check sees only the samples. It finds no outline whose
+red, green, and blue each lie between the background's and the characters',
+which looks like an anti-aliased edge, none that reaches the sample's
+border, and none that is the background's own color. It does not look at a
+reference with a text color.
 
 ### Checking characters
 
