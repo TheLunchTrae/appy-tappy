@@ -381,12 +381,12 @@ mod tests {
         assert!(!ended.recording);
         assert_eq!(
             ended.problem.as_deref(),
-            Some("Recording stopped: The captured window closed. Change window to pick it again."),
+            Some("Recording stopped: The captured window closed."),
             "a recording the user stopped says so too, since no other can start"
         );
         assert_eq!(
             harness.ask(start_looks),
-            Err("The captured window closed. Change window to pick it again.".to_owned())
+            Err("The captured window closed.".to_owned())
         );
         assert_eq!(harness.kept(), [1], "the refused start left it as it was");
     }

@@ -1,6 +1,6 @@
 // The look for the window of the application a saved value or reference belongs to, and the capture it starts.
 
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 
 import { captureEnded, errorText } from './api.ts';
 import type { WindowChoice } from './bindings.ts';
@@ -8,7 +8,15 @@ import { type PickerApp, known, pickerStep } from './picker.ts';
 import { background } from './repeat.ts';
 import { ask } from './request.ts';
 import { useAppWindows } from './useAppWindows.ts';
-import { type WindowAbsence, NO_CAPTURE, fallbackWarning, searchStep, windowAbsence } from './windowSearch.ts';
+import {
+  type WindowAbsence,
+  ENDED_ASK_PAUSE_MS,
+  NO_CAPTURE,
+  endedAsks,
+  fallbackWarning,
+  searchStep,
+  windowAbsence,
+} from './windowSearch.ts';
 
 /**
  * Looks for the window of the saved application `app` when the flow opens and on `refresh`, and captures it with
@@ -27,8 +35,11 @@ export function useWindowSearch(
   readonly antiCheat: readonly string[];
   /** What to say of a captured window that was taken only as the fallback, or null. */
   readonly fallback: string | null;
-  /** Hears that the captured window's live view failed, which a closed window is one cause of. */
-  readonly liveFailed: () => void;
+  /**
+   * Hears a sign that the captured window may have closed: its live view failed, a screenshot was refused, or a
+   * recording stopped.
+   */
+  readonly windowFailed: () => void;
   readonly refresh: () => void;
   readonly choose: (window: WindowChoice) => void;
   /** Looks again from the start, once the flow stopped its capture. */
@@ -72,26 +83,18 @@ export function useWindowSearch(
     [severalFallback],
   );
   const running = capture.kind === 'running' ? capture.window.handle : null;
-  // One ask at a time: the live view fails again with every frame it asks for.
-  const asking = useRef(false);
-  const liveFailed = useCallback((): void => {
-    if (running === null || asking.current) {
+  const [askEnded] = useState(() => endedAsks(captureEnded, ENDED_ASK_PAUSE_MS, Date.now));
+  const windowFailed = useCallback((): void => {
+    if (running === null) {
       return;
     }
-    asking.current = true;
     background(
-      captureEnded()
-        .then((ended) => {
-          if (ended) {
-            send({ kind: 'ended', window: running });
-            lookAgain();
-          }
-        })
-        .finally(() => {
-          asking.current = false;
-        }),
+      askEnded(() => {
+        send({ kind: 'ended', window: running });
+        lookAgain();
+      }),
     );
-  }, [running, lookAgain]);
+  }, [running, askEnded, lookAgain]);
   const restart = useCallback((): void => {
     send({ kind: 'stopped' });
     lookAgain();
@@ -101,7 +104,7 @@ export function useWindowSearch(
     found,
     antiCheat: seen?.antiCheat ?? [],
     fallback: fallbackWarning(capture, found?.name ?? 'The application'),
-    liveFailed,
+    windowFailed,
     refresh,
     choose,
     restart,

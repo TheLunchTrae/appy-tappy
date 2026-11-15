@@ -7,8 +7,10 @@ import {
   type SearchEvent,
   type WindowCapture,
   NO_CAPTURE,
+  endedAsks,
   fallbackWarning,
   searchStep,
+  showsNewCloseSign,
   windowAbsence,
   windowLanding,
 } from '../src/lib/windowSearch.ts';
@@ -175,4 +177,68 @@ test('only a running capture of the fallback window is said to be the fallback',
   expect(fallbackWarning(fallbackRunning, 'Example App')).toContain(second.title);
   expect(fallbackWarning(running, 'Example App')).toBeNull();
   expect(fallbackWarning({ kind: 'starting', window: second, fallback: true }, 'Example App')).toBeNull();
+});
+
+describe('asking whether the capture ended', () => {
+  test('tells an ended capture, and nothing for one that goes on', async () => {
+    const answers = [false, true];
+    let time = 0;
+    const ask = endedAsks(
+      async () => Promise.resolve(answers.shift() ?? false),
+      1000,
+      () => time,
+    );
+    let ended = 0;
+    const told = (): void => {
+      ended += 1;
+    };
+    await ask(told);
+    expect(ended).toBe(0);
+    time = 1000;
+    await ask(told);
+    expect(ended).toBe(1);
+  });
+
+  test('asks once at a time, and again only after the pause', async () => {
+    let asked = 0;
+    let answer: (ended: boolean) => void = () => undefined;
+    let time = 0;
+    const ask = endedAsks(
+      async () => {
+        asked += 1;
+        return new Promise<boolean>((resolve) => {
+          answer = resolve;
+        });
+      },
+      1000,
+      () => time,
+    );
+    const nothing = (): void => undefined;
+    const first = ask(nothing);
+    time = 5000;
+    await ask(nothing);
+    expect(asked).toBe(1);
+    answer(false);
+    await first;
+    time = 999;
+    await ask(nothing);
+    expect(asked).toBe(1);
+    time = 1000;
+    const next = ask(nothing);
+    expect(asked).toBe(2);
+    answer(false);
+    await next;
+  });
+});
+
+test('a refused screenshot or a stopped recording is a new sign that the window closed, once', () => {
+  const none = [null, null];
+  const refused = ['The captured window closed.', null];
+  expect(showsNewCloseSign(none, refused)).toBe(true);
+  expect(showsNewCloseSign(refused, refused)).toBe(false);
+  expect(showsNewCloseSign(refused, none)).toBe(false);
+  expect(
+    showsNewCloseSign(refused, ['The captured window closed.', 'Recording stopped: The captured window closed.']),
+  ).toBe(true);
+  expect(showsNewCloseSign(refused, ['A frame was lost.', null])).toBe(true);
 });

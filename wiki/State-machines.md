@@ -1383,11 +1383,16 @@ stateDiagram-v2
   the stage and offers **Change how it's found** there. **Change window**
   stops the capture and opens a new editor on a new look, after asking
   about unsaved work.
-- **The window closes.** Each failure of the live view asks the owner
-  whether the capture slot is **Ended** (`capture_ended`), one ask at a
-  time. When it is, the capture returns to **None** and a new look starts,
-  so the panel shows again with **Refresh**, and the window is captured
-  again once a look finds it. The editor is the same one: its draft, its
+- **The window closes.** Three signs ask the owner whether the capture
+  slot is **Ended** (`capture_ended`): each failure of the live view, a
+  screenshot that is refused, and a recording that stops with a problem or
+  cannot start (`showsNewCloseSign`), so a close is noticed while a
+  screenshot shows too. `endedAsks` sends one ask at a time and at most one
+  a second, since a live view that fails without ending fails with every
+  frame. When the slot is ended, the capture returns to **None** and a new
+  look starts, so the panel shows again with **Refresh**, in place of
+  whatever screenshot showed, and the window is captured again once a look
+  finds it. The editor is the same one: its draft, its
   screenshots, and what it recorded stay, and the screenshots still show
   while the panel takes the live window's place. The end carries the
   window's handle, and `searchStep` drops one for another window than the
@@ -1711,9 +1716,11 @@ stateDiagram-v2
 - **Ended** is a failure whose `ended` flag is set, for a `NotConnected`
   error: a closed window, a lost graphics device, or a capture panic. Frames
   after it are dropped, and a screenshot, a new recording, and **Record
-  more** are refused with "Change window to pick it
-  again". `capture_ended` answers whether the slot is in it. Only a stop or
-  another pick leaves it.
+  more** are refused with the failure's error. `capture_ended` answers
+  whether the slot is in it, and each screen says its own way back: a new
+  value's or reference's capture screen says to select **Change window**
+  (`PickedCapture`), and the [window search](#window-search) shows its
+  panel. Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show. Nothing starts the capture again, at any window size: the
   editor watches the value again.

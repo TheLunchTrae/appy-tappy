@@ -154,10 +154,7 @@ impl<H: Host> Owner<H> {
         // A closed window sends no more frames, so a recording would count
         // up with nothing in it.
         if let Some(failure) = picked.failure.as_ref().filter(|failure| failure.ended) {
-            return Err(format!(
-                "{} Change window to pick it again.",
-                sentence(&failure.error)
-            ));
+            return Err(sentence(&failure.error));
         }
         if self.capture.screenshots().get(screenshot).is_none() {
             return Err("Take a screenshot first.".to_owned());
@@ -1175,7 +1172,7 @@ mod tests {
                 "the captured window closed",
             )),
         );
-        let closed = "The captured window closed. Change window to pick it again.";
+        let closed = "The captured window closed.";
         for more in [true, false] {
             assert_eq!(
                 harness.ask(start_recording(255, more)),
@@ -1186,7 +1183,7 @@ mod tests {
         assert!(!stopped.recording);
         assert_eq!(
             stopped.problem.as_deref(),
-            Some("Recording stopped: The captured window closed. Change window to pick it again.")
+            Some("Recording stopped: The captured window closed.")
         );
         std::fs::remove_dir_all(root).expect("clean up");
     }
@@ -1215,7 +1212,7 @@ mod tests {
         );
         assert_eq!(
             harness.recording().expect("kept").problem.as_deref(),
-            Some("Recording stopped: The captured window closed. Change window to pick it again.")
+            Some("Recording stopped: The captured window closed.")
         );
         std::fs::remove_dir_all(root).expect("clean up");
     }
