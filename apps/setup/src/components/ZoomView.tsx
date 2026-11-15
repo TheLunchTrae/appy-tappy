@@ -8,6 +8,7 @@ import {
   type Pan,
   ZOOM_STEP,
   clampZoom,
+  panEnd,
   panMove,
   panStart,
   percent,
@@ -108,8 +109,8 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
     const listener = (event: WheelEvent): void => {
       latestWheel.current(event);
     };
-    // A pan replaces the middle button's own scrolling, which starts on the mouse's press, and the right button's
-    // menu, which opens on its release.
+    // A middle press during a left drag sends no pointer press for a pan to cancel, so its own scrolling is stopped
+    // here. The right button's menu opens on its release, which a pan replaces.
     const press = (event: MouseEvent): void => {
       if (event.button === 1) {
         event.preventDefault();
@@ -131,6 +132,11 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
   // A drag with the right or the middle button pans. The view holds the pointer, so the surface under it never hears
   // the press or its moves and draws nothing.
   const pan = useRef<Pan | null>(null);
+  const [panning, setPanning] = useState(false);
+  const follow = (next: Pan | null): void => {
+    pan.current = next;
+    setPanning(next !== null);
+  };
   const startPan = (event: PointerEvent<HTMLDivElement>): void => {
     const started = panStart(event.button, event.pointerId, { x: event.clientX, y: event.clientY });
     if (started === null) {
@@ -140,20 +146,39 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    pan.current = started;
+    if (event.button === 2) {
+      // The menu opens on the release, which goes to whatever is under the pointer once the view lets it go, often
+      // past the view's edge. So the next menu is turned off wherever it opens, or until the next press.
+      const armed = new AbortController();
+      const listening = { capture: true, signal: armed.signal };
+      window.addEventListener(
+        'contextmenu',
+        (opened) => {
+          opened.preventDefault();
+          armed.abort();
+        },
+        listening,
+      );
+      window.addEventListener(
+        'pointerdown',
+        () => {
+          armed.abort();
+        },
+        listening,
+      );
+    }
+    follow(started);
   };
   const movePan = (event: PointerEvent<HTMLDivElement>): void => {
     if (pan.current === null) {
       return;
     }
-    const moved = panMove(pan.current, event.pointerId, { x: event.clientX, y: event.clientY });
-    pan.current = moved.pan;
+    const moved = panMove(pan.current, event.pointerId, { x: event.clientX, y: event.clientY }, event.buttons);
+    follow(moved.pan);
     scroller.current?.scrollBy(moved.scroll.x, moved.scroll.y);
   };
   const endPan = (event: PointerEvent<HTMLDivElement>): void => {
-    if (pan.current?.pointer === event.pointerId) {
-      pan.current = null;
-    }
+    follow(panEnd(pan.current, event.pointerId));
   };
 
   // The most this picture zooms, which is 1 for the live view. A control that can do nothing more says so and keeps
@@ -172,7 +197,7 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
         }}
       >
         <div
-          className="scroller"
+          className={panning ? 'scroller panning' : 'scroller'}
           ref={scroller}
           onPointerDownCapture={startPan}
           onPointerMove={movePan}
@@ -228,7 +253,7 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
           >
             Fit
           </button>
-          <Hint topic="Zoom">{ZOOM_HINT}</Hint>
+          {zoomable ? <Hint topic="Zoom">{ZOOM_HINT}</Hint> : null}
         </div>
       </div>
     </div>

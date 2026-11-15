@@ -5,6 +5,7 @@ import {
   GUTTER,
   ZOOM_STEP,
   clampZoom,
+  panEnd,
   panMove,
   panStart,
   percent,
@@ -123,13 +124,30 @@ describe('pan', () => {
     expect(panStart(0, 7, { x: 10, y: 20 })).toBeNull();
   });
 
+  const pan = { pointer: 7, at: { x: 10, y: 20 } };
+  const RIGHT = 2;
+  const MIDDLE = 4;
+  const MAIN = 1;
+
   test('scrolls against the pointer, so the picture moves with it', () => {
-    const moved = panMove({ pointer: 7, at: { x: 10, y: 20 } }, 7, { x: 40, y: 5 });
-    expect(moved).toEqual({ pan: { pointer: 7, at: { x: 40, y: 5 } }, scroll: { x: -30, y: 15 } });
+    expect(panMove(pan, 7, { x: 40, y: 5 }, RIGHT)).toEqual({
+      pan: { pointer: 7, at: { x: 40, y: 5 } },
+      scroll: { x: -30, y: 15 },
+    });
+    expect(panMove(pan, 7, { x: 40, y: 5 }, MIDDLE | MAIN).pan).toEqual({ pointer: 7, at: { x: 40, y: 5 } });
+  });
+
+  test('ends when its button is let go while the main one stays down', () => {
+    expect(panMove(pan, 7, { x: 40, y: 5 }, MAIN)).toEqual({ pan: null, scroll: { x: 0, y: 0 } });
   });
 
   test('ignores another pointer', () => {
-    const pan = { pointer: 7, at: { x: 10, y: 20 } };
-    expect(panMove(pan, 8, { x: 40, y: 5 })).toEqual({ pan, scroll: { x: 0, y: 0 } });
+    expect(panMove(pan, 8, { x: 40, y: 5 }, MAIN)).toEqual({ pan, scroll: { x: 0, y: 0 } });
+    expect(panEnd(pan, 8)).toBe(pan);
+  });
+
+  test('ends when its own pointer is let go', () => {
+    expect(panEnd(pan, 7)).toBeNull();
+    expect(panEnd(null, 7)).toBeNull();
   });
 });
