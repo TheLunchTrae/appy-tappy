@@ -123,14 +123,13 @@ describe('drawing over the live view', () => {
 
 describe('where the live view takes a drawn region', () => {
   const frame = { width: 800, height: 450 };
-  const scene = { settingPlace: true, live: frame, hasRegion: false, editsSaved: false, occupied: false };
-  test("draws a new value's region over it again once one is placed, on the screenshot the drag takes", () => {
+  const scene = { settingPlace: true, live: frame, drawnAt: null, occupied: false };
+  test("draws a new value's region over it, placed or not, on the screenshot the drag takes", () => {
     expect(liveDrawFrame(scene)).toBe(frame);
-    expect(liveDrawFrame({ ...scene, hasRegion: true })).toBe(frame);
   });
-  test("leaves an edited value's placed region to screenshots of the size it was drawn at", () => {
-    expect(liveDrawFrame({ ...scene, editsSaved: true })).toBe(frame);
-    expect(liveDrawFrame({ ...scene, editsSaved: true, hasRegion: true })).toBeNull();
+  test("draws an edited value's region over a frame of the size it was drawn at only", () => {
+    expect(liveDrawFrame({ ...scene, drawnAt: { width: 800, height: 450 } })).toBe(frame);
+    expect(liveDrawFrame({ ...scene, drawnAt: { width: 1280, height: 720 } })).toBeNull();
   });
   test('draws nothing outside Where to read, without a frame, or while the live view is busy', () => {
     expect(liveDrawFrame({ ...scene, settingPlace: false })).toBeNull();

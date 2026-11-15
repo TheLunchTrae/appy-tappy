@@ -33,7 +33,9 @@ back to the automation with the value picked.
      a box around it. The drag takes the screenshot as it starts, the
      picture holds still while you drag and gives way to the screenshot once
      it is taken, and the region goes on that screenshot. To draw it again
-     on a newer frame, select **Live** in the strip and drag again.
+     on a newer frame, select **Live** in the strip, where the region shows
+     over the window, and drag again. While you edit a value, this works
+     while the window has the size the value was drawn at.
    - **Take a screenshot and draw on it.** Select **Take screenshot**, or
      press the screenshot shortcut, `F9` at first, then drag a box on the
      screenshot, as [Draw the region](#draw-the-region) describes. The
@@ -640,8 +642,9 @@ region may show none of the states right now.
    The fix compares with the first drawing's tolerance.
    For a **Number** check, **Read with** keeps the reference the value reads
    with at every size, or **Learn a reference at this size** teaches a new
-   one from this size's screenshots. A **Bar fill** or **Color** check keeps
-   its colors.
+   one from this size's screenshots. A **Number**'s region doesn't show in
+   this step; go back to **Where to read** to move it. A **Bar fill** or
+   **Color** check keeps its colors.
 4. Select **Save fix**.
 
 At that size AppyTappy then reads the fix exactly, instead of scaling. The

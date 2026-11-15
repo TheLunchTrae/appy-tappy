@@ -52,6 +52,9 @@ export function stageHint({
       ? 'Recording. Use the application; a reading is kept for each new shape.'
       : 'Recording. Use the application; a screenshot is kept of each different look.';
   }
+  if (drawing === 'none') {
+    return 'Go back to Where to read to change the region.';
+  }
   if (selected === null && drawing === 'live') {
     return `Drag over the window where the value shows; that takes the screenshot. Or take one (${shortcut}).`;
   }
@@ -68,9 +71,6 @@ export function stageHint({
       boxBlock ??
       'Drag to draw a box around some characters. Press a box to select it, drag it to move it, or press Delete to remove it.'
     );
-  }
-  if (drawing === 'none') {
-    return 'Go back to Where to read to change the region.';
   }
   if (otherSize) {
     return 'The region shows on screenshots of the size the value was drawn at.';

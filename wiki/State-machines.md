@@ -2132,8 +2132,8 @@ stateDiagram-v2
 While the live view shows, the capture screen's first step lays a region
 surface over the live window, so the user can drag where the value shows
 without taking a screenshot first. The press takes the screenshot the region
-goes on, and a region already placed moves onto it. `liveDraw` in `apps/setup/src/lib/liveDraw.ts` is the pure
-`(state, event)` transition, and `useLiveDraw` there holds the state, numbers
+goes on, and the box drawn replaces any region already placed. `liveDraw` in
+`apps/setup/src/lib/liveDraw.ts` is the pure `(state, event)` transition, and `useLiveDraw` there holds the state, numbers
 the presses, and takes the screenshot.
 
 ```mermaid
@@ -2183,9 +2183,12 @@ stateDiagram-v2
 
 The surface shows only while the first step sets the value's place, the live
 view shows, no recording runs, no review is open, and no color is being
-picked, and only while an edited saved value has no region, since the live
-window can have another size than the one its region is drawn at
-(`liveDrawFrame` in `apps/setup/src/lib/liveDraw.ts`).
+picked. For an edited saved value it shows only while the live window has the
+size its region is drawn at (`liveDrawFrame` in
+`apps/setup/src/lib/liveDraw.ts`). A region placed at the live frame's size
+shows over the live window until a press. A press that draws no box takes a
+screenshot like **Take screenshot**, except that it leaves a region placed at
+another size where it is.
 
 ### Value steps
 

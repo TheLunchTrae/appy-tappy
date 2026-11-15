@@ -29,8 +29,9 @@ export function shownOnStep(step: Step, drawnOn: number | null, selected: number
 
 /**
  * Whether the stage outlines the value's region, and lets it be drawn, in `step`. A number's later steps pick and
- * check its characters, so its region shows there only while a recording of it runs; other checks read colors and
- * looks inside the region in their second step, so it shows there too.
+ * check its characters, so its region shows there only while a recording of looks, started before the check became
+ * a number, still runs over it; other checks read colors and looks inside the region in their second step, so it shows
+ * there too.
  */
 export function regionOnStage(step: Step, kind: CheckKind, recording: boolean): boolean {
   return step === 'where' || kind !== 'number' || recording;
