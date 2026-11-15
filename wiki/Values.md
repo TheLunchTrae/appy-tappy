@@ -639,8 +639,9 @@ region may show none of the states right now.
    The fix compares with the first drawing's tolerance.
    For a **Number** check, **Read with** keeps the reference the value reads
    with at every size, or **Learn a reference at this size** teaches a new
-   one from this size's screenshots. A **Bar fill** or **Color** check keeps
-   its colors.
+   one from this size's screenshots. A **Number**'s region doesn't show in
+   this step; go back to **Where to read** to move it. A **Bar fill** or
+   **Color** check keeps its colors.
 4. Select **Save fix**.
 
 At that size AppyTappy then reads the fix exactly, instead of scaling. The
