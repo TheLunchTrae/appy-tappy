@@ -132,11 +132,12 @@ most with bold text that has a thick outline: give it a
 [text color](#text-color). With a text color, lower the **Tolerance**, or
 pick the color again from the middle of a character.
 
-A second warning there says that the characters have an outline or a shadow
-that doesn't count, because it is close to the background in what the
-reference learned. The number then reads over that background and stops
-reading when the application changes it, as a game does from one level or
-scene to the next: give the reference a [text color](#text-color).
+A second warning there says that an outline or a shadow around the
+characters is close to the background color in what the reference learned
+from, so it isn't part of the shapes it learned. Over a background of
+another color it can count, and the number won't read, as when a game goes
+from one level or scene to the next: give the reference a
+[text color](#text-color), so only the inside of the characters counts.
 
 AppyTappy learns a character from a box, found text you add, or a kept
 reading, never because a value needs it. A reference you make or edit from
