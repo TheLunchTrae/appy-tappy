@@ -91,7 +91,7 @@ export const FOUND_HINT =
 
 /** What Check characters steps through, and what an answer changes. */
 export const CHECK_CHARACTERS_HINT =
-  'Goes through the characters one at a time, across the boxes, the finds listed, and the readings a recording keeps. Each step shows one character and every place it appears, and asks once whether that is what it is. Your answer fixes the text of every place that shows it, so a character the text reader misread the same way everywhere needs one fix. You can still change any text by hand.';
+  'Goes through the characters one at a time, across the boxes, the finds listed, and the readings a recording keeps. Each step shows one character and every place it appears, and asks once whether that is what it is. Your answer fixes the text of every place that shows it, so a character the text reader misread the same way everywhere needs one fix. A later check asks only about characters you have not answered for yet. You can still change any text by hand.';
 
 /** The keys that answer a step of Check characters. */
 export const CHECK_KEYS_HINT =
