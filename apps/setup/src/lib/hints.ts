@@ -77,6 +77,10 @@ export const INK_HINT =
 export const BOXES_HINT =
   'Drag on any screenshot to draw a box tightly around some characters, then type exactly what it shows, such as 87% or 1,250. Draw as many as you like, several on one screenshot too. Press a box to select it; drag it to move it, drag a corner to resize it, or press Delete to remove it. Each box with text teaches the reference the characters in it. A reference you teach by itself reads and records at the box marked Reads here, the first in the list.';
 
+/** The saved pictures a reference can't learn. */
+export const UNLEARNED_HINT =
+  'A reference keeps a picture of every box and reading it learned from, and learns them all again each time it is saved. A picture stops teaching it when what counts as the characters changes: with another text color or tolerance, characters can touch, fall apart, or disappear. Removing a picture takes away only what that picture taught. If a character goes missing, draw a box around it on a screenshot.';
+
 /** The characters a number value needs. */
 export const EXPECTED_HINT =
   "The characters this value can show. It reads only these, so it doesn't mistake one for a lookalike, such as 0 for O, and AppyTappy shows which of them its reference has yet to learn. The reference keeps every character it knows, so other values in the same font can share it. A number ends at a colon or slash, so 12:30 and 12/50 each read as 12.";

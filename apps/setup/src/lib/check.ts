@@ -59,6 +59,8 @@ export interface Draft {
   readonly boxes: readonly Box[];
   /** What each reading kept from the recording shows, by reading index. */
   readonly recorded: ReadonlyMap<number, string>;
+  /** The saved pictures the reference being edited leaves out, by file name, which saving it removes. */
+  readonly dropped: readonly string[];
   readonly filled: Color | null;
   readonly empty: Color | null;
   readonly color: Color | null;
@@ -93,6 +95,7 @@ export const EMPTY_DRAFT: Draft = {
   ink: null,
   boxes: [],
   recorded: new Map(),
+  dropped: [],
   filled: null,
   empty: null,
   color: null,
@@ -335,6 +338,7 @@ export function reviewSpec(
     tolerance: draft.tolerance,
     labels: boxLabels(draft.boxes),
     recorded: kept,
+    dropped: draft.dropped,
   };
 }
 
@@ -360,7 +364,7 @@ export function buildCharacters(draft: Draft, reference: ReferenceRef | null): B
 
 /**
  * What saving a reference sends: the characters it is taught, or a saved reference's settings alone, which keep its
- * samples and need no screenshot.
+ * samples but for the ones it leaves out, and need no screenshot.
  */
 export type ReferenceSaving =
   | { readonly kind: 'taught'; readonly characters: CharactersSpec }
@@ -369,6 +373,7 @@ export type ReferenceSaving =
       readonly reference: ReferenceRef;
       readonly ink: Color | null;
       readonly tolerance: number;
+      readonly dropped: readonly string[];
     };
 
 /**
@@ -381,7 +386,10 @@ export function buildReferenceSave(draft: Draft, reference: ReferenceRef | null)
     return { ok: true, spec: { kind: 'taught', characters: characters.spec } };
   }
   return reference !== null && readingOf(draft).region === null
-    ? { ok: true, spec: { kind: 'settings', reference, ink: draft.ink, tolerance: draft.tolerance } }
+    ? {
+        ok: true,
+        spec: { kind: 'settings', reference, ink: draft.ink, tolerance: draft.tolerance, dropped: draft.dropped },
+      }
     : characters;
 }
 
@@ -626,12 +634,21 @@ export function toReference(draft: Draft, existing: ReferenceDef | null): Draft 
     tolerance: existing?.tolerance ?? NEW_REFERENCE_TOLERANCE,
     boxes: [],
     recorded: new Map(),
+    dropped: [],
   };
 }
 
-/** `draft` leaving the reference editor for the value it was opened from, without the editor's boxes or readings. */
+/**
+ * `draft` leaving the reference editor for the value it was opened from, without the editor's boxes or readings, or
+ * the saved pictures it left out.
+ */
 export function fromReference(draft: Draft): Draft {
-  return { ...draft, boxes: [], recorded: new Map() };
+  return { ...draft, boxes: [], recorded: new Map(), dropped: [] };
+}
+
+/** `draft` with the saved picture `image` of the reference being edited left out. */
+export function withoutSample(draft: Draft, image: string): Draft {
+  return draft.dropped.includes(image) ? draft : { ...draft, dropped: [...draft.dropped, image] };
 }
 
 /**

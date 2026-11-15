@@ -420,9 +420,9 @@ leftOut: boolean, }>;
 
 /**
  * The characters a reference is being taught, as the UI describes them:
- * the saved samples of `reference`, when it is saved, then `labels`, then
- * `recorded`, their characters told from the background by `ink` and
- * `tolerance`.
+ * the saved samples of `reference`, when it is saved, but for `dropped`,
+ * then `labels`, then `recorded`, their characters told from the
+ * background by `ink` and `tolerance`.
  */
 export type CharactersSpec = DeepReadonly<{
 /**
@@ -457,7 +457,12 @@ labels: Array<Label>,
 /**
  * Readings of the session's recording, which must be of `region`.
  */
-recorded: Array<RecordedLabel>, }>;
+recorded: Array<RecordedLabel>,
+/**
+ * The picture file names of the saved samples the reference leaves
+ * out, which saving it removes.
+ */
+dropped: Array<string>, }>;
 
 /**
  * How many times fall in each bar of a chart.
@@ -1721,7 +1726,7 @@ characters: CharactersSpec, }>;
 
 /**
  * A saved reference's settings to save, as the UI describes them. Its
- * samples stay as they are saved.
+ * samples stay as they are saved, but for those it leaves out.
  */
 export type ReferenceSettingsSpec = DeepReadonly<{
 /**
@@ -1740,7 +1745,12 @@ ink?: ColorDef,
 /**
  * The reference's tolerance, as `ReferenceDef` has it.
  */
-tolerance: number, }>;
+tolerance: number,
+/**
+ * The picture file names of the saved samples it leaves out, which
+ * saving it removes.
+ */
+dropped: Array<string>, }>;
 
 /**
  * A reference being taught to try on the live window before it is saved,
@@ -1884,6 +1894,12 @@ app: string,
  * The value's ID.
  */
 value: string, }>;
+
+/**
+ * How a saved reference is saved again, which decides the tolerance it
+ * learns its samples with by contrast.
+ */
+export type SavingKind = DeepReadonly<"taught" | "settings">;
 
 /**
  * A value read from a region of the window's frame.
@@ -2385,6 +2401,24 @@ screenshot: number,
  * size, or `None` before one is picked, for the side it is nearest.
  */
 pin: PinDef | null, }>;
+
+/**
+ * A saved sample a reference cannot learn with the text color and
+ * tolerance it is tried with.
+ */
+export type UnlearnedSample = DeepReadonly<{
+/**
+ * The sample's picture file name, which names it in `dropped`.
+ */
+image: string,
+/**
+ * The text the sample shows.
+ */
+text: string,
+/**
+ * Why the reference cannot learn it, as a sentence.
+ */
+problem: string, }>;
 
 /**
  * A newer release the user can install.

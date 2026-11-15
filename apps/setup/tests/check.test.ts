@@ -29,6 +29,7 @@ import {
   settingsDiffer,
   stateOn,
   toReference,
+  withoutSample,
   withFixRegion,
   withRecordedInk,
   withKind,
@@ -255,6 +256,7 @@ describe('buildCharacters', () => {
           { screenshot: 0, region: other, text: '12%' },
         ],
         recorded: [],
+        dropped: [],
       },
     });
   });
@@ -321,10 +323,13 @@ test('reviewSpec waits for the region, names the reference, and has a text color
     tolerance: CHECKS.number.tolerance,
     labels: [],
     recorded: [],
+    dropped: [],
   });
   expect(reviewSpec({ ...EMPTY_DRAFT, region, ink: red }, [], null)).toBeNull();
   const kept = [{ reading: 0, text: '5' }];
-  expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1, ink: red }, kept, percent)).toEqual({
+  // The saved pictures the editor left out go with every ask about the characters.
+  const dropped = ['ref-percent-2.png'];
+  expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1, ink: red, dropped }, kept, percent)).toEqual({
     region,
     screenshot: 1,
     reference: percent,
@@ -332,6 +337,7 @@ test('reviewSpec waits for the region, names the reference, and has a text color
     tolerance: CHECKS.number.tolerance,
     labels: [],
     recorded: kept,
+    dropped,
   });
 });
 
@@ -368,6 +374,12 @@ describe('the reference editor', () => {
       recorded: new Map([[0, '99%']]),
     };
     expect(fromReference(editor)).toEqual({ ...editor, boxes: [], recorded: new Map() });
+    // The saved pictures an editor left out stay with that editor.
+    const left = withoutSample(editor, 'ref-percent-1.png');
+    expect(left.dropped).toEqual(['ref-percent-1.png']);
+    expect(withoutSample(left, 'ref-percent-1.png')).toBe(left);
+    expect(fromReference(left).dropped).toEqual([]);
+    expect(toReference(left, saved).dropped).toEqual([]);
   });
 });
 
@@ -667,10 +679,11 @@ describe('fixDraft', () => {
 describe('buildReferenceSave', () => {
   test("saves a saved reference's settings alone while it has no place to read", () => {
     // The region of a value whose window is not captured sits on no screenshot.
-    const windowless = { ...EMPTY_DRAFT, region, ink: red, tolerance: 40 };
+    const dropped = ['ref-percent-1.png'];
+    const windowless = { ...EMPTY_DRAFT, region, ink: red, tolerance: 40, dropped };
     expect(buildReferenceSave(windowless, percent)).toEqual({
       ok: true,
-      spec: { kind: 'settings', reference: percent, ink: red, tolerance: 40 },
+      spec: { kind: 'settings', reference: percent, ink: red, tolerance: 40, dropped },
     });
   });
 
@@ -683,7 +696,7 @@ describe('buildReferenceSave', () => {
   test('a saved reference without a text color saves its settings without one', () => {
     expect(buildReferenceSave(EMPTY_DRAFT, percent)).toEqual({
       ok: true,
-      spec: { kind: 'settings', reference: percent, ink: null, tolerance: 40 },
+      spec: { kind: 'settings', reference: percent, ink: null, tolerance: 40, dropped: [] },
     });
   });
 

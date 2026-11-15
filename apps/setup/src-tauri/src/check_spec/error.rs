@@ -89,6 +89,16 @@ pub(crate) enum SpecError {
     /// A number value is to need more than [`MAX_EXPECTED_CHARACTERS`]
     /// characters.
     TooManyExpected,
+    /// A saved reference cannot learn from one of its saved samples with
+    /// the text color and tolerance it is tried with.
+    SavedLearn {
+        /// The reference's name.
+        reference: String,
+        /// The text the sample shows.
+        text: String,
+        /// Why the reference cannot learn from it.
+        source: LearnError,
+    },
     /// A reference could not learn from a label.
     Learn {
         /// The text the user typed.
@@ -195,8 +205,18 @@ impl fmt::Display for SpecError {
             ),
             Self::MissingSample { reference, picture } => write!(
                 formatter,
-                "The reference {reference} is missing its picture {picture}. Remove the values \
-                 that read with it, then delete the reference and make it again."
+                "{reference} is missing its saved picture {picture}. Edit {reference} and remove \
+                 that picture under Saved pictures it can't learn."
+            ),
+            Self::SavedLearn {
+                reference,
+                text,
+                source,
+            } => write!(
+                formatter,
+                "{reference} can't learn from its saved picture of \"{text}\": {source}. Edit \
+                 {reference} and remove that picture under Saved pictures it can't learn, or \
+                 change its text color."
             ),
             Self::Unreadable(why) => {
                 write!(formatter, "AppyTappy could not read this value as saved: {why}.")
@@ -226,7 +246,7 @@ impl From<SavedError> for SpecError {
 impl Error for SpecError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Learn { source, .. } => Some(source),
+            Self::Learn { source, .. } | Self::SavedLearn { source, .. } => Some(source),
             _ => None,
         }
     }

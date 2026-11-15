@@ -64,7 +64,8 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
 use crate::check_spec::{
-    CharactersSpec, CheckSpec, Label, MAX_EXPECTED_CHARACTERS, expected_characters,
+    CharactersSpec, CheckSpec, Label, MAX_EXPECTED_CHARACTERS, ReferenceRef, UnlearnedSample,
+    expected_characters,
 };
 use crate::commands::Upload;
 use crate::debug::bundle::BundleSpec;
@@ -80,8 +81,8 @@ use crate::overlay::window::label;
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
     FoundClick, FoundView, ImportSpec, Live, ReadingRisks, RecordSpec, ReferenceSaveSpec,
-    ReferenceSettingsSpec, ReferenceTrial, SaveSpec, SavedReferenceId, SavedValue, SharedView,
-    TrialSpec,
+    ReferenceSettingsSpec, ReferenceTrial, SaveSpec, SavedReferenceId, SavedValue, SavingKind,
+    SharedView, TrialSpec,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::reading::Reading;

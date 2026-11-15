@@ -45,6 +45,8 @@ interface Props {
   readonly preview: ReactNode;
   /** The recording panel. */
   readonly record: ReactNode;
+  /** The saved pictures it can't learn, with a way to leave them out. */
+  readonly unlearned: ReactNode;
   readonly onName: (name: string) => void;
   readonly onPick: () => void;
   /** Goes back to finding the characters by contrast. */
@@ -221,6 +223,7 @@ export function ReferenceEditor(props: Props) {
         onNoTextColor={props.onNoTextColor}
         onTolerance={props.onTolerance}
       />
+      {props.unlearned}
       {props.preview}
       {readers.length === 0 ? null : (
         <p className="note">

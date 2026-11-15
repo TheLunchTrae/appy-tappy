@@ -202,7 +202,9 @@ pub(super) fn read_back(
         error => file
             .references
             .iter()
-            .find_map(|reference| check_spec::sample_problem_of(&error, reference))
+            .find_map(|reference| {
+                check_spec::sample_problem_of(&error, &reference.name, &reference.samples)
+            })
             .unwrap_or_else(|| SpecError::from(error))
             .to_string(),
     })

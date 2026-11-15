@@ -44,6 +44,7 @@ import type {
   ReadingRisks,
   RecordSpec,
   RecordingView,
+  ReferenceRef,
   ReferenceSaveSpec,
   ReferenceSettingsSpec,
   ReferenceTrial,
@@ -52,6 +53,7 @@ import type {
   SaveSpec,
   SavedReference,
   SavedValue,
+  SavingKind,
   SelectionSpec,
   SelectionView,
   SettingsFile,
@@ -64,6 +66,7 @@ import type {
   TraceRange,
   TraceRows,
   TrialSpec,
+  UnlearnedSample,
   UpdateOffer,
   WhenDef,
   WindowDef,
@@ -516,9 +519,28 @@ export async function saveReference(spec: ReferenceSaveSpec): Promise<SavedRefer
   return invoke<SavedReference>('save_reference', { spec });
 }
 
-/** Saves a saved reference's name, color, and tolerance, with its samples as they are, so it needs no screenshot. */
+/**
+ * Saves a saved reference's name, color, and tolerance, with its samples as they are but for those it leaves
+ * out, so it needs no screenshot.
+ */
 export async function saveReferenceSettings(spec: ReferenceSettingsSpec): Promise<SavedReference> {
   return invoke<SavedReference>('save_reference_settings', { spec });
+}
+
+/**
+ * The saved pictures the saved reference `reference` can't learn with the text color `ink`, or by contrast
+ * without one, and `tolerance`, saved as `saving` says without the pictures `dropped` names.
+ */
+export async function unlearnedSamples(reference: ReferenceRef, ink: ColorDef | null, tolerance: number, dropped: ReadonlyArray<string>, saving: SavingKind): Promise<ReadonlyArray<UnlearnedSample>> {
+  return invoke<ReadonlyArray<UnlearnedSample>>('unlearned_samples', { reference, ink, tolerance, dropped, saving });
+}
+
+/**
+ * The saved picture `image` of the saved reference `reference` at most `maxWidth` wide, or null when there
+ * is none.
+ */
+export async function samplePicture(reference: ReferenceRef, image: string, maxWidth: number): Promise<Picture | null> {
+  return decodePicture(await invoke<ArrayBuffer>('sample_picture', { reference, image, maxWidth }));
 }
 
 /** Removes a saved reference and its pictures; refused while a value reads with it. */

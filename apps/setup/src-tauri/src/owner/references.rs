@@ -7,8 +7,8 @@ use appytappy_config::names::new_reference_id;
 
 use serde::{Deserialize, Serialize};
 
-use crate::check_spec::{CharactersSpec, ReferenceRef, SavedReference, Session};
-
+use crate::check_spec::{CharactersSpec, ReferenceRef, SavedReference, Session, UnlearnedSample};
+use crate::pixels;
 use crate::stores::SavedApp;
 
 use super::host::Host;
@@ -29,7 +29,7 @@ pub(crate) struct ReferenceSaveSpec {
 }
 
 /// A saved reference's settings to save, as the UI describes them. Its
-/// samples stay as they are saved.
+/// samples stay as they are saved, but for those it leaves out.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +45,24 @@ pub(crate) struct ReferenceSettingsSpec {
     pub(crate) ink: Option<ColorDef>,
     /// The reference's tolerance, as `ReferenceDef` has it.
     pub(crate) tolerance: u8,
+    /// The picture file names of the saved samples it leaves out, which
+    /// saving it removes.
+    #[serde(default)]
+    pub(crate) dropped: Vec<String>,
+}
+
+/// How a saved reference is saved again, which decides the tolerance it
+/// learns its samples with by contrast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SavingKind {
+    /// With the characters it is taught, as [`ReferenceSaveSpec`] saves
+    /// it: with the tolerance it is given.
+    Taught,
+    /// With its settings alone, as [`ReferenceSettingsSpec`] saves it: with
+    /// a tolerance fitted to its samples.
+    Settings,
 }
 
 /// Where a reference was saved.
@@ -160,11 +178,51 @@ impl<H: Host> Owner<H> {
         .map(|saved| saved.answer)
     }
 
+    /// The saved samples the saved reference `reference` cannot learn with
+    /// the text color `ink` and `tolerance`, saved as `saving` says and
+    /// without the samples `dropped` names: the ones a save refuses, which
+    /// the reference's editor shows so the user can leave them out.
+    pub(crate) fn unlearned_samples(
+        &mut self,
+        reference: &ReferenceRef,
+        ink: Option<ColorDef>,
+        tolerance: u8,
+        dropped: &[String],
+        saving: SavingKind,
+    ) -> Result<Vec<UnlearnedSample>, String> {
+        self.keep_reference(Some(reference));
+        let saved = self.saved_reference(reference)?.without(dropped);
+        Ok(match saving {
+            SavingKind::Taught => saved.unlearned(ink, tolerance),
+            SavingKind::Settings => saved.unlearned_with_settings(ink, tolerance),
+        })
+    }
+
+    /// The pixels of the picture `image` of a sample of the saved reference
+    /// `reference`, at most `max_width` wide; `None` when the reference
+    /// has no such sample or its picture cannot be read.
+    pub(crate) fn sample_pixels(
+        &self,
+        reference: &ReferenceRef,
+        image: &str,
+        max_width: u32,
+    ) -> Option<Vec<u8>> {
+        let saved = self.saved_reference(reference).ok()?;
+        let sample = saved
+            .reference
+            .samples
+            .iter()
+            .find(|sample| sample.image == image)?;
+        saved
+            .picture(sample)
+            .map(|picture| pixels::rgba(&picture, max_width))
+    }
+
     /// Saves the settings `spec` gives a saved reference, its name and its
     /// text color and tolerance, and says where it is saved. Its samples
-    /// stay as they are, so this needs no screenshot and no picked window.
-    /// The reference must still learn every sample with the new text color
-    /// and tolerance.
+    /// stay as they are but for those `spec` leaves out, so this needs no
+    /// screenshot and no picked window. The reference must still learn
+    /// every sample it keeps with the new text color and tolerance.
     pub(crate) fn save_reference_settings(
         &mut self,
         spec: &ReferenceSettingsSpec,
@@ -177,6 +235,7 @@ impl<H: Host> Owner<H> {
         self.update_app(app, Changed::Values, |_owner, found| {
             named_apart(&found.file, id, name)?;
             let changed = reference_of(found, id)?
+                .without(&spec.dropped)
                 .with_settings(name, spec.ink, spec.tolerance)
                 .map_err(|error| error.to_string())?;
             let answer = SavedReferenceId {
@@ -285,8 +344,8 @@ mod tests {
 
     use crate::owner::SavedValue;
     use crate::owner::test_support::{
-        FakeHost, Harness, add_example_app, frame_image, harness_with, scratch_store, spec,
-        teaching, trial,
+        FakeHost, Harness, add_example_app, characters, frame_image, harness_with, scratch_store,
+        spec, teaching, trial,
     };
 
     use super::*;
@@ -588,6 +647,7 @@ mod tests {
             reference_name: name.to_owned(),
             ink,
             tolerance: 10,
+            dropped: Vec::new(),
         };
         let red = before.ink;
         let save = |harness: &mut Harness, spec: ReferenceSettingsSpec| {
@@ -645,6 +705,152 @@ mod tests {
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
+    #[test]
+    fn a_saved_picture_the_reference_cannot_learn_is_shown_and_left_out() {
+        let (stores, root) = scratch_store("references-unlearned");
+        let folder = stores.apps.folder("example");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        harness
+            .ask(|owner| owner.save_reference(&reference("example", "Digits", None)))
+            .expect("saves");
+        let digits = ReferenceRef {
+            app: "example".to_owned(),
+            id: "digits".to_owned(),
+        };
+        let gray = ColorDef {
+            red: 40,
+            green: 40,
+            blue: 40,
+        };
+        let red = ColorDef {
+            red: 255,
+            green: 0,
+            blue: 0,
+        };
+        // The saved red square, tried in gray with a box on the gray half.
+        let in_gray = |dropped: &str| ReferenceSaveSpec {
+            app: "example".to_owned(),
+            reference_name: "Digits".to_owned(),
+            characters: characters(&format!(
+                r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,
+                    "reference":{{"app":"example","id":"digits"}},
+                    "ink":{{"red":40,"green":40,"blue":40}},"tolerance":0,
+                    "labels":[{{"screenshot":0,"region":{{"x":2,"y":0,"width":2,"height":2}},
+                        "text":"2"}}],"dropped":[{dropped}]}}"#
+            )),
+        };
+        let unlearned = |harness: &mut Harness, ink, dropped: &[String], saving| {
+            let reference = digits.clone();
+            let dropped = dropped.to_vec();
+            harness
+                .ask(move |owner| owner.unlearned_samples(&reference, ink, 0, &dropped, saving))
+                .expect("a saved reference")
+                .into_iter()
+                .map(|sample| (sample.image, sample.text))
+                .collect::<Vec<_>>()
+        };
+        let picture = "ref-digits-1.png".to_owned();
+        let refused = harness
+            .ask(|owner| owner.save_reference(&in_gray("")))
+            .expect_err("the saved picture has no gray");
+        assert!(
+            refused.starts_with("Digits can't learn from its saved picture of \"1\":"),
+            "{refused}"
+        );
+        // The editor is told which picture it is, and shown it.
+        let failing = [(picture.clone(), "1".to_owned())];
+        for saving in [SavingKind::Taught, SavingKind::Settings] {
+            assert_eq!(unlearned(&mut harness, Some(gray), &[], saving), failing);
+            assert_eq!(
+                unlearned(
+                    &mut harness,
+                    Some(gray),
+                    std::slice::from_ref(&picture),
+                    saving
+                ),
+                []
+            );
+            assert_eq!(unlearned(&mut harness, Some(red), &[], saving), []);
+        }
+        let red_square = frame_image()
+            .crop(appytappy_sources::screen::Region::new(0, 0, 2, 2).expect("not empty"))
+            .expect("inside");
+        assert_eq!(
+            harness.ask(|owner| owner.sample_pixels(&digits, &picture, 8)),
+            Some(pixels::rgba(&red_square, 8))
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.sample_pixels(&digits, "ref-digits-9.png", 8)),
+            None
+        );
+
+        // Left out, it is gone from the file and the folder once saved.
+        harness
+            .ask(|owner| owner.save_reference(&in_gray(r#""ref-digits-1.png""#)))
+            .expect("saves without the picture");
+        let saved = |harness: &mut Harness| {
+            let apps = harness.ask(Owner::apps).expect("lists");
+            let file = apps[0].file.as_ref().expect("a good file");
+            file.reference("digits").expect("saved").clone()
+        };
+        let texts = |harness: &mut Harness| {
+            saved(harness)
+                .samples
+                .into_iter()
+                .map(|sample| sample.text)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(texts(&mut harness), ["2"]);
+        let pictures: Vec<_> = std::fs::read_dir(&folder)
+            .expect("the application's folder")
+            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+            .filter(|name| name.starts_with("ref-"))
+            .collect();
+        assert_eq!(
+            pictures,
+            std::slice::from_ref(&picture),
+            "the box took its name"
+        );
+        assert_eq!(
+            unlearned(&mut harness, Some(gray), &[], SavingKind::Taught),
+            []
+        );
+
+        // Its settings alone leave a picture out the same way, but not the
+        // last one.
+        let settings = |ink, dropped: &[String]| ReferenceSettingsSpec {
+            reference: digits.clone(),
+            reference_name: "Digits".to_owned(),
+            ink,
+            tolerance: 0,
+            dropped: dropped.to_vec(),
+        };
+        harness
+            .ask(|owner| owner.save_reference(&in_gray("")))
+            .expect("learns the box again");
+        assert_eq!(texts(&mut harness), ["2", "2"]);
+        let second = saved(&mut harness).samples[1].image.clone();
+        harness
+            .ask(|owner| {
+                owner.save_reference_settings(&settings(Some(gray), std::slice::from_ref(&second)))
+            })
+            .expect("saves without the second picture");
+        assert_eq!(texts(&mut harness), ["2"]);
+        assert!(!folder.join(&second).exists());
+        assert_eq!(
+            harness.ask(|owner| {
+                owner.save_reference_settings(&settings(Some(gray), std::slice::from_ref(&picture)))
+            }),
+            Err("Type what at least one box shows, or keep a recorded reading.".to_owned())
+        );
+        assert_eq!(texts(&mut harness), ["2"], "a refused save changes nothing");
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
     /// What the three asks of one edit in the reference's editor answer
     /// for characters that add to the saved reference `digits`.
     fn edit(harness: &mut Harness) -> [Result<(), String>; 3] {
@@ -683,8 +889,8 @@ mod tests {
         // Each ask says the picture of the saved reference is missing.
         let missing = |answers: [Result<(), String>; 3]| {
             let error = Err::<(), _>(
-                "The reference Digits is missing its picture ref-digits-1.png. Remove the values \
-                 that read with it, then delete the reference and make it again."
+                "Digits is missing its saved picture ref-digits-1.png. Edit Digits and remove \
+                 that picture under Saved pictures it can't learn."
                     .to_owned(),
             );
             answers == [error.clone(), error.clone(), error]
@@ -709,7 +915,7 @@ mod tests {
                 .ask(|owner| {
                     owner.save_reference(&reference("example", "Small", Some(("example", "small"))))
                 })
-                .is_err_and(|error| error.contains("is missing its picture ref-small-1.png"))
+                .is_err_and(|error| error.contains("is missing its saved picture ref-small-1.png"))
         );
 
         // Writing an application forgets it, so the next ask reads what
@@ -739,8 +945,8 @@ mod tests {
         assert_eq!(
             harness.ask(|owner| owner.set_check(&trial(NUMBER))),
             Err(
-                "The reference Digits is missing its picture ref-digits-1.png. Remove the values \
-                 that read with it, then delete the reference and make it again."
+                "Digits is missing its saved picture ref-digits-1.png. Edit Digits and remove \
+                 that picture under Saved pictures it can't learn."
                     .to_owned()
             )
         );

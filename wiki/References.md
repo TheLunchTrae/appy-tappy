@@ -379,8 +379,8 @@ back to finding the characters by contrast. A box that was drawn while the
 reference had a text color needs a little room around its text for that. If
 the reference then can't learn a box, draw it again. A saved picture whose
 text touches its edge can't be learned by contrast either, and has no box to
-draw again: put the text color back, or teach the reference afresh from new
-boxes or readings.
+draw again: put the text color back, or
+[remove the picture](#saved-pictures-it-cant-learn).
 
 An outline reads by contrast while the background behind the number stays
 much the same. Where the background changes, the outline counts as part of
@@ -408,6 +408,39 @@ text color, select a box first: the tint shows what stands out from that
 box's background. Under the switch, AppyTappy counts the tinted pixels in
 the box and on the rest of the screenshot. The tint is only a guide, as
 [Show matching pixels](Values.md#show-matching-pixels) describes.
+
+## Saved pictures it can't learn
+
+A reference keeps a picture of every box and reading it learned from, and
+learns them all again each time you save it. No screenshot shows those
+pictures. A picture that taught the reference when you saved it can stop
+teaching it once you pick, change, or remove its text color, or change the
+text color's **Tolerance**: what counts as the characters changes, so the
+characters in the picture can touch, fall apart, or disappear.
+
+The editor then lists each such picture under
+**Saved pictures it can't learn**, below **Text color (optional)**: the
+picture, what you typed for it, and why the reference can't learn it. Its
+**?** says the same in short. The reference can't be saved while it keeps
+one of them, so do one of these:
+
+- **Remove the picture.** Select **Remove** beside it. The reference loses
+  only what that picture taught it. If
+  [**Characters still missing**](#what-it-has-learned) then lists a
+  character, draw a box around it on a screenshot. The editor counts the
+  pictures you removed, and **Put back** brings them all back. Saving the
+  reference deletes them.
+- **Change the text color back**, or its tolerance, to what the reference
+  was saved with.
+
+A reference needs at least one picture, box, or kept reading, so draw a box
+before you save one whose pictures you removed.
+
+A value that reads with the reference can show the same problem, such as
+`Percent font can't learn from its saved picture of "87%"`, or say that a
+saved picture is missing from the application's folder. Select
+**Edit Percent font** where the value picks its reference, and remove the
+picture there.
 
 ## Record readings
 

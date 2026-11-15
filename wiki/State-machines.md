@@ -104,6 +104,14 @@ it was about has gone. Fifteen guards drop such stale messages:
   (`fitKey` in `apps/setup/src/lib/useContrastTolerance.ts`). An answer
   under another key than the reference asks under now is dropped
   (`fitArrived`), and settles nothing (`fitSettles`).
+- **Unlearned sample keys.** The
+  [saved pictures a reference can't learn](#saved-pictures-a-reference-cant-learn)
+  are asked for under a key made of the saved reference, the text color,
+  the tolerance, the pictures left out, how it is saved, and its saved
+  pictures' file names (`unlearnedKey` in
+  `apps/setup/src/lib/useUnlearned.ts`). An answer under another key than
+  the editor asks under now is not shown (`unlearnedArrived`), and neither
+  are the pictures fetched for it.
 - **Reading risk keys.** The [reading risks](#look-alike-characters)
   of a reference being taught are asked for under a key made of its whole
   spec: the region, the samples, the text color, and the tolerance
@@ -1431,7 +1439,8 @@ stateDiagram-v2
   files but not kept to read with (`Owner::go_live`), so it is tried again
   once the capture runs. A saved reference with no box and no recording
   saves its name, text color, and tolerance with its samples
-  as they are (`save_reference_settings`), which needs no screenshot;
+  as they are but for the ones left out (`save_reference_settings`), which
+  needs no screenshot;
   teaching it more needs a box on a screenshot.
 
 ### Click target tries
@@ -3062,9 +3071,9 @@ stateDiagram-v2
 - **Asking** waits a quarter of a second under the key and then has a
   request out for it. A change within the wait starts it again under the
   new key, so a label that is being typed asks once. The owner answers the
-  tolerance asked about while the reference learns every sample with it, so
-  an answer that changes the tolerance is followed by one more request,
-  which settles.
+  tolerance asked about while no other learns more of the samples, so an
+  answer that changes the tolerance is followed by one more request, which
+  settles.
 - **Settled** has the tolerance the owner chose, and asks again only under a
   new key.
 - **Unanswered** is a failed request, such as for a box on a screenshot of
@@ -3135,6 +3144,61 @@ stateDiagram-v2
   shadow out, whatever the value needs.
 - **Unanswered** is a failed request. The failure is logged and no warning
   shows; the reference's own messages say what is wrong with its samples.
+
+### Saved pictures a reference can't learn
+
+The reference editor lists the saved samples that the reference can't learn
+with the text color and tolerance it has now, as
+[Setup app](Setup-app.md#saved-pictures-a-reference-cant-learn) describes
+(`apps/setup/src/lib/useUnlearned.ts`, used by `useReferenceTeaching.ts`).
+Its state is the key the editor asks under now (`unlearnedKey`), or none,
+the last answer with the key it was asked under, and the pictures fetched
+for that key. The draft holds the samples the user left out (`dropped`).
+The owner keeps nothing for it; each request is one `unlearned_samples`
+command, and one `sample_picture` command for each sample it names.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Resting
+    Resting --> Asking: a saved reference builds, its tolerance is fitted, and a quarter of a second passes
+    Asking --> Shown: the answer arrives under the key asked
+    Asking --> Asking: the text color, the tolerance, or the pictures left out change
+    Asking --> Unanswered: the request fails
+    Shown --> Asking: the text color, the tolerance, or the pictures left out change, or the tolerance is fitted again
+    Unanswered --> Asking: the text color, the tolerance, or the pictures left out change
+    Asking --> Resting: the reference no longer builds or the editor closes
+    Shown --> Resting: the reference no longer builds or the editor closes
+    Unanswered --> Resting: the reference no longer builds or the editor closes
+```
+
+- **Resting** asks nothing and lists nothing: no editor is open, the
+  reference is new, or what it saves does not build.
+- **Asking** waits a quarter of a second under the key and then has a
+  request out for it. A reference taught by contrast asks once its
+  [contrast tolerance](#contrast-tolerance) is settled, so it is judged with
+  the tolerance it keeps; one that saves its settings alone does not wait,
+  since the owner fits its tolerance for the answer. An answer shows only
+  under the key it was asked under (`unlearnedArrived`), so the list is
+  empty while a new key asks. The boxes and readings the draft adds are not
+  in the key: the reference learns its saved samples before them. Typing a
+  label therefore keeps the list while the tolerance is fitted again, and
+  the ask that follows answers under the same key unless the fit changed
+  the tolerance.
+- **Shown** lists the samples of the answer, each with its picture once it
+  arrives, or nothing when the reference learns every saved sample. With a
+  sample listed, the trial and **Save reference** fail and name it.
+  **Remove** adds it to the draft's `dropped`, which changes the key and
+  asks again; the owner then judges the samples that are left. **Put back**
+  empties `dropped`.
+- **Unanswered** is a failed request, such as for a reference that was
+  deleted. The failure is logged and nothing is listed; the trial and the
+  save say what is wrong, and a learn error on a saved sample says where
+  the picture is removed.
+- The samples left out end with the editor: opening it on a reference and
+  leaving it clear `dropped` (`toReference`, `fromReference`), and a save
+  writes the reference without them and closes the editor. A
+  [draft](Setup-app.md#drafts) kept with the editor open keeps them, by
+  picture file name.
 
 ### Bar detection
 

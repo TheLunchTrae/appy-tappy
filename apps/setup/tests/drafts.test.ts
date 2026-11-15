@@ -134,6 +134,7 @@ describe('what a draft keeps', () => {
         { id: 3, screenshot: 2, region: { x: 1, y: 2, width: 3, height: 4 }, text: '99' },
       ],
       recorded: new Map([[3, '45']]),
+      dropped: ['ref-percent-1.png'],
       filled: { red: 1, green: 2, blue: 3 },
       empty: { red: 4, green: 5, blue: 6 },
       color: { red: 7, green: 8, blue: 9 },
@@ -182,7 +183,7 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(5);
+    expect(DRAFT_FORMAT).toBe(6);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -221,6 +222,7 @@ describe('the shape a draft keeps', () => {
       'color',
       'colorMatch',
       'drawnOn',
+      'dropped',
       'empty',
       'filled',
       'ignoreBackground',
