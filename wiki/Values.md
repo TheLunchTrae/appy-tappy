@@ -34,8 +34,8 @@ back to the automation with the value picked.
      picture holds still while you drag and gives way to the screenshot once
      it is taken, and the region goes on that screenshot. To draw it again
      on a newer frame, select **Live** in the strip, where the region shows
-     over the window, and drag again. While you edit a value, this works
-     while the window has the size the value was drawn at.
+     over the window, and drag again. While you edit a value, a drag places
+     the region only while the window has the size the value was drawn at.
    - **Take a screenshot and draw on it.** Select **Take screenshot**, or
      press the screenshot shortcut, `F9` at first, then drag a box on the
      screenshot, as [Draw the region](#draw-the-region) describes. The
