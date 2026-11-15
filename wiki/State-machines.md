@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Fourteen guards drop such stale messages:
+it was about has gone. Fifteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -75,6 +75,12 @@ it was about has gone. Fourteen guards drop such stale messages:
   the readings it left out under their recording's number, and keeps none
   again for another recording (`leftOutOf` in
   `apps/setup/src/lib/useCharacterCheck.ts`).
+- **Pick numbers.** A capture screen that picks its window with the picker
+  numbers each pick (`pickedWindowStep` in
+  `apps/setup/src/lib/windowSearch.ts`). The owner's answer that the capture
+  ended carries the number of the pick it was asked under, and one for an
+  older pick is dropped, so an answer still on its way at
+  **Change window** never says that the window picked since has closed.
 - **Detection keys.** The capture screen keys a bar detection by its region,
   the screenshot the region was drawn on, and the indexes of the screenshots
   there are. An answer for any other key than the request under way is dropped. What two
@@ -1382,7 +1388,8 @@ stateDiagram-v2
   cannot start (`showsNewCloseSign`), so a close is noticed while a
   screenshot shows too. `endedAsks` sends one ask at a time and at most one
   a second, since a live view that fails without ending fails with every
-  frame. When the slot is ended, the capture returns to **None** and a new
+  frame. A sign that arrives during an ask or inside that second is kept:
+  one ask follows when the second is over. When the slot is ended, the capture returns to **None** and a new
   look starts, so the panel shows again with **Refresh**, in place of
   whatever screenshot showed, and the window is captured again once a look
   finds it. The editor is the same one: its draft, its
@@ -1712,7 +1719,8 @@ stateDiagram-v2
   more** are refused with the failure's error. `capture_ended` answers
   whether the slot is in it, and each screen says its own way back: a new
   value's or reference's capture screen says to select **Change window**
-  (`PickedCapture`), and the [window search](#window-search) shows its
+  (`PickedCapture`), which drops an answer asked under an older
+  [pick number](#how-to-read-this-page), and the [window search](#window-search) shows its
   panel. Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show. Nothing starts the capture again, at any window size: the

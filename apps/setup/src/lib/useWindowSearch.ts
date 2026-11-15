@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import { captureEnded, errorText } from './api.ts';
 import type { WindowChoice } from './bindings.ts';
 import { type PickerApp, known, pickerStep } from './picker.ts';
-import { background } from './repeat.ts';
+import { background, backgroundLater } from './repeat.ts';
 import { ask } from './request.ts';
 import { useAppWindows } from './useAppWindows.ts';
 import {
@@ -83,7 +83,7 @@ export function useWindowSearch(
     [severalFallback],
   );
   const running = capture.kind === 'running' ? capture.window.handle : null;
-  const [askEnded] = useState(() => endedAsks(captureEnded, ENDED_ASK_PAUSE_MS, Date.now));
+  const [askEnded] = useState(() => endedAsks(captureEnded, ENDED_ASK_PAUSE_MS, Date.now, backgroundLater));
   const windowFailed = useCallback((): void => {
     if (running === null) {
       return;
