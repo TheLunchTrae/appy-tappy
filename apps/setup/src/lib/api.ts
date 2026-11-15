@@ -506,7 +506,7 @@ export async function saveReference(spec: ReferenceSaveSpec): Promise<SavedRefer
   return invoke<SavedReference>('save_reference', { spec });
 }
 
-/** Saves a saved reference's name, color, tolerance, and the characters it needs, with its samples as they are, so it needs no screenshot. */
+/** Saves a saved reference's name, color, and tolerance, with its samples as they are, so it needs no screenshot. */
 export async function saveReferenceSettings(spec: ReferenceSettingsSpec): Promise<SavedReference> {
   return invoke<SavedReference>('save_reference_settings', { spec });
 }

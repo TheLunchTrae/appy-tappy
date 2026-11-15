@@ -16,7 +16,7 @@ import { EXPECTED_HINT } from '../lib/hints.ts';
 import { Hint } from './Hint.tsx';
 
 interface Props {
-  /** The characters the reference needs, each once. */
+  /** The characters the value needs, each once; none for every character its reference knows. */
   readonly expected: readonly string[];
   readonly onExpected: (expected: readonly string[]) => void;
 }
@@ -61,28 +61,35 @@ function Presets({
 }
 
 /**
- * What a reference needs to know: presets to turn on, and a field for any other character. It edits one set of
- * characters, which only guides teaching.
+ * The characters a number value needs: presets to turn on, and a field for any other character. It edits one set of
+ * characters, which the value reads and its reference is taught against.
  */
-export function ExpectedCharacters({ expected, onExpected }: Props) {
+export function ExpectedCharacters({
+  expected,
+  onExpected,
+  label = 'Characters it needs',
+}: Props & {
+  /** What the field is called: the value's own name for it, or the reference editor's, where "it" is the reference. */
+  readonly label?: string;
+}) {
   // The field's text as typed, and the set it started from, while it is being typed in. Outside that, the field
   // shows the set's own other characters, in order.
   const [typing, setTyping] = useState<{ readonly start: readonly string[]; readonly text: string } | null>(null);
   return (
     <div className="field">
       <span className="name">
-        <span>Characters it needs</span>
-        <Hint topic="Characters it needs">{EXPECTED_HINT}</Hint>
+        <span>{label}</span>
+        <Hint topic={label}>{EXPECTED_HINT}</Hint>
       </span>
       <span className="note">
         {expected.length === 0
-          ? 'Nothing chosen yet. Turn on what the numbers it reads can show, to see what is still missing.'
-          : 'What the numbers it reads can show. This is your list of what to teach, and changes nothing about how a number is read.'}
+          ? 'Nothing chosen, so the value reads every character its reference knows, and any it learns later.'
+          : 'Turn on everything the value shows: its digits and any sign right after them, such as the % in 87%.'}
       </span>
       <Presets title="Numbers" presets={NUMBER_PRESETS} expected={expected} onExpected={onExpected} />
       <span className="note">
-        Letters. Only Number values read with a reference, and AppyTappy has no check that reads text. Turn these on for
-        letters that a number&apos;s region shows with the number, such as the Lv in Lv.5.
+        Letters. A number value reads no text. Turn these on for letters its region shows with the number, such as the
+        Lv in Lv.5.
       </span>
       <Presets title="Letters" presets={LETTER_PRESETS} expected={expected} onExpected={onExpected} />
       <label htmlFor="other-characters">Other characters</label>

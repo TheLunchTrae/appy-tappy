@@ -3,9 +3,8 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
-import type { Editing } from '../lib/captureDraft.ts';
+import type { Editing, NeedsField } from '../lib/captureDraft.ts';
 import { type Built, type Draft, type ReferenceSaving, withTextColor } from '../lib/check.ts';
-import { TOO_MANY } from '../lib/expected.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
@@ -125,6 +124,8 @@ interface Props {
   readonly busy: boolean;
   readonly draftError: ReactNode;
   readonly draftButton: ReactNode;
+  /** How the editor shows the characters the value it is taught for needs. */
+  readonly needsField: NeedsField;
   /** Leaves the editor without saving. */
   readonly onDiscard: () => void;
 }
@@ -153,9 +154,10 @@ export function ReferenceInspector({
   busy,
   draftError,
   draftButton,
+  needsField,
   onDiscard,
 }: Props) {
-  const { taught, finder, guided, review, recorder, checking, covered, overLimit } = teaching;
+  const { taught, finder, guided, review, recorder, checking, covered } = teaching;
   const chosen = boxes.selected;
   const settingsOnly = saving.ok && saving.spec.kind === 'settings';
   const refSave = referenceSave({
@@ -164,7 +166,6 @@ export function ReferenceInspector({
     // Settings alone teach nothing to try: the reference reads as it is saved.
     tried: settingsOnly || check.state.kind === 'set',
     busy,
-    overLimit,
     reviewing: teaching.reviewed !== null,
   });
   return (
@@ -181,7 +182,7 @@ export function ReferenceInspector({
         labeled={taught.labeled}
         recorded={taught.recorded}
         finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
-        expected={editing.expects}
+        expected={teaching.needs}
         coverage={covered}
         readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
         onName={(name) => {
@@ -197,8 +198,9 @@ export function ReferenceInspector({
         onTolerance={(tolerance) => {
           setDraft((current) => ({ ...current, tolerance }));
         }}
-        onExpected={(expects) => {
-          setEditing((current) => (current === null ? null : { ...current, expects }));
+        needsField={needsField}
+        onExpected={(needs) => {
+          setEditing((current) => (current === null ? null : { ...current, needs }));
         }}
         boxes={
           <BoxList
@@ -282,14 +284,15 @@ export function ReferenceInspector({
       <ReadingDetailsBox ask={check.state.kind === 'set' ? explainReading : null} />
       <div className="sep" />
       {teaching.error === null ? null : <p className="warn">{teaching.error}</p>}
-      {overLimit ? <p className="warn">{TOO_MANY}</p> : null}
       {refSave.waits === null ? null : (
         <p id={SAVE_WAITS_ID} className="note">
           {refSave.waits}
         </p>
       )}
       {refSave.can && covered.missing.length > 0 ? (
-        <p className="note">It has yet to learn every character it needs. You can save now and teach the rest later.</p>
+        <p className="note">
+          It has yet to learn every character the value needs. You can save now and teach the rest later.
+        </p>
       ) : null}
       {draftError}
       {checking ? null : <CheckOffer characters={guided.unconfirmed} onCheck={guided.open} />}

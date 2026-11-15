@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { LIMITS, NO_STATE } from '../src/lib/bindings.ts';
+import { TOO_MANY } from '../src/lib/expected.ts';
 import { boxStep } from '../src/lib/boxes.ts';
 import {
   type Draft,
@@ -8,6 +9,7 @@ import {
   buildCharacters,
   buildReferenceSave,
   buildSpec,
+  savedNeeds,
   CHECKS,
   CHECK_KINDS,
   EMPTY_DRAFT,
@@ -30,9 +32,6 @@ import {
   withFixRegion,
   withRecordedInk,
   withKind,
-  charactersOnceTaught,
-  readsOf,
-  withReference,
   withoutState,
   withState,
   withStateAt,
@@ -79,16 +78,30 @@ describe('buildSpec', () => {
     });
   });
 
-  test('a number names the characters it reads only once some are chosen, and needs one', () => {
+  test('a number names the characters it needs once some are chosen, up to the most a value saves', () => {
     const number = { ...EMPTY_DRAFT, region, reference: 'percent' };
     expect(buildSpec({ ...number, characters: ['1', '2', '%'] }, 'example')).toEqual({
       ok: true,
       spec: { kind: 'number', region, reference: percent, whole: false, characters: '12%' },
     });
     expect(buildSpec({ ...number, characters: [] }, 'example')).toEqual({
-      ok: false,
-      next: 'Choose at least one character for the value to read.',
+      ok: true,
+      spec: { kind: 'number', region, reference: percent, whole: false },
     });
+    const most = Array.from({ length: LIMITS.maxExpectedCharacters }, (_, index) =>
+      String.fromCodePoint(0x100 + index),
+    );
+    expect(buildSpec({ ...number, characters: most }, 'example').ok).toBe(true);
+    const over = [...most, '%'];
+    expect(buildSpec({ ...number, characters: over }, 'example')).toEqual({ ok: false, next: TOO_MANY });
+    // A saved value keeps a longer list through an edit or a fix that leaves it as it is.
+    expect(buildSpec({ ...number, characters: over }, 'example', over).ok).toBe(true);
+    expect(buildSpec({ ...number, characters: over }, 'example', most)).toEqual({ ok: false, next: TOO_MANY });
+    expect(savedNeeds({ kind: 'number', reference: 'percent', whole: false, characters: '%1 1' })).toEqual(['1', '%']);
+    expect(savedNeeds({ kind: 'number', reference: 'percent', whole: false })).toEqual([]);
+    expect(savedNeeds({ kind: 'color', color: red, tolerance: 4 })).toBeNull();
+    // What needs a reference still comes first.
+    expect(buildSpec({ ...number, reference: null, characters: over }, 'example').ok).toBe(false);
   });
 
   test('builds a bar fill from both colors', () => {
@@ -593,78 +606,6 @@ test("a new screenshot carries the value's region when it fits, and clears it wh
   expect(onPicture(saved, 1, false)).toBe(saved);
   // While a size is unknown, such as before the screenshot's pixels arrive, the region stays where it is drawn.
   expect(onPicture(drawn, 1, null)).toBe(drawn);
-});
-
-test('charactersOnceTaught keeps the choice that was picked, for the reference as it is taught', () => {
-  const percent = {
-    id: 'percent',
-    name: 'Percent',
-    origin: { kind: 'byHand' } as const,
-    ink: red,
-    tolerance: 40,
-    samples: [{ image: 'p.png', text: '10%' }],
-  };
-  const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
-  const number = { ...EMPTY_DRAFT, reference: 'percent', characters: [...digits, '%'] };
-  const taught = (reference: string | null) => ({
-    region,
-    screenshot: 0,
-    reference: reference === null ? null : { app: 'example', id: reference },
-    ink: red,
-    tolerance: 40,
-    labels: [{ screenshot: 0, text: '3/' }],
-    recorded: [{ reading: 0, text: '7' }],
-  });
-  // Digits and symbols takes up a symbol taught to the reference the number reads with.
-  expect(charactersOnceTaught(number, [percent], taught('percent'))).toEqual([...digits, '%', '/']);
-  // A new reference knows only what it is taught.
-  expect(charactersOnceTaught(number, [percent], taught(null))).toEqual([...digits, '/']);
-  // A chosen set stays as it is, and every character stays every character.
-  expect(charactersOnceTaught({ ...number, characters: ['1', '7', 'L'] }, [percent], taught(null))).toEqual([
-    '1',
-    '7',
-    'L',
-  ]);
-  expect(charactersOnceTaught({ ...number, characters: null }, [percent], taught(null))).toBeNull();
-  expect(readsOf([])).toBeNull();
-  expect(readsOf(['1', '%'])).toBe('1%');
-});
-
-test('withReference keeps the choice of characters that was picked, for the new reference', () => {
-  const reference = (id: string, text: string) => ({
-    id,
-    name: id,
-    origin: { kind: 'byHand' } as const,
-    ink: red,
-    tolerance: 40,
-    samples: [{ image: `ref-${id}-1.png`, text }],
-  });
-  const references = [reference('percent', '10%L'), reference('clock', '12:')];
-  const number = { ...EMPTY_DRAFT, reference: 'percent' };
-  expect(withReference(number, 'clock', references)).toEqual({ ...number, reference: 'clock' });
-  const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
-  expect(withReference({ ...number, characters: [...digits, '%'] }, 'clock', references).characters).toEqual([
-    ...digits,
-    ':',
-  ]);
-  expect(withReference({ ...number, characters: ['1', 'L'] }, 'clock', references).characters).toEqual(['1', 'L']);
-  // A reference that is not among them, such as while its file cannot be read, changes nothing that is read.
-  expect(withReference({ ...number, characters: ['1', 'L'] }, 'gone', references)).toEqual({
-    ...number,
-    reference: 'gone',
-    characters: ['1', 'L'],
-  });
-  // The value's own reference taught a `.` in place: the choice was made against what it knew before.
-  const taught = [reference('percent', '10%L.')];
-  const inPlace = (characters: readonly string[]) =>
-    withReference({ ...number, characters }, 'percent', taught, references).characters;
-  // The digits and symbols take the new symbol, and keep the digits it has yet to learn.
-  expect(inPlace([...digits, '%'])).toEqual([...digits, '%', '.']);
-  expect(inPlace(digits)).toEqual(digits);
-  // A chosen set loses nothing, even a character the reference never knew.
-  expect(inPlace(['1', '7', '%'])).toEqual(['1', '7', '%']);
-  // A first reference has no choice to carry over but the one the draft holds.
-  expect(withReference({ ...EMPTY_DRAFT, characters: digits }, 'clock', references).characters).toEqual(digits);
 });
 
 describe('fixDraft', () => {

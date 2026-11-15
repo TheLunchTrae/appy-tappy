@@ -5,13 +5,13 @@ of each digit and sign, in any colors. A [Number](Values.md#checks) value reads
 its region with one of its application's references, so several values in the
 same font share one reference, and teaching it a new digit teaches all of
 them. A reference can know a whole font, and each value says which of its
-characters it reads, as
-[Characters a number reads](Values.md#characters-a-number-reads) describes.
+characters it needs, as
+[Characters a number needs](Values.md#characters-a-number-needs) describes.
 
 The **References** page lists each application's references, with the
-characters each knows and the values that read with it. A reference that has
-yet to learn characters it needs lists them after **Missing**, and so does
-the list of references you pick from for a Number value.
+characters each knows and the values that read with it. The list of
+references you pick from for a Number value also shows, after **Missing**,
+the characters that value needs and the reference has yet to learn.
 
 A reference reads its characters at any size, so a number drawn larger than
 the ones it learned from still reads.
@@ -28,17 +28,16 @@ select **Capture this window**, as the first step of
 1. **Name it,** such as `Percent font`, with a name no other reference of
    the application has. Capitals of the letters A to Z don't count:
    `Percent font` and `percent font` are one name.
-2. **Choose the characters it needs.** Under **Characters it needs**, turn on
-   what the numbers can show. A new reference starts with **Digits** on.
-   [Choose what it needs](#choose-what-it-needs) describes the choices.
-3. **Teach it the characters.** On a screenshot, drag to draw a box tightly
+2. **Teach it the characters.** On a screenshot, drag to draw a box tightly
    around some characters, then type what the box shows, such as `87%`, in
    its row under **Boxes**. AppyTappy learns the shape of each character from
-   what you type. [Boxes](#boxes) describes the boxes. Draw boxes until
-   **Characters still missing** says it knows every character it needs,
+   what you type. [Boxes](#boxes) describes the boxes. Draw more boxes,
    [find more like it](#find-more-like-it) on the same screenshot, or
-   [record readings](#record-readings) to collect them as they show.
-4. **Save.** Select **Save reference**. A reference with characters still
+   [record readings](#record-readings) to collect characters as they show.
+   While you teach a reference for a value,
+   [**Characters still missing**](#what-it-has-learned) says what the value
+   needs that is left to teach.
+3. **Save.** Select **Save reference**. A reference with characters still
    missing saves too: the editor says so next to the button, and you can
    teach them later. When some of its characters are AppyTappy's guesses
    that nobody has confirmed, **Not confirmed yet** above the button
@@ -53,7 +52,7 @@ instead, in the words
 explains. That box is the reference's own reading of the region you drew, at the
 window's size now, as [Window size](Values.md#window-size) describes for a
 value. A reference you make or edit from a number reads here as that number
-will: only the characters the number reads, and without the digits after
+will: only the characters the number needs, and without the digits after
 the decimal point when the number ignores them. The automation reads with
 the same reference, where its value's region is at the window's size.
 
@@ -61,8 +60,8 @@ To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. From the References page the
 editor opens at once and finds the application's window itself.
 [While the application isn't open](Values.md#while-the-application-isnt-open),
-you can still rename the reference, change **Characters it needs** and the
-tolerance of its [text color](#text-color), and save: its samples stay as
+you can still rename the reference, change the tolerance of its
+[text color](#text-color), and save: its samples stay as
 they are. Teaching it more needs a box on a screenshot, so screenshots and
 recording wait for the window. What it learned before stays; new boxes and
 readings add to it. Changing it, such as giving it a
@@ -103,52 +102,32 @@ While you teach a reference for a value, the screenshots show the boxes, not
 the value's region. The region is as you drew it when you go back to the
 value.
 
-## Choose what it needs
+## What it has learned
 
-**Characters it needs** is your list of what to teach, so you do not have to
-work out which characters are still to come. Turn on what the numbers this
-reference reads can show:
+**Characters it knows** shows every character the reference learned, and
+keeps up as you type what boxes show, add found text, keep recorded
+readings, or correct them.
 
-- **Digits** is `0` to `9`.
-- **Decimal point**, **Comma**, **Percent**, **Minus**, **Plus**, and
-  **Colon** are each one sign. Turn on the ones the application draws. For
-  how a number reads around a `:` or `/`, see [Checks](Values.md#checks).
-- **Uppercase** and **Lowercase** are the English letters `A` to `Z` and `a`
-  to `z`, each case on its own, and **Question mark** and
-  **Exclamation mark** are the punctuation that goes with them. Only
-  [Number](Values.md#checks) values read with a reference, and AppyTappy has
-  no check that reads text. Turn letters on only when a number's region shows
-  them with the number, such as the `Lv` in `Lv.5`.
-- **Other characters** takes anything else: type each character the region
-  shows, such as `/` or `°`. Delete a character there to stop needing it.
-  Spaces do not count. A list with more characters than a reference can
-  need turns **Save reference** off until you remove some, and the editor
-  says so.
-
-A choice that holds only some of its characters, such as **Digits** with `0`
-to `5`, shows as partly on with how many it holds, and its characters show
-in **Other characters**, where you can remove each. Select the choice to turn
-all of it on, and again to turn all of it off.
-
-The editor compares the list with what the reference learned, and keeps up as
-you type what boxes show, add found text, keep recorded readings, or correct
-them:
+While you teach a reference for a value, the editor also shows
+**Characters the value needs**, the value's
+[**Characters it needs**](Values.md#characters-a-number-needs), and compares
+them with what the reference learned. You can change them there too: the
+value takes the change when you save the reference, and **Discard** leaves
+the value's list as it was. A [fix](Values.md#fix-a-value-at-one-size)
+needs the characters its value does, so its reference's editor shows the
+list without the choices; edit the value to change it.
 
 - **Characters still missing** shows each needed character it has yet to
   learn, outlined. This is what is left to teach. Once it has them all, it
   says so.
 - **Characters it knows** shows the needed characters it learned. Characters
-  it learned that are not on the list show below them. They are fine to keep:
-  the list says what you need, not what is allowed.
+  it learned that the value does not need show below them. They are fine to
+  keep: another value in the same font can need them.
 
-The list only guides you. AppyTappy learns a character from a box, found
-text you add, or a kept reading, never because it is on the list, and a
-number reads the same way whatever you turn on. [Checks](Values.md#checks) says how a number reads its
-`.` and `,`.
-
-A reference saved without a list shows every character it knows under
-**Characters it knows**, and nothing as missing. **Edit** it and turn on what
-it needs to see what is left to teach.
+AppyTappy learns a character from a box, found text you add, or a kept
+reading, never because a value needs it. A reference you make or edit from
+the References page is taught for no value, so nothing shows as missing
+there, and neither does it when the value needs no characters.
 
 ## Find more like it
 
@@ -160,13 +139,16 @@ the boxes that are there already, and reads each as text. It finds text on
 the same background as the box's; text on a panel of another color needs a
 box of its own first.
 
-The list holds only the finds that may show the characters the reference
-[needs](#choose-what-it-needs). A letter that is often read in place of a
-digit counts as that digit, so a reference that needs digits still lists a
+While you teach a reference for a value, the list holds only the finds that
+may show the characters the value
+[needs](Values.md#characters-a-number-needs). A letter that is often read in
+place of a digit counts as that digit, so a value that needs digits still
+lists a
 find read as `12O5`, whose `O` may be a `0`. The list says how many finds it
 skipped. A find you ticked before its text was read is skipped the same way
 once the text shows other characters, so it leaves the list and is not
-added. A reference with no list of what it needs lists every find.
+added. A reference taught for no value, or for one that needs no
+characters, lists every find.
 
 1. **Tick the ones to add.** Each find in the list shows outlined on the
    screenshot under the same number, with the text AppyTappy read. A skipped
@@ -215,8 +197,8 @@ so one answer also fixes a box you drew by hand.
    large, and every place that shows it, with the character outlined. When
    the text has it drawn more than one way, each way has its own tile. If
    they are all that character, select **Yes, it is 7**, or
-   **Yes, they are all 7**. The characters the reference
-   [needs](#choose-what-it-needs) come first.
+   **Yes, they are all 7**. The characters the value
+   [needs](Values.md#characters-a-number-needs) come first.
 2. **Fix one that is something else.** Type the right character in
    **It is** under its tile and press Enter. Every place that shows it gets
    that character, and the tile moves to that character's step.
@@ -331,7 +313,7 @@ pixels tall, draw boxes around several readings of each character, or
 AppyTappy finds a reference's characters by how they stand out from the
 background behind them, so text in several colors reads as one: a gradient,
 an outline, a number that turns red when it is low. It takes the background
-from the edge of each box and region, and chooses how far a pixel must be
+from the pixels just around each box and region, and chooses how far a pixel must be
 from it to count from the boxes you type and the readings you keep, so there
 is nothing to set.
 
@@ -351,7 +333,10 @@ Only pixels near the text color count as characters then, whatever is behind
 them, so the text has to be drawn in one color. **Remove text color** goes
 back to finding the characters by contrast. A box that was drawn while the
 reference had a text color needs a little room around its text for that. If
-the reference then can't learn a box, draw it again.
+the reference then can't learn a box, draw it again. A saved picture whose
+text touches its edge can't be learned by contrast either, and has no box to
+draw again: put the text color back, or teach the reference afresh from new
+boxes or readings.
 
 With or without a text color, turn on **Show matching pixels** to tint every
 pixel on the screenshot that counts as part of the characters. Without a
@@ -397,9 +382,10 @@ stray shape and draw a box around it instead.
 2. **Use the application.** Go on in it until the region has shown the
    characters you need. AppyTappy reads each kept reading's text for you, and
    **Recording** says what that gives so far:
-   - **Still missing** shows each character the reference needs that nothing
-     has shown yet. Make the application show these. It shows when you
-     [chose what the reference needs](#choose-what-it-needs).
+   - **Still missing** shows each character the value needs that nothing
+     has shown yet. Make the application show these. It shows while you
+     teach the reference for a value that
+     [needs characters](Values.md#characters-a-number-needs).
    - **Found, not checked yet** shows the characters AppyTappy read in the
      kept readings. They are its guess until you check their readings in
      review: type in a reading's text, set its **Keep**, or select
@@ -572,8 +558,8 @@ for the shapes it draws differently.
 It has limits, and review is where you deal with them:
 
 - **It can pick up other text.** A menu's label or a name in the same color
-  and size is kept too. When you
-  [chose what the reference needs](#choose-what-it-needs), a reading whose
+  and size is kept too. While you teach the reference for a value that
+  [needs characters](Values.md#characters-a-number-needs), a reading whose
   text shows none of those characters starts with **Keep** cleared and says
   so; set its **Keep** if you want it after all. A reading that mixes both,
   such as `Lv 5`, starts kept, since its `5` may be the only one. So does

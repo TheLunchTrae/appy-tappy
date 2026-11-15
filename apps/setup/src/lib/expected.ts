@@ -1,11 +1,12 @@
-// The characters a reference needs to know, as the user chooses them, and how they compare with what it learned.
+// The characters a number value needs, as the user chooses them, and how they compare with what a reference learned.
 //
 // The choice is one set of characters. The presets are a way to add and remove several of them at once, and each
-// reads its own state back from the set, so nothing but the set is saved. The set only guides teaching: AppyTappy
-// learns and reads from labels alone, whatever the set holds.
+// reads its own state back from the set, so nothing but the set is saved. The value reads only the characters of
+// the set, and teaching its reference shows which of them the reference has yet to learn. An empty set is every
+// character the reference knows.
 
-import { LIMITS, type ReferenceDef } from './bindings.ts';
-import { knownCharacters, referenceCharacters } from './reference.ts';
+import { LIMITS } from './bindings.ts';
+import { knownCharacters } from './reference.ts';
 
 /** Characters the user turns on or off as one. */
 export interface Preset {
@@ -17,7 +18,7 @@ export interface Preset {
 }
 
 /**
- * The set of the characters in `text`, as a reference saves them: each character a label teaches that is no control
+ * The set of the characters in `text`, as a value saves them: each character a label teaches that is no control
  * character, once, the digits first and the rest by code point. A list a person wrote into the file by hand reads
  * as this set, and the next save writes it so.
  */
@@ -25,20 +26,20 @@ export function expectedSet(text: string): readonly string[] {
   return knownCharacters([text]).filter((character) => !/\p{Cc}/u.test(character));
 }
 
-/** Whether `expected` holds more characters than a reference saves, which the save refuses. */
+/** Whether `expected` holds more characters than a value saves, which the save refuses. */
 export function tooMany(expected: readonly string[]): boolean {
   return expected.length > LIMITS.maxExpectedCharacters;
 }
 
 /** What to do about a list that {@link tooMany} refuses. */
-export const TOO_MANY = `A reference needs at most ${LIMITS.maxExpectedCharacters} characters. Remove some.`;
+export const TOO_MANY = `A value needs at most ${LIMITS.maxExpectedCharacters} characters. Remove some.`;
 
 function preset(name: string, shown: string, characters: string): Preset {
   return { name, shown, characters: expectedSet(characters) };
 }
 
 /** The digits `0` to `9`. */
-export const DIGITS = preset('Digits', '0–9', '0123456789');
+const DIGITS = preset('Digits', '0–9', '0123456789');
 
 /** What a number can show: its digits, and the signs each font may or may not use. */
 export const NUMBER_PRESETS: readonly Preset[] = [
@@ -60,19 +61,6 @@ export const LETTER_PRESETS: readonly Preset[] = [
 ];
 
 const PRESETS: readonly Preset[] = [...NUMBER_PRESETS, ...LETTER_PRESETS];
-
-/**
- * The set a reference's editor starts with: what the saved reference `existing` expects, which is nothing when it was
- * saved without a choice. A new reference starts with what `like` expects, the reference it is learned again for
- * at another window size, when that has a list, or else with the digits, since numbers are what references read.
- */
-export function startingExpected(existing: ReferenceDef | null, like: ReferenceDef | null): readonly string[] {
-  if (existing !== null) {
-    return expectedSet(existing.expects ?? '');
-  }
-  const shared = expectedSet(like?.expects ?? '');
-  return shared.length > 0 ? shared : DIGITS.characters;
-}
 
 /** How much of a preset a set holds: every character, some of them, or none. */
 export type PresetState = 'on' | 'partial' | 'off';
@@ -134,6 +122,14 @@ export interface Coverage {
 }
 
 /**
+ * Whether a reference that knows `learned` knows none of `expected`, the characters a value needs, so that the value
+ * reads nothing with it. A value that needs none reads every character the reference knows.
+ */
+export function knowsNone(expected: readonly string[], learned: readonly string[]): boolean {
+  return expected.length > 0 && !expected.some((character) => learned.includes(character));
+}
+
+/**
  * How `learned`, the characters a reference knows, compares with `expected`, the ones it needs. Each group keeps the
  * order of the list it came from.
  */
@@ -143,9 +139,4 @@ export function coverage(expected: readonly string[], learned: readonly string[]
     missing: expected.filter((character) => !learned.includes(character)),
     extra: learned.filter((character) => !expected.includes(character)),
   };
-}
-
-/** How the characters the saved `reference` learned from its pictures compare with the ones it expects. */
-export function referenceCoverage(reference: ReferenceDef): Coverage {
-  return coverage(expectedSet(reference.expects ?? ''), referenceCharacters(reference));
 }

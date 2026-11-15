@@ -26,11 +26,6 @@ pub(crate) struct ReferenceSaveSpec {
     /// The characters it is taught, which name the reference when it is
     /// saved already.
     pub(crate) characters: CharactersSpec,
-    /// The characters the user says it needs to know, or empty when the
-    /// user chose none. The save lists each once, in order, refuses more
-    /// than a reference saves, and replaces what the saved reference
-    /// expected.
-    pub(crate) expects: String,
 }
 
 /// A saved reference's settings to save, as the UI describes them. Its
@@ -50,9 +45,6 @@ pub(crate) struct ReferenceSettingsSpec {
     pub(crate) ink: Option<ColorDef>,
     /// The reference's tolerance, as `ReferenceDef` has it.
     pub(crate) tolerance: u8,
-    /// The characters the user says it needs to know, as
-    /// [`ReferenceSaveSpec::expects`] has them.
-    pub(crate) expects: String,
 }
 
 /// Where a reference was saved.
@@ -151,10 +143,7 @@ impl<H: Host> Owner<H> {
             );
             named_apart(file, &id, name)?;
             let taught = owner
-                .with_session(|session| {
-                    spec.characters
-                        .teach(session, Some(&id), name, &spec.expects)
-                })
+                .with_session(|session| spec.characters.teach(session, Some(&id), name))
                 .map_err(|error| error.to_string())?;
             match file.references.iter_mut().find(|saved| saved.id == id) {
                 Some(saved) => *saved = taught.reference,
@@ -171,11 +160,11 @@ impl<H: Host> Owner<H> {
         .map(|saved| saved.answer)
     }
 
-    /// Saves the settings `spec` gives a saved reference, its name, its
-    /// text color and tolerance, and the characters it needs, and
-    /// says where it is saved. Its samples stay as they are, so this needs
-    /// no screenshot and no picked window. The reference must still learn
-    /// every sample with the new text color and tolerance.
+    /// Saves the settings `spec` gives a saved reference, its name and its
+    /// text color and tolerance, and says where it is saved. Its samples
+    /// stay as they are, so this needs no screenshot and no picked window.
+    /// The reference must still learn every sample with the new text color
+    /// and tolerance.
     pub(crate) fn save_reference_settings(
         &mut self,
         spec: &ReferenceSettingsSpec,
@@ -188,7 +177,7 @@ impl<H: Host> Owner<H> {
         self.update_app(app, Changed::Values, |_owner, found| {
             named_apart(&found.file, id, name)?;
             let changed = reference_of(found, id)?
-                .with_settings(name, spec.ink, spec.tolerance, &spec.expects)
+                .with_settings(name, spec.ink, spec.tolerance)
                 .map_err(|error| error.to_string())?;
             let answer = SavedReferenceId {
                 app: app.clone(),
@@ -313,7 +302,6 @@ mod tests {
         ReferenceSaveSpec {
             app: app.to_owned(),
             reference_name: name.to_owned(),
-            expects: String::new(),
             characters: serde_json::from_str(&format!(
                 r#"{{"region":{{"x":0,"y":0,"width":2,"height":2}},"screenshot":0,
                     "reference":{editing},"ink":{{"red":255,"green":0,"blue":0}},
@@ -572,45 +560,6 @@ mod tests {
     }
 
     #[test]
-    fn a_reference_is_saved_with_the_characters_it_expects_until_they_change() {
-        let (stores, root) = scratch_store("references-expected");
-        let mut harness = harness_with(false, Ok(stores));
-        add_example_app(&mut harness);
-        let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        let mut save = |editing, expects: &str| {
-            let spec = ReferenceSaveSpec {
-                expects: expects.to_owned(),
-                ..reference("example", "Digits", editing)
-            };
-            harness.ask(move |owner| owner.save_reference(&spec))?;
-            let apps = harness.ask(Owner::apps)?;
-            let file = apps[0].file.as_ref().ok_or("a good file")?;
-            let saved = file.reference("digits").ok_or("saved")?;
-            Ok::<_, String>((saved.expects.clone(), saved.samples.len()))
-        };
-        // It learns the one sample it is taught, whatever it expects.
-        assert_eq!(
-            save(None, "0123456789%"),
-            Ok((Some("0123456789%".to_owned()), 1))
-        );
-        let saved = Some(("example", "digits"));
-        assert_eq!(
-            save(saved, "% 1 0 1"),
-            Ok((Some("01%".to_owned()), 2)),
-            "listed once each, in order"
-        );
-        let too_many: String = ('\u{100}'..='\u{180}').collect();
-        assert_eq!(
-            save(saved, &too_many),
-            Err("A reference needs at most 128 characters. Remove some.".to_owned()),
-        );
-        assert_eq!(save(saved, ""), Ok((None, 3)), "none chosen");
-        std::fs::remove_dir_all(root).expect("clean up");
-    }
-
-    #[test]
     fn a_saved_reference_s_settings_save_without_a_window_and_keep_its_samples() {
         let (stores, root) = scratch_store("references-settings");
         let mut harness = harness_with(false, Ok(stores));
@@ -631,34 +580,32 @@ mod tests {
             file.reference("digits").expect("saved").clone()
         };
         let before = digits(&mut harness);
-        let settings =
-            |id: &str, name: &str, ink: Option<ColorDef>, expects: &str| ReferenceSettingsSpec {
-                reference: ReferenceRef {
-                    app: "example".to_owned(),
-                    id: id.to_owned(),
-                },
-                reference_name: name.to_owned(),
-                ink,
-                tolerance: 10,
-                expects: expects.to_owned(),
-            };
+        let settings = |id: &str, name: &str, ink: Option<ColorDef>| ReferenceSettingsSpec {
+            reference: ReferenceRef {
+                app: "example".to_owned(),
+                id: id.to_owned(),
+            },
+            reference_name: name.to_owned(),
+            ink,
+            tolerance: 10,
+        };
         let red = before.ink;
         let save = |harness: &mut Harness, spec: ReferenceSettingsSpec| {
             harness.ask(move |owner| owner.save_reference_settings(&spec))
         };
         assert_eq!(
-            save(&mut harness, settings("digits", " ", red, "")),
+            save(&mut harness, settings("digits", " ", red)),
             Err("Name the reference first.".to_owned())
         );
         assert_eq!(
-            save(&mut harness, settings("digits", "other", red, "")),
+            save(&mut harness, settings("digits", "other", red)),
             Err(
                 "Example App already has a reference named \"Other\". Pick another name."
                     .to_owned()
             )
         );
         assert_eq!(
-            save(&mut harness, settings("gone", "Gone", red, "")),
+            save(&mut harness, settings("gone", "Gone", red)),
             Err("Example App no longer has that reference.".to_owned())
         );
         let blue = Some(ColorDef {
@@ -667,7 +614,7 @@ mod tests {
             blue: 255,
         });
         assert!(
-            save(&mut harness, settings("digits", "Digits", blue, "")).is_err(),
+            save(&mut harness, settings("digits", "Digits", blue)).is_err(),
             "a color its samples have no pixel of teaches it nothing"
         );
         assert_eq!(
@@ -677,29 +624,19 @@ mod tests {
         );
 
         assert_eq!(
-            save(
-                &mut harness,
-                settings("digits", " Score digits ", red, "1 0 1")
-            ),
+            save(&mut harness, settings("digits", " Score digits ", red)),
             Ok(SavedReferenceId {
                 app: "example".to_owned(),
                 reference: "digits".to_owned()
             })
         );
         let after = digits(&mut harness);
-        assert_eq!(
-            (
-                after.name.as_str(),
-                after.tolerance,
-                after.expects.as_deref()
-            ),
-            ("Score digits", 10, Some("01"))
-        );
+        assert_eq!((after.name.as_str(), after.tolerance), ("Score digits", 10));
         assert_eq!(after.samples, before.samples);
         assert_eq!(after.origin, before.origin);
 
         harness.forget_reloads();
-        assert!(save(&mut harness, settings("digits", "Score digits", red, "01")).is_ok());
+        assert!(save(&mut harness, settings("digits", "Score digits", red)).is_ok());
         assert_eq!(
             harness.reloads(),
             0,

@@ -3,7 +3,7 @@
 
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
 
-import type { PinDef, RecordingScope, ReferenceDef, ReferenceRef, SavedReference } from './bindings.ts';
+import type { PinDef, RecordingScope, ReferenceRef, SavedReference } from './bindings.ts';
 import { errorText, saveReference, saveReferenceSettings } from './api.ts';
 import { boxOf } from './boxes.ts';
 import type { Editing } from './captureDraft.ts';
@@ -23,7 +23,7 @@ import {
 } from './check.ts';
 import { progress } from './confirm.ts';
 import { discovery } from './discovery.ts';
-import { coverage, startingExpected, tooMany } from './expected.ts';
+import { coverage } from './expected.ts';
 import type { Picture } from './pixels.ts';
 import { knownCharacters } from './reference.ts';
 import { background } from './repeat.ts';
@@ -100,8 +100,8 @@ export function useReferenceTeaching({
   // Why the reference was not saved. It is the editor's own, and goes when the editor closes, so it never shows as
   // the value's.
   const [error, setError] = useState<string | null>(null);
-  // The characters it needs, which what it learns from is compared with.
-  const needs = editing?.expects ?? NO_NEEDS;
+  // The characters the value it is taught for needs, which what it learns is compared with; none filters no find.
+  const needs = editing?.needs ?? NO_NEEDS;
   const focus = useRecordFocus();
   const review = useReview(recording, draft, setDraft, reference, needs, focus);
   // What the reference being edited learns from: its saved pictures, its boxes with text, and its kept readings.
@@ -218,11 +218,10 @@ export function useReferenceTeaching({
     focusNext(focus.more);
   };
 
-  // Opens the editor on `existing`, or on a new reference read from the value's region, which starts with what
-  // `like` expects: the reference it is learned again for at this size, if any.
-  const open = (existing: ReferenceDef | null, like: ReferenceDef | null): void => {
-    setEditing({ existing, name: existing?.name ?? '', expects: startingExpected(existing, like) });
-    setDraft((current) => toReference(current, existing));
+  // Opens the editor as `editing`, on a saved reference or on a new one read from the value's region.
+  const open = (opened: Editing): void => {
+    setEditing(opened);
+    setDraft((current) => toReference(current, opened.existing));
     boxes.select(null);
     stopPicking();
     setError(null);
@@ -247,7 +246,7 @@ export function useReferenceTeaching({
       return;
     }
     const { spec } = saving;
-    const named = { referenceName: editing.name.trim(), expects: editing.expects.join('') };
+    const named = { referenceName: editing.name.trim() };
     onSaving(true);
     try {
       const saved = await (spec.kind === 'taught'
@@ -307,8 +306,6 @@ export function useReferenceTeaching({
     findBlocked: findBlockedBy(boxes.selected),
     /** Why no box can be drawn on the picture shown, or null. */
     boxBlock: editing === null ? null : boxBlocked(readingSize, shown),
-    /** Whether it expects more characters than a reference saves. */
-    overLimit: editing !== null && tooMany(editing.expects),
     /** The name the editor's reference shows under. */
     name: editing === null || editing.name.trim() === '' ? 'New reference' : editing.name.trim(),
     settingsChanged,

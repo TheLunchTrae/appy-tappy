@@ -13,7 +13,11 @@
 //! A reference being taught is a [`CharactersSpec`], which `characters.rs`
 //! turns into a saved reference the same way.
 
-use appytappy_config::app_file::{CheckDef, ColorDef, OriginDef, RegionDef, StateDef};
+use std::collections::BTreeSet;
+
+use appytappy_config::app_file::{
+    CheckDef, ColorDef, OriginDef, RegionDef, StateDef, is_label_character,
+};
 use appytappy_config::names::state_image_name;
 use appytappy_sources::screen::digits::InkRule;
 use appytappy_sources::screen::{EmptyRegion, Image, Region, Rgb, Size};
@@ -27,9 +31,7 @@ pub(crate) mod characters;
 mod contrast;
 mod error;
 
-pub(crate) use characters::{
-    CharactersSpec, Label, MAX_EXPECTED_CHARACTERS, SavedReference, Session, sample_problem_of,
-};
+pub(crate) use characters::{CharactersSpec, Label, SavedReference, Session, sample_problem_of};
 pub(crate) use error::{Cut, SpecError};
 
 /// A saved reference of a saved application.
@@ -40,6 +42,58 @@ pub(crate) struct ReferenceRef {
     pub(crate) app: String,
     /// The reference's ID in the application's file.
     pub(crate) id: String,
+}
+
+/// The most characters a number value is saved as needing: room for the
+/// digits, both cases of the English letters, and every other printable
+/// ASCII character, with some to spare.
+pub(crate) const MAX_EXPECTED_CHARACTERS: usize = 128;
+
+/// The characters of `expected`, the ones a number value needs, as the value
+/// saves them, or `None` when it names none and so reads every character
+/// its reference knows: each character a label teaches, as [`is_label_character`]
+/// says, that is no control character, once, the digits `0` to `9` first
+/// and the rest by code point.
+pub(crate) fn expected_characters(expected: &str) -> Option<String> {
+    // A digit sorts before every other character, and each group by code
+    // point.
+    let characters: BTreeSet<(bool, char)> = expected
+        .chars()
+        .filter(|&character| is_label_character(character) && !character.is_control())
+        .map(|character| (!character.is_ascii_digit(), character))
+        .collect();
+    let list: String = characters
+        .into_iter()
+        .map(|(_, character)| character)
+        .collect();
+    (!list.is_empty()).then_some(list)
+}
+
+/// Whether `check`, a value's as a save leaves it, may need the characters
+/// it lists. A list is held to [`MAX_EXPECTED_CHARACTERS`] where it is set
+/// or changed: `was` is the check the value is saved with, if it is, whose
+/// own list stays as long as it is.
+///
+/// # Errors
+///
+/// Returns [`SpecError::TooManyExpected`] for a new or changed list of more
+/// characters than that.
+pub(crate) fn expected_within_limit(
+    check: &CheckDef,
+    was: Option<&CheckDef>,
+) -> Result<(), SpecError> {
+    let list = |check: &CheckDef| match check {
+        CheckDef::Number { characters, .. } => {
+            expected_characters(characters.as_deref().unwrap_or_default())
+        },
+        CheckDef::BarFill { .. } | CheckDef::Color { .. } | CheckDef::State { .. } => None,
+    };
+    let needs = list(check);
+    let count = needs.as_deref().map_or(0, |needs| needs.chars().count());
+    if count > MAX_EXPECTED_CHARACTERS && was.map(list) != Some(needs) {
+        return Err(SpecError::TooManyExpected);
+    }
+    Ok(())
 }
 
 /// A value's check as the UI describes it.
@@ -53,8 +107,9 @@ pub(crate) enum CheckSpec {
         reference: ReferenceRef,
         /// Whether digits after the decimal point are ignored.
         whole: bool,
-        /// The characters the value reads, or `None` for every character
-        /// the reference knows, as [`CheckDef::Number`] saves them.
+        /// The characters the value needs, or `None` for every character
+        /// the reference knows. The save lists each once, in order, as
+        /// [`expected_characters`] does.
         #[serde(default)]
         #[cfg_attr(test, ts(optional))]
         characters: Option<String>,
@@ -181,7 +236,7 @@ pub(crate) fn to_saved_fix(
             CheckDef::Number {
                 reference: reference.id.clone(),
                 whole: *whole,
-                characters: characters.clone(),
+                characters: expected_characters(characters.as_deref().unwrap_or_default()),
             }
         },
         CheckSpec::BarFill { filled, empty, .. } => CheckDef::BarFill {

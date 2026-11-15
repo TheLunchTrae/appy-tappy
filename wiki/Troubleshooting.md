@@ -123,9 +123,9 @@ The reasons a number has no reading:
   lists the characters no box teaches.
 - **The value leaves out a character its number holds.** The message shows
   what it read, such as `- 5` or `1 , 2 3 4`. The value's
-  [characters](Values.md#characters-a-number-reads) leave out a `-`, a `.`,
+  [characters](Values.md#characters-a-number-needs) leave out a `-`, a `.`,
   a `,`, or a digit that is a part of the number: turn it on under
-  **Characters it reads**.
+  **Characters it needs**.
 - **The characters hold no number.** The message shows what it read, such as
   `%`. The region shows no digit now, or the region cuts the digits off.
 
@@ -146,10 +146,10 @@ screenshot of the window at the size you play at.
 the number can show appears in at least one of them. Where the background
 behind the number is busy, give the reference a
 [text color](References.md#text-color).
-[**Characters still missing**](References.md#choose-what-it-needs) lists what
+[**Characters still missing**](References.md#what-it-has-learned) lists what
 is left to teach. If it reads a digit as a letter that looks like it, such as
 `0` as `O`, set the value's
-[**Characters it reads**](Values.md#characters-a-number-reads) to the
+[**Characters it needs**](Values.md#characters-a-number-needs) to the
 characters it shows. Some text the **Number**
 check cannot read; [Checks](Values.md#checks) says what it can't, and what to
 use instead.

@@ -15,7 +15,7 @@ use appytappy_sources::screen::check::ImageMatch;
 use appytappy_sources::screen::digits::InkRule;
 use appytappy_sources::screen::saved;
 
-use super::characters::{RecordedLabel, Taught, expected_characters};
+use super::characters::{RecordedLabel, Taught};
 use super::*;
 use crate::recording::Recording;
 use crate::recording::follow::Follows;
@@ -102,7 +102,6 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
                 image: sample_name("digits", 1),
                 text: "1".to_owned(),
             }],
-            expects: Some("123".to_owned()),
         },
         pictures: vec![(
             sample_name("digits", 1),
@@ -160,7 +159,7 @@ fn characters(
 
 /// What `spec` teaches a reference saved as `digits`, expecting nothing.
 fn teach(spec: &CharactersSpec, session: Session<'_>) -> Result<Taught, SpecError> {
-    spec.teach(session, Some("digits"), "Digits", "")
+    spec.teach(session, Some("digits"), "Digits")
 }
 
 /// What saving `spec` on screenshot 0 and reading it back gives: the value
@@ -553,7 +552,7 @@ fn a_saved_reference_that_loses_its_text_color_takes_a_tolerance_its_samples_rea
             shadowed().encode_png().expect("encodes"),
         )],
     };
-    let settings = |ink, tolerance| saved().with_settings("Digits", ink, tolerance, "");
+    let settings = |ink, tolerance| saved().with_settings("Digits", ink, tolerance);
     // The shadow between the strokes is ink at 40, so they read as one
     // character there.
     let by_contrast = settings(None, 40).expect("learns the strokes");
@@ -824,12 +823,7 @@ fn the_ui_describes_checks_in_camel_case_json() {
 fn a_new_reference_names_one_picture_per_label() {
     let spec = characters(left(), None, one(0), Vec::new());
     let taught = spec
-        .teach(
-            session(&[screenshot()], None),
-            Some("digits"),
-            "Digits",
-            "%9 876543210%",
-        )
+        .teach(session(&[screenshot()], None), Some("digits"), "Digits")
         .expect("valid characters");
     assert_eq!(
         taught.reference,
@@ -839,12 +833,10 @@ fn a_new_reference_names_one_picture_per_label() {
             origin: OriginDef::ByHand,
             ink: Some(RED),
             tolerance: 0,
-            // The one label teaches the one sample, whatever it expects.
             samples: vec![SampleDef {
                 image: "ref-digits-1.png".to_owned(),
                 text: "1".to_owned(),
             }],
-            expects: Some("0123456789%".to_owned()),
         }
     );
     let pictures = taught.pictures;
@@ -867,46 +859,90 @@ fn a_new_reference_names_one_picture_per_label() {
 }
 
 #[test]
-fn expected_characters_are_saved_once_each_in_order_up_to_the_most() {
+fn expected_characters_are_listed_once_each_in_order() {
     assert_eq!(
         expected_characters(" b%1\u{7}a0 1\u{3000}%\u{85}"),
-        Ok(Some("01%ab".to_owned())),
+        Some("01%ab".to_owned()),
         "no whitespace, control character or repeat, and the digits first"
     );
     assert_eq!(
         expected_characters("\u{1d7d9}z\u{ff11}\u{feff}"),
-        Ok(Some("z\u{feff}\u{ff11}\u{1d7d9}".to_owned())),
+        Some("z\u{feff}\u{ff11}\u{1d7d9}".to_owned()),
         "by code point, and only the digits 0 to 9 come first"
     );
-    assert_eq!(expected_characters(""), Ok(None));
-    assert_eq!(expected_characters(" \t\u{7}"), Ok(None));
+    assert_eq!(expected_characters(""), None);
+    assert_eq!(expected_characters(" \t\u{7}"), None);
+}
+
+#[test]
+fn a_list_of_expected_characters_is_held_to_the_most_where_it_is_set_or_changed() {
+    let needing = |characters: &str| CheckDef::Number {
+        reference: "digits".to_owned(),
+        whole: false,
+        characters: Some(characters.to_owned()),
+    };
     let most: String = ('\u{100}'..).take(MAX_EXPECTED_CHARACTERS).collect();
-    assert_eq!(expected_characters(&most), Ok(Some(most.clone())));
+    let over = format!("{most}%");
+    assert_eq!(expected_within_limit(&needing(&most), None), Ok(()));
     // A repeat or a space does not count toward the most.
     assert_eq!(
-        expected_characters(&format!("{most} {most}")),
-        Ok(Some(most.clone()))
+        expected_within_limit(&needing(&format!("{most} {most}")), None),
+        Ok(())
     );
     assert_eq!(
-        expected_characters(&format!("{most}%")),
+        expected_within_limit(&needing(&over), None),
         Err(SpecError::TooManyExpected)
     );
+    assert_eq!(
+        expected_within_limit(&needing(&over), Some(&needing(&most))),
+        Err(SpecError::TooManyExpected),
+        "a list that grew past the most"
+    );
+    // A value saved with a longer list, such as one written by hand, keeps
+    // it through a save that leaves it as it is, in whatever order.
+    assert_eq!(
+        expected_within_limit(&needing(&over), Some(&needing(&format!("% {most}")))),
+        Ok(())
+    );
+    let bar = CheckDef::BarFill {
+        filled: ColorDef {
+            red: 1,
+            green: 2,
+            blue: 3,
+        },
+        empty: ColorDef {
+            red: 4,
+            green: 5,
+            blue: 6,
+        },
+    };
+    assert_eq!(expected_within_limit(&bar, Some(&needing(&over))), Ok(()));
     assert_eq!(
         SpecError::TooManyExpected.to_string(),
-        "A reference needs at most 128 characters. Remove some."
+        "A value needs at most 128 characters. Remove some."
     );
-    // The save refuses the list.
-    let spec = characters(left(), None, one(0), Vec::new());
-    assert_eq!(
-        spec.teach(
-            session(&[screenshot()], None),
-            Some("digits"),
-            "Digits",
-            &format!("{most}%"),
-        )
-        .map(drop),
-        Err(SpecError::TooManyExpected)
-    );
+}
+
+#[test]
+fn a_number_is_saved_with_the_characters_it_needs_listed_once_in_order() {
+    let needing = |characters: &str| {
+        let spec = CheckSpec::Number {
+            region: left(),
+            reference: digits_ref(),
+            whole: false,
+            characters: Some(characters.to_owned()),
+        };
+        match to_saved(&spec, &[], "app", "progress")
+            .expect("a number")
+            .check
+        {
+            CheckDef::Number { characters, .. } => characters,
+            other => panic!("a number check, not {other:?}"),
+        }
+    };
+    assert_eq!(needing("% 1 0 1"), Some("01%".to_owned()));
+    // A value that names none reads every character its reference knows.
+    assert_eq!(needing(" "), None);
 }
 
 #[test]
@@ -917,13 +953,9 @@ fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
     };
     // Without an ID of its own, it is taught under the saved one's.
     let taught = spec
-        .teach(session(&[screenshot()], None), None, "Red digits", "")
+        .teach(session(&[screenshot()], None), None, "Red digits")
         .expect("valid characters");
     let reference = taught.reference;
-    assert_eq!(
-        reference.expects, None,
-        "what it expected goes when the user chooses none"
-    );
     let images: Vec<&str> = reference
         .samples
         .iter()

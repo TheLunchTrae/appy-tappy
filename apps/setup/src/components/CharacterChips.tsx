@@ -45,7 +45,10 @@ export function CharacterChips({
   );
 }
 
-/** The characters a reference needs and has yet to learn, each in an outlined tile, since it has no shape for them. */
+/**
+ * The characters a value needs that its reference has yet to learn, each in an outlined tile, since it has no shape
+ * for them.
+ */
 export function MissingChips({
   characters,
   large = false,
@@ -67,7 +70,7 @@ export function MissingChips({
   );
 }
 
-/** The characters a reference expects and has yet to learn, in one line, or nothing when it has them all. */
+/** The characters a value needs that a reference has yet to learn, in one line, or nothing when it has them all. */
 export function MissingNote({ characters }: { readonly characters: readonly string[] }) {
   return characters.length === 0 ? null : (
     <span className="missing-note">

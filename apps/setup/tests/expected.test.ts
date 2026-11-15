@@ -1,17 +1,16 @@
 import { expect, test } from 'bun:test';
 
-import { LIMITS, type ReferenceDef } from '../src/lib/bindings.ts';
+import { LIMITS } from '../src/lib/bindings.ts';
 import {
   coverage,
   expectedSet,
+  knowsNone,
   LETTER_PRESETS,
   NUMBER_PRESETS,
   otherCharacters,
   type Preset,
   presetCount,
   presetState,
-  referenceCoverage,
-  startingExpected,
   tooMany,
   withOther,
   withPreset,
@@ -30,44 +29,15 @@ function named(name: string): Preset {
 const digits = named('Digits');
 const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
-function reference(texts: readonly string[], expects?: string): ReferenceDef {
-  return {
-    id: 'percent',
-    name: 'Percent font',
-    origin: { kind: 'byHand' } as const,
-    ink: { red: 255, green: 255, blue: 255 },
-    tolerance: 40,
-    samples: texts.map((text, index) => ({ image: `ref-percent-${index}.png`, text })),
-    ...(expects === undefined ? {} : { expects }),
-  };
-}
-
 test('expectedSet keeps each character a label teaches once, digits first', () => {
   expect(expectedSet(' 9a%9\t\u0007A0\u0085')).toEqual(['0', '9', '%', 'A', 'a']);
   expect(expectedSet('')).toEqual([]);
 });
 
-test('a list is too long past the most characters a reference saves', () => {
+test('a list is too long past the most characters a value saves', () => {
   const most = Array.from({ length: LIMITS.maxExpectedCharacters }, (_, index) => String.fromCodePoint(0x100 + index));
   expect(tooMany(most)).toBe(false);
   expect(tooMany([...most, '%'])).toBe(true);
-});
-
-test('a new reference starts with the digits, and a saved one with what it expects', () => {
-  expect(startingExpected(null, null)).toEqual(DIGITS);
-  expect(startingExpected(reference(['87%']), null)).toEqual([]);
-  expect(startingExpected(reference(['87%'], '%10'), null)).toEqual(['0', '1', '%']);
-  // A list a person wrote by hand reads as its characters, each once.
-  expect(startingExpected(reference(['87%'], '11 %'), null)).toEqual(['1', '%']);
-});
-
-test('a reference learned again at another size starts with what the shared one expects', () => {
-  const shared = reference(['87%'], '0123456789.%');
-  expect(startingExpected(null, shared)).toEqual([...DIGITS, '%', '.']);
-  // Without a list to take over, it starts with the digits like any new reference.
-  expect(startingExpected(null, reference(['87%']))).toEqual(DIGITS);
-  // A saved reference keeps its own list.
-  expect(startingExpected(reference(['1'], '1'), shared)).toEqual(['1']);
 });
 
 test('a preset is on with all of its characters, partial with some, and off with none', () => {
@@ -137,9 +107,10 @@ test('coverage splits the needed characters by whether they are learned, and lis
   expect(coverage(['8'], [])).toEqual({ known: [], missing: ['8'], extra: [] });
 });
 
-test("a saved reference's coverage compares its samples with what it expects", () => {
-  expect(referenceCoverage(reference(['87%', '10'], '0123456789%')).missing).toEqual(['2', '3', '4', '5', '6', '9']);
-  expect(referenceCoverage(reference(['87%'], '78%'))).toEqual({ known: ['7', '8', '%'], missing: [], extra: [] });
-  // A reference saved without a choice has nothing missing.
-  expect(referenceCoverage(reference(['87%']))).toEqual({ known: [], missing: [], extra: ['7', '8', '%'] });
+test('a reference knows none of what a value needs only when the value needs some', () => {
+  expect(knowsNone(['1', '%'], ['7', 'L'])).toBe(true);
+  expect(knowsNone(['1', '%'], ['%'])).toBe(false);
+  // A value that needs none reads every character the reference knows.
+  expect(knowsNone([], ['7'])).toBe(false);
+  expect(knowsNone(['1'], [])).toBe(true);
 });

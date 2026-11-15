@@ -67,11 +67,7 @@ export const RECORD_RESIZED_HINT =
 
 /** What a reference is. */
 export const REFERENCE_HINT =
-  'A reference knows what each character looks like in one font, learned from the boxes you draw on screenshots and the readings you record. Values that show the same font can share one.';
-
-/** The characters of its reference that a number value reads. */
-export const CHARACTERS_READ_HINT =
-  'A reference can know a whole font. Reading only the characters this value shows stops it mistaking one character for a lookalike, such as 0 for O. The reference keeps every character, so other values can read more of it.';
+  'A reference knows what each character looks like in one font, learned from the boxes you draw on screenshots and the readings you record. Values that show the same font can share one, and each value chooses the characters it needs of it.';
 
 /** A reference's text color, which most references leave unset. */
 export const INK_HINT =
@@ -81,12 +77,13 @@ export const INK_HINT =
 export const BOXES_HINT =
   'Drag on any screenshot to draw a box tightly around some characters, then type exactly what it shows, such as 87% or 1,250. Draw as many as you like, several on one screenshot too. Press a box to select it; drag it to move it, drag a corner to resize it, or press Delete to remove it. Each box with text teaches the reference the characters in it. A reference you teach by itself reads and records at the box marked Reads here, the first in the list.';
 
-/** The characters a reference needs. */
+/** The characters a number value needs. */
 export const EXPECTED_HINT =
-  'Your list of what to teach. AppyTappy shows which of these characters the reference has yet to learn. It only guides you: a character is learned from the boxes you type and the readings you keep, never from this list, and a number reads the same way whatever you turn on. A number ends at a colon or slash, so 12:30 and 12/50 each read as 12.';
+  "The characters this value can show. It reads only these, so it doesn't mistake one for a lookalike, such as 0 for O, and AppyTappy shows which of them its reference has yet to learn. The reference keeps every character it knows, so other values in the same font can share it. A number ends at a colon or slash, so 12:30 and 12/50 each read as 12.";
+
 /** Finding more text like the selected box. */
 export const FIND_LIKE_HINT =
-  "Looks on the selected box's screenshot for other text that stands out as the text in the box does and is as tall, and reads each as text. It lists only text that shows the characters the reference needs. Each one you tick and add becomes a box. Draw the box tightly around the text and type what it shows first, so the size is right.";
+  "Looks on the selected box's screenshot for other text that stands out as the text in the box does and is as tall, and reads each as text. For a reference you teach from a value, it lists only text that shows characters the value needs. Each one you tick and add becomes a box. Draw the box tightly around the text and type what it shows first, so the size is right.";
 
 /** What the found text's list shows, and what each row's box and field do. */
 export const FOUND_HINT =

@@ -86,7 +86,7 @@ pub(crate) enum SpecError {
     /// The saved form cannot be read for a reason the page has no words of
     /// its own for, in `saved::build`'s.
     Unreadable(String),
-    /// A reference is to expect more than [`MAX_EXPECTED_CHARACTERS`]
+    /// A number value is to need more than [`MAX_EXPECTED_CHARACTERS`]
     /// characters.
     TooManyExpected,
     /// A reference could not learn from a label.
@@ -128,15 +128,15 @@ impl fmt::Display for SpecError {
             Self::Check(CheckDefError::NoCharacters) => {
                 formatter.write_str("Choose at least one character for the value to read.")
             },
-            // A fix reads the characters its value chose, with a reference
+            // A fix needs the characters its value chose, with a reference
             // of its own, so the wording holds where they cannot be chosen.
             Self::NoCharacters {
                 reference,
                 characters,
             } => write!(
                 formatter,
-                "{reference} knows none of the characters this value reads, {characters:?}. Teach \
-                 it one of them, or change which characters the value reads."
+                "{reference} knows none of the characters this value needs, {characters:?}. Teach \
+                 it one of them, or change the characters the value needs."
             ),
             Self::NothingSelected(name) => write!(
                 formatter,
@@ -203,7 +203,7 @@ impl fmt::Display for SpecError {
             },
             Self::TooManyExpected => write!(
                 formatter,
-                "A reference needs at most {MAX_EXPECTED_CHARACTERS} characters. Remove some."
+                "A value needs at most {MAX_EXPECTED_CHARACTERS} characters. Remove some."
             ),
             Self::Learn { text, source } => {
                 write!(formatter, "Could not learn from \"{text}\": {source}")

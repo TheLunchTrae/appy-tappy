@@ -10,8 +10,8 @@ interface Props {
   /** The reference the fix reads with now. */
   readonly selected: string | null;
   readonly onShared: () => void;
-  /** Opens the editor on a new reference for this size, which starts with what `like` needs. */
-  readonly onLearn: (like: ReferenceDef | null) => void;
+  /** Opens the editor on a new reference for this size. */
+  readonly onLearn: () => void;
 }
 
 /** What a fix of a number reads with: the reference its value shares, or one learned at this size. */
@@ -46,9 +46,7 @@ export function ReadWith({ references, shared, selected, onShared, onLearn }: Pr
           name="read-with"
           aria-describedby="read-with-own"
           checked={selected !== shared}
-          onChange={() => {
-            onLearn(named(shared));
-          }}
+          onChange={onLearn}
         />
         <span>
           <span className="choice-name">

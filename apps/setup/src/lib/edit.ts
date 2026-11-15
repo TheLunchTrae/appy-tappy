@@ -12,7 +12,7 @@ import type {
   StateDef,
   ValueDef,
 } from './bindings.ts';
-import { type Built, type Draft, buildSpec, fixDraft, stateNamesNext } from './check.ts';
+import { type Built, type Draft, buildSpec, fixDraft, savedNeeds, stateNamesNext } from './check.ts';
 import { AUTOMATIC, type PinChoice } from './pin.ts';
 import { andList } from './reference.ts';
 import { sameRect } from './region.ts';
@@ -154,7 +154,7 @@ function editDrawing(draft: Draft, saved: ValueDef, app: string): Built<EditDraw
   const shot = missing(
     `Take a screenshot while the window is ${sizeText(screen.windowSize)}, the size ${saved.name} was drawn at.`,
   );
-  const built = drawnOn === null && draft.kind === 'state' ? shot : buildSpec(draft, app);
+  const built = drawnOn === null && draft.kind === 'state' ? shot : buildSpec(draft, app, savedNeeds(screen.check));
   if (!built.ok) {
     return built;
   }

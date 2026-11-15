@@ -23,7 +23,7 @@ use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Size};
 use serde::Deserialize;
 
-use crate::check_spec::{self, CharactersSpec, CheckSpec};
+use crate::check_spec::{self, CharactersSpec, CheckSpec, expected_characters};
 use crate::reading::at_size;
 
 use super::Owner;
@@ -60,9 +60,9 @@ pub(crate) struct ReferenceTrial {
     pub(crate) app: String,
     /// The characters it is taught.
     pub(crate) characters: CharactersSpec,
-    /// The characters the number it is made for reads of it, or `None`
-    /// for every character it is taught, as a saved number check has them.
-    pub(crate) reads: Option<String>,
+    /// The characters the number it is made for needs, or none for every
+    /// character it is taught.
+    pub(crate) needs: String,
     /// Whether that number ignores digits after the decimal point.
     pub(crate) whole: bool,
     /// The side of the window that number's region stays at, or `None`
@@ -227,16 +227,17 @@ impl<H: Host> Owner<H> {
         self.keep_reference(trial.characters.reference.as_ref());
         let mut found = self.stores()?.app(&trial.app)?;
         let taught = self
-            .with_session(|session| trial.characters.teach(session, None, TAUGHT, ""))
+            .with_session(|session| trial.characters.teach(session, None, TAUGHT))
             .map_err(|error| error.to_string())?;
         let id = taught.reference.id.clone();
+        let characters = expected_characters(&trial.needs);
         let screen = ScreenDef {
             window_size: taught.window_size.into(),
             region: taught.region.into(),
             check: CheckDef::Number {
                 reference: id.clone(),
                 whole: trial.whole,
-                characters: trial.reads.clone(),
+                characters,
             },
             pin: trial.pin,
             reading_area: false,
@@ -486,7 +487,6 @@ mod tests {
                 owner.save_reference(&ReferenceSaveSpec {
                     app: "example".to_owned(),
                     reference_name: "Percent".to_owned(),
-                    expects: String::new(),
                     characters: characters(PERCENT),
                 })
             })
@@ -599,14 +599,19 @@ mod tests {
         assert_eq!(
             harness.ask(|owner| owner.set_check(&reading("2"))),
             Err(
-                "Percent knows none of the characters this value reads, \"2\". Teach it one of \
-                 them, or change which characters the value reads."
+                "Percent knows none of the characters this value needs, \"2\". Teach it one of \
+                 them, or change the characters the value needs."
                     .to_owned()
             )
         );
+        // A value that names no character needs every one its reference
+        // knows.
+        harness
+            .ask(|owner| owner.set_check(&reading("")))
+            .expect("reads every character");
         assert_eq!(
-            harness.ask(|owner| owner.set_check(&reading(""))),
-            Err("Choose at least one character for the value to read.".to_owned())
+            harness.ask(Owner::reading),
+            Ok(Some(Reading::Number(379.0)))
         );
         fs::remove_dir_all(root).expect("clean up");
     }
@@ -792,10 +797,10 @@ mod tests {
             Ok(Some(Reading::Number(379.0)))
         );
         let no_seven = ReferenceTrial {
-            reads: Some("39%".to_owned()),
+            needs: "39%".to_owned(),
             ..teaching(taught.clone())
         };
-        // Made for a value that reads only some characters, it reads as
+        // Made for a value that needs only some characters, it reads as
         // that value will: not around a digit the value leaves out.
         harness
             .ask(|owner| owner.set_characters(&no_seven))
@@ -803,22 +808,14 @@ mod tests {
         assert_eq!(harness.ask(Owner::reading), Err(NO_SEVEN.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.set_characters(&ReferenceTrial {
-                reads: Some("2".to_owned()),
+                needs: "2".to_owned(),
                 ..teaching(taught.clone())
             })),
             Err(
-                "The reference knows none of the characters this value reads, \"2\". Teach it \
-                 one of them, or change which characters the value reads."
+                "The reference knows none of the characters this value needs, \"2\". Teach it \
+                 one of them, or change the characters the value needs."
                     .to_owned()
             )
-        );
-        // The file's own rule for a number holds here as it does at a save.
-        assert_eq!(
-            harness.ask(|owner| owner.set_characters(&ReferenceTrial {
-                reads: Some(String::new()),
-                ..teaching(taught.clone())
-            })),
-            Err("Choose at least one character for the value to read.".to_owned())
         );
         harness
             .ask(|owner| owner.set_characters(&teaching(taught.clone())))

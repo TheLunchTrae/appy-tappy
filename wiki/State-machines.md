@@ -1418,7 +1418,7 @@ stateDiagram-v2
   reads nothing. A value's trial tried then is judged against the saved
   files but not kept to read with (`Owner::go_live`), so it is tried again
   once the capture runs. A saved reference with no box and no recording
-  saves its name, text color, tolerance, and needed characters with its samples
+  saves its name, text color, and tolerance with its samples
   as they are (`save_reference_settings`), which needs no screenshot;
   teaching it more needs a box on a screenshot.
 
@@ -2767,7 +2767,8 @@ stateDiagram-v2
 - The UI keeps each find's tick, its text, and whether the user typed it
   (`useFound`) until a new search or a dismissal; a reread keeps them. A find
   starts unticked. It is listed when its text may show only characters the
-  reference needs, a lookalike digit counted as its digit (`fitsNeeds`), or
+  value the reference is taught for needs, a lookalike digit counted as its
+  digit (`fitsNeeds`), or
   while it is being read or the user typed it. Answers to a search the user
   moved on from are ignored by the UI's turn and, for pictures, by the
   search's number. A reread also starts a new turn, so the search's state as it

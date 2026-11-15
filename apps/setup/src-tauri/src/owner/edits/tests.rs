@@ -767,7 +767,6 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
         let reference = ReferenceSaveSpec {
             app: "example".to_owned(),
             reference_name: name.to_owned(),
-            expects: String::new(),
             characters: serde_json::from_str(&format!(
                 r#"{{"region":{{"x":0,"y":0,"width":2,"height":2}},
                     "screenshot":0,"reference":null,"ink":{{"red":255,"green":0,"blue":0}},
@@ -849,6 +848,100 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
             "{check:?}"
         );
     }
+    std::fs::remove_dir_all(root).expect("clean up");
+}
+
+#[test]
+fn a_list_of_characters_past_the_most_is_refused_only_where_it_is_set_or_changed() {
+    const TOO_MANY: &str = "A value needs at most 128 characters. Remove some.";
+    let (stores, root) = scratch_store("edit-number-characters");
+    let mut harness = harness_with(false, Ok(stores));
+    add_example_app(&mut harness);
+    let mut handler = harness.pick();
+    for (index, image) in [frame_image(), red_image(LARGER)].iter().enumerate() {
+        harness.deliver(&mut handler, Ok(image));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(index));
+    }
+    // The red square of screenshot 0 taught as a 1.
+    let reference = ReferenceSaveSpec {
+        app: "example".to_owned(),
+        reference_name: "Digits".to_owned(),
+        characters: serde_json::from_str(
+            r#"{"region":{"x":0,"y":0,"width":2,"height":2},
+                "screenshot":0,"reference":null,"ink":{"red":255,"green":0,"blue":0},
+                "tolerance":0,"labels":[{"screenshot":0,"text":"1"}]}"#,
+        )
+        .expect("valid JSON"),
+    };
+    harness
+        .ask(|owner| owner.save_reference(&reference))
+        .expect("saves");
+    // One character more than a value may be given, the taught 1 among
+    // them.
+    let over: String = "1".chars().chain(('\u{100}'..).take(128)).collect();
+    let needing = |region: &str, characters: &str| {
+        number(region, "digits").replacen(
+            r#""whole":true"#,
+            &format!(r#""whole":true,"characters":"{characters}""#),
+            1,
+        )
+    };
+    let first = r#"{"x":0,"y":0,"width":2,"height":2}"#;
+    assert_eq!(
+        harness.ask(|owner| owner.save(&spec("example", "Progress", &needing(first, &over)))),
+        Err(TOO_MANY.to_owned())
+    );
+    harness
+        .ask(|owner| owner.save(&spec("example", "Progress", &number(first, "digits"))))
+        .expect("saves");
+    let kept = |characters: &str| {
+        kept_number("digits", true).replacen(
+            r#""whole":true"#,
+            &format!(r#""whole":true,"characters":"{characters}""#),
+            1,
+        )
+    };
+    assert_eq!(
+        save(
+            &mut harness,
+            &edit("progress", "Progress", &kept(&over)),
+            &[]
+        ),
+        Err(TOO_MANY.to_owned())
+    );
+    // A person gives the saved value the long list by hand.
+    let folder = harness
+        .owner
+        .stores()
+        .expect("stores")
+        .apps
+        .folder("example");
+    let mut file = saved_file(&harness);
+    match &mut file.values[0].screen.check {
+        CheckDef::Number { characters, .. } => *characters = Some(over.clone()),
+        other => panic!("a number check, not {other:?}"),
+    }
+    std::fs::write(folder.join("app.json"), file.to_json()).expect("writes");
+    // The value keeps its list through a rename and a fix, which change
+    // none of it, and loses it to an edit that names another long one.
+    save(&mut harness, &edit("progress", "Health", &kept(&over)), &[]).expect("renames");
+    let fix = FixSpec {
+        app: "example".to_owned(),
+        value: "progress".to_owned(),
+        check: serde_json::from_str(&needing(r#"{"x":0,"y":0,"width":4,"height":4}"#, &over))
+            .expect("valid JSON"),
+        screenshot: 1,
+    };
+    harness.ask(|owner| owner.save_fix(&fix)).expect("saves");
+    let longer = format!("{over}%");
+    assert_eq!(
+        save(
+            &mut harness,
+            &edit("progress", "Health", &kept(&longer)),
+            &[]
+        ),
+        Err(TOO_MANY.to_owned())
+    );
     std::fs::remove_dir_all(root).expect("clean up");
 }
 

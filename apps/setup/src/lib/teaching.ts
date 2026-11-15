@@ -10,8 +10,6 @@ export interface ReferenceSave {
   readonly tried: boolean;
   /** Whether a save, of it or of its draft, is under way. */
   readonly busy: boolean;
-  /** Whether it needs more characters than one reference saves. */
-  readonly overLimit: boolean;
   /** Whether a recording's review is open, under the character check or not. */
   readonly reviewing: boolean;
 }
@@ -27,7 +25,7 @@ export const SAVE_AFTER_REVIEW =
  * for Keep, or for the way back to the screenshot.
  */
 export function referenceSave(save: ReferenceSave): { readonly can: boolean; readonly waits: string | null } {
-  const ready = save.named && save.built && save.tried && !save.busy && !save.overLimit;
+  const ready = save.named && save.built && save.tried && !save.busy;
   return { can: ready && !save.reviewing, waits: save.reviewing ? SAVE_AFTER_REVIEW : null };
 }
 

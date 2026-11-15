@@ -21,17 +21,15 @@ import {
   buildCharacters,
   buildReferenceSave,
   buildSpec,
+  savedNeeds,
   EMPTY_DRAFT,
   firstWithPixels,
   fixDraft,
   NEW_REFERENCE_TOLERANCE,
   onPicture,
-  readsOf,
-  charactersOnceTaught,
   regionScreenshot,
   toReference,
   withFixRegion,
-  withReference,
   withState,
   withTextColor,
 } from '../lib/check.ts';
@@ -47,7 +45,6 @@ import { ChangeWindow } from './capture/StageBar.tsx';
 import { Stepper, nextFromWhere, stepTabs } from './capture/Stepper.tsx';
 import { WhereFields } from './capture/WhereFields.tsx';
 import { agreedFixes, editStart, keepsStates, placedOn, saveable } from '../lib/edit.ts';
-import { startingExpected } from '../lib/expected.ts';
 import { BarDetect, BarReadings } from './BarFields.tsx';
 import { BarColorFields, type ColorTarget, ColorFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
@@ -85,6 +82,9 @@ import {
   regionOnStage,
   shownOnStep,
   storeSetup,
+  needsField,
+  startEditing,
+  withTaught,
 } from '../lib/captureDraft.ts';
 import { type ReportDraft, type Resumed, draftsOf, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { background } from '../lib/repeat.ts';
@@ -150,13 +150,7 @@ function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restor
       : setup;
   }
   const editing: Editing | null =
-    mode.kind === 'reference'
-      ? {
-          existing: mode.existing,
-          name: mode.existing?.name ?? '',
-          expects: startingExpected(mode.existing, null),
-        }
-      : null;
+    mode.kind === 'reference' ? startEditing('reference', mode.existing, EMPTY_DRAFT) : null;
   if (mode.kind === 'edit') {
     return { step: 'where', editing, ...editStart(mode.value) };
   }
@@ -272,6 +266,11 @@ export function Capture({
   const fixing = mode.kind === 'fix' ? mode.value : null;
   // The saved value an edit changes as it was first drawn.
   const edited = mode.kind === 'edit' ? mode.value : null;
+  // The characters the saved value needs already, which it keeps however many they are.
+  const needsSaved = useMemo(
+    () => (mode.kind === 'fix' || mode.kind === 'edit' ? savedNeeds(mode.value.screen.check) : null),
+    [mode],
+  );
   // Whether the user said the value's content may move around inside the window.
   const [mayMove, setMayMove] = useState(start.mayMove);
   const [saving, setSaving] = useState(false);
@@ -332,7 +331,7 @@ export function Capture({
     () => (isEditing ? buildCharacters(draft, editingRef) : null),
     [isEditing, draft, editingRef],
   );
-  const valueCheck = useMemo(() => buildSpec(draft, appId), [draft, appId]);
+  const valueCheck = useMemo(() => buildSpec(draft, appId, needsSaved), [draft, appId, needsSaved]);
   const referenceSave = useMemo(
     () => (isEditing ? buildReferenceSave(draft, editingRef) : null),
     [isEditing, draft, editingRef],
@@ -373,7 +372,6 @@ export function Capture({
   const staysAt = pinView(draft.pin, draft.region, drawnSize ?? edited?.screen.windowSize ?? null);
   const pin = pinOfView(staysAt);
   const fixPin = fixing?.screen.pin;
-  const references = file?.references;
   const teaching = useReferenceTeaching({
     app: appId,
     editing,
@@ -398,16 +396,9 @@ export function Capture({
         onSaved({ app: saved.app, value: null });
         return;
       }
-      // The choice of characters was made against the references as they were before this save.
-      const before = references ?? [];
-      const after = (await appFile.reload())?.references ?? [];
+      await appFile.reload();
       close();
-      // A value's choice of characters follows its reference, as when one is picked. A fix reads its value's.
-      setDraft((current) =>
-        fixing === null
-          ? withReference({ ...current, kind: 'number' }, saved.reference, after, before)
-          : { ...current, kind: 'number', reference: saved.reference },
-      );
+      setDraft((current) => withTaught(current, saved.reference, editing));
     },
   });
   const { recording, finder, reviewed, sheeted, checking } = teaching;
@@ -588,18 +579,17 @@ export function Capture({
     sizes: full,
   });
   const { drawnOn } = draft;
-  // A reference is tried as the number it is made for reads with it once both are saved: with that number's
-  // characters, which a fix keeps and a value's follow the reference, whole when it is, and at its side. A reference
-  // made on its own reads every character it knows.
+  // A reference is tried as the number it is made for reads with it once both are saved: with the characters that
+  // number needs, whole when it is, and at its side. A reference made on its own reads every character it knows.
   const taughtTrial = useMemo((): Built<ReferenceTrial> | null => {
     if (characters === null || !characters.ok) {
       return characters;
     }
     const { spec } = characters;
-    const reads = readsOf(fixing === null ? charactersOnceTaught(draft, references ?? [], spec) : draft.characters);
     const whole = mode.kind !== 'reference' && draft.whole;
-    return { ok: true, spec: { app: appId, characters: spec, reads, whole, pin: fixPin ?? pin } };
-  }, [characters, fixing, draft, references, mode.kind, appId, fixPin, pin]);
+    const needs = (editing?.needs ?? []).join('');
+    return { ok: true, spec: { app: appId, characters: spec, needs, whole, pin: fixPin ?? pin } };
+  }, [characters, editing?.needs, draft.whole, mode.kind, appId, fixPin, pin]);
   const trial = useMemo((): Trial => {
     if (taughtTrial !== null) {
       return trialOf('characters', taughtTrial, { set: setCharacters });
@@ -720,10 +710,10 @@ export function Capture({
     }
   };
 
-  // Opens the reference editor on `existing`, or on a new reference like `like`. The editor records readings, and
-  // the owner records one thing at a time, so a recording of looks goes first.
-  const openEditor = async (existing: ReferenceDef | null, like: ReferenceDef | null): Promise<void> => {
-    teaching.open(existing, like);
+  // Opens the reference editor on `existing`, or on a new reference. The editor records readings, and the owner
+  // records one thing at a time, so a recording of looks goes first.
+  const openEditor = async (existing: ReferenceDef | null): Promise<void> => {
+    teaching.open(startEditing(mode.kind, existing, draft));
     // Why the value was not saved is about the value before this edit, so it does not show when the editor closes.
     setSaveError(null);
     await looks.discard();
@@ -738,7 +728,7 @@ export function Capture({
       return;
     }
     const { region, drawnOn } = draft;
-    await openEditor(existing, null);
+    await openEditor(existing);
     if (region === null || drawnOn === null) {
       return;
     }
@@ -851,14 +841,14 @@ export function Capture({
       whole={draft.whole}
       characters={draft.characters}
       onSelect={(reference) => {
-        setDraft((current) => withReference(current, reference, file?.references ?? []));
+        setDraft((current) => ({ ...current, reference }));
       }}
       onEdit={(id) => {
-        background(openEditor(file?.references.find((reference) => reference.id === id) ?? null, null));
+        background(openEditor(file?.references.find((reference) => reference.id === id) ?? null));
       }}
       drafted={drafted}
       onNew={() => {
-        background(openEditor(null, null));
+        background(openEditor(null));
       }}
       onRecord={() => {
         background(recordReadings());
@@ -903,8 +893,8 @@ export function Capture({
           onShared={() => {
             setDraft((current) => ({ ...current, reference: sharedReference }));
           }}
-          onLearn={(like) => {
-            background(openEditor(null, like));
+          onLearn={() => {
+            background(openEditor(null));
           }}
         />
       ),
@@ -1313,6 +1303,7 @@ export function Capture({
           busy={busy}
           draftError={draftError}
           draftButton={draftButton}
+          needsField={needsField(mode.kind)}
           onDiscard={mode.kind === 'reference' ? onCancel : teaching.close}
         />
       )}

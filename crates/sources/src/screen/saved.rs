@@ -721,7 +721,7 @@ impl fmt::Display for SavedError {
             },
             Self::NoCharacters { id, characters } => write!(
                 formatter,
-                "its reference {id} knows none of the characters it reads, {characters:?}"
+                "its reference {id} knows none of the characters it needs, {characters:?}"
             ),
             Self::Learn { name, source } => {
                 write!(
@@ -1012,38 +1012,6 @@ mod tests {
                 image: sample_name("counter", 1),
                 text: text.to_owned(),
             }],
-            expects: None,
-        }
-    }
-
-    #[test]
-    fn what_a_reference_expects_changes_nothing_it_learns_or_reads() {
-        let files = pictures(&[(&sample_name("counter", 1), &elevens(3))]);
-        let number = CheckDef::Number {
-            reference: "counter".to_owned(),
-            whole: false,
-            characters: None,
-        };
-        let plain = build(
-            &screen(number.clone()),
-            &mut Readers::new(&[counter("11")]),
-            OFTEN,
-            from(&files),
-        )
-        .expect("builds");
-        // The same glyphs and the same number rules, whatever it expects,
-        // even a list no setup app would save.
-        for expected in ["0123456789,.%", "11 ", "", &"x".repeat(5000)] {
-            let mut expecting = counter("11");
-            expecting.expects = Some(expected.to_owned());
-            let guided = build(
-                &screen(number.clone()),
-                &mut Readers::new(&[expecting]),
-                OFTEN,
-                from(&files),
-            )
-            .expect("builds");
-            assert_eq!(guided.drawn.check, plain.drawn.check, "{expected:?}");
         }
     }
 
@@ -1097,7 +1065,6 @@ mod tests {
             }),
             tolerance: 40,
             samples,
-            expects: None,
         };
         let value = ScreenDef {
             window_size: SizeDef {
@@ -1401,7 +1368,7 @@ mod tests {
         .expect_err("it knows none of them");
         assert_eq!(
             error.to_string(),
-            "its reference counter knows none of the characters it reads, \"%\""
+            "its reference counter knows none of the characters it needs, \"%\""
         );
         assert!(error.source().is_none());
         // A fix that reads with its own reference reads the same characters
@@ -1423,7 +1390,7 @@ mod tests {
         .expect_err("the fix's reference knows no digit");
         assert_eq!(
             error.to_string(),
-            "at 1000x500, its reference letters knows none of the characters it reads, \"0\""
+            "at 1000x500, its reference letters knows none of the characters it needs, \"0\""
         );
     }
 

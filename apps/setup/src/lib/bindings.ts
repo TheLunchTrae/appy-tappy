@@ -496,8 +496,11 @@ reference: string,
  */
 whole: boolean,
 /**
- * The characters the value reads, such as `0123456789%`, or `None`
- * for every character its reference knows.
+ * The characters the value needs of its reference, such as
+ * `0123456789%`, or `None` for every character its reference
+ * knows. A reference is a font that may know more than one value
+ * shows, so each value says what it needs. The setup app also
+ * shows which of them the reference has yet to learn.
  *
  * The value matches what it sees against these characters alone,
  * so a value that shows only digits cannot read a `0` as an `O`
@@ -543,8 +546,9 @@ export type CheckSpec = DeepReadonly<{ "kind": "number", region: RegionDef, refe
  */
 whole: boolean,
 /**
- * The characters the value reads, or `None` for every character
- * the reference knows, as [`CheckDef::Number`] saves them.
+ * The characters the value needs, or `None` for every character
+ * the reference knows. The save lists each once, in order, as
+ * [`expected_characters`] does.
  */
 characters?: string, } | { "kind": "barFill", region: RegionDef, filled: ColorDef, empty: ColorDef, } | { "kind": "color", region: RegionDef, color: ColorDef, tolerance: number, } | { "kind": "state", region: RegionDef,
 /**
@@ -1623,6 +1627,9 @@ shapes: Array<RecordedShape>, }>;
  * character to its line's height. It tells a picture's or a region's
  * characters from the background by contrast with the background, or by
  * their color when it has a text color.
+ *
+ * It is a font and no more: which of its characters a value needs is the
+ * value's to say, in its number check.
  */
 export type ReferenceDef = DeepReadonly<{
 /**
@@ -1654,19 +1661,7 @@ tolerance: number,
 /**
  * The pictures it learns from.
  */
-samples: Array<SampleDef>,
-/**
- * The characters the user says it needs to know, such as
- * `0123456789.%`, or `None` when the user chose none.
- *
- * Setup guidance only. The setup app shows which of them the samples
- * have yet to teach, and writes them each once, in order, when it saves
- * the reference. Nothing that learns or reads looks at it, and no rule
- * of the file covers it: it adds no glyph, labels no shape, leaves how
- * a number is read as it is, and never stops a file from loading,
- * whatever text it holds.
- */
-expects?: string, }>;
+samples: Array<SampleDef>, }>;
 
 /**
  * A saved reference of a saved application.
@@ -1697,14 +1692,7 @@ referenceName: string,
  * The characters it is taught, which name the reference when it is
  * saved already.
  */
-characters: CharactersSpec,
-/**
- * The characters the user says it needs to know, or empty when the
- * user chose none. The save lists each once, in order, refuses more
- * than a reference saves, and replaces what the saved reference
- * expected.
- */
-expects: string, }>;
+characters: CharactersSpec, }>;
 
 /**
  * A saved reference's settings to save, as the UI describes them. Its
@@ -1727,12 +1715,7 @@ ink?: ColorDef,
 /**
  * The reference's tolerance, as `ReferenceDef` has it.
  */
-tolerance: number,
-/**
- * The characters the user says it needs to know, as
- * [`ReferenceSaveSpec::expects`] has them.
- */
-expects: string, }>;
+tolerance: number, }>;
 
 /**
  * A reference being taught to try on the live window before it is saved,
@@ -1749,10 +1732,10 @@ app: string,
  */
 characters: CharactersSpec,
 /**
- * The characters the number it is made for reads of it, or `None`
- * for every character it is taught, as a saved number check has them.
+ * The characters the number it is made for needs, or none for every
+ * character it is taught.
  */
-reads: string | null,
+needs: string,
 /**
  * Whether that number ignores digits after the decimal point.
  */
@@ -2620,7 +2603,7 @@ states: Array<StateView>, }>;
 
 /**
  * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the
- * most states and the longest state name in characters, the most characters a reference expects, the settings'
+ * most states and the longest state name in characters, the most characters a value needs, the settings'
  * ranges, the highest tolerance, and the most pixels a click's search area holds, as the saved files take them.
  */
 export const LIMITS = {
