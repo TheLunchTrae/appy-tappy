@@ -112,8 +112,9 @@ export interface Guide {
    */
   readonly left: ReadonlySet<string>;
   /**
-   * The places, as {@link placeKey} names them, that have joined the check: their text was read, and they got the
-   * answers that stood then. One that is not among them yet gets the answers when it joins.
+   * The places that have joined the check, each as {@link joinKey} names it with the shapes it shows: their text
+   * was read, and they got the answers that stood then. One that is not among them yet, or that shows other
+   * shapes than it joined with, gets the answers when it joins.
    */
   readonly seen: ReadonlySet<string>;
 }
@@ -148,18 +149,24 @@ export interface Change {
 /** The answers, which of them are an earlier check's, and the places left out, which say what the steps are. */
 type Given = Pick<Guide, 'answers' | 'earlier' | 'left'>;
 
-/** What the checks before this one leave it: their answers, and the places that joined them. */
-export interface Earlier {
-  readonly answers: Answers;
-  readonly seen: ReadonlySet<string>;
-}
-
-/** What a reference's first check goes on from: no answer, and no place. */
-export const NO_EARLIER: Earlier = { answers: new Map(), seen: new Set() };
+/**
+ * What the checks before this one leave it: their answers, the places they left out for a shape that is no
+ * character, and the places that joined them.
+ */
+export type Earlier = Pick<Guide, 'answers' | 'left' | 'seen'>;
 
 /** A name for `place` that stays the same while the places around it change. */
 export function placeKey(place: Pick<Place, 'source' | 'index'>): string {
   return `${place.source}-${place.index}`;
+}
+
+/**
+ * A name for `place` as it joins a check: its {@link placeKey}, a space, and the shapes it shows. A place that
+ * shows other shapes under the same key is another place to the check, such as a box drawn after one was deleted,
+ * which can have that box's ID, or a find that was read again as other ink.
+ */
+function joinKey(place: Place): string {
+  return [placeKey(place), ...place.characters.map((shown) => shown.shape)].join(' ');
 }
 
 /** The character `place`'s text gives each of its shapes, or null unless it has one character for each. */
@@ -380,9 +387,9 @@ function firstOpen(places: readonly Place[], given: Given, needs: readonly strin
   return unfittedStop(places, given) ?? { at: 'done' };
 }
 
-/** The names of the places of `places` whose text is read, so they are part of a check. */
+/** The names, as {@link joinKey} gives them, of the places of `places` whose text is read, so they are part of a check. */
 function readKeys(places: readonly Place[]): ReadonlySet<string> {
-  return new Set(places.flatMap((place) => (place.reading ? [] : [placeKey(place)])));
+  return new Set(places.flatMap((place) => (place.reading ? [] : [joinKey(place)])));
 }
 
 /** `places` with `edits` made: each edited place has the edit's text and keep. */
@@ -406,7 +413,7 @@ export function join(
   places: readonly Place[],
 ): { readonly guide: Guide; readonly changes: readonly Change[] } {
   const seen = readKeys(places);
-  const fresh = places.filter((place) => !place.reading && !guide.seen.has(placeKey(place)));
+  const fresh = places.filter((place) => !place.reading && !guide.seen.has(joinKey(place)));
   if (fresh.length === 0 && seen.size === guide.seen.size) {
     return { guide, changes: [] };
   }
@@ -438,7 +445,8 @@ export function join(
 
 /**
  * A check of `places` for a reference that needs the characters `needs`, which goes on from `earlier`, and the
- * edits that follow. The earlier answers stand. A place that was not part of an earlier check joins this one as
+ * edits that follow. The earlier answers stand, and the places an earlier check left out for a shape that is no
+ * character can be kept again by taking that answer back. A place that was not part of an earlier check joins this one as
  * {@link join} says, so it gets those answers. The check starts at the first stop that still asks something, and
  * the shapes the earlier answers cover join no step.
  */
@@ -447,14 +455,13 @@ export function openGuide(
   needs: readonly string[],
   earlier: Earlier,
 ): { readonly guide: Guide; readonly changes: readonly Change[] } {
-  const read = readKeys(places);
   const joined = join(
     {
       cursor: { at: 'done' },
       answers: earlier.answers,
       earlier: new Set(earlier.answers.keys()),
-      left: new Set(),
-      seen: new Set([...read].filter((key) => earlier.seen.has(key))),
+      left: earlier.left,
+      seen: earlier.seen,
     },
     places,
   );

@@ -77,7 +77,8 @@ it was about has gone. Fifteen guards drop such stale messages:
   `apps/setup/src/lib/useCharacterCheck.ts`). It remembers the places that
   joined a closed check under the numbers of their search and their
   recording, and counts a find of another search, or a reading of another
-  recording, as one that never joined (`earlierOf`).
+  recording, as one that never joined and was never left out
+  (`earlierOf`).
 - **Pick numbers.** A capture screen that picks its window with the picker
   numbers each pick (`pickedWindowStep` in
   `apps/setup/src/lib/windowSearch.ts`). The owner's answer that the capture
@@ -2814,7 +2815,7 @@ a `Guide`: the answers given so far, by shape, which of them an earlier
 check gave (`earlier`), the places it left out, the places that have joined
 it, and a cursor. Beside it the hook holds `past`, what the checks closed
 since the reference's editor opened leave the next one, and `leftOut`, the
-readings the open check took from the draft. `turn` is its
+readings the checks took from the draft. `turn` is its
 pure `(state, event)` transition for what the user does, and `join` is the
 one for places that show under an open check. Each answers with the next
 guide and the edits of the places' texts and ticks. `heldStep` in
@@ -2893,8 +2894,8 @@ stateDiagram-v2
   about is ticked or kept once all its shapes have answers, and left out
   when one is no character. A tick the user changes afterward stays.
 - **A place joins once its text is read.** The guide names the places that
-  have joined in `seen`: the ones whose text was read when the check opened,
-  and each one since. A place that first shows under an open check, or
+  have joined in `seen`, each with the shapes it shows (`joinKey`): the ones
+  whose text was read when the check opened, and each one since. A place that first shows under an open check, or
   whose text the reader sends then, gets every answer that stands for its
   shapes, as the turn that gave the answer would have written it (`join`,
   which `useCharacterCheck.ts` runs after each render). Its text takes the
@@ -2904,7 +2905,10 @@ stateDiagram-v2
   and the draft does not keep it, gets the text and keeps its keep. A place
   whose text the user typed keeps that text and is only left out. A place
   joins once, so a text or a tick the user changes afterward stays. One
-  that is gone, or being read again, leaves `seen` and joins anew.
+  that is gone, or being read again, leaves `seen` and joins anew, and so
+  does one that shows other shapes than it joined with: a box drawn after
+  another was deleted, which can have that box's ID, or a find that was
+  read again as other ink.
 - **Text that fits no step.** A place whose text has another number of
   characters than its picture has shapes joins no step. Once every one of
   its shapes has an answer, the answers are its text. One still left is the
@@ -2924,15 +2928,16 @@ stateDiagram-v2
   (`CharacterCheck.tsx`), so that click lands on no button and answers for
   nothing.
 - **A check after an earlier one goes on from it.** Closing keeps the
-  answers and the places that joined in `past`, with the numbers of the
+  answers, the places left out (`left`), and the places that joined in
+  `past`, with the numbers of the
   search and the recording those places were finds and readings of. The
   next check opens with those answers (`openGuide`, from `earlierOf`). A
   place that was part of no earlier check joins as it opens and gets the
   answers, so a find of a search made since has the answered characters in
   its text, and is ticked when the answers cover all of it. A find of
   another search than the closed check's, or a reading of another
-  recording, counts as one that never joined, since only its index is the
-  same. A place that did join stays as the user has it since. The guide
+  recording, counts as one that never joined and was never left out, since
+  only its index is the same. A place that did join stays as the user has it since. The guide
   names the shapes the earlier answers cover in `earlier`, and such a shape
   joins no step while its answer holds, so the steps ask only about shapes
   nobody has answered for: the ones a new find or reading shows, the ones a
@@ -2942,7 +2947,8 @@ stateDiagram-v2
   many characters have no step for that reason (`checkedEarlier`), and
   **Check all again** there empties `earlier` and goes to the first step:
   every character has its step again, with its answers standing, so the
-  user can change one or take back **Not a character**.
+  user can change one or take back **Not a character**, which keeps the
+  places an earlier check left out for it again.
 - **A reading the draft keeps already** takes the check's edit on the draft
   too, so that saving learns what the check wrote (`editedReading`). Its
   kept text gets only the characters the edit changed, and the draft keeps
@@ -2956,11 +2962,12 @@ stateDiagram-v2
   ticked, and `leftOut` remembers the text the draft kept it with and
   review's tick; **It is a character**, or its tick on the `Unfitted` stop,
   puts it back with that text and that tick. A reading the draft never
-  kept stays off it. Closing
-  forgets `leftOut`, and a reading of another recording
+  kept stays off it. Closing the check
+  keeps `leftOut` for the next one, and a reading of another recording
   than the one `leftOut` names is not in it.
 - The answers that stand, the open check's or else the ones in `past`
-  (`answersOf`), also say what the user has confirmed. The characters nobody has confirmed (`unconfirmed`) are the
+  (`answersOf`), also say what the user has confirmed. The characters
+  nobody has confirmed (`unconfirmed`) are the
   ones a reference saved next would learn from a text reader's guess, a box
   that is still `guessed` or one of the same `savedReadings` with the
   reader's text, for a

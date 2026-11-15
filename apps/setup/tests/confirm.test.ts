@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  type Earlier,
   type Guide,
   type Place,
   type Turn,
-  NO_EARLIER,
   beingRead,
   boxesShowing,
   checkedEarlier,
@@ -51,6 +51,9 @@ function place(source: Place['source'], index: number, shapes: string, text: str
     asks: true,
   };
 }
+
+/** What a reference's first check goes on from: no answer, and no place. */
+const NO_EARLIER: Earlier = { answers: new Map(), left: new Set(), seen: new Set() };
 
 /** A reference's first check of `places`, which goes on from no earlier one. */
 const fresh = (places: readonly Place[], needs: readonly string[]): Guide => openGuide(places, needs, NO_EARLIER).guide;
@@ -499,7 +502,7 @@ describe('a reading the draft keeps while review has it left out without Keep', 
 describe('a check after an earlier one', () => {
   // The first check answered for every shape: s is 7, e is 8, p is %.
   const first = play(all, [], { kind: 'confirm' }, { kind: 'confirm' }, { kind: 'confirm' });
-  const earlier = { answers: first.guide.answers, seen: first.guide.seen };
+  const earlier: Earlier = first.guide;
   // A search since found text that shows the misread 7 again, and a shape no answer covers.
   const found = place('find', 5, 'sx', '19', false);
   const since = [...first.places, found];
@@ -556,7 +559,7 @@ describe('a check after an earlier one', () => {
 
   test('asks again about a step the earlier check skipped', () => {
     const skipped = play(all, [], { kind: 'confirm' }, { kind: 'skip' }, { kind: 'confirm' });
-    const open = openGuide(skipped.places, [], { answers: skipped.guide.answers, seen: skipped.guide.seen });
+    const open = openGuide(skipped.places, [], skipped.guide);
     expect(outline(skipped.places, open.guide)).toEqual(['8:e']);
   });
 
@@ -574,6 +577,38 @@ describe('a check after an earlier one', () => {
     expect(steps(ticked, again.guide, []).every((step) => step.shapes.every((use) => use.answered))).toBe(true);
     expect(again.guide.answers).toEqual(done.guide.answers);
   });
+  test('takes back on Check all again that a shape is no character, and keeps the places left out for it', () => {
+    // Shape x is no character, so the earlier check left out the find and the reading that show it.
+    const shown = [place('find', 0, 'sx', '7Q'), place('reading', 0, 'sx', '7Q'), place('find', 1, 's', '7')];
+    const before = play(shown, [], { kind: 'confirm' }, { kind: 'setAside', shape: 'x' });
+    expect(texts(before.places)).toEqual([
+      ['7Q', false],
+      ['7Q', false],
+      ['7', true],
+    ]);
+    const open = openGuide(before.places, [], before.guide);
+    expect(open.changes).toEqual([]);
+    const again = turn(open.guide, { kind: 'again' }, before.places, []).guide;
+    expect(outline(before.places, again)).toEqual(['7:s', 'Q:x']);
+    const restored = turn(again, { kind: 'restore', shape: 'x' }, before.places, []);
+    expect(restored.changes).toEqual([
+      { source: 'find', index: 0, text: '7Q', keep: true },
+      { source: 'reading', index: 0, text: '7Q', keep: true },
+    ]);
+    expect(restored.guide.answers.has('x')).toBe(false);
+  });
+
+  test('gives a place that shows other shapes than it joined with the answers anew', () => {
+    // Box 2 was deleted, and a box drawn since has its ID and the reader's guess for its text.
+    const drawn: Place = { ...place('box', 2, 'se', '18'), typed: false };
+    const before: Earlier = { ...first.guide, seen: new Set([...first.guide.seen, 'box-2 p']) };
+    expect(openGuide([...first.places, drawn], [], before).changes).toEqual([
+      { source: 'box', index: 2, text: '78', keep: true },
+    ]);
+    // The same box still, which the user has typed over since, stays as it is.
+    const same: Earlier = { ...first.guide, seen: new Set([...first.guide.seen, 'box-2 s e']) };
+    expect(openGuide([...first.places, drawn], [], same).changes).toEqual([]);
+  });
 });
 
 describe('what the capture screen holds of the check', () => {
@@ -588,12 +623,20 @@ describe('what the capture screen holds of the check', () => {
 
   const close = { kind: 'close', search: 7, recording: 3 } as const;
 
-  test('closing keeps the answers and the places that joined for the next check, and forgets the readings left out', () => {
-    const closed = heldStep(heldStep(open, leftOut), close);
+  test('closing keeps the answers, the places left out and joined, and the readings taken from the draft', () => {
+    const aside = { ...answered, left: new Set(['reading-1']) };
+    const closed = heldStep(heldStep(heldStep(open, { kind: 'show', guide: aside }), leftOut), close);
     expect(closed.guide).toBeNull();
-    expect(closed.past).toEqual({ answers: answered.answers, seen: answered.seen, search: 7, recording: 3 });
+    expect(closed.past).toEqual({
+      answers: answered.answers,
+      left: aside.left,
+      seen: answered.seen,
+      search: 7,
+      recording: 3,
+    });
     expect(answersOf(closed)).toEqual(answered.answers);
-    expect(leftOutOf(closed, 3).size).toBe(0);
+    // The next check can put the reading back as the draft kept it.
+    expect(leftOutOf(closed, 3).get(1)).toEqual({ text: '18', ticked: true });
     // Closing again, with nothing open, changes none of it.
     expect(heldStep(closed, { kind: 'close', search: 8, recording: 4 })).toEqual(closed);
   });
@@ -611,13 +654,19 @@ describe('what the capture screen holds of the check', () => {
   });
 
   test('the next check goes on from the places that joined, but not from another search or recording', () => {
-    const boxed = { ...answered, seen: new Set(['box-2', 'find-0', 'reading-1']) };
+    const boxed = {
+      ...answered,
+      left: new Set(['find-0', 'reading-1']),
+      seen: new Set(['box-2 s', 'find-0 s e p', 'reading-1 s e']),
+    };
     const closed = heldStep(heldStep(NOTHING_HELD, { kind: 'show', guide: boxed }), close);
-    expect(earlierOf(closed, 7, 3)).toEqual({ answers: answered.answers, seen: boxed.seen });
+    expect(earlierOf(closed, 7, 3)).toEqual({ answers: answered.answers, left: boxed.left, seen: boxed.seen });
     // A find of the next search, or a reading of the next recording, only has the index of one that joined.
-    expect(earlierOf(closed, 8, 3).seen).toEqual(new Set(['box-2', 'reading-1']));
-    expect(earlierOf(closed, 7, 4).seen).toEqual(new Set(['box-2', 'find-0']));
-    expect(earlierOf(closed, null, null).seen).toEqual(new Set(['box-2']));
+    expect(earlierOf(closed, 8, 3).seen).toEqual(new Set(['box-2 s', 'reading-1 s e']));
+    expect(earlierOf(closed, 8, 3).left).toEqual(new Set(['reading-1']));
+    expect(earlierOf(closed, 7, 4).seen).toEqual(new Set(['box-2 s', 'find-0 s e p']));
+    expect(earlierOf(closed, 7, 4).left).toEqual(new Set(['find-0']));
+    expect(earlierOf(closed, null, null).seen).toEqual(new Set(['box-2 s']));
   });
 
   test("the reference's editor closing closes an open check and forgets every answer", () => {
@@ -724,7 +773,7 @@ describe('a place that joins an open check', () => {
     const late = [...answered, { ...unread, text: '18', reading: false }];
     const next = join(guide, late);
     expect(next.changes).toEqual([{ source: 'find', index: 5, text: '78', keep: true }]);
-    expect(next.guide.seen).toEqual(new Set(['find-0', 'find-3', 'reading-1', 'find-5']));
+    expect(next.guide.seen).toEqual(new Set(['find-0 s e p', 'find-3 s p', 'reading-1 s e', 'find-5 s e']));
     expect(next.guide.cursor).toEqual(guide.cursor);
     // It joined, so nothing more follows from it.
     const joined = edited(late, next.changes);
@@ -785,7 +834,7 @@ describe('a place that joins an open check', () => {
   });
 
   test('is one of the places a check opens on, which have no answer to get', () => {
-    expect(fresh([...all, unread], []).seen).toEqual(new Set(['find-0', 'find-3', 'reading-1']));
+    expect(fresh([...all, unread], []).seen).toEqual(new Set(['find-0 s e p', 'find-3 s p', 'reading-1 s e']));
   });
 });
 
@@ -849,7 +898,7 @@ describe('moving through a check', () => {
       earlier: new Set(),
       answers: new Map(),
       left: new Set(),
-      seen: new Set(['find-0', 'find-3', 'reading-1']),
+      seen: new Set(['find-0 s e p', 'find-3 s p', 'reading-1 s e']),
     });
     expect(turn(guide, { kind: 'back' }, all, []).guide.cursor).toEqual({ at: 'character', character: '%' });
   });
