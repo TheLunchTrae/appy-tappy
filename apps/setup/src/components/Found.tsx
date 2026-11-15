@@ -281,7 +281,7 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
               background(finder.searchSkipped());
             }}
           >
-            {view.passed === 1 ? 'Show it again' : 'Show them again'}
+            Show them again
           </button>
         </div>
       )}
