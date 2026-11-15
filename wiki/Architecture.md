@@ -10,7 +10,8 @@ AppyTappy has two programs that share a set of library crates:
   automation's actions when it fires.
 
 The setup app runs rarely, so it can afford a heavier UI. The runtime is always
-on, so it must use little memory and next to no CPU. Every design choice below follows from that split.
+on, so it must use little memory and next to no CPU. Every design choice below
+follows from that split.
 [`CONTEXT.md`](https://github.com/TheLunchTrae/appy-tappy/blob/main/CONTEXT.md)
 defines the domain terms.
 
@@ -493,8 +494,8 @@ tray stops on its own, the runtime logs why and keeps running without it.
 
 The runtime runs all day beside games, so it has to use little memory and next
 to no CPU. Its file size matters far less, by the project owner's decision:
-the binary size target only catches runaway growth. `mise run rust:footprint` builds the runtime the installer ships, with
-the `dist` profile, and
+the binary size target only catches runaway growth. `mise run rust:footprint`
+builds the runtime the installer ships, with the `dist` profile, and
 [`scripts/footprint.ps1`](https://github.com/TheLunchTrae/appy-tappy/blob/main/scripts/footprint.ps1)
 runs it on Windows and fails when a measurement exceeds its target. The
 `footprint` CI job runs it. The targets, and how long each phase settles and
