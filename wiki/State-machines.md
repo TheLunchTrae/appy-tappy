@@ -2898,8 +2898,9 @@ stateDiagram-v2
   have joined in `seen`, each with the shapes it shows (`joinKey`): the ones
   whose text was read when the check opened, and each one since. A place
   that first shows under an open check, or whose text the reader sends
-  then, gets every answer that stands for its shapes, as the turn that gave the answer would have written it (`join`,
-  which `useCharacterCheck.ts` runs after each render). Its text takes the
+  then, gets every answer that stands for its shapes, as the turn that gave
+  the answer would have written it (`join`, which `useCharacterCheck.ts` runs
+  after each render). Its text takes the
   answered characters, it is left out and remembered in `left` for a shape
   that is no character, and it is ticked or kept once all its shapes have
   answers. A reading that nothing would learn, since review leaves it out
@@ -2942,8 +2943,8 @@ stateDiagram-v2
   closed leaves the places that joined (`boxes` in `heldStep`), so a box
   drawn later joins anew though it has the deleted box's ID and shows the
   same shapes. A place that did join stays as the user has it since. The
-  guide names the shapes the earlier answers cover in `earlier`, and such a shape
-  joins no step while its answer holds, so the steps ask only about shapes
+  guide names the shapes the earlier answers cover in `earlier`, and such a
+  shape joins no step while its answer holds, so the steps ask only about shapes
   nobody has answered for: the ones a new find or reading shows, the ones a
   step the user skipped left, and the ones whose answer a text typed since
   disagrees with. An answer the open check gives takes its shape out of
