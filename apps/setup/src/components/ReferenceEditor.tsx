@@ -154,7 +154,7 @@ export function ReferenceEditor(props: Props) {
       {props.needsField === 'readOnly' ? (
         <div className="field">
           <span>{NEEDS_LABEL}</span>
-          {chosen ? <CharacterChips characters={expected} ink={undefined} large /> : null}
+          {chosen ? <CharacterChips characters={expected} ink={ink} large /> : null}
           <span className="note">
             {chosen
               ? 'A fix needs the characters its value does. To change them, edit the value.'
