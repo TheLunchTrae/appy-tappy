@@ -104,6 +104,12 @@ it was about has gone. Fifteen guards drop such stale messages:
   (`fitKey` in `apps/setup/src/lib/useContrastTolerance.ts`). An answer
   under another key than the reference asks under now is dropped
   (`fitArrived`).
+- **Look-alike keys.** The [look-alike characters](#look-alike-characters)
+  of a reference being taught are asked for under a key made of its whole
+  spec: the region, the samples, the text color, and the tolerance
+  (`lookalikeKey` in `apps/setup/src/lib/useLookalikes.ts`). An answer under
+  another key than the reference asks under now is not shown
+  (`pairsArrived`).
 - **Pointer IDs.** A region drag keeps the ID of the pointer that started it
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
@@ -3073,6 +3079,46 @@ stateDiagram-v2
   starts the tolerance at 40 (`withTextColor`), since the two ways measure
   different distances. One text color in place of another keeps the
   tolerance.
+
+### Look-alike characters
+
+The reference editor warns about two learned characters the reference may
+read as each other, as [Setup app](Setup-app.md#look-alike-characters)
+describes (`apps/setup/src/lib/useLookalikes.ts`, used by
+`useReferenceTeaching.ts`). Its state is the key the reference asks under
+now (`lookalikeKey`), or none, and the last answer with the key it was asked
+under. The owner keeps nothing for it; each request is one
+`lookalike_characters` command, which teaches the reference and compares
+its shapes.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Resting
+    Resting --> Asking: the reference builds, and a quarter of a second passes
+    Asking --> Shown: the answer arrives under the key asked
+    Asking --> Asking: a sample, the region, the text color, or the tolerance changes
+    Asking --> Unanswered: the request fails
+    Shown --> Asking: a sample, the region, the text color, or the tolerance changes
+    Unanswered --> Asking: a sample, the region, the text color, or the tolerance changes
+    Asking --> Resting: the reference no longer builds, or the editor closes
+    Shown --> Resting: the reference no longer builds, or the editor closes
+    Unanswered --> Resting: the reference no longer builds, or the editor closes
+```
+
+- **Resting** asks nothing and warns about nothing: no reference is taught,
+  or what it is taught from does not build, which the boxes and the save
+  say.
+- **Asking** waits a quarter of a second under the key and then has a
+  request out for it. It shows no warning, since the last answer was for
+  another key, so the warning goes while a label is typed and comes back
+  once the answer for the new text arrives.
+- **Shown** warns about the pairs of the answer whose characters the value
+  reads (`neededPairs`), or about nothing when there are none.
+- **Unanswered** is a failed request. The failure is logged and no warning
+  shows; the reference's own messages say what is wrong with its samples.
+- The tolerance that [contrast tolerance](#contrast-tolerance) sets changes
+  the key, so a reference found by contrast asks again once its tolerance
+  settles.
 
 ### Bar detection
 

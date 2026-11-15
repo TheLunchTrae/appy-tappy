@@ -184,6 +184,7 @@ export function ReferenceInspector({
         finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
         expected={teaching.needs}
         coverage={covered}
+        lookalikes={teaching.lookalikes}
         readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
         onName={(name) => {
           setEditing((current) => (current === null ? null : { ...current, name }));

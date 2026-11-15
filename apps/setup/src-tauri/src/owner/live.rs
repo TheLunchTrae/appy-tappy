@@ -254,6 +254,19 @@ impl<H: Host> Owner<H> {
         Ok(())
     }
 
+    /// The pairs of characters whose shapes, as the reference `spec`
+    /// teaches learns them, match each other, so it may read one as the
+    /// other: each pair once, in the order it learned them.
+    pub(crate) fn lookalike_characters(
+        &mut self,
+        spec: &CharactersSpec,
+    ) -> Result<Vec<(char, char)>, String> {
+        self.keep_reference(spec.reference.as_ref());
+        self.with_session(|session| spec.teach(session, None, TAUGHT))
+            .map(|taught| taught.reader.lookalikes())
+            .map_err(|error| error.to_string())
+    }
+
     /// Reads the live frame of the picked window with `value` from now on,
     /// placed at the newest frame's size, or at the size it was drawn at
     /// before a frame arrived, and answers why it is not read at that size,
@@ -285,13 +298,65 @@ mod tests {
     use crate::debug::workings::WorkingsView;
     use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
-        BAR, Harness, add_example_app, capturing, characters, harness_with, scratch_store,
+        BAR, Harness, add_example_app, capturing, characters, harness, harness_with, scratch_store,
         teaching, trial,
     };
     use crate::reading::Reading;
     use crate::stores::SavedApp;
 
     use super::*;
+
+    /// A 20 by 8 frame with three marks of red on a gray background, each
+    /// 6 tall: a 5 wide block at x 1, the same block less its top right
+    /// pixel at x 8, and a 1 wide bar at x 15.
+    fn near_twins() -> Image {
+        let red = [0, 0, 255, 0];
+        let gray = [40, 40, 40, 0];
+        let pixels = (0..8_u32)
+            .flat_map(|y| {
+                (0..20_u32).flat_map(move |x| {
+                    let tall = (1..7).contains(&y);
+                    let block = tall && (1..6).contains(&x);
+                    let twin = tall && (8..13).contains(&x) && !(x == 12 && y == 1);
+                    let bar = tall && x == 15;
+                    if block || twin || bar { red } else { gray }
+                })
+            })
+            .collect();
+        Image::new(
+            Size {
+                width: 20,
+                height: 8,
+            },
+            pixels,
+        )
+        .expect("matching length")
+    }
+
+    #[test]
+    fn lookalike_characters_name_the_learned_shapes_that_match_each_other() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&near_twins()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let spec = |screenshot: usize| -> CharactersSpec {
+            serde_json::from_str(&format!(
+                r#"{{"region":{{"x":0,"y":0,"width":17,"height":8}},"screenshot":{screenshot},
+                    "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,
+                    "labels":[{{"screenshot":{screenshot},"text":"861"}}]}}"#
+            ))
+            .expect("valid JSON")
+        };
+        assert_eq!(
+            harness.ask(|owner| owner.lookalike_characters(&spec(0))),
+            Ok(vec![('8', '6')]),
+            "the bar matches neither block"
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.lookalike_characters(&spec(9))),
+            Err("That screenshot is gone. Take a new one and try again.".to_owned())
+        );
+    }
 
     #[test]
     fn the_check_reads_the_live_frame() {

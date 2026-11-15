@@ -30,6 +30,7 @@ import { background } from './repeat.ts';
 import type { useBoxes } from './useBoxes.ts';
 import { useCharacterCheck } from './useCharacterCheck.ts';
 import { useContrastTolerance } from './useContrastTolerance.ts';
+import { neededPairs, useLookalikes } from './useLookalikes.ts';
 import { useFound } from './useFound.ts';
 import { useRecording } from './useRecording.ts';
 import { focusNext, useRecordFocus, useReview } from './useReview.ts';
@@ -144,6 +145,8 @@ export function useReferenceTeaching({
   useContrastTolerance(recording === null ? taughtCharacters : null, (tolerance) => {
     setDraft((current) => ({ ...current, tolerance }));
   });
+  // The characters it may read as each other, of those the value reads.
+  const lookalikes = neededPairs(useLookalikes(taughtCharacters), needs);
   // The check, like review, shows in place of the window's picture.
   const checking = guided.guide !== null;
   // The recording review shows. Review is open only on a recording, and one name decides everything review changes
@@ -292,6 +295,7 @@ export function useReferenceTeaching({
     review,
     taught,
     covered,
+    lookalikes,
     finder,
     guided,
     checking,
