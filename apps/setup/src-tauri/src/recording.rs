@@ -1202,32 +1202,6 @@ mod tests {
     }
 
     #[test]
-    fn tall_ink_gets_a_margin_of_half_its_height() {
-        let start = Instant::now();
-        let tall = Size {
-            width: 1,
-            height: 10,
-        };
-        let region = Region::new(0, 0, 1, 10).expect("not empty");
-        let mut recording = Recording::new(
-            Ticket::numbered(1),
-            region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            },
-            (tall, Follows::Drawn),
-            start,
-        );
-        let line = recording
-            .offer(&frame(1, 10, |_, _| true), start)
-            .expect("a new reading")
-            .line;
-        // Ten pixels of ink take a margin of five all round.
-        assert_eq!((line.width, line.height), (11, 20));
-    }
-
-    #[test]
     fn the_text_reader_gets_the_ink_black_on_white_with_a_margin() {
         let start = Instant::now();
         let mut recording = recording(start);

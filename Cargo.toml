@@ -178,3 +178,24 @@ inherits = "release"
 codegen-units = 1
 lto = true
 strip = true
+
+# The setup app's text reader runs its model in these crates. Unoptimized,
+# one line takes most of a second to read, so debug builds and the tests,
+# which read fixture lines with the real model, optimize them.
+[profile.dev.package.rten]
+opt-level = 3
+
+[profile.dev.package.rten-base]
+opt-level = 3
+
+[profile.dev.package.rten-gemm]
+opt-level = 3
+
+[profile.dev.package.rten-simd]
+opt-level = 3
+
+[profile.dev.package.rten-tensor]
+opt-level = 3
+
+[profile.dev.package.rten-vecmath]
+opt-level = 3

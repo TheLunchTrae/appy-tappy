@@ -973,9 +973,15 @@ operating system's OCR. Only its recognition model loads: the region holds one
 line, so there is no text to find first. It runs on a thread of its own, because
 a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
-as black text on white with a margin, whatever the application's colors,
+as black text on white, whatever the application's colors,
 cut to the rows the number reader takes as the line of text
-(`Ink::line`) and the nearest mark on each side of them (`recording/ink.rs`).
+(`Ink::line`) and the nearest mark on each side of them (`recording/ink.rs`),
+with two pixels of white around it. The model takes a line cut close to its
+text, as the lines it learned from are, and scales it to its input height.
+White before the first character wider than about a fifth of the line's height
+makes it drop or double that character, so `98.6%` reads as `8.6%`; white
+above and below shrinks the text it sees; and ink that touches an edge reads
+worse. Two pixels keep the ink off the edges at every text height.
 A mark is a short block of inked rows, such as the dot of an i or an accent
 that the text reader needs to tell letters apart: no taller than half the
 letters' height, with at most a quarter of their height of blank rows, and at
@@ -997,6 +1003,18 @@ load, recording still works and each reading says why, for the user to type
 its text. For a development build, `mise run ocr:model` downloads it, checks
 it against the hash pinned in `.config/mise/conf.d/installer.toml`, and copies
 it beside the debug build.
+
+The reader's guesses are tested with that model: a test in `recording/ocr.rs`
+reads each row of `tests/fixtures/readings.png`, a region as a recording crops
+it, and expects the exact text. The rows are numbers whose first character a
+wider margin drops or doubles, a single character, letters with a dot and a
+descender, dark text on light, and small text. The tasks that run the setup
+app's tests depend on `ocr:model`, which downloads the model when it is
+missing, and the test fails without it. The test looks for the model in
+`apps/setup/src-tauri/models`, or where `APPYTAPPY_TEXT_READER_MODEL` says,
+which the [mutation lanes](Rust-standards.md#mutation-testing) set. The root
+manifest optimizes the crates that run the model in debug builds too, where a
+line otherwise takes most of a second to read.
 
 ## Window matching
 

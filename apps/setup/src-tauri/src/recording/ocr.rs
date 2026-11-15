@@ -150,9 +150,6 @@ pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>, model: &Path
 }
 
 /// The text reader with the recognition model at `model`.
-// Telling a mutant apart needs the real model file, which is not in the
-// repository or the test lanes; a missing file is tested through `run`.
-#[mutants::skip]
 fn load(model: &Path) -> Result<OcrEngine, String> {
     let model = Model::load_file(model).map_err(|error| {
         format!(
@@ -178,9 +175,6 @@ fn read(engine: &OcrEngine, line: &Line) -> Text {
 
 /// The text `engine` recognizes on `line`, taken as one line of text: the
 /// region holds one counter, so no text needs finding first.
-// Only the real model can read text, and it is not in the repository or the
-// test lanes, so no test here can tell a mutant of this body apart.
-#[mutants::skip]
 fn recognize(engine: &OcrEngine, line: &Line) -> Result<String, Box<dyn Error + Send + Sync>> {
     let source = ImageSource::from_bytes(&line.pixels, (line.width, line.height))?;
     let input = engine.prepare_input(source)?;
@@ -199,9 +193,74 @@ fn recognize(engine: &OcrEngine, line: &Line) -> Result<String, Box<dyn Error + 
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::fs;
     use std::sync::mpsc;
 
+    use appytappy_sources::screen::digits::{DigitReader, InkRule};
+    use appytappy_sources::screen::{Image, Region};
+
     use super::*;
+
+    /// The model that `mise run ocr:model` downloads: where
+    /// `APPYTAPPY_TEXT_READER_MODEL` says, which the mutation lanes set
+    /// because they build in a copy of the tree without ignored files, or
+    /// else in this package's `models` folder.
+    fn model() -> PathBuf {
+        env::var_os("APPYTAPPY_TEXT_READER_MODEL").map_or_else(
+            || {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("models")
+                    .join(MODEL_FILE)
+            },
+            PathBuf::from,
+        )
+    }
+
+    /// Each row of `tests/fixtures/readings.png`, a region as a recording
+    /// crops it, by its top and height, and the text it shows: numbers
+    /// whose first character a wide margin drops or doubles, one character
+    /// alone, letters with a dot and a descender, dark text on light, and
+    /// small text.
+    const READINGS: [((u32, u32), &str); 8] = [
+        ((0, 35), "98.6%"),
+        ((35, 41), "45210"),
+        ((76, 35), "100%"),
+        ((111, 41), "1234"),
+        ((152, 21), "7"),
+        ((173, 26), "jig"),
+        ((199, 26), "Level 12"),
+        ((225, 18), "1:23"),
+    ];
+
+    #[test]
+    fn the_model_reads_each_fixture_reading_as_the_text_it_shows() {
+        let model = model();
+        assert!(
+            model.is_file(),
+            "the text reader's model is not at {}: run `mise run ocr:model` to download it",
+            model.display()
+        );
+        let engine = load(&model).expect("the model loads");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/readings.png");
+        let sheet = Image::decode_png(&fs::read(fixture).expect("the fixture reads"))
+            .expect("the fixture is a PNG");
+        let reader = DigitReader::new(InkRule::Contrast { tolerance: 60 });
+        let read: Vec<Text> = READINGS
+            .iter()
+            .map(|&((top, height), _)| {
+                let region = Region::new(0, top, sheet.size().width, height).expect("a region");
+                let reading = sheet.crop(region).expect("a row of the fixture");
+                let line = Line::of(&reader.ink(&reading)).expect("the row shows ink");
+                super::read(&engine, &line)
+            })
+            .collect();
+        let shown: Vec<Text> = READINGS
+            .iter()
+            .map(|&(_, text)| Text::Read(text.to_owned()))
+            .collect();
+        assert_eq!(read, shown);
+    }
 
     #[test]
     fn the_model_is_beside_the_program() {

@@ -12,9 +12,10 @@ set -eu
 # The recognition model of ocrs, the setup app's text reader, which reads
 # recorded readings (wiki/Setup-app.md). It is not committed: this task
 # downloads it once into apps/setup/src-tauri/models, where the installer
-# bundles it from, and copies it beside the debug build, where `tauri dev`
-# runs the setup app. The hash pins the file, so a changed download fails
-# the build instead of shipping.
+# bundles it from and the setup app's tests read it, and copies it beside
+# the debug build, where `tauri dev` runs the setup app. The hash pins the
+# file, so a changed download fails the build and the tests instead of
+# shipping.
 url=https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.onnx
 expected=86c145c2edb96c8caed5b1ebb8f44d706408922211451c309c625157dd6061c5
 model=apps/setup/src-tauri/models/text-recognition.onnx
