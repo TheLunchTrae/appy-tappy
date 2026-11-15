@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 
 import type { CharactersSpec, SampleDef } from '../src/lib/bindings.ts';
 import type { ReferenceSaving } from '../src/lib/check.ts';
-import { unlearnedArrived, unlearnedAsk, unlearnedKey } from '../src/lib/useUnlearned.ts';
+import { cropArrived, unlearnedArrived, unlearnedAsk, unlearnedKey } from '../src/lib/useUnlearned.ts';
 
 const percent = { app: 'example', id: 'percent' };
 const red = { red: 255, green: 0, blue: 0 };
@@ -47,7 +47,7 @@ test('a saved reference asks about its pictures with the settings and the way it
 test('an answer shows only while the editor asks under the key it was asked under', () => {
   const key = (saving: ReferenceSaving, saved = samples): string | null => unlearnedKey(unlearnedAsk(saving), saved);
   const asked = key(taught) ?? '';
-  const unlearned = [{ image: 'ref-percent-1.png', text: '87%', problem: 'No pixel stands out.' }];
+  const unlearned = [{ image: 'ref-percent-1.png', text: '87%', problem: 'No pixel stands out.', missing: false }];
   const answer = { key: asked, samples: unlearned };
   expect(unlearnedKey(null, samples)).toBeNull();
   expect(unlearnedArrived(answer, asked)).toEqual(unlearned);
@@ -65,4 +65,21 @@ test('an answer shows only while the editor asks under the key it was asked unde
     expect(wanted).not.toBe(asked);
     expect(unlearnedArrived(answer, wanted)).toEqual([]);
   }
+});
+
+test('a picture fetched for settings since changed is dropped', () => {
+  const picture = (width: number) => ({ width, height: 1, data: new Uint8ClampedArray(width * 4) });
+  const first = picture(1);
+  const second = picture(2);
+  const none = { key: '', pictures: new Map<string, typeof first>() };
+  const old = cropArrived(none, 'old', 'old', 'ref-percent-1.png', first);
+  expect(old).toEqual({ key: 'old', pictures: new Map([['ref-percent-1.png', first]]) });
+  // The editor asks under a new key, whose first picture replaces the old key's.
+  const now = cropArrived(old, 'new', 'new', 'ref-percent-2.png', second);
+  expect(now).toEqual({ key: 'new', pictures: new Map([['ref-percent-2.png', second]]) });
+  // A picture of the old key that arrives late leaves the new key's pictures as they are.
+  expect(cropArrived(now, 'old', 'new', 'ref-percent-1.png', first)).toBe(now);
+  expect(cropArrived(now, 'old', null, 'ref-percent-1.png', first)).toBe(now);
+  // The pictures of one key gather.
+  expect(cropArrived(now, 'new', 'new', 'ref-percent-3.png', first).pictures.size).toBe(2);
 });

@@ -100,6 +100,9 @@ pub(crate) struct UnlearnedSample {
     pub(crate) text: String,
     /// Why the reference cannot learn it, as a sentence.
     pub(crate) problem: String,
+    /// Whether its picture is missing or cannot be decoded, which no text
+    /// color or tolerance helps.
+    pub(crate) missing: bool,
 }
 
 /// A saved reference and those of its samples' pictures that can be read,
@@ -140,7 +143,7 @@ impl SavedReference {
             tolerance: self.settled_tolerance(ink, tolerance),
             ..self.reference.clone()
         };
-        learned(&reference, &[], &self.pictures, &self.reference.name).map(|_reader| reference)
+        learned(&reference, &[], &self.pictures).map(|_reader| reference)
     }
 
     /// The tolerance [`Self::with_settings`] saves for `ink` and
@@ -175,10 +178,11 @@ impl SavedReference {
             .samples
             .iter()
             .filter_map(|sample| {
-                let problem = match self.picture(sample) {
+                let picture = self.picture(sample);
+                let problem = match &picture {
                     Some(picture) => {
                         let mut trial = reader.clone();
-                        match trial.learn(&picture, &sample.text) {
+                        match trial.learn(picture, &sample.text) {
                             Ok(()) => {
                                 reader = trial;
                                 return None;
@@ -192,6 +196,7 @@ impl SavedReference {
                     image: sample.image.clone(),
                     text: sample.text.clone(),
                     problem,
+                    missing: picture.is_none(),
                 })
             })
             .collect()
@@ -228,15 +233,14 @@ impl SavedReference {
 }
 
 /// The reader `reference` learns from its samples' pictures, the `new` ones
-/// and those `kept` from the saved reference named `saved_name`, as
-/// `saved::reader` learns it. A problem with a kept sample names that
-/// saved reference, whatever the one learned here is called, since the
-/// user sees its picture only in that reference's editor.
+/// and those `kept` from the saved reference it adds to, as `saved::reader`
+/// learns it. Every caller teaches the reference in its own editor, so a
+/// problem with a kept sample points at the editor's list of saved
+/// pictures, which shows the picture no box does.
 fn learned(
     reference: &ReferenceDef,
     new: &[(String, Vec<u8>)],
     kept: &[(String, Vec<u8>)],
-    saved_name: &str,
 ) -> Result<DigitReader, SpecError> {
     saved::reader(reference, |picture| {
         new.iter()
@@ -246,19 +250,36 @@ fn learned(
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
     })
     .map_err(|error| {
-        if let SavedError::Learn { name, source } = &error
-            && new.iter().any(|(new_name, _)| new_name == name)
-            && let Some(sample) = reference
+        let text_of = |name: &str| {
+            reference
                 .samples
                 .iter()
-                .find(|sample| sample.image == *name)
-        {
-            return SpecError::Learn {
-                text: sample.text.clone(),
-                source: source.clone(),
-            };
+                .find(|sample| sample.image == name)
+                .map(|sample| sample.text.clone())
+        };
+        match &error {
+            SavedError::Learn { name, source } => match text_of(name) {
+                Some(text) if new.iter().any(|(new_name, _)| new_name == name) => {
+                    SpecError::Learn {
+                        text,
+                        source: source.clone(),
+                    }
+                },
+                Some(text) => SpecError::SavedLearn {
+                    text,
+                    source: source.clone(),
+                },
+                None => error.into(),
+            },
+            SavedError::Missing { name, .. } | SavedError::Picture { name, .. }
+                if text_of(name).is_some() =>
+            {
+                SpecError::MissingPicture {
+                    picture: name.clone(),
+                }
+            },
+            _ => error.into(),
         }
-        sample_problem_of(&error, saved_name, &reference.samples).unwrap_or_else(|| error.into())
     })
 }
 
@@ -372,25 +393,14 @@ impl CharactersSpec {
         let id = id
             .or_else(|| self.reference.as_ref().map(|saved| saved.id.as_str()))
             .unwrap_or(UNSAVED);
-        let (mut samples, kept, made, saved_name): (Vec<SampleDef>, Pictures, OriginDef, _) = saved
-            .map_or_else(
-                || {
-                    (
-                        Vec::new(),
-                        Vec::new(),
-                        OriginDef::default(),
-                        name.to_owned(),
-                    )
-                },
-                |saved| {
-                    (
-                        saved.reference.samples,
-                        saved.pictures,
-                        saved.reference.origin,
-                        saved.reference.name,
-                    )
-                },
-            );
+        let (mut samples, kept, made): (Vec<SampleDef>, Pictures, OriginDef) =
+            saved.map_or_else(Default::default, |saved| {
+                (
+                    saved.reference.samples,
+                    saved.pictures,
+                    saved.reference.origin,
+                )
+            });
         // A recording that teaches a reference made by hand makes it one a
         // recording made. One that says where it was imported from goes on
         // saying so.
@@ -436,7 +446,7 @@ impl CharactersSpec {
             tolerance: self.tolerance,
             samples,
         };
-        let reader = learned(&reference, &pictures, &kept, &saved_name)?;
+        let reader = learned(&reference, &pictures, &kept)?;
         Ok(Taught {
             region,
             window_size,
@@ -632,10 +642,11 @@ impl AsRef<str> for RecordedLabel {
     }
 }
 
-/// Why the saved reference named `reference` cannot be learned, from what
-/// `saved::reader` or `saved::build` said of the picture of one of its
-/// `samples`: in the UI's words for a picture that is missing or teaches
-/// nothing, and `None` for an error that names none of them.
+/// Why a value cannot read with the saved reference named `reference`, from
+/// what `saved::build` said of the picture of one of its `samples`: in the
+/// UI's words for a picture that is missing or teaches nothing, which send
+/// the user to the reference's editor, and `None` for an error that names
+/// none of them.
 pub(crate) fn sample_problem_of(
     error: &SavedError,
     reference: &str,
@@ -650,7 +661,7 @@ pub(crate) fn sample_problem_of(
     let sample = samples.iter().find(|sample| sample.image == *name)?;
     let reference = reference.to_owned();
     Some(match error {
-        SavedError::Learn { source, .. } => SpecError::SavedLearn {
+        SavedError::Learn { source, .. } => SpecError::ReferenceLearn {
             reference,
             text: sample.text.clone(),
             source: source.clone(),

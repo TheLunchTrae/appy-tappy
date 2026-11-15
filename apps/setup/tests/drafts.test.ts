@@ -9,6 +9,7 @@ import {
   captureProblem,
   fixOutdated,
   needsField,
+  refreshedDraft,
   refreshedEditing,
   startEditing,
   withTaught,
@@ -404,6 +405,27 @@ describe('a draft and what it belongs to', () => {
     const fresh = { ...editing, existing: null };
     expect(refreshedEditing(fresh, [taught])).toBe(fresh);
     expect(refreshedEditing(null, [taught])).toBeNull();
+  });
+
+  test('saved pictures a draft left out stay out only while the reference has the pictures it copied', () => {
+    const copied = {
+      id: 'percent',
+      name: 'Percent',
+      origin: { kind: 'byHand' } as const,
+      tolerance: 40,
+      samples: [
+        { image: 'ref-percent-1.png', text: '87%' },
+        { image: 'ref-percent-2.png', text: '12%' },
+      ],
+    };
+    const draft = { ...EMPTY_DRAFT, dropped: ['ref-percent-2.png'] };
+    expect(refreshedDraft(draft, copied, { ...copied, name: 'Renamed', tolerance: 60 })).toBe(draft);
+    // Saved again since, the file name can be a new picture's, or no picture's.
+    const retaught = { ...copied, samples: [copied.samples[0]!, { image: 'ref-percent-2.png', text: '5' }] };
+    expect(refreshedDraft(draft, copied, retaught).dropped).toEqual([]);
+    expect(refreshedDraft(draft, copied, { ...copied, samples: copied.samples.slice(0, 1) }).dropped).toEqual([]);
+    expect(refreshedDraft(draft, copied, null).dropped).toEqual([]);
+    expect(refreshedDraft(EMPTY_DRAFT, copied, null)).toBe(EMPTY_DRAFT);
   });
 
   test('the newest draft of a saved item is the one finished', () => {

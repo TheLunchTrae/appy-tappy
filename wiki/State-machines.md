@@ -110,8 +110,8 @@ it was about has gone. Fifteen guards drop such stale messages:
   the tolerance, the pictures left out, how it is saved, and its saved
   pictures' file names (`unlearnedKey` in
   `apps/setup/src/lib/useUnlearned.ts`). An answer under another key than
-  the editor asks under now is not shown (`unlearnedArrived`), and neither
-  are the pictures fetched for it.
+  the editor asks under now is not shown (`unlearnedArrived`), and a
+  picture fetched for one is dropped when it arrives (`cropArrived`).
 - **Reading risk keys.** The [reading risks](#reading-risks)
   of a reference being taught are asked for under a key made of its whole
   spec: the region, the samples, the text color, and the tolerance
@@ -3194,7 +3194,10 @@ stateDiagram-v2
   the tolerance.
 - **Shown** lists the samples of the answer, each with its picture once it
   arrives, or nothing when the reference learns every saved sample. With a
-  sample listed, the trial and **Save reference** fail and name it.
+  sample listed, the trial fails and names it, and **Save reference** waits
+  with a note (`referenceSave`). A picture that arrives for a key the
+  editor no longer asks under is dropped (`cropArrived`), so it never
+  replaces the pictures of the rows that show.
   **Remove** adds it to the draft's `dropped`, which changes the key and
   asks again; the owner then judges the samples that are left. **Put back**
   empties `dropped`.
@@ -3206,7 +3209,8 @@ stateDiagram-v2
   leaving it clear `dropped` (`toReference`, `fromReference`), and a save
   writes the reference without them and closes the editor. A
   [draft](Setup-app.md#drafts) kept with the editor open keeps them, by
-  picture file name.
+  picture file name, and resumes with none left out when the reference's
+  saved samples changed since (`refreshedDraft`).
 
 ### Bar detection
 

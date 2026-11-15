@@ -758,7 +758,7 @@ mod tests {
             .ask(|owner| owner.save_reference(&in_gray("")))
             .expect_err("the saved picture has no gray");
         assert!(
-            refused.starts_with("Digits can't learn from its saved picture of \"1\":"),
+            refused.starts_with("Can't learn from its saved picture of \"1\":"),
             "{refused}"
         );
         // The editor is told which picture it is, and shown it.
@@ -889,8 +889,8 @@ mod tests {
         // Each ask says the picture of the saved reference is missing.
         let missing = |answers: [Result<(), String>; 3]| {
             let error = Err::<(), _>(
-                "Digits is missing its saved picture ref-digits-1.png. Edit Digits and remove \
-                 that picture under Saved pictures it can't learn."
+                "Its saved picture ref-digits-1.png is missing. Remove it under Saved pictures \
+                 it can't learn."
                     .to_owned(),
             );
             answers == [error.clone(), error.clone(), error]
@@ -915,7 +915,7 @@ mod tests {
                 .ask(|owner| {
                     owner.save_reference(&reference("example", "Small", Some(("example", "small"))))
                 })
-                .is_err_and(|error| error.contains("is missing its saved picture ref-small-1.png"))
+                .is_err_and(|error| error.contains("Its saved picture ref-small-1.png is missing"))
         );
 
         // Writing an application forgets it, so the next ask reads what
@@ -942,6 +942,7 @@ mod tests {
         assert_eq!(harness.reloads(), 1, "the runtime reads the references");
         std::fs::remove_file(stores.apps.folder("example").join("ref-digits-1.png"))
             .expect("remove the picture");
+        // A value that reads with it says which reference to edit.
         assert_eq!(
             harness.ask(|owner| owner.set_check(&trial(NUMBER))),
             Err(

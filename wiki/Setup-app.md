@@ -761,9 +761,9 @@ from the saved samples, when it saves the reference without a text color.
 
 A reference learns its saved samples again on each save and each trial,
 with the text color and tolerance of the draft, before its boxes and kept
-readings (`CharactersSpec::learn`, `saved::reader`). What it saved learns
-again unchanged: a save writes only what `saved::reader` learned from the
-very bytes it writes. A sample stops teaching the reference when the draft
+readings (`CharactersSpec::learn`, `saved::reader`). A save writes only
+what `saved::reader` learned from the very bytes it writes. A sample stops
+teaching the reference when the draft
 finds the characters another way: with another text color or tolerance, or
 by contrast where the sample was cut for a text color and so has no
 background around its text. A picture that is missing from the
@@ -794,10 +794,24 @@ that file. A reference left with no sample is refused, as a new one with no
 label is. The draft keeps `dropped` only while the editor is open on that
 reference: opening and leaving the editor clear it.
 
-A learn error on a saved sample names the reference and says where to
-remove the picture (`SpecError::SavedLearn`), on the editor's trial and on
-a value that reads with the reference. An error on a box or a reading the
-draft adds stays the box's own (`SpecError::Learn`).
+Every `CharactersSpec` is taught in the reference's own editor, so a learn
+error on a saved sample there points at the list and names no reference to
+open (`SpecError::SavedLearn`, and `SpecError::MissingPicture` for a
+picture that is gone). An error on a box or a reading the draft adds stays
+the box's own (`SpecError::Learn`). A value that reads with the reference
+names it and says to edit it (`SpecError::ReferenceLearn`,
+`SpecError::MissingSample`, from `sample_problem_of`), since the value's
+reference picker offers **Edit** for it. While the answer lists a sample,
+**Save reference** waits and says so (`referenceSave` in
+`lib/teaching.ts`), so settings alone, which no trial judges, are not sent
+to be refused. The answer marks a sample whose picture is missing
+(`UnlearnedSample.missing`), and the list suggests another text color only
+for a sample that one could help.
+
+A draft resumed with the editor open goes on from the reference as it is
+saved now. When its samples are not the ones the draft copied, the draft's
+`dropped` is cleared (`refreshedDraft` in `lib/captureDraft.ts`): a file
+name it holds could name a picture saved since.
 
 The owner decisions behind this:
 

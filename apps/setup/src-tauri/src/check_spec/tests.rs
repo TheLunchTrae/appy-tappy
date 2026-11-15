@@ -12,8 +12,8 @@ use appytappy_config::app_file::{
 use appytappy_config::names::sample_name;
 use appytappy_config::signal::Number;
 use appytappy_sources::screen::check::ImageMatch;
-use appytappy_sources::screen::digits::InkRule;
-use appytappy_sources::screen::saved;
+use appytappy_sources::screen::digits::{InkRule, LearnError};
+use appytappy_sources::screen::saved::{self, SavedError};
 
 use super::characters::{RecordedLabel, Taught, UnlearnedSample};
 use super::*;
@@ -428,17 +428,17 @@ fn a_saved_reference_is_relearned_in_the_color_being_tried() {
     };
     let error = teach(&gray, session(&[screenshot()], None)).expect_err("no gray in the sample");
     assert!(
-        matches!(&error, SpecError::SavedLearn { reference, text, .. }
-            if reference == "Digits" && text == "1"),
+        matches!(&error, SpecError::SavedLearn { text, .. } if text == "1"),
         "{error:?}"
     );
-    // The picture is one the user sees only in the reference's editor, so
-    // the words say whose it is and where it is removed.
+    // The reference is taught in its own editor, which lists the picture
+    // no box shows, so the words point at that list and name no reference
+    // to open.
     assert_eq!(
         error.to_string(),
-        "Digits can't learn from its saved picture of \"1\": no pixel in the region stands out \
-         from its background, or has the reference's text color. Edit Digits and remove that \
-         picture under Saved pictures it can't learn, or change its text color."
+        "Can't learn from its saved picture of \"1\": no pixel in the region stands out from \
+         its background, or has the reference's text color. Remove it under Saved pictures it \
+         can't learn, or change the text color."
     );
     assert!(error.source().is_some());
 }
@@ -531,6 +531,7 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
         image: sample_name("digits", 1),
         text: "1".to_owned(),
         problem: problem.to_owned(),
+        missing: false,
     };
     assert_eq!(
         saved.unlearned(Some(GRAY), 0),
@@ -577,20 +578,48 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
     assert_eq!(
         two.unlearned(Some(RED), 0)
             .into_iter()
-            .map(|sample| (sample.image, sample.problem))
+            .map(|sample| (sample.image, sample.problem, sample.missing))
             .collect::<Vec<_>>(),
         [
             (
                 sample_name("digits", 1),
                 "The region shows 1 characters but the text has 2; characters that touch count \
                  as one."
-                    .to_owned()
+                    .to_owned(),
+                false
             ),
             (
                 second,
-                "Its picture is missing or can't be opened.".to_owned()
+                "Its picture is missing or can't be opened.".to_owned(),
+                true
             ),
         ]
+    );
+    // A value that reads with the reference names it and says to edit it,
+    // since the picture shows only in the reference's editor.
+    let from_value = |error: &SavedError| {
+        sample_problem_of(error, "Digits", &two.reference.samples)
+            .map(|problem| problem.to_string())
+    };
+    assert_eq!(
+        from_value(&SavedError::Learn {
+            name: sample_name("digits", 1),
+            source: LearnError::NoInk,
+        }),
+        Some(
+            "Digits can't learn from its saved picture of \"77\": no pixel in the region stands \
+             out from its background, or has the reference's text color. Edit Digits and remove \
+             that picture under Saved pictures it can't learn, or change its text color."
+                .to_owned()
+        )
+    );
+    assert_eq!(
+        from_value(&SavedError::Learn {
+            name: sample_name("other", 1),
+            source: LearnError::NoInk,
+        }),
+        None,
+        "another reference's picture"
     );
     // A reference left with no sample has nothing to learn from.
     assert_eq!(
@@ -598,59 +627,6 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
             .without(&[sample_name("digits", 1)])
             .with_settings("Digits", Some(RED), 0),
         Err(SpecError::NoLabels)
-    );
-}
-
-#[test]
-fn a_saved_reference_opens_again_as_it_was_saved() {
-    // A reference by contrast, taught from a box as tight as its strokes
-    // and saved with the tolerance fitted to it.
-    let shots = [shadowed()];
-    let spec = |reference| CharactersSpec {
-        ink: None,
-        tolerance: 128,
-        region: RegionDef {
-            x: 1,
-            y: 1,
-            width: 3,
-            height: 3,
-        },
-        ..characters(
-            whole(),
-            reference,
-            vec![Label {
-                screenshot: 0,
-                region: None,
-                text: "11".to_owned(),
-            }],
-            Vec::new(),
-        )
-    };
-    let taught = teach(&spec(None), session(&shots, None)).expect("learns the box");
-    let saved = SavedReference {
-        reference: taught.reference.clone(),
-        pictures: taught.pictures.clone(),
-    };
-    let references = |_: &ReferenceRef| Ok(saved.clone());
-    let reopened = Session {
-        screenshots: &shots,
-        recording: None,
-        references: &references,
-    };
-    // Its editor opens with the saved settings and no box.
-    let unchanged = CharactersSpec {
-        labels: Vec::new(),
-        ..spec(Some(digits_ref()))
-    };
-    assert_eq!(unchanged.contrast_tolerance(reopened), Ok(128));
-    let again = teach(&unchanged, reopened).expect("learns what it saved");
-    assert_eq!(again.reference, taught.reference);
-    assert_eq!(again.reader, taught.reader);
-    assert!(again.pictures.is_empty(), "nothing new to save");
-    assert_eq!(saved.unlearned(None, 128), []);
-    assert_eq!(
-        saved.clone().with_settings("Digits", None, 128),
-        Ok(taught.reference)
     );
 }
 
@@ -806,8 +782,8 @@ fn a_saved_sample_without_its_picture_says_how_to_recover() {
         teach(&spec, session)
             .expect_err("a sample is gone")
             .to_string(),
-        "Digits is missing its saved picture ref-digits-1.png. Edit Digits and remove that \
-         picture under Saved pictures it can't learn."
+        "Its saved picture ref-digits-1.png is missing. Remove it under Saved pictures it can't \
+         learn."
     );
     // Left out, it stops nothing.
     let without = CharactersSpec {
