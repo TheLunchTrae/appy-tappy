@@ -3,8 +3,11 @@
 import { AREA_DRAW_HINT } from './moving.ts';
 import type { SelectTool } from './selection.ts';
 
-/** What the stage draws: the value's region, over the live window too, or a reference's boxes. */
-export type Drawing = 'region' | 'live' | 'boxes';
+/**
+ * What the stage draws: the value's region, over the live window too, a reference's boxes, or nothing in a step
+ * that leaves the region to Where to read.
+ */
+export type Drawing = 'region' | 'live' | 'boxes' | 'none';
 
 /** What the stage shows and takes, which decides its hint. */
 export interface StageView {
@@ -65,6 +68,9 @@ export function stageHint({
       boxBlock ??
       'Drag to draw a box around some characters. Press a box to select it, drag it to move it, or press Delete to remove it.'
     );
+  }
+  if (drawing === 'none') {
+    return 'Go back to Where to read to change the region.';
   }
   if (otherSize) {
     return 'The region shows on screenshots of the size the value was drawn at.';

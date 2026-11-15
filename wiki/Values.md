@@ -54,7 +54,9 @@ back to the automation with the value picked.
 
 3. **Characters,** for a **Number**. Pick the reference the number reads
    with, make one with **New reference from this region**, or teach one with
-   **Record readings**, as [Checks](#checks) describes. Then select
+   **Record readings**, as [Checks](#checks) describes. This step and
+   **Check and save** don't show the region, apart from a recording's
+   outline; go back to **Where to read** to change it. Then select
    **Next: check and save**.
 4. **Check and save,** for a **Number**, or **How to read it** for the other
    checks, which set up the check here, as [Checks](#checks) describes, and

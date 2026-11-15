@@ -11,6 +11,7 @@ import {
   refreshedEditing,
   keptSetup,
   labeledCharacters,
+  regionOnStage,
   restoreSetup,
   shownOnStep,
   storeSetup,
@@ -28,6 +29,7 @@ import {
   removalLoses,
   unfinishedText,
 } from '../src/lib/drafts.ts';
+import { stageHint } from '../src/lib/stageHint.ts';
 import { type AppSetup, startAppSetup, unfinishedApp } from '../src/lib/matching.ts';
 
 const apps: readonly AppSummary[] = [
@@ -435,4 +437,27 @@ test("entering Where to read shows the screenshot the value's region is drawn on
   expect(shownOnStep('where', null, 5)).toBe(5);
   expect(shownOnStep('how', 2, 5)).toBe(5);
   expect(shownOnStep('check', 2, null)).toBeNull();
+});
+
+test("a number's later steps leave its region to Where to read, unless a recording of it runs", () => {
+  expect(regionOnStage('where', 'number', false)).toBe(true);
+  expect(regionOnStage('how', 'number', false)).toBe(false);
+  expect(regionOnStage('check', 'number', false)).toBe(false);
+  expect(regionOnStage('how', 'number', true)).toBe(true);
+  // Other checks read colors and looks inside the region in their second step.
+  expect(regionOnStage('how', 'state', false)).toBe(true);
+  const onScreenshot = {
+    recording: null,
+    selected: 2,
+    shotCount: 1,
+    picking: false,
+    liveError: null,
+    shortcut: 'F9',
+    tool: 'box',
+    area: false,
+    otherSize: false,
+    boxBlock: null,
+  } as const;
+  expect(stageHint({ ...onScreenshot, drawing: 'none' })).toBe('Go back to Where to read to change the region.');
+  expect(stageHint({ ...onScreenshot, drawing: 'region' })).toStartWith('Drag to draw a region.');
 });
