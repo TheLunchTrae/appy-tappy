@@ -362,6 +362,16 @@ text touches its edge can't be learned by contrast either, and has no box to
 draw again: put the text color back, or teach the reference afresh from new
 boxes or readings.
 
+An outline usually reads by contrast, but a thick one around bold text
+can't. When AppyTappy finds the characters by contrast, the outline counts as
+part of each character, so the strokes are thicker, the holes in `0`, `6`,
+`8`, and `9` are small, and the reference can read one of them as another,
+such as `0` as `8`. Give such text a text color: pick the color inside a
+character, not on its outline, so that only the inside counts and the
+reference tells the digits apart. Without a text color, draw each box and the
+value's region around the whole character, outline included. A box that cuts
+through the outline leaves part of the character out.
+
 With or without a text color, turn on **Show matching pixels** to tint every
 pixel on the screenshot that counts as part of the characters. Without a
 text color, select a box first: the tint shows what stands out from that
