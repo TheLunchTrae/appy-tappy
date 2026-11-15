@@ -68,7 +68,11 @@ the decimal point when the number ignores them. The automation reads with
 the same reference, where its value's region is at the window's size.
 
 To teach a saved reference more, select **Edit** next to it on the References
-page, or **Edit** while you pick it for a value. What it learned before stays;
+page, or **Edit** while you pick it for a value. From the References page the
+editor opens at once and finds the application's window itself.
+[While the application isn't open](Values.md#while-the-application-isnt-open),
+you can still rename the reference, change **Characters it needs**, check its
+characters, and save; screenshots and recording wait for the window. What it learned before stays;
 new boxes and readings add to it. Changing its color or tolerance changes how
 every value that reads with it reads, and the editor names them.
 
