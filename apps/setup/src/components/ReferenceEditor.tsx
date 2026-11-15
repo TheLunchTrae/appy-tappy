@@ -29,7 +29,7 @@ interface Props {
   readonly expected: readonly string[];
   /** How the characters in those texts compare with the ones it needs. */
   readonly coverage: Coverage;
-  /** The pairs of characters it may read as each other, of those the value reads. */
+  /** The pairs of characters it may read as each other, of those with a character the value needs. */
   readonly lookalikes: readonly (readonly [string, string])[];
   /** The texts of found text not added yet, whose new characters are outlined. */
   readonly finding: readonly string[];
