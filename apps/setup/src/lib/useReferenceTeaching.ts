@@ -145,7 +145,7 @@ export function useReferenceTeaching({
   const fitted = useContrastTolerance(recording === null ? taughtCharacters : null, (tolerance) => {
     setDraft((current) => ({ ...current, tolerance }));
   });
-  // What may keep it from reading as its samples do, asked once the tolerance that depends on is fitted.
+  // What may keep it from reading as its samples do, asked once the tolerance it depends on is fitted.
   const risks = useReadingRisks(fitted ? taughtCharacters : null);
   // The check, like review, shows in place of the window's picture.
   const checking = guided.guide !== null;

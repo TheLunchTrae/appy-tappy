@@ -767,7 +767,7 @@ lookalike, and fails on a left-out digit that is closer. A reference made
 by itself takes what the values that read with it need (`readersNeed`). A
 reference found by contrast asks once its tolerance is fitted, since the fit
 changes the spec.
-[Look-alike characters](State-machines.md#look-alike-characters) has its
+[Reading risks](State-machines.md#reading-risks) has its
 states. Only the setup app checks this, so the runtime is unchanged.
 
 ### Hidden outlines
