@@ -354,8 +354,41 @@ impl CharactersSpec {
     /// characters by contrast with, chosen from its samples as
     /// [`contrast::fitted`] describes: the spec's own while every sample
     /// reads with it. A reference with a text color keeps its tolerance,
-    /// which the user sets. A saved sample whose picture cannot be read
-    /// has no say; teaching the reference reports it.
+    /// which the user sets.
+    ///
+    /// # Errors
+    ///
+    /// Returns what [`Self::of_samples`] does.
+    pub(crate) fn contrast_tolerance(&self, session: Session<'_>) -> Result<u8, SpecError> {
+        if self.ink.is_some() {
+            return Ok(self.tolerance);
+        }
+        self.of_samples(session, |samples| contrast::fitted(samples, self.tolerance))
+    }
+
+    /// Whether the reference these characters teach finds its characters
+    /// by contrast with a tolerance that leaves an outline or a shadow of
+    /// one of its samples out, as [`contrast::hides_a_tone`] describes, so
+    /// that it reads only over backgrounds that hide it too. A reference
+    /// with a text color counts only that color, whatever is behind it.
+    ///
+    /// # Errors
+    ///
+    /// Returns what [`Self::of_samples`] does.
+    pub(crate) fn hides_a_tone(&self, session: Session<'_>) -> Result<bool, SpecError> {
+        if self.ink.is_some() {
+            return Ok(false);
+        }
+        self.of_samples(session, |samples| {
+            contrast::hides_a_tone(samples, self.tolerance)
+        })
+    }
+
+    /// What `of` makes of the samples the reference these characters teach
+    /// learns from, each a picture and the text it shows: the saved ones,
+    /// then the labeled screenshots, then the recorded readings. A saved
+    /// sample whose picture cannot be read is left out; teaching the
+    /// reference reports it.
     ///
     /// # Errors
     ///
@@ -363,10 +396,11 @@ impl CharactersSpec {
     /// screenshot, recorded reading, or saved reference that does not
     /// exist, and for a labeled screenshot or a recording of another
     /// window size.
-    pub(crate) fn contrast_tolerance(&self, session: Session<'_>) -> Result<u8, SpecError> {
-        if self.ink.is_some() {
-            return Ok(self.tolerance);
-        }
+    fn of_samples<T>(
+        &self,
+        session: Session<'_>,
+        of: impl FnOnce(&[(Image, &str)]) -> T,
+    ) -> Result<T, SpecError> {
         let (region, window_size) = self.drawn(session.screenshots)?;
         self.same_sizes(session, window_size)?;
         let saved = self
@@ -377,7 +411,7 @@ impl CharactersSpec {
         let mut samples: Vec<(Image, &str)> =
             saved.iter().flat_map(SavedReference::samples).collect();
         samples.extend(self.new_samples(session, region, &self.recorded)?);
-        Ok(contrast::fitted(&samples, self.tolerance))
+        Ok(of(&samples))
     }
 
     /// Fails unless every labeled screenshot, and the recording when a

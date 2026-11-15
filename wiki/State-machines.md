@@ -104,12 +104,12 @@ it was about has gone. Fifteen guards drop such stale messages:
   (`fitKey` in `apps/setup/src/lib/useContrastTolerance.ts`). An answer
   under another key than the reference asks under now is dropped
   (`fitArrived`), and settles nothing (`fitSettles`).
-- **Look-alike keys.** The [look-alike characters](#look-alike-characters)
+- **Reading risk keys.** The [reading risks](#look-alike-characters)
   of a reference being taught are asked for under a key made of its whole
   spec: the region, the samples, the text color, and the tolerance
-  (`lookalikeKey` in `apps/setup/src/lib/useLookalikes.ts`). An answer under
+  (`riskKey` in `apps/setup/src/lib/useReadingRisks.ts`). An answer under
   another key than the reference asks under now is not shown
-  (`pairsArrived`), and a change of key clears the answer, so one for a
+  (`risksArrived`), and a change of key clears the answer, so one for a
   reference saved again under the same ID never shows.
 - **Pointer IDs.** A region drag keeps the ID of the pointer that started it
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
@@ -3089,14 +3089,17 @@ stateDiagram-v2
 
 ### Look-alike characters
 
-The reference editor warns about two learned characters the reference may
-read as each other, as [Setup app](Setup-app.md#look-alike-characters)
-describes (`apps/setup/src/lib/useLookalikes.ts`, used by
+The reference editor warns about what may keep the reference from reading
+as its samples do: two learned characters it may read as each other, as
+[Setup app](Setup-app.md#look-alike-characters) describes, and an outline or
+a shadow its tolerance leaves out, as
+[Hidden outlines](Setup-app.md#hidden-outlines) describes
+(`apps/setup/src/lib/useReadingRisks.ts`, used by
 `useReferenceTeaching.ts`). Its state is the key the reference asks under
-now (`lookalikeKey`), or none, and the last answer with the key it was asked
-under. The owner keeps nothing for it; each request is one
-`lookalike_characters` command, which teaches the reference and compares
-its shapes.
+now (`riskKey`), or none, and the last answer with the key it was asked
+under. The owner keeps nothing for it; each request is one `reading_risks`
+command, which teaches the reference, compares its shapes, and looks at its
+samples.
 
 ```mermaid
 stateDiagram-v2
@@ -3119,7 +3122,7 @@ stateDiagram-v2
   change the key and drop the answer.
 - **Asking** waits a quarter of a second under the key and then has a
   request out for it. It shows no warning: each change of the key drops the
-  last answer (`pairsArrived`, and the effect's cleanup clears it), so the
+  last answer (`risksArrived`, and the effect's cleanup clears it), so the
   warning goes while a label is typed and comes back once the answer for the
   new text arrives. A closed editor that opens again on the same key asks
   afresh, since a reference saved again keeps its ID and so its key.
@@ -3127,7 +3130,9 @@ stateDiagram-v2
   needs, or about every pair when it needs none (`neededPairs`). A reference
   made or edited by itself takes the characters that the values reading with
   it need between them (`readersNeed`), and every pair when one of them needs
-  none or none reads with it. It warns about nothing when no pair is left.
+  none or none reads with it. It warns about no pair when none is left. It
+  also warns when the answer says the tolerance leaves an outline or a
+  shadow out, whatever the value needs.
 - **Unanswered** is a failed request. The failure is logged and no warning
   shows; the reference's own messages say what is wrong with its samples.
 

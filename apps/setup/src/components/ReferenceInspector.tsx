@@ -7,7 +7,7 @@ import type { Editing, NeedsField } from '../lib/captureDraft.ts';
 import { type Built, type Draft, type ReferenceSaving, withTextColor } from '../lib/check.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers, readersNeed } from '../lib/reference.ts';
-import { neededPairs } from '../lib/useLookalikes.ts';
+import { neededPairs } from '../lib/useReadingRisks.ts';
 import { background } from '../lib/repeat.ts';
 import { checkBackLabel, referenceSave } from '../lib/teaching.ts';
 import type { useBoxes } from '../lib/useBoxes.ts';
@@ -193,7 +193,8 @@ export function ReferenceInspector({
         finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
         expected={teaching.needs}
         coverage={covered}
-        lookalikes={neededPairs(teaching.lookalikes, lookalikeNeeds)}
+        lookalikes={neededPairs(teaching.risks.lookalikes, lookalikeNeeds)}
+        hidesTone={teaching.risks.hidesTone}
         readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
         onName={(name) => {
           setEditing((current) => (current === null ? null : { ...current, name }));

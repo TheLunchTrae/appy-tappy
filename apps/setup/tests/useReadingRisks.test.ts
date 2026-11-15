@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import type { CharactersSpec } from '../src/lib/bindings.ts';
-import { lookalikeKey, lookalikeWarning, neededPairs, pairsArrived } from '../src/lib/useLookalikes.ts';
+import { lookalikeWarning, neededPairs, riskKey, risksArrived } from '../src/lib/useReadingRisks.ts';
 
 const pairs = [
   ['8', '6'],
@@ -44,14 +44,16 @@ test('an answer shows only while the reference asks under the key it was asked u
     labels: [{ screenshot: 0, region: { x: 0, y: 0, width: 10, height: 10 }, text: '86' }],
     recorded: [],
   };
-  const asked = lookalikeKey(spec) ?? '';
-  const answer = { key: asked, pairs: [['8', '6']] as const };
-  expect(lookalikeKey(null)).toBeNull();
-  expect(lookalikeKey({ ...spec })).toBe(asked);
-  expect(pairsArrived(answer, asked)).toEqual([['8', '6']]);
-  const relabeled = lookalikeKey({ ...spec, labels: [{ ...spec.labels[0]!, text: '88' }] });
+  const asked = riskKey(spec) ?? '';
+  const risks = { lookalikes: [['8', '6']], hidesTone: true } as const;
+  const answer = { key: asked, risks };
+  const none = { lookalikes: [], hidesTone: false };
+  expect(riskKey(null)).toBeNull();
+  expect(riskKey({ ...spec })).toBe(asked);
+  expect(risksArrived(answer, asked)).toEqual(risks);
+  const relabeled = riskKey({ ...spec, labels: [{ ...spec.labels[0]!, text: '88' }] });
   expect(relabeled).not.toBe(asked);
-  expect(pairsArrived(answer, relabeled)).toEqual([]);
-  expect(pairsArrived(answer, lookalikeKey({ ...spec, ink: { red: 255, green: 0, blue: 0 } }))).toEqual([]);
-  expect(pairsArrived(answer, null)).toEqual([]);
+  expect(risksArrived(answer, relabeled)).toEqual(none);
+  expect(risksArrived(answer, riskKey({ ...spec, ink: { red: 255, green: 0, blue: 0 } }))).toEqual(none);
+  expect(risksArrived(answer, null)).toEqual(none);
 });

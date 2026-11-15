@@ -120,6 +120,14 @@ more than count the colors around the region and compare each pixel:
 integers only, with no allocation beyond the ink itself, and the same answer
 for the same pixels.
 
+A tone counts only where it is further from the background than the
+tolerance, so text in two tones has another shape over a background that
+hides one of them: an outline that is ink over a bright background and not
+over a dark one. A reference by contrast reads such text only while the
+background stays on one side of that; the setup app
+[warns](Setup-app.md#hidden-outlines) when the samples hide a tone. A text
+color counts the fill alone.
+
 Contrast needs a background that is nearly one color around the region.
 Text over a scene that shows through takes a text color instead, the
 reference's optional `ink` (`InkRule::Color`): a pixel is then ink when its

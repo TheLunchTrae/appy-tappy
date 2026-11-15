@@ -1405,6 +1405,24 @@ workings: WorkingsView | null,
 problem: string | null, }>;
 
 /**
+ * What may keep a reference from reading as its samples do, for its
+ * editor to warn about.
+ */
+export type ReadingRisks = DeepReadonly<{
+/**
+ * The pairs of characters whose learned shapes match each other, so
+ * it may read one as the other: each pair once, in the order it
+ * learned them.
+ */
+lookalikes: Array<[string, string]>,
+/**
+ * Whether it finds its characters by contrast with a tolerance that
+ * leaves an outline or a shadow of a sample out, so that it reads only
+ * over backgrounds that hide it too.
+ */
+hidesTone: boolean, }>;
+
+/**
  * What a recording of readings records, as the UI describes it.
  */
 export type RecordSpec = DeepReadonly<{

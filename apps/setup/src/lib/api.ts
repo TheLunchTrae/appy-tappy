@@ -41,6 +41,7 @@ import type {
   OverlayView,
   Reading,
   ReadingDetails,
+  ReadingRisks,
   RecordSpec,
   RecordingView,
   ReferenceSaveSpec,
@@ -256,11 +257,11 @@ export async function contrastTolerance(spec: CharactersSpec): Promise<number> {
 }
 
 /**
- * The pairs of characters whose learned shapes, as the reference `spec` teaches them, match each other, so
- * it may read one as the other: each pair once, in the order it learned them.
+ * What may keep the reference `spec` teaches from reading as its samples do: the pairs of characters whose
+ * learned shapes match each other, and whether its tolerance leaves an outline or a shadow out.
  */
-export async function lookalikeCharacters(spec: CharactersSpec): Promise<ReadonlyArray<[string, string]>> {
-  return invoke<ReadonlyArray<[string, string]>>('lookalike_characters', { spec });
+export async function readingRisks(spec: CharactersSpec): Promise<ReadingRisks> {
+  return invoke<ReadingRisks>('reading_risks', { spec });
 }
 
 /**
