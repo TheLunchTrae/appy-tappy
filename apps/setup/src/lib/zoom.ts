@@ -57,3 +57,22 @@ export function scrollShift(point: Point, anchor: Point, box: Box, picture: Size
 export function percent(shown: Size, picture: Size): string {
   return picture.width > 0 ? `${Math.round((shown.width * 100) / picture.width)}%` : '';
 }
+
+/** A pan of a zoomed picture: the pointer whose right or middle button drags it, and where it was last. */
+export interface Pan {
+  readonly pointer: number;
+  readonly at: Point;
+}
+
+/** The pan a press starts: the right and the middle button pan, as in image and video editors, and others don't. */
+export function panStart(button: number, pointer: number, at: Point): Pan | null {
+  return button === 1 || button === 2 ? { pointer, at } : null;
+}
+
+/** Where `pan` is after `pointer` moves to `at`, and how far the view scrolls so the picture follows the pointer. */
+export function panMove(pan: Pan, pointer: number, at: Point): { readonly pan: Pan; readonly scroll: Point } {
+  if (pointer !== pan.pointer) {
+    return { pan, scroll: { x: 0, y: 0 } };
+  }
+  return { pan: { pointer, at }, scroll: { x: pan.at.x - at.x, y: pan.at.y - at.y } };
+}

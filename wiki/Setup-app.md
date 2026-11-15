@@ -113,7 +113,9 @@ This page covers what the user guide leaves out.
   which belongs to screenshots of one size. `RegionSurface` reads the pointer
   against the picture's box on the page at each pointer event, and again when
   a scroll or a zoom moves the picture under a pointer that stays still, so
-  the zoom, the scroll, and the window's size are no state of the drag. The
+  the zoom, the scroll, and the window's size are no state of the drag. A
+  drag with the right or the middle button pans the view, which holds that
+  pointer and keeps its press from the surface and its menu from opening. The
   region's outline, its label, and the dim around it are drawn by `Marquee`,
   outside the box. A corner takes presses 12 pixels out from the box and up
   to 4 into it, less into a small box, which keeps 8 pixels each way, or all

@@ -198,7 +198,9 @@ and **Zoom out** (**−**) change how large the screenshot shows, and the
 percentage between them says how large that is against the window's own
 pixels. **Fit** shows the whole screenshot again. Hold Ctrl and turn the mouse
 wheel to zoom around the pointer. While the screenshot is larger than the
-view, turn the wheel or drag the scroll bars to move around it. The wheel
+view, hold the right or the middle mouse button and drag, turn the wheel, or
+drag the scroll bars to move around it. The **?** beside **Fit** says the
+same. The wheel
 also works in the middle of a drag, and the box follows the screenshot as it
 scrolls, to draw a box larger than the view shows.
 Zoom changes only how you see the screenshot: the region keeps its pixels.

@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import { toPicture } from '../src/lib/region.ts';
-import { GUTTER, ZOOM_STEP, clampZoom, percent, scrollShift, shownAt, wheelZoom } from '../src/lib/zoom.ts';
+import {
+  GUTTER,
+  ZOOM_STEP,
+  clampZoom,
+  panMove,
+  panStart,
+  percent,
+  scrollShift,
+  shownAt,
+  wheelZoom,
+} from '../src/lib/zoom.ts';
 
 const picture = { width: 1920, height: 1080 };
 // The picture fits this space at half its size, with the gutter around it.
@@ -103,5 +113,23 @@ describe('zooming around a point', () => {
     const shift = scrollShift(under(anchor, box), anchor, box, picture);
     expect(shift.x).toBeCloseTo(0, 9);
     expect(shift.y).toBeCloseTo(0, 9);
+  });
+});
+
+describe('pan', () => {
+  test('starts with the right or the middle button, not the main one', () => {
+    expect(panStart(2, 7, { x: 10, y: 20 })).toEqual({ pointer: 7, at: { x: 10, y: 20 } });
+    expect(panStart(1, 7, { x: 10, y: 20 })).toEqual({ pointer: 7, at: { x: 10, y: 20 } });
+    expect(panStart(0, 7, { x: 10, y: 20 })).toBeNull();
+  });
+
+  test('scrolls against the pointer, so the picture moves with it', () => {
+    const moved = panMove({ pointer: 7, at: { x: 10, y: 20 } }, 7, { x: 40, y: 5 });
+    expect(moved).toEqual({ pan: { pointer: 7, at: { x: 40, y: 5 } }, scroll: { x: -30, y: 15 } });
+  });
+
+  test('ignores another pointer', () => {
+    const pan = { pointer: 7, at: { x: 10, y: 20 } };
+    expect(panMove(pan, 8, { x: 40, y: 5 })).toEqual({ pan, scroll: { x: 0, y: 0 } });
   });
 });
