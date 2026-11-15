@@ -356,8 +356,8 @@ This page covers what the user guide leaves out.
   alone, so the list adds no glyph and labels no shape. The save shapes the
   list: `expected_characters` in `check_spec.rs` writes each character a
   label teaches that is no control character, once, the digits `0` to `9`
-  first and the rest by code point, leaves `characters` out for an empty
-  list, and refuses more than `MAX_EXPECTED_CHARACTERS`, which the page
+  first and the rest by code point, and leaves `characters` out for an empty
+  list. A save refuses more than `MAX_EXPECTED_CHARACTERS`, which the page
   reads as `LIMITS.maxExpectedCharacters` to say so before the save. A
   reference's trial takes its list through the same function. The page
   keeps the list as one set of characters on the value's draft
@@ -366,9 +366,16 @@ This page covers what the user guide leaves out.
   hand shows as its characters and the next save writes it in order; it
   reads each preset's state back from the set; and its `coverage` splits the
   set and the learned characters into known, missing, and extra, for the
-  reference picker and the reference editor. The editor shows and edits the
-  list only when it is opened from a value, and teaches a reference opened
-  from the References page for no characters. The learned characters are
+  reference picker and the reference editor. The editor works on a copy of
+  the list (`Editing.needs`, which `startEditing` in `lib/captureDraft.ts`
+  takes from the value's draft), which the value takes back only when the
+  reference is saved (`withTaught`). `needsField` says how the editor shows
+  it: to change when opened from a value, to read when opened from a fix,
+  which needs what its value does, and not at all from the References page,
+  where a reference is taught for no characters. The cap holds where a list
+  is set or changed (`expected_within_limit`, and `buildSpec` on the page),
+  so a saved value with a longer list, written by hand, still takes a fix or
+  an edit that leaves the list alone. The learned characters are
   those of the saved samples, the labeled screenshots, and the kept
   readings. A character is counted as a label's is: `is_label_character` in
   `appytappy-config` serves the learner and the save, and the samples in
@@ -1041,9 +1048,9 @@ and its `tolerance` is then how far a pixel may be from that color and still
 be ink. `ink` is left out when the reference finds its characters by
 contrast.
 
-A reference takes only the keys above. A key it does not know, such as one
-another version of AppyTappy wrote, is ignored when the file loads and
-dropped by the next save.
+A reference takes only the keys above and `expects`, a list of characters
+that it reads and forgets, so the next save leaves that key out. Any other
+key stops the file loading, as everywhere else in the file.
 
 An application's `overlay` is left out until the user first picks one. Its
 `mode` is `overlay` or `pictureInPicture`, and once the panel has been moved
@@ -1240,11 +1247,11 @@ format was saved by another version and can only be deleted.
 
 What each kind keeps in `state`:
 
-| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                        | What it does not keep                                                                                                                  |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                          | A value or application flow the editor had opened, and what such a flow would hand back                                                |
-| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                     | The window picked in the list                                                                                                          |
-| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference, the characters it needs and **Whole number only**), and the reference being edited | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
+| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                          | What it does not keep                                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                            | A value or application flow the editor had opened, and what such a flow would hand back                                                |
+| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                                       | The window picked in the list                                                                                                          |
+| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference, the characters it needs and **Whole number only**), and the reference being edited with its copy of those characters | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
 
 Screenshots follow one rule, however they were kept: every screenshot the
 capture holds when the draft is saved goes into the draft, those a

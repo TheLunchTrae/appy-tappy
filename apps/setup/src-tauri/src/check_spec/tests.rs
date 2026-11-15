@@ -859,30 +859,64 @@ fn a_new_reference_names_one_picture_per_label() {
 }
 
 #[test]
-fn expected_characters_are_saved_once_each_in_order_up_to_the_most() {
+fn expected_characters_are_listed_once_each_in_order() {
     assert_eq!(
         expected_characters(" b%1\u{7}a0 1\u{3000}%\u{85}"),
-        Ok(Some("01%ab".to_owned())),
+        Some("01%ab".to_owned()),
         "no whitespace, control character or repeat, and the digits first"
     );
     assert_eq!(
         expected_characters("\u{1d7d9}z\u{ff11}\u{feff}"),
-        Ok(Some("z\u{feff}\u{ff11}\u{1d7d9}".to_owned())),
+        Some("z\u{feff}\u{ff11}\u{1d7d9}".to_owned()),
         "by code point, and only the digits 0 to 9 come first"
     );
-    assert_eq!(expected_characters(""), Ok(None));
-    assert_eq!(expected_characters(" \t\u{7}"), Ok(None));
+    assert_eq!(expected_characters(""), None);
+    assert_eq!(expected_characters(" \t\u{7}"), None);
+}
+
+#[test]
+fn a_list_of_expected_characters_is_held_to_the_most_where_it_is_set_or_changed() {
+    let needing = |characters: &str| CheckDef::Number {
+        reference: "digits".to_owned(),
+        whole: false,
+        characters: Some(characters.to_owned()),
+    };
     let most: String = ('\u{100}'..).take(MAX_EXPECTED_CHARACTERS).collect();
-    assert_eq!(expected_characters(&most), Ok(Some(most.clone())));
+    let over = format!("{most}%");
+    assert_eq!(expected_within_limit(&needing(&most), None), Ok(()));
     // A repeat or a space does not count toward the most.
     assert_eq!(
-        expected_characters(&format!("{most} {most}")),
-        Ok(Some(most.clone()))
+        expected_within_limit(&needing(&format!("{most} {most}")), None),
+        Ok(())
     );
     assert_eq!(
-        expected_characters(&format!("{most}%")),
+        expected_within_limit(&needing(&over), None),
         Err(SpecError::TooManyExpected)
     );
+    assert_eq!(
+        expected_within_limit(&needing(&over), Some(&needing(&most))),
+        Err(SpecError::TooManyExpected),
+        "a list that grew past the most"
+    );
+    // A value saved with a longer list, such as one written by hand, keeps
+    // it through a save that leaves it as it is, in whatever order.
+    assert_eq!(
+        expected_within_limit(&needing(&over), Some(&needing(&format!("% {most}")))),
+        Ok(())
+    );
+    let bar = CheckDef::BarFill {
+        filled: ColorDef {
+            red: 1,
+            green: 2,
+            blue: 3,
+        },
+        empty: ColorDef {
+            red: 4,
+            green: 5,
+            blue: 6,
+        },
+    };
+    assert_eq!(expected_within_limit(&bar, Some(&needing(&over))), Ok(()));
     assert_eq!(
         SpecError::TooManyExpected.to_string(),
         "A value needs at most 128 characters. Remove some."
@@ -898,16 +932,17 @@ fn a_number_is_saved_with_the_characters_it_needs_listed_once_in_order() {
             whole: false,
             characters: Some(characters.to_owned()),
         };
-        to_saved(&spec, &[], "app", "progress").map(|saved| match saved.check {
+        match to_saved(&spec, &[], "app", "progress")
+            .expect("a number")
+            .check
+        {
             CheckDef::Number { characters, .. } => characters,
             other => panic!("a number check, not {other:?}"),
-        })
+        }
     };
-    assert_eq!(needing("% 1 0 1"), Ok(Some("01%".to_owned())));
+    assert_eq!(needing("% 1 0 1"), Some("01%".to_owned()));
     // A value that names none reads every character its reference knows.
-    assert_eq!(needing(" "), Ok(None));
-    let too_many: String = ('\u{100}'..='\u{180}').collect();
-    assert_eq!(needing(&too_many), Err(SpecError::TooManyExpected));
+    assert_eq!(needing(" "), None);
 }
 
 #[test]

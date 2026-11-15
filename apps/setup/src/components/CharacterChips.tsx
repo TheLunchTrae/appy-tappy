@@ -45,7 +45,10 @@ export function CharacterChips({
   );
 }
 
-/** The characters a value needs that its reference has yet to learn, each in an outlined tile, since it has no shape for them. */
+/**
+ * The characters a value needs that its reference has yet to learn, each in an outlined tile, since it has no shape
+ * for them.
+ */
 export function MissingChips({
   characters,
   large = false,

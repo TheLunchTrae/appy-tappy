@@ -883,7 +883,8 @@ fn parse_cases() -> serde_json::Value {
             Some(text.chars().filter(|&character| is_label_character(character)).collect())
         }),
         "expectedCharacters": cases(&character_samples(), |text| {
-            expected_characters(text).ok().map(Option::unwrap_or_default)
+            let listed = expected_characters(text).unwrap_or_default();
+            (listed.chars().count() <= MAX_EXPECTED_CHARACTERS).then_some(listed)
         }),
         "spotPlacement": spot_cases(),
     })

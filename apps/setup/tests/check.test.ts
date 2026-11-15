@@ -9,6 +9,7 @@ import {
   buildCharacters,
   buildReferenceSave,
   buildSpec,
+  savedNeeds,
   CHECKS,
   CHECK_KINDS,
   EMPTY_DRAFT,
@@ -73,7 +74,7 @@ describe('buildSpec', () => {
     expect(buildSpec({ ...EMPTY_DRAFT, region }, 'example')).toEqual({ ok: false, next: pick });
     expect(buildSpec({ ...EMPTY_DRAFT, region, reference: 'percent', whole: true }, 'example')).toEqual({
       ok: true,
-      spec: { kind: 'number', region, reference: percent, whole: true, characters: '0123456789' },
+      spec: { kind: 'number', region, reference: percent, whole: true },
     });
   });
 
@@ -91,7 +92,16 @@ describe('buildSpec', () => {
       String.fromCodePoint(0x100 + index),
     );
     expect(buildSpec({ ...number, characters: most }, 'example').ok).toBe(true);
-    expect(buildSpec({ ...number, characters: [...most, '%'] }, 'example')).toEqual({ ok: false, next: TOO_MANY });
+    const over = [...most, '%'];
+    expect(buildSpec({ ...number, characters: over }, 'example')).toEqual({ ok: false, next: TOO_MANY });
+    // A saved value keeps a longer list through an edit or a fix that leaves it as it is.
+    expect(buildSpec({ ...number, characters: over }, 'example', over).ok).toBe(true);
+    expect(buildSpec({ ...number, characters: over }, 'example', most)).toEqual({ ok: false, next: TOO_MANY });
+    expect(savedNeeds({ kind: 'number', reference: 'percent', whole: false, characters: '%1 1' })).toEqual(['1', '%']);
+    expect(savedNeeds({ kind: 'number', reference: 'percent', whole: false })).toEqual([]);
+    expect(savedNeeds({ kind: 'color', color: red, tolerance: 4 })).toBeNull();
+    // What needs a reference still comes first.
+    expect(buildSpec({ ...number, reference: null, characters: over }, 'example').ok).toBe(false);
   });
 
   test('builds a bar fill from both colors', () => {
@@ -604,8 +614,6 @@ describe('fixDraft', () => {
       ...EMPTY_DRAFT,
       reference: 'percent',
       whole: true,
-      // A value saved with no characters needs none, so it reads every character its reference knows.
-      characters: [],
     });
     expect(fixDraft({ kind: 'number', reference: 'percent', whole: false, characters: '%10 1' })).toEqual({
       ...EMPTY_DRAFT,

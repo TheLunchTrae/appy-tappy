@@ -21,6 +21,7 @@ import {
   buildCharacters,
   buildReferenceSave,
   buildSpec,
+  savedNeeds,
   EMPTY_DRAFT,
   firstWithPixels,
   fixDraft,
@@ -81,6 +82,9 @@ import {
   regionOnStage,
   shownOnStep,
   storeSetup,
+  needsField,
+  startEditing,
+  withTaught,
 } from '../lib/captureDraft.ts';
 import { type ReportDraft, type Resumed, draftsOf, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { background } from '../lib/repeat.ts';
@@ -110,9 +114,6 @@ export type CaptureMode =
   | { readonly kind: 'edit'; readonly value: ValueDef };
 
 /** What the reference editor's save waits for while no reference is edited, which never shows. */
-/** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
-const NO_NEEDS: readonly string[] = [];
-
 const NO_REFERENCE_SAVE: Built<ReferenceSaving> = { ok: false, next: '' };
 
 /** The name a draft of the capture lists under: what was typed, or else what it makes or fixes. */
@@ -149,12 +150,7 @@ function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restor
       : setup;
   }
   const editing: Editing | null =
-    mode.kind === 'reference'
-      ? {
-          existing: mode.existing,
-          name: mode.existing?.name ?? '',
-        }
-      : null;
+    mode.kind === 'reference' ? startEditing('reference', mode.existing, EMPTY_DRAFT) : null;
   if (mode.kind === 'edit') {
     return { step: 'where', editing, ...editStart(mode.value) };
   }
@@ -270,6 +266,11 @@ export function Capture({
   const fixing = mode.kind === 'fix' ? mode.value : null;
   // The saved value an edit changes as it was first drawn.
   const edited = mode.kind === 'edit' ? mode.value : null;
+  // The characters the saved value needs already, which it keeps however many they are.
+  const needsSaved = useMemo(
+    () => (mode.kind === 'fix' || mode.kind === 'edit' ? savedNeeds(mode.value.screen.check) : null),
+    [mode],
+  );
   // Whether the user said the value's content may move around inside the window.
   const [mayMove, setMayMove] = useState(start.mayMove);
   const [saving, setSaving] = useState(false);
@@ -330,7 +331,7 @@ export function Capture({
     () => (isEditing ? buildCharacters(draft, editingRef) : null),
     [isEditing, draft, editingRef],
   );
-  const valueCheck = useMemo(() => buildSpec(draft, appId), [draft, appId]);
+  const valueCheck = useMemo(() => buildSpec(draft, appId, needsSaved), [draft, appId, needsSaved]);
   const referenceSave = useMemo(
     () => (isEditing ? buildReferenceSave(draft, editingRef) : null),
     [isEditing, draft, editingRef],
@@ -371,10 +372,7 @@ export function Capture({
   const staysAt = pinView(draft.pin, draft.region, drawnSize ?? edited?.screen.windowSize ?? null);
   const pin = pinOfView(staysAt);
   const fixPin = fixing?.screen.pin;
-  // The characters the reference is taught for: the value's, and none for a reference made by itself.
-  const needs = mode.kind === 'reference' ? NO_NEEDS : draft.characters;
   const teaching = useReferenceTeaching({
-    needs,
     app: appId,
     editing,
     setEditing,
@@ -400,7 +398,7 @@ export function Capture({
       }
       await appFile.reload();
       close();
-      setDraft((current) => ({ ...current, kind: 'number', reference: saved.reference }));
+      setDraft((current) => withTaught(current, saved.reference, editing));
     },
   });
   const { recording, finder, reviewed, sheeted, checking } = teaching;
@@ -589,8 +587,9 @@ export function Capture({
     }
     const { spec } = characters;
     const whole = mode.kind !== 'reference' && draft.whole;
-    return { ok: true, spec: { app: appId, characters: spec, needs: needs.join(''), whole, pin: fixPin ?? pin } };
-  }, [characters, needs, draft.whole, mode.kind, appId, fixPin, pin]);
+    const needs = (editing?.needs ?? []).join('');
+    return { ok: true, spec: { app: appId, characters: spec, needs, whole, pin: fixPin ?? pin } };
+  }, [characters, editing?.needs, draft.whole, mode.kind, appId, fixPin, pin]);
   const trial = useMemo((): Trial => {
     if (taughtTrial !== null) {
       return trialOf('characters', taughtTrial, { set: setCharacters });
@@ -714,7 +713,7 @@ export function Capture({
   // Opens the reference editor on `existing`, or on a new reference. The editor records readings, and the owner
   // records one thing at a time, so a recording of looks goes first.
   const openEditor = async (existing: ReferenceDef | null): Promise<void> => {
-    teaching.open(existing);
+    teaching.open(startEditing(mode.kind, existing, draft));
     // Why the value was not saved is about the value before this edit, so it does not show when the editor closes.
     setSaveError(null);
     await looks.discard();
@@ -1304,13 +1303,7 @@ export function Capture({
           busy={busy}
           draftError={draftError}
           draftButton={draftButton}
-          onNeeds={
-            mode.kind === 'reference' || fixing !== null
-              ? null
-              : (characters) => {
-                  setDraft((current) => ({ ...current, characters }));
-                }
-          }
+          needsField={needsField(mode.kind)}
           onDiscard={mode.kind === 'reference' ? onCancel : teaching.close}
         />
       )}

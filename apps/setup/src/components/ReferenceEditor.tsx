@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from 'react';
 
+import type { NeedsField } from '../lib/captureDraft.ts';
 import type { Coverage } from '../lib/expected.ts';
 import type { Color } from '../lib/pixels.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
@@ -43,9 +44,13 @@ interface Props {
   /** Goes back to finding the characters by contrast. */
   readonly onNoTextColor: () => void;
   readonly onTolerance: (tolerance: number) => void;
-  /** Changes the characters the value needs, or null for a reference made by itself. */
-  readonly onExpected: ((expected: readonly string[]) => void) | null;
+  /** How the characters the value needs show. */
+  readonly needsField: NeedsField;
+  readonly onExpected: (expected: readonly string[]) => void;
 }
+
+/** What the editor calls the list of the value it is taught for, since "it" here is the reference. */
+const NEEDS_LABEL = 'Characters the value needs';
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
@@ -143,9 +148,20 @@ export function ReferenceEditor(props: Props) {
         <span>Application</span>
         <p>{appName}</p>
       </div>
-      {props.onExpected === null ? null : (
-        <ExpectedCharacters label="Characters the value needs" expected={expected} onExpected={props.onExpected} />
-      )}
+      {props.needsField === 'editable' ? (
+        <ExpectedCharacters label={NEEDS_LABEL} expected={expected} onExpected={props.onExpected} />
+      ) : null}
+      {props.needsField === 'readOnly' ? (
+        <div className="field">
+          <span>{NEEDS_LABEL}</span>
+          {chosen ? <CharacterChips characters={expected} ink={undefined} large /> : null}
+          <span className="note">
+            {chosen
+              ? 'A fix needs the characters its value does. To change them, edit the value.'
+              : 'The value needs no characters, so the fix reads every character this reference knows.'}
+          </span>
+        </div>
+      ) : null}
       {props.boxes}
       {props.findPanel}
       {chosen ? (

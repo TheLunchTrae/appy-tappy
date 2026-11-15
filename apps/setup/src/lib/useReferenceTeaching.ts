@@ -3,7 +3,7 @@
 
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
 
-import type { PinDef, RecordingScope, ReferenceDef, ReferenceRef, SavedReference } from './bindings.ts';
+import type { PinDef, RecordingScope, ReferenceRef, SavedReference } from './bindings.ts';
 import { errorText, saveReference, saveReferenceSettings } from './api.ts';
 import { boxOf } from './boxes.ts';
 import type { Editing } from './captureDraft.ts';
@@ -34,6 +34,9 @@ import { useFound } from './useFound.ts';
 import { useRecording } from './useRecording.ts';
 import { focusNext, useRecordFocus, useReview } from './useReview.ts';
 
+/** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
+const NO_NEEDS: readonly string[] = [];
+
 /** What the capture screen gives the teaching of its reference. */
 interface TeachingSetup {
   /** The saved application the reference belongs to. */
@@ -41,8 +44,6 @@ interface TeachingSetup {
   /** The reference the editor teaches, or null while no editor is open. */
   readonly editing: Editing | null;
   readonly setEditing: Dispatch<SetStateAction<Editing | null>>;
-  /** The characters the value it is taught for needs, which what it learns is compared with; none filters no find. */
-  readonly needs: readonly string[];
   readonly draft: Draft;
   readonly setDraft: Dispatch<SetStateAction<Draft>>;
   readonly boxes: ReturnType<typeof useBoxes>;
@@ -78,7 +79,6 @@ export function useReferenceTeaching({
   app,
   editing,
   setEditing,
-  needs,
   draft,
   setDraft,
   boxes,
@@ -100,6 +100,8 @@ export function useReferenceTeaching({
   // Why the reference was not saved. It is the editor's own, and goes when the editor closes, so it never shows as
   // the value's.
   const [error, setError] = useState<string | null>(null);
+  // The characters the value it is taught for needs, which what it learns is compared with; none filters no find.
+  const needs = editing?.needs ?? NO_NEEDS;
   const focus = useRecordFocus();
   const review = useReview(recording, draft, setDraft, reference, needs, focus);
   // What the reference being edited learns from: its saved pictures, its boxes with text, and its kept readings.
@@ -216,10 +218,10 @@ export function useReferenceTeaching({
     focusNext(focus.more);
   };
 
-  // Opens the editor on `existing`, or on a new reference read from the value's region.
-  const open = (existing: ReferenceDef | null): void => {
-    setEditing({ existing, name: existing?.name ?? '' });
-    setDraft((current) => toReference(current, existing));
+  // Opens the editor as `editing`, on a saved reference or on a new one read from the value's region.
+  const open = (opened: Editing): void => {
+    setEditing(opened);
+    setDraft((current) => toReference(current, opened.existing));
     boxes.select(null);
     stopPicking();
     setError(null);

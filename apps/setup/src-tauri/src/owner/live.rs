@@ -230,7 +230,7 @@ impl<H: Host> Owner<H> {
             .with_session(|session| trial.characters.teach(session, None, TAUGHT))
             .map_err(|error| error.to_string())?;
         let id = taught.reference.id.clone();
-        let characters = expected_characters(&trial.needs).map_err(|error| error.to_string())?;
+        let characters = expected_characters(&trial.needs);
         let screen = ScreenDef {
             window_size: taught.window_size.into(),
             region: taught.region.into(),

@@ -39,7 +39,7 @@ function preset(name: string, shown: string, characters: string): Preset {
 }
 
 /** The digits `0` to `9`. */
-export const DIGITS = preset('Digits', '0–9', '0123456789');
+const DIGITS = preset('Digits', '0–9', '0123456789');
 
 /** What a number can show: its digits, and the signs each font may or may not use. */
 export const NUMBER_PRESETS: readonly Preset[] = [
@@ -119,6 +119,14 @@ export interface Coverage {
   readonly missing: readonly string[];
   /** The characters it learned that are not needed, which is every one it learned when none is needed. */
   readonly extra: readonly string[];
+}
+
+/**
+ * Whether a reference that knows `learned` knows none of `expected`, the characters a value needs, so that the value
+ * reads nothing with it. A value that needs none reads every character the reference knows.
+ */
+export function knowsNone(expected: readonly string[], learned: readonly string[]): boolean {
+  return expected.length > 0 && !expected.some((character) => learned.includes(character));
 }
 
 /**

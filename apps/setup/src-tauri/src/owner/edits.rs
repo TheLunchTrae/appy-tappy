@@ -248,6 +248,8 @@ impl<H: Host> Owner<H> {
                 )
             },
         };
+        check_spec::expected_within_limit(&check, Some(&saved.screen.check))
+            .map_err(|error| error.to_string())?;
         let (fixes, dropped) = if fixes_suit(&saved.screen.check, &check) {
             (kept_fixes(&saved.screen, &check), Vec::new())
         } else {

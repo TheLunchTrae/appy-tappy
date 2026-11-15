@@ -8,7 +8,10 @@ import {
   captureMissing,
   captureProblem,
   fixOutdated,
+  needsField,
   refreshedEditing,
+  startEditing,
+  withTaught,
   keptSetup,
   labeledCharacters,
   regionOnStage,
@@ -16,7 +19,7 @@ import {
   shownOnStep,
   storeSetup,
 } from '../src/lib/captureDraft.ts';
-import { type Draft, EMPTY_DRAFT, fixDraft } from '../src/lib/check.ts';
+import { type Draft, EMPTY_DRAFT, fixDraft, fromReference, toReference } from '../src/lib/check.ts';
 import {
   DRAFT_FORMAT,
   draftOfSaved,
@@ -162,6 +165,7 @@ describe('what a draft keeps', () => {
       editing: {
         existing: null,
         name: 'Digits',
+        needs: ['1', '2', '%'],
       },
       draft,
     };
@@ -321,7 +325,7 @@ describe('what an unfinished item still needs', () => {
     expect(captureMissing(drawn, next, false)).toEqual(['Pick the reference.']);
     const editing = {
       ...drawn,
-      editing: { existing: null, name: '' },
+      editing: { existing: null, name: '', needs: [] },
     };
     expect(captureMissing(editing, next, false)).toEqual(['Name the reference.']);
   });
@@ -391,7 +395,7 @@ describe('a draft and what it belongs to', () => {
       samples: [],
     };
     const taught = { ...saved, tolerance: 12 };
-    const editing = { existing: saved, name: 'Percent' };
+    const editing = { existing: saved, name: 'Percent', needs: ['1'] };
     expect(refreshedEditing(editing, [taught])).toEqual({ ...editing, existing: taught });
     // A reference deleted since is made as a new one, and a new one stays new.
     expect(refreshedEditing(editing, [])).toEqual({ ...editing, existing: null });
@@ -466,4 +470,31 @@ test("a number's later steps leave its region to Where to read, unless a recordi
   expect(stageHint({ ...onScreenshot, selected: null, drawing: 'live', drawnAt: '1920 × 1080' })).toStartWith(
     'Drag over the window at 1920 × 1080 where the value shows;',
   );
+});
+
+describe("the characters a value needs, in its reference's editor", () => {
+  const value: Draft = { ...EMPTY_DRAFT, reference: 'percent', characters: ['1', '%'] };
+
+  test('show to change from a value, to read from a fix, and not at all for a reference made by itself', () => {
+    expect(needsField('value')).toBe('editable');
+    expect(needsField('edit')).toBe('editable');
+    expect(needsField('fix')).toBe('readOnly');
+    expect(needsField('reference')).toBe('hidden');
+    expect(startEditing('value', null, value)).toEqual({ existing: null, name: '', needs: ['1', '%'] });
+    expect(startEditing('fix', null, value).needs).toEqual(['1', '%']);
+    // A reference made by itself is taught for no value, whatever the capture's own draft holds.
+    expect(startEditing('reference', null, value).needs).toEqual([]);
+  });
+
+  test('change the value only when the reference is saved', () => {
+    const editing = { ...startEditing('value', null, value), needs: ['1', '2', '%'] };
+    // Discard leaves the editor for the value as it was.
+    expect(fromReference(toReference(value, null)).characters).toEqual(['1', '%']);
+    expect(withTaught(toReference(value, null), 'clock', editing)).toMatchObject({
+      kind: 'number',
+      reference: 'clock',
+      characters: ['1', '2', '%'],
+    });
+    expect(withTaught(value, 'clock', null).characters).toEqual(['1', '%']);
+  });
 });
