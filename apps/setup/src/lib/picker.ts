@@ -174,8 +174,8 @@ export function offersMatchEdit(step: PickerStep): boolean {
   return step.kind === 'none' || step.kind === 'several';
 }
 
-/** What the picker says of windows taken only as the fallback, after it names them as `these`. */
-function fallbackNote(these: string, fallback: boolean): string {
+/** What is said of windows taken only as the fallback, after they are named as `these`. */
+export function fallbackNote(these: string, fallback: boolean): string {
   return fallback ? ` ${these} the fallback: no open window matches everything that must match.` : '';
 }
 

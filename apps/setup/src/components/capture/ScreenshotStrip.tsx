@@ -6,6 +6,8 @@ interface Props {
   readonly shots: ReturnType<typeof useScreenshots>['shots'];
   /** The screenshot shown, or null while the live window shows. */
   readonly selected: number | null;
+  /** Whether a window is captured, which the first tile shows live; without one the tile shows why there is none. */
+  readonly live: boolean;
   /** The screenshot's number as the strip shows it. */
   readonly position: (index: number) => number;
   readonly hidden: boolean;
@@ -20,7 +22,7 @@ interface Props {
 }
 
 /** The live window and the screenshots, to pick what the stage shows, and the way to remove the one shown. */
-export function ScreenshotStrip({ shots, selected, position, hidden, removal, note, onSelect }: Props) {
+export function ScreenshotStrip({ shots, selected, live, position, hidden, removal, note, onSelect }: Props) {
   const unremovable = removal?.unremovable ?? null;
   return (
     <div className="strip" hidden={hidden}>
@@ -32,10 +34,8 @@ export function ScreenshotStrip({ shots, selected, position, hidden, removal, no
           onSelect(null);
         }}
       >
-        <span className="shot">
-          <span className="dot live" />
-        </span>
-        Live
+        <span className="shot">{live ? <span className="dot live" /> : null}</span>
+        {live ? 'Live' : 'No window'}
       </button>
       {shots.map((shot) => (
         <button

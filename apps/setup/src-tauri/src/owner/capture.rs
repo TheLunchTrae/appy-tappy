@@ -257,6 +257,48 @@ impl<H: Host> Owner<H> {
         Ok(number)
     }
 
+    /// Captures `window` in place of capture `earlier`, the number an
+    /// earlier pick answered, and answers the new capture's number. The
+    /// session goes on with its screenshots, check, recording, and found
+    /// text, so a window that closed and opened again takes the place of
+    /// the one that closed. A capture that cannot start leaves the earlier
+    /// one as it was. Picks `window` afresh when another capture took the
+    /// earlier one's place.
+    pub(crate) fn pick_again(&mut self, window: u64, earlier: u64) -> Result<u64, String> {
+        let held = self.capture.picked_ticket();
+        if held.is_none_or(|ticket| ticket.number() != earlier) {
+            return self.pick(window);
+        }
+        let capture = start(
+            &self.host,
+            &mut self.tickets,
+            &self.messages,
+            (window, Crop::Whole),
+            PREVIEW_INTERVAL,
+            preview_event,
+        )?;
+        let number = capture.ticket.number();
+        if let Some(picked) = self.capture.picked_mut() {
+            let replaced = mem::replace(&mut picked.capture, capture);
+            picked.latest = None;
+            picked.failure = None;
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the earlier capture's error is moot once another took its place"
+            )]
+            let _ = replaced.close();
+        }
+        Ok(number)
+    }
+
+    /// Whether the picked window closed, which ended its capture for good.
+    pub(crate) fn capture_ended(&self) -> bool {
+        self.capture
+            .picked()
+            .and_then(|picked| picked.failure.as_ref())
+            .is_some_and(|failure| failure.ended)
+    }
+
     /// Keeps `image`, a frame of the picked window that arrived at
     /// `received`, unless the capture ended. A good frame ends a failure
     /// that did not end the capture.
@@ -289,10 +331,7 @@ impl<H: Host> Owner<H> {
             let recording = recording.life_mut();
             let error = sentence(&failure.error);
             if failure.ended {
-                recording.end(
-                    Instant::now(),
-                    format!("Recording stopped: {error} Change window to pick it again."),
-                );
+                recording.end(Instant::now(), format!("Recording stopped: {error}"));
             } else {
                 recording.fail(Instant::now(), format!("Recording stopped: {error} {next}"));
             }
@@ -321,12 +360,12 @@ impl<H: Host> Owner<H> {
     pub(crate) fn screenshot(&mut self) -> Result<usize, String> {
         let image = self
             .newest_frame(|failure| {
-                let next = if failure.ended {
-                    "Change window to pick it again."
+                let error = sentence(&failure.error);
+                if failure.ended {
+                    error
                 } else {
-                    "Take it once the window shows again."
-                };
-                format!("{} {next}", sentence(&failure.error))
+                    format!("{error} Take it once the window shows again.")
+                }
             })?
             .clone();
         let picked = self
@@ -621,7 +660,54 @@ mod tests {
         );
         assert_eq!(
             harness.ask(Owner::screenshot),
-            Err("The captured window closed. Change window to pick it again.".to_owned())
+            Err("The captured window closed.".to_owned())
+        );
+    }
+
+    #[test]
+    fn picking_a_closed_window_again_keeps_the_session_and_drops_the_closed_capture_s_frames() {
+        let mut harness = harness(false);
+        let (earlier, mut closed) = harness.pick_numbered();
+        harness.deliver(&mut closed, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        assert!(!harness.ask(|owner| owner.capture_ended()));
+        harness.deliver(
+            &mut closed,
+            Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the captured window closed",
+            )),
+        );
+        assert!(harness.ask(|owner| owner.capture_ended()));
+
+        let again = harness.ask(move |owner| owner.pick_again(7, earlier));
+        let again = again.expect("capture starts");
+        assert_ne!(again, earlier, "the capture is another one");
+        assert!(!harness.ask(|owner| owner.capture_ended()));
+        let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
+        harness.deliver(&mut closed, Ok(&frame_image()));
+        assert_eq!(
+            harness.ask(preview),
+            Ok(None),
+            "the closed capture's frames are dropped"
+        );
+        assert!(
+            harness
+                .ask(|owner| owner.screenshot_pixels(0, 100))
+                .is_some(),
+            "the session's screenshot stays"
+        );
+
+        let fresh = harness.ask(move |owner| owner.pick_again(7, earlier));
+        assert!(
+            fresh.is_ok(),
+            "a capture another took the place of picks afresh"
+        );
+        assert!(
+            harness
+                .ask(|owner| owner.screenshot_pixels(0, 100))
+                .is_none(),
+            "a fresh pick drops the screenshots"
         );
     }
 

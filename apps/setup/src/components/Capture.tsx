@@ -17,7 +17,9 @@ import {
   type Built,
   type CheckKind,
   type Draft,
+  type ReferenceSaving,
   buildCharacters,
+  buildReferenceSave,
   buildSpec,
   EMPTY_DRAFT,
   firstWithPixels,
@@ -36,6 +38,8 @@ import { type Placed, liveDrawFrame, regionFromLiveBox, regionOverFrame, useLive
 import { boxTextId } from './BoxList.tsx';
 import { DraftButtons } from './capture/DraftButtons.tsx';
 import { ReadWith } from './capture/ReadWith.tsx';
+import { useLanding } from '../lib/landing.ts';
+import { showsNewCloseSign } from '../lib/windowSearch.ts';
 import { ScreenshotStage, useScreenshotStage } from './capture/ScreenshotStage.tsx';
 import { ChangeWindow } from './capture/StageBar.tsx';
 import { Stepper, nextFromWhere, stepTabs } from './capture/Stepper.tsx';
@@ -108,6 +112,9 @@ export type CaptureMode =
   | { readonly kind: 'fix'; readonly value: ValueDef }
   | { readonly kind: 'edit'; readonly value: ValueDef };
 
+/** What the reference editor's save waits for while no reference is edited, which never shows. */
+const NO_REFERENCE_SAVE: Built<ReferenceSaving> = { ok: false, next: '' };
+
 /** The name a draft of the capture lists under: what was typed, or else what it makes or fixes. */
 function draftName(mode: Exclude<CaptureMode, { readonly kind: 'edit' }>, setup: CaptureSetup): string {
   switch (mode.kind) {
@@ -167,7 +174,25 @@ function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restor
 }
 
 interface Props {
-  readonly choice: Choice;
+  /** The saved application the value or reference belongs to. */
+  readonly choice: Pick<Choice, 'app' | 'name'>;
+  /**
+   * What shows in place of the window while it is not captured, and why what needs the window waits, or null once it
+   * is captured. Everything that needs no window goes on without it.
+   */
+  readonly absent: { readonly panel: ReactNode; readonly reason: string } | null;
+  /** What the flow says about the window, above the picture. */
+  readonly windowNotes: ReactNode;
+  /**
+   * Hears each sign that the window may have closed: a failure of its live view, a refused screenshot, and a
+   * recording that stopped or could not start.
+   */
+  readonly onWindowFailed: () => void;
+  /**
+   * Whether the flow shows because another flow ended, so the focus has to land somewhere, and the control it lands
+   * on, or null while that is not known.
+   */
+  readonly landing: { readonly owed: boolean; readonly target: string | null };
   readonly mode: CaptureMode;
   /** The draft the flow finishes, or null. */
   readonly resumed: Resumed | null;
@@ -189,6 +214,10 @@ interface Props {
 
 export function Capture({
   choice,
+  absent,
+  windowNotes,
+  onWindowFailed,
+  landing,
   mode,
   resumed,
   restored,
@@ -216,8 +245,10 @@ export function Capture({
     draft: opening.setup.draft,
   }));
   const [draft, setDraft] = useState<Draft>(start.draft);
-  // The saved application the value or reference belongs to.
   const appId = choice.app;
+  const windowless = absent?.reason ?? null;
+  const page = useRef<HTMLElement>(null);
+  useLanding(landing.owed, landing.target, page);
   const appFile = useAppFile(appId);
   const { file } = appFile;
   const [step, setStep] = useState<Step>(opening.setup.step);
@@ -301,7 +332,11 @@ export function Capture({
     [isEditing, draft, editingRef],
   );
   const valueCheck = useMemo(() => buildSpec(draft, appId), [draft, appId]);
-  const built: Built<unknown> = characters ?? valueCheck;
+  const referenceSave = useMemo(
+    () => (isEditing ? buildReferenceSave(draft, editingRef) : null),
+    [isEditing, draft, editingRef],
+  );
+  const built: Built<unknown> = referenceSave ?? valueCheck;
   const builtKind = characters === null ? (valueCheck.ok ? valueCheck.spec.kind : 'none') : 'characters';
   const missing = captureMissing(setup, built, fixing !== null);
   // An edit changes a saved value in place and is never a draft.
@@ -346,8 +381,9 @@ export function Capture({
     setDraft,
     boxes,
     reference: editingRef,
-    characters,
+    saving: referenceSave,
     pin: fixPin ?? pin,
+    windowless,
     full,
     shown: shownPicture,
     setSelected,
@@ -376,6 +412,24 @@ export function Capture({
   const { recording, finder, reviewed, sheeted, checking } = teaching;
   // The recording that runs now, of readings or of looks: the owner records one thing at a time.
   const recordingNow = recording?.recording === true ? recording : looks.view?.recording === true ? looks.view : null;
+  const closeSigns = useMemo(
+    () => [screenshots.error, recording?.problem ?? null, looks.view?.problem ?? null, looks.error],
+    [screenshots.error, recording?.problem, looks.view?.problem, looks.error],
+  );
+  const closeSignsShown = useRef(closeSigns);
+  useEffect(() => {
+    if (showsNewCloseSign(closeSignsShown.current, closeSigns)) {
+      onWindowFailed();
+    }
+    closeSignsShown.current = closeSigns;
+  }, [closeSigns, onWindowFailed]);
+  // A window that goes shows its panel, whatever screenshot showed, so the way back to it is in view.
+  const hasWindow = windowless === null;
+  useEffect(() => {
+    if (!hasWindow) {
+      setSelected(null);
+    }
+  }, [hasWindow, setSelected]);
   const busy = saving || drafting.saving;
   const holds = held(busy, start, {
     screenshots: shots.length,
@@ -562,7 +616,8 @@ export function Capture({
     const spec: TrialSpec = { app: appId, check: valueCheck.spec, screenshot: drawnOn, pin: fixPin ?? pin };
     return trialOf('check', { ok: true, spec }, { set: setCheck });
   }, [taughtTrial, edit.built, valueCheck, drawnOn, appId, fixPin, pin]);
-  const check = useLiveCheck(trial, edit.again);
+  // A trial tried without a window is not kept to read with, so it is tried again once the window is captured.
+  const check = useLiveCheck(trial, `${edit.again ?? ''}, ${windowless === null ? 'window' : 'no window'}`);
   const dropFixes = agreedFixes(check.preview, edit.lost);
   // The size of the screenshot the region would show over, when an edited value was drawn at another: its region
   // is in the pixels of the size it was drawn at, so it shows and moves on screenshots of that size only.
@@ -588,9 +643,10 @@ export function Capture({
   const previewField = <MatchPreviewField preview={preview} region={previewDraft.region} />;
   // An edited value's region sits on a screenshot of the size it was drawn at, and a bar is looked for on those.
   const detectBlocked =
-    edited !== null && draft.drawnOn === null
+    windowless ??
+    (edited !== null && draft.drawnOn === null
       ? `Take a screenshot with the window at ${sizeText(edited.screen.windowSize)} to detect the bar: its region was drawn at that size.`
-      : null;
+      : null);
   // Color match is in the inspector while a state's thing is selected with Snap or Click.
   const colorMatched = editing === null && step === 'where' && draft.kind === 'state' && tool !== 'box';
   const selectedPreview = useSelectedPreview(
@@ -713,9 +769,10 @@ export function Capture({
         recorded={shots.filter((shot) => shot.recorded).length}
         removable={removable.length}
         blocked={
-          otherSize !== null && edited !== null
+          windowless ??
+          (otherSize !== null && edited !== null
             ? `Recording needs the window at ${sizeText(edited.screen.windowSize)}, the size ${edited.name} was drawn at.`
-            : lookBlocked(draft)
+            : lookBlocked(draft))
         }
         appName={choice.name}
         error={looks.error}
@@ -897,7 +954,7 @@ export function Capture({
   };
 
   return (
-    <main className="capture">
+    <main className="capture" ref={page}>
       <ScreenshotStage
         stage={stage}
         label="Capture"
@@ -922,20 +979,31 @@ export function Capture({
                 ? { kind: 'checking', step: teaching.checkStep }
                 : reviewed !== null
                   ? { kind: 'reviewing', recording: reviewed }
-                  : { kind: 'live', appName: choice.name },
+                  : absent === null
+                    ? { kind: 'live', appName: choice.name }
+                    : { kind: 'absent' },
           size: sheeted ? null : (native ?? null),
         }}
         actions={
-          <ChangeWindow
-            busy={busy}
-            // Finishing a draft starts on its screenshots, which the new window leaves behind.
-            loses={holds === 'unsaved' ? 'unsaved' : resumed === null ? 'nothing' : 'draft'}
-            onChangeWindow={onChangeWindow}
-          />
+          absent === null ? (
+            <ChangeWindow
+              busy={busy}
+              // Finishing a draft starts on its screenshots, which the new window leaves behind.
+              loses={holds === 'unsaved' ? 'unsaved' : resumed === null ? 'nothing' : 'draft'}
+              onChangeWindow={onChangeWindow}
+            />
+          ) : null
         }
+        absent={absent}
+        onLiveFailed={onWindowFailed}
         onTake={takeShot}
         sheet={teachingSheet(teaching)}
-        notes={selection.error === null ? null : <p className="warn">{selection.error}</p>}
+        notes={
+          <>
+            {windowNotes}
+            {selection.error === null ? null : <p className="warn">{selection.error}</p>}
+          </>
+        }
         held={{ frozen: live.shown.frozen, picture: heldPicture }}
         hint={(shortcut) =>
           stageHint({
@@ -1172,7 +1240,12 @@ export function Capture({
               {check.state.kind === 'set' && check.preview !== null && check.preview.unread !== null ? (
                 <p className="reading note">{check.preview.unread}</p>
               ) : (
-                <ReadingBox built={trial.ok ? null : trial.next} state={check.state} reads={check.reads} />
+                <ReadingBox
+                  built={trial.ok ? null : trial.next}
+                  state={check.state}
+                  reads={check.reads}
+                  windowless={windowless}
+                />
               )}
               {edit.built === null || check.preview === null ? null : (
                 <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
@@ -1234,8 +1307,9 @@ export function Capture({
           position={position}
           setSelected={setSelected}
           preview={previewField}
-          built={built}
+          saving={referenceSave ?? NO_REFERENCE_SAVE}
           check={check}
+          windowless={windowless}
           busy={busy}
           draftError={draftError}
           draftButton={draftButton}

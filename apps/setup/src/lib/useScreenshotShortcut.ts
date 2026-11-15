@@ -11,9 +11,10 @@ import { useShortcutChoice } from './useShortcutChoice.ts';
 
 /**
  * The global shortcut that takes a screenshot with `onPress`, and the user's choice of a new one, which is saved in
- * the settings. It is on while the component that uses it shows, except while the user is choosing.
+ * the settings. It is on while the component that uses it shows, except while the user is choosing and while
+ * `onPress` is null because there is nothing to take a screenshot of, so other programs keep the keys meanwhile.
  */
-export function useScreenshotShortcut(onPress: () => Promise<unknown>): Omit<
+export function useScreenshotShortcut(onPress: (() => Promise<unknown>) | null): Omit<
   ReturnType<typeof useShortcutChoice>,
   'shortcut'
 > & {
@@ -31,12 +32,13 @@ export function useScreenshotShortcut(onPress: () => Promise<unknown>): Omit<
   // Registering and unregistering run one after another, in the order the
   // effect asked for them, so a quick unregister cannot overtake a register.
   const queue = useRef<Promise<void>>(Promise.resolve());
+  const takes = onPress !== null;
   useEffect(() => {
-    if (choosing) {
+    if (choosing || !takes) {
       return undefined;
     }
     const pressed = (event: ShortcutEvent): void => {
-      if (event.state === 'Pressed') {
+      if (event.state === 'Pressed' && latest.current !== null) {
         background(latest.current());
       }
     };
@@ -62,7 +64,7 @@ export function useScreenshotShortcut(onPress: () => Promise<unknown>): Omit<
           // A shortcut that never registered has nothing to remove.
         });
     };
-  }, [shortcut, choosing]);
+  }, [shortcut, choosing, takes]);
 
   return { ...choice, error };
 }

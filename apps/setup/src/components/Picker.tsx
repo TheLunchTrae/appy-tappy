@@ -6,6 +6,8 @@ import { pickerLanding, useLanding } from '../lib/landing.ts';
 import { captureWindow, isRunning, known, offersMatchEdit, pickerStep, stepStatus } from '../lib/picker.ts';
 import { background } from '../lib/repeat.ts';
 import { useAppWindows } from '../lib/useAppWindows.ts';
+import { AntiCheatRunning } from './AntiCheatRunning.tsx';
+import { MatchEdit } from './MatchEdit.tsx';
 import { Trail } from './Trail.tsx';
 
 /** The window to capture and the application its values belong to. */
@@ -119,12 +121,7 @@ export function Picker({
           </button>
         </div>
       </div>
-      {found !== null && found.antiCheat.length > 0 ? (
-        <p className="warn">
-          Anti-cheat running now: {found.antiCheat.join(', ')}. Reading the screen is fine, but set the
-          application&apos;s anti-cheat before giving it key press or click actions.
-        </p>
-      ) : null}
+      <AntiCheatRunning products={found?.antiCheat ?? []} />
       <div className={lockedApp === null ? 'picker' : 'picker alone'}>
         {lockedApp === null ? (
           <section className="windows" aria-label="Applications">
@@ -208,31 +205,14 @@ export function Picker({
             </ul>
           ) : null}
           {'app' in step && offersMatchEdit(step) ? (
-            <>
-              <button
-                type="button"
-                className="btn"
-                data-landing="match"
-                disabled={busy}
-                onClick={() => {
-                  onEditApplication(step.app.summary);
-                }}
-              >
-                {draftedApps.has(step.app.id) ? (
-                  <>
-                    Finish draft<span className="visually-hidden"> of {step.app.name}</span>
-                  </>
-                ) : (
-                  <>Change how it&apos;s found</>
-                )}
-              </button>
-              {draftedApps.has(step.app.id) ? (
-                // Changing it here apart from its draft would leave the two to overwrite each other.
-                <p className="note">
-                  {step.app.name} has a draft of changes. To change how it&apos;s found, finish that draft.
-                </p>
-              ) : null}
-            </>
+            <MatchEdit
+              app={step.app}
+              drafted={draftedApps.has(step.app.id)}
+              disabled={busy}
+              onEdit={() => {
+                onEditApplication(step.app.summary);
+              }}
+            />
           ) : null}
           {typeof start === 'object' ? (
             <p className="warn" role="alert">

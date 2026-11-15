@@ -55,3 +55,10 @@ export function useOnChange(task: () => Promise<void>): void {
     background(task());
   }, [task]);
 }
+
+/** Runs `task` in the background once `afterMs` passed. */
+export function backgroundLater(task: () => Promise<unknown>, afterMs: number): void {
+  setTimeout(() => {
+    background(task());
+  }, afterMs);
+}
