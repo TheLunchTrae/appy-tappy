@@ -379,11 +379,12 @@ pub struct ReferenceDef {
 }
 
 /// A [`ReferenceDef`] as a file holds it: its keys, and `expects`, a list of
-/// characters that references carried once. That one key is read and
-/// forgotten, so the next save leaves it out; any other key the reference
-/// does not have is refused, as in every other part of the file.
+/// characters that no reference has. That one key is read and forgotten, so
+/// the next save leaves it out; any other key the reference does not have
+/// is refused, as in every other part of the file. An error names it as the
+/// reference it reads.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename = "ReferenceDef", deny_unknown_fields)]
 struct ReferenceKeys {
     id: String,
     name: String,

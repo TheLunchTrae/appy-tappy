@@ -9,6 +9,7 @@ import type { FoundView, RecordedLabel, RecordingView, ShownCharacter } from './
 import {
   type Answers,
   type Change,
+  type Earlier,
   type Guide,
   type Place,
   type Turn,
@@ -230,21 +231,38 @@ export function editedReading(
 export interface Held {
   /** The open check, or null while it is closed. */
   readonly guide: Guide | null;
-  /** What the checks closed since the reference's editor opened answered, which says what the user has confirmed. */
-  readonly past: Answers;
-  /** The readings the open check took from the draft, and the ID of the recording they are readings of. */
+  /**
+   * What the checks closed since the reference's editor opened leave the next one: their answers, which also say
+   * what the user has confirmed, the places they left out, the places that joined them, and the IDs of the search
+   * and the recording those places were finds and readings of.
+   */
+  readonly past: Past;
+  /** The readings the checks took from the draft, and the ID of the recording they are readings of. */
   readonly leftOut: { readonly recording: number | null; readonly readings: ReadonlyMap<number, LeftOut> };
 }
 
+/** What the closed checks leave the next one. */
+interface Past extends Earlier {
+  readonly search: number | null;
+  readonly recording: number | null;
+}
+
 /** Nothing held: no check is open, and none has answered anything. */
-export const NOTHING_HELD: Held = { guide: null, past: new Map(), leftOut: { recording: null, readings: new Map() } };
+export const NOTHING_HELD: Held = {
+  guide: null,
+  past: { answers: new Map(), left: new Set(), seen: new Set(), search: null, recording: null },
+  leftOut: { recording: null, readings: new Map() },
+};
 
 /** What changes what the capture screen holds of the check. */
 export type HeldEvent =
   /** The check opens with `guide`, or the open one becomes it. */
   | { readonly kind: 'show'; readonly guide: Guide }
-  /** The check closes: its answers stay as what the user has confirmed. */
-  | { readonly kind: 'close' }
+  /**
+   * The check closes: its answers, the places it left out, and the places that joined it stay for the next check. `search` and `recording`
+   * are the IDs of the search and the recording whose finds and readings it went over.
+   */
+  | { readonly kind: 'close'; readonly search: number | null; readonly recording: number | null }
   /** The reference's editor closes, so the next reference starts with nothing. */
   | { readonly kind: 'forget' }
   /** The check edited reading `index` of recording `recording`, which the draft now has as `reading`. */
@@ -260,21 +278,49 @@ export function leftOutOf(held: Held, recording: number | null): ReadonlyMap<num
   return held.leftOut.recording === recording ? held.leftOut.readings : NOTHING_HELD.leftOut.readings;
 }
 
-/** Every answer `held` has, of the closed checks and the open one, whose answers come last. */
+/**
+ * The answers that stand in `held`: the open check's, which began with the closed checks' and may have taken one
+ * back, or else the closed checks'.
+ */
 export function answersOf(held: Held): Answers {
-  return new Map([...held.past, ...(held.guide?.answers ?? [])]);
+  return held.guide?.answers ?? held.past.answers;
 }
 
 /**
- * What the capture screen holds of the check after `event`. Closing forgets which readings the check left out with
- * its answers, since only an answer of the open check keeps one again.
+ * What a check that opens now goes on from: the answers of the closed checks, and the places they left out and the
+ * places that joined them that are the same places still. A find of another search than `search`, or a reading of
+ * another recording than `recording`, only shares an index with one of those, so it joins anew and was never left
+ * out. A box is known by the shapes it joined with.
+ */
+export function earlierOf(held: Held, search: number | null, recording: number | null): Earlier {
+  const { past } = held;
+  const same = (key: string): boolean =>
+    key.startsWith('find-') ? past.search === search : !key.startsWith('reading-') || past.recording === recording;
+  const still = (keys: ReadonlySet<string>): ReadonlySet<string> => new Set([...keys].filter(same));
+  return { answers: past.answers, left: still(past.left), seen: still(past.seen) };
+}
+
+/**
+ * What the capture screen holds of the check after `event`. Closing keeps the answers, the places left out, the
+ * places that joined, and the readings the check took from the draft, which the next check goes on from: taking
+ * back there that a shape is no character keeps those places again.
  */
 export function heldStep(held: Held, event: HeldEvent): Held {
   switch (event.kind) {
     case 'show':
       return { ...held, guide: event.guide };
     case 'close':
-      return { ...NOTHING_HELD, past: answersOf(held) };
+      return {
+        ...held,
+        guide: null,
+        past: {
+          answers: answersOf(held),
+          left: held.guide?.left ?? held.past.left,
+          seen: held.guide?.seen ?? held.past.seen,
+          search: held.guide === null ? held.past.search : event.search,
+          recording: held.guide === null ? held.past.recording : event.recording,
+        },
+      };
     case 'forget':
       return NOTHING_HELD;
     case 'reading': {
@@ -315,7 +361,7 @@ export interface CharacterCheck {
   /** The open check, where it can be for the places as they are now, or null while it is closed. */
   readonly guide: Guide | null;
   readonly open: () => void;
-  /** Closes it and forgets its answers; the texts they wrote stay. Escape closes it too. */
+  /** Closes it. Its answers stay for the next check, and the texts they wrote stay. Escape closes it too. */
   readonly close: () => void;
   /**
    * The characters a reference saved next would learn that nobody has confirmed: the text reader read them, and the
@@ -376,8 +422,10 @@ export function useCharacterCheck(
     () => unconfirmed(learnedPlaces(places, recorder.view?.readings ?? [], saved), answersOf(state)),
     [places, recorder.view, saved, state],
   );
+  const search = finder.view?.id ?? null;
+  const recording = recorder.view?.id ?? null;
   const close = (): void => {
-    send({ kind: 'close' });
+    send({ kind: 'close', search, recording });
   };
 
   const edit = (place: Place, entry: ReviewEntry): void => {
@@ -389,7 +437,6 @@ export function useCharacterCheck(
       return;
     }
     if (place.source === 'reading') {
-      const recording = recorder.view?.id ?? null;
       const leftOut = leftOutOf(state, recording);
       const tick = review.entries[place.index]?.keep ?? place.keep;
       review.edit(place.index, {
@@ -455,7 +502,10 @@ export function useCharacterCheck(
     places,
     guide,
     open: () => {
-      send({ kind: 'show', guide: openGuide(places, needs) });
+      // The answers of the checks closed before stand, and the places that show since get them.
+      const start = openGuide(places, needs, earlierOf(state, search, recording));
+      apply(start.changes);
+      send({ kind: 'show', guide: start.guide });
     },
     close,
     unconfirmed: notConfirmed,

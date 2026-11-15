@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  type Earlier,
   type Guide,
   type Place,
   type Turn,
   beingRead,
   boxesShowing,
+  checkedEarlier,
   join,
   listed,
   openGuide,
@@ -22,6 +24,7 @@ import {
   NOTHING_HELD,
   answersOf,
   checkPlaces,
+  earlierOf,
   editedReading,
   escapeCloses,
   heldStep,
@@ -49,6 +52,12 @@ function place(source: Place['source'], index: number, shapes: string, text: str
   };
 }
 
+/** What a reference's first check goes on from: no answer, and no place. */
+const NO_EARLIER: Earlier = { answers: new Map(), left: new Set(), seen: new Set() };
+
+/** A reference's first check of `places`, which goes on from no earlier one. */
+const fresh = (places: readonly Place[], needs: readonly string[]): Guide => openGuide(places, needs, NO_EARLIER).guide;
+
 /** The characters of each step with its shapes, such as `7:ab`. */
 const outline = (places: readonly Place[], guide: Guide, needs: readonly string[] = []): string[] =>
   steps(places, guide, needs).map((step) => `${step.character}:${step.shapes.map((use) => use.shape).join('')}`);
@@ -67,7 +76,7 @@ function edited(places: readonly Place[], edits: ReturnType<typeof turn>['change
 /** Takes `turns` one after another, making each one's edits before the next. */
 function play(start: readonly Place[], needs: readonly string[], ...turns: Turn[]) {
   let places = [...start];
-  let guide = openGuide(places, needs);
+  let guide = fresh(places, needs);
   for (const event of turns) {
     const next = turn(guide, event, places, needs);
     places = edited(places, next.changes);
@@ -86,7 +95,7 @@ const all = [...finds, reading];
 
 describe('the steps of a check', () => {
   test('are one for each character, the needed ones first, with every spot that shows a shape', () => {
-    const guide = openGuide(all, ['%', '8']);
+    const guide = fresh(all, ['%', '8']);
     expect(outline(all, guide, ['%', '8'])).toEqual(['%:p', '8:e', '7:s']);
     expect(steps(all, guide, [])[0]).toEqual({
       character: '7',
@@ -109,12 +118,12 @@ describe('the steps of a check', () => {
 
   test('put a shape with the first of the characters that as many places give it', () => {
     const tied = [place('find', 0, 's', '1'), place('find', 1, 's', '7')];
-    expect(outline(tied, openGuide(tied, []))).toEqual(['1:s']);
+    expect(outline(tied, fresh(tied, []))).toEqual(['1:s']);
   });
 
   test('leave out a place whose text has another number of characters than it has shapes', () => {
     const places = [place('find', 0, 'se', '7'), place('find', 1, 'e', '8'), place('find', 2, '', '')];
-    const guide = openGuide(places, []);
+    const guide = fresh(places, []);
     expect(outline(places, guide)).toEqual(['8:e']);
     expect(unfitted(places, guide)).toEqual([0, 2]);
   });
@@ -122,7 +131,7 @@ describe('the steps of a check', () => {
   test('leave out a place that is still being read, which is not text to type either', () => {
     const unread: Place = { ...place('find', 0, 'se', ''), reading: true };
     const places = [unread, place('find', 1, 'e', '8')];
-    const guide = openGuide(places, []);
+    const guide = fresh(places, []);
     expect(outline(places, guide)).toEqual(['8:e']);
     expect(unfitted(places, guide)).toEqual([]);
     expect(beingRead(places)).toBe(1);
@@ -134,7 +143,7 @@ describe('the steps of a check', () => {
 
 describe('an answer', () => {
   test('for a character fixes every place that shows its shape, and ticks the places checked in full', () => {
-    const first = turn(openGuide(all, []), { kind: 'confirm' }, all, []);
+    const first = turn(fresh(all, []), { kind: 'confirm' }, all, []);
     // The misread reading is fixed; no place is checked in full yet, so the finds stay unticked.
     expect(first.changes).toEqual([{ source: 'reading', index: 1, text: '78', keep: true }]);
     expect(first.guide.cursor).toEqual({ at: 'character', character: '8' });
@@ -150,7 +159,7 @@ describe('an answer', () => {
 
   test('that a shape is another character moves it to that character everywhere', () => {
     const places = [place('find', 0, 'ab', '00'), place('reading', 0, 'bc', '01')];
-    const next = turn(openGuide(places, []), { kind: 'retype', shape: 'b', character: 'O' }, places, []);
+    const next = turn(fresh(places, []), { kind: 'retype', shape: 'b', character: 'O' }, places, []);
     expect(next.changes).toEqual([
       { source: 'find', index: 0, text: '0O', keep: true },
       { source: 'reading', index: 0, text: 'O1', keep: true },
@@ -163,19 +172,19 @@ describe('an answer', () => {
 
   test('that takes the last shape of a step goes on to the step after it', () => {
     const places = [place('find', 0, 'ab', '01')];
-    const next = turn(openGuide(places, []), { kind: 'retype', shape: 'a', character: 'O' }, places, []);
+    const next = turn(fresh(places, []), { kind: 'retype', shape: 'a', character: 'O' }, places, []);
     expect(next.guide.cursor).toEqual({ at: 'character', character: '1' });
   });
 
   test('keeps the spaces a text has', () => {
     const places = [place('find', 0, 'sep', ' 1 8%')];
-    expect(turn(openGuide(places, []), { kind: 'retype', shape: 's', character: '7' }, places, []).changes).toEqual([
+    expect(turn(fresh(places, []), { kind: 'retype', shape: 's', character: '7' }, places, []).changes).toEqual([
       { source: 'find', index: 0, text: ' 7 8%', keep: true },
     ]);
   });
 
   test('of nothing typed changes nothing', () => {
-    const guide = openGuide(all, []);
+    const guide = fresh(all, []);
     const next = turn(guide, { kind: 'retype', shape: 's', character: ' ' }, all, []);
     expect(next.changes).toEqual([]);
     expect(next.guide).toEqual(guide);
@@ -200,7 +209,7 @@ describe('a reading review leaves out', () => {
 
   test('is not asked about, gets the answers, and stays left out', () => {
     const places = [kept, out];
-    const guide = openGuide(places, []);
+    const guide = fresh(places, []);
     expect(steps(places, guide, [])[0]?.shapes[0]?.spots).toEqual([{ place: 0, at: 0 }]);
     const next = turn(guide, { kind: 'retype', shape: 's', character: '7' }, places, []);
     expect(next.changes).toEqual([
@@ -226,7 +235,7 @@ describe('a reading review leaves out', () => {
     const start = entries(readings, new Map(), new Map(), new Map(), []);
     expect(start.map((entry) => entry.keep)).toEqual([true, false]);
     const places = checkPlaces([], [], [], readings, start, new Map());
-    const next = turn(openGuide(places, []), { kind: 'retype', shape: 's', character: '7' }, places, []);
+    const next = turn(fresh(places, []), { kind: 'retype', shape: 's', character: '7' }, places, []);
     const edits = new Map(next.changes.map((change) => [change.index, { keep: change.keep, text: change.text }]));
     const after = entries(readings, edits, new Map(), new Map(), []);
     expect(after).toEqual([
@@ -282,7 +291,7 @@ describe('a box', () => {
   const places = [drawn, place('find', 0, 's', '1', false), reading];
 
   test('joins the steps, and one answer fixes it with the finds and the readings', () => {
-    const guide = openGuide(places, []);
+    const guide = fresh(places, []);
     expect(outline(places, guide)).toEqual(['1:s', '8:e']);
     expect(turn(guide, { kind: 'retype', shape: 's', character: 'T' }, places, []).changes).toEqual([
       { source: 'box', index: 4, text: 'T8', keep: true },
@@ -326,12 +335,12 @@ describe('a box', () => {
   test('that shows no character is asked nothing and counts for nothing, since no answer could be about it', () => {
     // No character was found in its picture: no text fits it, and it has no tick to leave it out with.
     const bare = place('box', 4, '', '18');
-    expect(unfitted([bare], openGuide([bare], []))).toEqual([]);
-    expect(openGuide([bare], []).cursor).toEqual({ at: 'done' });
+    expect(unfitted([bare], fresh([bare], []))).toEqual([]);
+    expect(fresh([bare], []).cursor).toEqual({ at: 'done' });
     expect(unconfirmed([bare], new Map())).toEqual([]);
     // A find that shows none has a tick, so it is still text to type or leave out.
     const find = place('find', 0, '', '18');
-    expect(unfitted([find], openGuide([find], []))).toEqual([0]);
+    expect(unfitted([find], fresh([find], []))).toEqual([0]);
     expect(unconfirmed([find], new Map())).toEqual(['1', '8']);
   });
 });
@@ -347,7 +356,7 @@ describe('a reading the draft keeps already', () => {
   };
 
   test('goes from the draft for a shape that is no character, and comes back when that is taken back', () => {
-    const open = openGuide([reading], []);
+    const open = fresh([reading], []);
     const aside = turn(open, { kind: 'setAside', shape: 's' }, [reading], []);
     const gone = editedReading(kept, none, reading, true, entryOf(aside.changes));
     expect(gone).toEqual({ text: '18', leftOut: true, ticked: true });
@@ -376,7 +385,7 @@ describe('a reading the draft keeps already', () => {
   });
 
   test("gets the check's answer on the draft, and not what review changed without keeping", () => {
-    const fixed = turn(openGuide([reading], []), { kind: 'retype', shape: 's', character: '7' }, [reading], []);
+    const fixed = turn(fresh([reading], []), { kind: 'retype', shape: 's', character: '7' }, [reading], []);
     expect(editedReading(kept, none, reading, true, entryOf(fixed.changes))).toEqual({
       text: '78',
       leftOut: false,
@@ -384,7 +393,7 @@ describe('a reading the draft keeps already', () => {
     });
     // Review has its 8 as a 9, which the user did not keep: the draft gets the 7 alone.
     const reviewed = { ...reading, text: '19', typed: true };
-    const again = turn(openGuide([reviewed], []), { kind: 'retype', shape: 's', character: '7' }, [reviewed], []);
+    const again = turn(fresh([reviewed], []), { kind: 'retype', shape: 's', character: '7' }, [reviewed], []);
     expect(entryOf(again.changes)).toEqual({ keep: true, text: '79' });
     expect(editedReading(kept, none, reviewed, true, entryOf(again.changes))).toEqual({
       text: '78',
@@ -410,7 +419,7 @@ describe('a reading the draft keeps already', () => {
     const unticked = { ...reading, keep: false, asks: false };
     const asked = place('find', 0, 's', '1');
     const both = [asked, unticked];
-    const fixed = turn(openGuide(both, []), { kind: 'retype', shape: 's', character: '7' }, both, []);
+    const fixed = turn(fresh(both, []), { kind: 'retype', shape: 's', character: '7' }, both, []);
     expect(entryOf(fixed.changes)).toEqual({ keep: false, text: '78' });
     expect(editedReading(kept, none, unticked, false, entryOf(fixed.changes))).toEqual({
       text: '78',
@@ -455,7 +464,7 @@ describe('a reading the draft keeps while review has it left out without Keep', 
   const [onDraft] = places;
 
   test('goes from the draft for a shape that is no character, and comes back with its tick still clear', () => {
-    const aside = turn(openGuide(places, []), { kind: 'setAside', shape: 's' }, places, []);
+    const aside = turn(fresh(places, []), { kind: 'setAside', shape: 's' }, places, []);
     expect(aside.changes).toEqual([{ source: 'reading', index: 0, text: '7', keep: false }]);
     const [gone] = aside.changes;
     if (onDraft === undefined || gone === undefined) {
@@ -479,7 +488,7 @@ describe('a reading the draft keeps while review has it left out without Keep', 
   });
 
   test("keeps review's cleared tick when an answer only rewrites its text", () => {
-    const fixed = turn(openGuide(places, []), { kind: 'retype', shape: 's', character: '1' }, places, []);
+    const fixed = turn(fresh(places, []), { kind: 'retype', shape: 's', character: '1' }, places, []);
     expect(fixed.changes).toEqual([{ source: 'reading', index: 0, text: '1', keep: true }]);
     const [edit] = fixed.changes;
     if (onDraft === undefined || edit === undefined) {
@@ -487,6 +496,118 @@ describe('a reading the draft keeps while review has it left out without Keep', 
     }
     expect(reviewTick(false, undefined, onDraft, edit)).toBe(false);
     expect(editedReading(kept, none, onDraft, false, edit)).toEqual({ text: '1', leftOut: false, ticked: false });
+  });
+});
+
+describe('a check after an earlier one', () => {
+  // The first check answered for every shape: s is 7, e is 8, p is %.
+  const first = play(all, [], { kind: 'confirm' }, { kind: 'confirm' }, { kind: 'confirm' });
+  const earlier: Earlier = first.guide;
+  // A search since found text that shows the misread 7 again, and a shape no answer covers.
+  const found = place('find', 5, 'sx', '19', false);
+  const since = [...first.places, found];
+
+  test('asks only about the shapes no earlier answer covers, and gives the places since the answers', () => {
+    const open = openGuide(since, [], earlier);
+    expect(open.changes).toEqual([{ source: 'find', index: 5, text: '79', keep: false }]);
+    const places = edited(since, open.changes);
+    expect(outline(places, open.guide)).toEqual(['9:x']);
+    expect(open.guide.cursor).toEqual({ at: 'character', character: '9' });
+    expect(progress(open.guide, places, [])).toEqual({ step: 1, of: 1 });
+    expect(checkedEarlier(open.guide, places, [])).toBe(3);
+    const next = turn(open.guide, { kind: 'confirm' }, places, []);
+    expect(next.changes).toEqual([{ source: 'find', index: 5, text: '79', keep: true }]);
+    expect(next.guide.cursor).toEqual({ at: 'done' });
+    // Its own answer stays in its step, so Back returns to it.
+    expect(outline(edited(places, next.changes), next.guide)).toEqual(['9:x']);
+  });
+
+  test('has no step when the earlier answers cover every shape, and ticks the find they cover', () => {
+    const covered = [...first.places, place('find', 5, 'se', '18', false)];
+    const open = openGuide(covered, [], earlier);
+    expect(open.changes).toEqual([{ source: 'find', index: 5, text: '78', keep: true }]);
+    const places = edited(covered, open.changes);
+    expect(outline(places, open.guide)).toEqual([]);
+    expect(open.guide.cursor).toEqual({ at: 'done' });
+    expect(checkedEarlier(open.guide, places, [])).toBe(3);
+    // A reference's first check hides nothing.
+    expect(checkedEarlier(fresh(all, []), all, [])).toBe(0);
+  });
+
+  test('leaves a place that joined an earlier check as the user has it since', () => {
+    // The first check ticked find 0, and the user cleared the tick afterward.
+    const cleared = first.places.map((each) => (each.index === 0 ? { ...each, keep: false } : each));
+    expect(texts(first.places)[0]).toEqual(['78%', true]);
+    expect(openGuide(cleared, [], earlier).changes).toEqual([]);
+    // One that never joined gets the tick.
+    expect(openGuide(cleared, [], { ...earlier, seen: new Set() }).changes).toEqual([
+      { source: 'find', index: 0, text: '78%', keep: true },
+    ]);
+  });
+
+  test('asks again about a shape whose answer a text typed since disagrees with', () => {
+    const retyped = first.places.map((each) => (each.index === 3 ? { ...each, text: '1%', typed: true } : each));
+    const open = openGuide(retyped, [], earlier);
+    expect(open.changes).toEqual([]);
+    expect(outline(retyped, open.guide)).toEqual(['7:s']);
+    expect(steps(retyped, open.guide, [])[0]?.shapes[0]?.also).toEqual(['1']);
+    // The answer given again is this check's, so its step stays for Back to return to.
+    const next = turn(open.guide, { kind: 'confirm' }, retyped, []);
+    expect(next.changes).toEqual([{ source: 'find', index: 3, text: '7%', keep: true }]);
+    expect(outline(edited(retyped, next.changes), next.guide)).toEqual(['7:s']);
+  });
+
+  test('asks again about a step the earlier check skipped', () => {
+    const skipped = play(all, [], { kind: 'confirm' }, { kind: 'skip' }, { kind: 'confirm' });
+    const open = openGuide(skipped.places, [], skipped.guide);
+    expect(outline(skipped.places, open.guide)).toEqual(['8:e']);
+  });
+
+  test('asks about every character again on Check all again, from the first step', () => {
+    const open = openGuide(since, [], earlier);
+    const places = edited(since, open.changes);
+    const done = turn(open.guide, { kind: 'confirm' }, places, []);
+    const ticked = edited(places, done.changes);
+    const again = turn(done.guide, { kind: 'again' }, ticked, []);
+    expect(again.changes).toEqual([]);
+    expect(outline(ticked, again.guide)).toEqual(['7:s', '8:e', '%:p', '9:x']);
+    expect(again.guide.cursor).toEqual({ at: 'character', character: '7' });
+    expect(checkedEarlier(again.guide, ticked, [])).toBe(0);
+    // The earlier answers still stand: no step asks until the user changes one.
+    expect(steps(ticked, again.guide, []).every((step) => step.shapes.every((use) => use.answered))).toBe(true);
+    expect(again.guide.answers).toEqual(done.guide.answers);
+  });
+  test('takes back on Check all again that a shape is no character, and keeps the places left out for it', () => {
+    // Shape x is no character, so the earlier check left out the find and the reading that show it.
+    const shown = [place('find', 0, 'sx', '7Q'), place('reading', 0, 'sx', '7Q'), place('find', 1, 's', '7')];
+    const before = play(shown, [], { kind: 'confirm' }, { kind: 'setAside', shape: 'x' });
+    expect(texts(before.places)).toEqual([
+      ['7Q', false],
+      ['7Q', false],
+      ['7', true],
+    ]);
+    const open = openGuide(before.places, [], before.guide);
+    expect(open.changes).toEqual([]);
+    const again = turn(open.guide, { kind: 'again' }, before.places, []).guide;
+    expect(outline(before.places, again)).toEqual(['7:s', 'Q:x']);
+    const restored = turn(again, { kind: 'restore', shape: 'x' }, before.places, []);
+    expect(restored.changes).toEqual([
+      { source: 'find', index: 0, text: '7Q', keep: true },
+      { source: 'reading', index: 0, text: '7Q', keep: true },
+    ]);
+    expect(restored.guide.answers.has('x')).toBe(false);
+  });
+
+  test('gives a place that shows other shapes than it joined with the answers anew', () => {
+    // Box 2 was deleted, and a box drawn since has its ID and the reader's guess for its text.
+    const drawn: Place = { ...place('box', 2, 'se', '18'), typed: false };
+    const before: Earlier = { ...first.guide, seen: new Set([...first.guide.seen, 'box-2 p']) };
+    expect(openGuide([...first.places, drawn], [], before).changes).toEqual([
+      { source: 'box', index: 2, text: '78', keep: true },
+    ]);
+    // The same box still, which the user has typed over since, stays as it is.
+    const same: Earlier = { ...first.guide, seen: new Set([...first.guide.seen, 'box-2 s e']) };
+    expect(openGuide([...first.places, drawn], [], same).changes).toEqual([]);
   });
 });
 
@@ -500,19 +621,56 @@ describe('what the capture screen holds of the check', () => {
     reading: { text: '18', leftOut: true, ticked: true },
   } as const;
 
-  test('closing keeps the answers as what the user confirmed, and forgets the readings left out', () => {
-    const closed = heldStep(heldStep(open, leftOut), { kind: 'close' });
+  const close = { kind: 'close', search: 7, recording: 3 } as const;
+
+  test('closing keeps the answers, the places left out and joined, and the readings taken from the draft', () => {
+    const aside = { ...answered, left: new Set(['reading-1']) };
+    const closed = heldStep(heldStep(heldStep(open, { kind: 'show', guide: aside }), leftOut), close);
     expect(closed.guide).toBeNull();
-    expect(closed.past).toEqual(answered.answers);
-    expect(leftOutOf(closed, 3).size).toBe(0);
-    // The next check's answers come after them.
-    const next = heldStep(closed, { kind: 'show', guide: { ...answered, answers: new Map([['s', null]]) } });
-    expect(answersOf(next).get('s')).toBeNull();
-    expect(answersOf(next).size).toBe(answered.answers.size);
+    expect(closed.past).toEqual({
+      answers: answered.answers,
+      left: aside.left,
+      seen: answered.seen,
+      search: 7,
+      recording: 3,
+    });
+    expect(answersOf(closed)).toEqual(answered.answers);
+    // The next check can put the reading back as the draft kept it.
+    expect(leftOutOf(closed, 3).get(1)).toEqual({ text: '18', ticked: true });
+    // Closing again, with nothing open, changes none of it.
+    expect(heldStep(closed, { kind: 'close', search: 8, recording: 4 })).toEqual(closed);
+  });
+
+  test('an answer the next check takes back is confirmed no longer', () => {
+    const aside = new Map([...answered.answers, ['e', null]]);
+    const closed = heldStep(heldStep(open, { kind: 'show', guide: { ...answered, answers: aside } }), close);
+    const places = [place('find', 0, 'e', '8')];
+    const next = openGuide(places, [], earlierOf(closed, 7, 3)).guide;
+    const again = turn(next, { kind: 'again' }, places, []).guide;
+    const restored = turn(again, { kind: 'restore', shape: 'e' }, places, []).guide;
+    const reopened = heldStep(closed, { kind: 'show', guide: restored });
+    expect(answersOf(reopened).has('e')).toBe(false);
+    expect(answersOf(heldStep(reopened, close)).has('e')).toBe(false);
+  });
+
+  test('the next check goes on from the places that joined, but not from another search or recording', () => {
+    const boxed = {
+      ...answered,
+      left: new Set(['find-0', 'reading-1']),
+      seen: new Set(['box-2 s', 'find-0 s e p', 'reading-1 s e']),
+    };
+    const closed = heldStep(heldStep(NOTHING_HELD, { kind: 'show', guide: boxed }), close);
+    expect(earlierOf(closed, 7, 3)).toEqual({ answers: answered.answers, left: boxed.left, seen: boxed.seen });
+    // A find of the next search, or a reading of the next recording, only has the index of one that joined.
+    expect(earlierOf(closed, 8, 3).seen).toEqual(new Set(['box-2 s', 'reading-1 s e']));
+    expect(earlierOf(closed, 8, 3).left).toEqual(new Set(['reading-1']));
+    expect(earlierOf(closed, 7, 4).seen).toEqual(new Set(['box-2 s', 'find-0 s e p']));
+    expect(earlierOf(closed, 7, 4).left).toEqual(new Set(['find-0']));
+    expect(earlierOf(closed, null, null).seen).toEqual(new Set(['box-2 s']));
   });
 
   test("the reference's editor closing closes an open check and forgets every answer", () => {
-    const closed = heldStep(open, { kind: 'close' });
+    const closed = heldStep(open, close);
     for (const held of [open, closed, heldStep(open, leftOut)]) {
       expect(heldStep(held, { kind: 'forget' })).toEqual(NOTHING_HELD);
     }
@@ -573,7 +731,7 @@ describe('text typed by hand while the check is open', () => {
   const places = [place('find', 0, 's', '7'), place('find', 1, 'e', '8')];
 
   test('is not rewritten by an answer about another shape', () => {
-    const first = turn(openGuide(places, []), { kind: 'confirm' }, places, []);
+    const first = turn(fresh(places, []), { kind: 'confirm' }, places, []);
     // The user types 1 over the 7 in the list of finds, then answers for the 8.
     const typed = [{ ...places[0], text: '1' }, places[1]].filter((each): each is Place => each !== undefined);
     const second = turn(settle(first.guide, typed, []), { kind: 'confirm' }, typed, []);
@@ -581,7 +739,7 @@ describe('text typed by hand while the check is open', () => {
   });
 
   test('that disagrees with an answer makes the step ask again, and the answer then fixes it', () => {
-    const first = turn(openGuide(places, []), { kind: 'confirm' }, places, []);
+    const first = turn(fresh(places, []), { kind: 'confirm' }, places, []);
     const typed = [place('find', 0, 's', '1'), place('find', 1, 'e', '8')];
     const guide = settle(first.guide, typed, []);
     const seven = steps(typed, guide, []).find((step) => step.character === '7');
@@ -615,7 +773,7 @@ describe('a place that joins an open check', () => {
     const late = [...answered, { ...unread, text: '18', reading: false }];
     const next = join(guide, late);
     expect(next.changes).toEqual([{ source: 'find', index: 5, text: '78', keep: true }]);
-    expect(next.guide.seen).toEqual(new Set(['find-0', 'find-3', 'reading-1', 'find-5']));
+    expect(next.guide.seen).toEqual(new Set(['find-0 s e p', 'find-3 s p', 'reading-1 s e', 'find-5 s e']));
     expect(next.guide.cursor).toEqual(guide.cursor);
     // It joined, so nothing more follows from it.
     const joined = edited(late, next.changes);
@@ -676,7 +834,7 @@ describe('a place that joins an open check', () => {
   });
 
   test('is one of the places a check opens on, which have no answer to get', () => {
-    expect(openGuide([...all, unread], []).seen).toEqual(new Set(['find-0', 'find-3', 'reading-1']));
+    expect(fresh([...all, unread], []).seen).toEqual(new Set(['find-0 s e p', 'find-3 s p', 'reading-1 s e']));
   });
 });
 
@@ -700,7 +858,7 @@ describe('a place whose text does not fit its shapes', () => {
   test('stays listed while its text is typed, though the text fits on the way', () => {
     // Four characters typed for three shapes; a backspace away from fitting, and one more from what it shows.
     const long = [place('find', 0, 'abc', '1234')];
-    const guide = openGuide(long, []);
+    const guide = fresh(long, []);
     expect(guide.cursor).toEqual({ at: 'unfitted', places: ['find-0'] });
     const fitting = [place('find', 0, 'abc', '123')];
     const settled = settle(guide, fitting, []);
@@ -732,14 +890,15 @@ describe('a place whose text does not fit its shapes', () => {
 
 describe('moving through a check', () => {
   test('goes back and on without answering, and stops at both ends', () => {
-    const start = openGuide(all, []);
+    const start = fresh(all, []);
     expect(turn(start, { kind: 'back' }, all, [])).toEqual({ guide: start, changes: [] });
     const { guide } = play(all, [], { kind: 'skip' }, { kind: 'skip' }, { kind: 'skip' }, { kind: 'skip' });
     expect(guide).toEqual({
       cursor: { at: 'done' },
+      earlier: new Set(),
       answers: new Map(),
       left: new Set(),
-      seen: new Set(['find-0', 'find-3', 'reading-1']),
+      seen: new Set(['find-0 s e p', 'find-3 s p', 'reading-1 s e']),
     });
     expect(turn(guide, { kind: 'back' }, all, []).guide.cursor).toEqual({ at: 'character', character: '%' });
   });
@@ -867,7 +1026,7 @@ describe('the readings a save would learn', () => {
       const saved = savedReadings(reviewing, [], kept);
       const places = checkPlaces([], [], [], [reading], leftOut, saved);
       const offered = unconfirmed(learnedPlaces(places, [reading], saved), new Map());
-      const asked = steps(places, openGuide(places, []), []).map((step) => step.character);
+      const asked = steps(places, fresh(places, []), []).map((step) => step.character);
       // With review closed a save learns the reading, so the offer names its 7 and the check has a step for it.
       // With review open, Keep would drop it: neither names it.
       expect(offered).toEqual(reviewing ? [] : ['7']);

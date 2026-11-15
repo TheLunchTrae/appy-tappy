@@ -10,6 +10,7 @@ import {
   type Turn,
   beingRead,
   boxesShowing,
+  checkedEarlier,
   listed,
   placeKey,
   progress,
@@ -292,14 +293,17 @@ function keyFocus(target: EventTarget | null, sheet: Element): KeyFocus {
  * A step's buttons, the keys that press them, and the hint that names the keys. `back` is null where the step has
  * none before it, and left out where the step shows no Back; `skip` is null where there is nothing to skip.
  * `character` is the step's while a shape of it can be retyped, so a typed character goes to that shape's field.
+ * `again` is there where the check has characters to ask about again.
  */
 function StepAnswers({
+  again,
   back,
   skip,
   primary,
   onPrimary,
   character,
 }: {
+  readonly again?: () => void;
   readonly back?: (() => void) | null;
   readonly skip: (() => void) | null;
   readonly primary: ReactNode;
@@ -352,6 +356,11 @@ function StepAnswers({
   return (
     <div ref={end} className="end with-hint">
       <Hint topic="the keys that answer a step">{CHECK_KEYS_HINT}</Hint>
+      {again === undefined ? null : (
+        <button type="button" className="btn" onClick={again}>
+          Check all again
+        </button>
+      )}
       {back === undefined ? null : (
         <button
           type="button"
@@ -544,6 +553,7 @@ export function CharacterCheckSheet(props: Props) {
   const left = unfitted(places, guide).length;
   const unread = beingRead(places);
   const skipped = all.filter((each) => each.shapes.some((use) => !use.answered)).map((each) => each.character);
+  const earlier = checkedEarlier(guide, places, needs);
   const nothing = all.length === 0 && left === 0 && unread === 0;
   return (
     <div ref={sheet} className="check-sheet">
@@ -559,14 +569,18 @@ export function CharacterCheckSheet(props: Props) {
           <div>
             <h2 tabIndex={-1} data-check-head>
               {nothing
-                ? 'Nothing to check yet'
+                ? earlier === 0
+                  ? 'Nothing to check yet'
+                  : 'Nothing new to check'
                 : skipped.length === 0 && left === 0 && unread === 0
                   ? 'Every character is checked'
                   : 'That was the last one'}
             </h2>
             <p>
               {nothing
-                ? 'No box, find, or kept reading shows characters to check. Draw a box around some characters, find more like it, or record the reference, first.'
+                ? earlier === 0
+                  ? 'No box, find, or kept reading shows characters to check. Draw a box around some characters, find more like it, or record the reference, first.'
+                  : 'You answered for every character in an earlier check, and your answers stand. Check all again goes through them once more.'
                 : [
                     skipped.length === 0
                       ? 'Each box, find, and reading has the text you confirmed, and a find you checked in full is ticked, ready to add.'
@@ -577,12 +591,22 @@ export function CharacterCheckSheet(props: Props) {
                     unread === 0
                       ? null
                       : `${plural(unread, 'place is', 'places are')} still being read, and ${unread === 1 ? 'its' : 'their'} characters are asked about once the text arrives.`,
+                    earlier === 0
+                      ? null
+                      : `${plural(earlier, 'character', 'characters')} you answered for in an earlier check ${earlier === 1 ? 'was' : 'were'} not asked about again.`,
                   ]
                     .filter((part) => part !== null)
                     .join(' ')}
             </p>
           </div>
           <StepAnswers
+            {...(earlier === 0
+              ? {}
+              : {
+                  again: () => {
+                    props.onTurn({ kind: 'again' });
+                  },
+                })}
             {...(nothing
               ? {}
               : {
