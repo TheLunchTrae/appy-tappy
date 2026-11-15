@@ -435,8 +435,7 @@ fn prune(folder: &Path, keep: usize) {
         })
         .collect();
     // The oldest is looked for once for each file to delete, which are
-    // few. Sorting the files would build a sort of these triples into the
-    // runtime, which has a size target (`rust:footprint`).
+    // few.
     for _ in keep..traces.len() {
         let oldest = traces
             .iter()

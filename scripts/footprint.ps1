@@ -27,7 +27,7 @@ Set-StrictMode -Version Latest
 
 # The targets. Memory is the private working set, the Memory column of Task
 # Manager's Details tab; CPU is the share of one core over the sample. The
-# binary's size only has to stay far from egregious: memory and CPU are what
+# binary size target only catches runaway growth: memory and CPU are what
 # running beside a game costs.
 $BinaryLimit = 20MB
 $IdleMemoryLimit = 3MB
