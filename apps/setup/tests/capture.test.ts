@@ -27,6 +27,7 @@ test('the capture is held while any screen holds it, and each change is told onc
 /** A pick the test answers by hand, with the window it was for. */
 interface Asked {
   readonly window: number;
+  readonly continues: number | null;
   readonly answer: (capture: number) => void;
   readonly fail: (error: string) => void;
 }
@@ -43,10 +44,11 @@ function owner(): {
   const asked: Asked[] = [];
   let slot: number | null = null;
   const screen = screenCaptures(
-    async (window) =>
+    async (window, continues) =>
       new Promise<number>((resolve, reject) => {
         asked.push({
           window,
+          continues,
           answer: (capture) => {
             slot = capture;
             resolve(capture);
@@ -119,4 +121,28 @@ test('a pick whose screen went before its turn is not sent, and a failed pick ho
   asked[1]?.answer(12);
   await picked;
   expect(slot()).toBe(12);
+});
+
+test('picking again continues the capture the screen holds, and starts afresh once it stopped', async () => {
+  const { asked, screen } = owner();
+  const editor = screen();
+  editor.enter();
+  const first = editor.pickAgain(1);
+  await settle();
+  asked[0]?.answer(10);
+  await first;
+  const again = editor.pickAgain(1);
+  await settle();
+  asked[1]?.answer(11);
+  await again;
+  editor.stop();
+  const afresh = editor.pickAgain(2);
+  await settle();
+  asked[2]?.answer(12);
+  await afresh;
+  const plain = editor.pick(2);
+  await settle();
+  asked[3]?.answer(13);
+  await plain;
+  expect(asked.map((pick) => pick.continues)).toEqual([null, 10, null, null]);
 });

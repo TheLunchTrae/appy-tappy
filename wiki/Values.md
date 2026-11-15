@@ -144,10 +144,21 @@ is there when the window doesn't match, once you saved or discarded what you
 changed in the editor.
 
 Everything that doesn't need the window works meanwhile: names, the check's
-settings, **Stays at**, a reference's characters and saved samples, and
-saving a change that needs no new screenshot. What needs the window is off
-and says why: **Take screenshot**, recording, detecting a bar, and the box
-that shows what the value reads on the live window.
+settings, **Stays at**, a reference's tolerance and
+**Characters it needs**, and saving a change that needs no new screenshot.
+What needs the window is off and says why: **Take screenshot**, recording,
+detecting a bar, and the box that shows what the value reads on the live
+window. The screenshot shortcut does nothing meanwhile, and the first tile
+under the stage reads **No window** instead of **Live**.
+
+If the application closes while you edit, the same panel takes the live
+window's place. What you changed stays, and so do the screenshots you took:
+select one under the stage to keep working on it. Open the application
+again and select **Refresh**, and the editor goes on with the window.
+
+If no open window matches everything that must match, AppyTappy captures the
+fallback window and says so above the window, with
+**Change how it's found** beside it. Check that it is the window you mean.
 
 If an anti-cheat product is running, the editor says so above the window:
 reading the screen is fine, but set the application's

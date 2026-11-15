@@ -6,6 +6,7 @@ import {
   type Draft,
   type DraftState,
   buildCharacters,
+  buildReferenceSave,
   buildSpec,
   CHECKS,
   CHECK_KINDS,
@@ -710,5 +711,27 @@ describe('fixDraft', () => {
     expect(withState(renamed, 5).states.map((state) => state.name)).toEqual(['Hidden', 'Shown']);
     const both = withState(first, 5);
     expect(withState(both, 6).states.map((state) => state.name)).toEqual(['Shown', 'Hidden', 'State 3']);
+  });
+});
+
+describe('buildReferenceSave', () => {
+  test("saves a saved reference's settings alone while it has no place to read", () => {
+    // The region of a value whose window is not captured sits on no screenshot.
+    const windowless = { ...EMPTY_DRAFT, region, ink: red, tolerance: 40 };
+    expect(buildReferenceSave(windowless, percent)).toEqual({
+      ok: true,
+      spec: { kind: 'settings', reference: percent, ink: red, tolerance: 40 },
+    });
+  });
+
+  test('teaches the characters once there is a place to read them', () => {
+    const draft = { ...EMPTY_DRAFT, ink: red, boxes: [{ id: 0, screenshot: 1, region, text: '5' }] };
+    const built = buildReferenceSave(draft, percent);
+    expect(built.ok && built.spec.kind).toBe('taught');
+  });
+
+  test('a new reference, and one without a color, still say what they need', () => {
+    expect(buildReferenceSave({ ...EMPTY_DRAFT, ink: red }, null).ok).toBe(false);
+    expect(buildReferenceSave(EMPTY_DRAFT, percent).ok).toBe(false);
   });
 });

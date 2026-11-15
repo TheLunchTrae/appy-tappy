@@ -78,8 +78,8 @@ use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
-    FoundClick, FoundView, ImportSpec, Live, RecordSpec, ReferenceSaveSpec, ReferenceTrial,
-    SaveSpec, SavedReferenceId, SavedValue, SharedView, TrialSpec,
+    FoundClick, FoundView, ImportSpec, Live, RecordSpec, ReferenceSaveSpec, ReferenceSettingsSpec,
+    ReferenceTrial, SaveSpec, SavedReferenceId, SavedValue, SharedView, TrialSpec,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::reading::Reading;

@@ -45,19 +45,25 @@ const capture = holders();
 
 /**
  * The screens' captures of a window, which each screen starts with `pick` and stops by the number its pick answered
- * (`ownTicket`), so the stop it sends as it goes never stops the next screen's. Picks go to the owner one at a time,
+ * (`ownTicket`), so the stop it sends as it goes never stops the next screen's. A pick says which capture of the
+ * screen's it continues, or null to start afresh. Picks go to the owner one at a time,
  * in the order the screens asked, and a pick whose screen went before its turn is not sent. The owner takes what the
  * page sends in no set order, so a pick that a closed screen sent could otherwise take the capture after the next
  * screen's pick, and the closed screen's stop would then leave the next screen with none.
  */
 export function screenCaptures(
-  pick: (window: number) => Promise<number>,
+  pick: (window: number, continues: number | null) => Promise<number>,
   stop: (capture: number) => void,
 ): () => {
   /** The screen shows. */
   readonly enter: () => void;
   /** Captures `window` for the screen once the picks before it answered, unless the screen went by then. */
   readonly pick: (window: number) => Promise<void>;
+  /**
+   * Captures `window` in place of the capture the screen holds, such as one whose window closed, and keeps that
+   * one's screenshots. A screen that holds none picks as `pick` does.
+   */
+  readonly pickAgain: (window: number) => Promise<void>;
   /** Stops the screen's capture, if it has one. */
   readonly stop: () => void;
   /** The screen goes, and its capture with it. */
@@ -67,17 +73,19 @@ export function screenCaptures(
   let picking: Promise<void> = Promise.resolve();
   return () => {
     const own = ownTicket(stop);
+    const take = async (window: number, continues: () => number | null): Promise<void> => {
+      const turn = picking.then(async () => {
+        if (own.shows()) {
+          own.started(await pick(window, continues()));
+        }
+      });
+      picking = turn.catch(() => undefined);
+      await turn;
+    };
     return {
       enter: own.enter,
-      pick: async (window) => {
-        const turn = picking.then(async () => {
-          if (own.shows()) {
-            own.started(await pick(window));
-          }
-        });
-        picking = turn.catch(() => undefined);
-        await turn;
-      },
+      pick: async (window) => take(window, () => null),
+      pickAgain: async (window) => take(window, own.held),
       stop: own.stop,
       leave: own.leave,
     };
@@ -91,10 +99,12 @@ const screens = screenCaptures(pickWindow, (started) => {
 /**
  * Says that the component holds the capture while it shows: it picks the window with `pick`, and its capture stops
  * when it goes, with the capture's screenshots and recording, so no other screen has to stop it for it. `stop` stops
- * its capture early, such as before another window is picked.
+ * its capture early, such as before another window is picked. `pickAgain` picks the window in place of the capture
+ * the component holds and keeps that one's screenshots.
  */
 export function useCapture(): {
   readonly pick: (window: number) => Promise<void>;
+  readonly pickAgain: (window: number) => Promise<void>;
   readonly stop: () => void;
 } {
   const [own] = useState(screens);
@@ -106,7 +116,7 @@ export function useCapture(): {
       own.leave();
     };
   }, [own]);
-  return { pick: own.pick, stop: own.stop };
+  return { pick: own.pick, pickAgain: own.pickAgain, stop: own.stop };
 }
 
 /** Whether a screen holds the capture now. */

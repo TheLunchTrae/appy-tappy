@@ -44,6 +44,7 @@ import type {
   RecordSpec,
   RecordingView,
   ReferenceSaveSpec,
+  ReferenceSettingsSpec,
   ReferenceTrial,
   RegionDef,
   RowFilter,
@@ -81,9 +82,17 @@ export async function listWindows(): Promise<WindowList> {
   return invoke<WindowList>('list_windows');
 }
 
-/** Starts capturing `window` for the preview, and answers the capture's number. */
-export async function pickWindow(window: number): Promise<number> {
-  return invoke<number>('pick_window', { window });
+/**
+ * Starts capturing `window` for the preview, and answers the capture's number. The session of capture
+ * `continues` goes on with its screenshots when the owner still holds it; any other pick starts a session.
+ */
+export async function pickWindow(window: number, continues: number | null): Promise<number> {
+  return invoke<number>('pick_window', { window, continues });
+}
+
+/** Whether the picked window closed, which ended its capture for good. */
+export async function captureEnded(): Promise<boolean> {
+  return invoke<boolean>('capture_ended');
 }
 
 /**
@@ -485,6 +494,11 @@ export async function deleteValue(application: string, value: string): Promise<v
 /** Saves a reference, over the one `spec.check.reference` names when it names one. */
 export async function saveReference(spec: ReferenceSaveSpec): Promise<SavedReference> {
   return invoke<SavedReference>('save_reference', { spec });
+}
+
+/** Saves a saved reference's name, color, tolerance, and the characters it needs, with its samples as they are, so it needs no screenshot. */
+export async function saveReferenceSettings(spec: ReferenceSettingsSpec): Promise<SavedReference> {
+  return invoke<SavedReference>('save_reference_settings', { spec });
 }
 
 /** Removes a saved reference and its pictures; refused while a value reads with it. */

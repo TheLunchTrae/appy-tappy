@@ -2,11 +2,14 @@
 //! application. Saving one learns its samples, as the check that reads with
 //! it would, and deleting one waits until no value reads with it.
 
+use appytappy_config::app_file::{AppFile, ColorDef};
 use appytappy_config::names::new_reference_id;
 
 use serde::{Deserialize, Serialize};
 
 use crate::check_spec::{CharactersSpec, ReferenceRef, SavedReference, Session};
+
+use crate::stores::SavedApp;
 
 use super::host::Host;
 use super::{Changed, Edit, Owner};
@@ -27,6 +30,25 @@ pub(crate) struct ReferenceSaveSpec {
     /// user chose none. The save lists each once, in order, refuses more
     /// than a reference saves, and replaces what the saved reference
     /// expected.
+    pub(crate) expects: String,
+}
+
+/// A saved reference's settings to save, as the UI describes them. Its
+/// samples stay as they are saved.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReferenceSettingsSpec {
+    /// The saved reference.
+    pub(crate) reference: ReferenceRef,
+    /// The reference's name, the one it has or a new one.
+    pub(crate) reference_name: String,
+    /// The characters' color.
+    pub(crate) ink: ColorDef,
+    /// How far from `ink` a pixel of a character may be.
+    pub(crate) tolerance: u8,
+    /// The characters the user says it needs to know, as
+    /// [`ReferenceSaveSpec::expects`] has them.
     pub(crate) expects: String,
 }
 
@@ -68,21 +90,7 @@ impl<H: Host> Owner<H> {
     /// Reads the saved reference `reference` from its application's file
     /// and its samples' pictures from the folder.
     fn read_reference(&self, reference: &ReferenceRef) -> Result<SavedReference, String> {
-        let app = self.stores()?.app(&reference.app)?;
-        let saved = app
-            .file
-            .reference(&reference.id)
-            .ok_or_else(|| format!("{} no longer has that reference.", app.file.name))?
-            .clone();
-        let pictures = saved
-            .samples
-            .iter()
-            .filter_map(|sample| Some((sample.image.clone(), app.picture(&sample.image).ok()?)))
-            .collect();
-        Ok(SavedReference {
-            reference: saved,
-            pictures,
-        })
+        reference_of(&self.stores()?.app(&reference.app)?, &reference.id)
     }
 
     /// Keeps the saved reference `reference` as read now, so the asks about
@@ -138,21 +146,7 @@ impl<H: Host> Owner<H> {
                 },
                 |editing| editing.id.clone(),
             );
-            // Names that differ only in spaces at either end or the capitals
-            // of ASCII letters, such as "Digits" and "digits ", are one name,
-            // as automations and applications compare names. The IDs never
-            // clash, since `new_reference_id` numbers a taken one.
-            if let Some(other) = file
-                .references
-                .iter()
-                .find(|saved| saved.id != id && saved.name.trim().eq_ignore_ascii_case(name.trim()))
-            {
-                return Err(format!(
-                    "{} already has a reference named \"{}\". Pick another name.",
-                    file.name,
-                    other.name.trim()
-                ));
-            }
+            named_apart(file, &id, name)?;
             let taught = owner
                 .with_session(|session| {
                     spec.characters
@@ -170,6 +164,46 @@ impl<H: Host> Owner<H> {
                 },
                 taught.pictures,
             ))
+        })
+        .map(|saved| saved.answer)
+    }
+
+    /// Saves the settings `spec` gives a saved reference, its name, its
+    /// characters' color and tolerance, and the characters it needs, and
+    /// says where it is saved. Its samples stay as they are, so this needs
+    /// no screenshot and no picked window. The reference must still learn
+    /// every sample with the new color and tolerance.
+    pub(crate) fn save_reference_settings(
+        &mut self,
+        spec: &ReferenceSettingsSpec,
+    ) -> Result<SavedReferenceId, String> {
+        let name = spec.reference_name.trim();
+        if name.is_empty() {
+            return Err("Name the reference first.".to_owned());
+        }
+        let ReferenceRef { app, id } = &spec.reference;
+        self.update_app(app, Changed::Values, |_owner, found| {
+            named_apart(&found.file, id, name)?;
+            let changed = reference_of(found, id)?
+                .with_settings(name, spec.ink, spec.tolerance, &spec.expects)
+                .map_err(|error| error.to_string())?;
+            let answer = SavedReferenceId {
+                app: app.clone(),
+                reference: id.clone(),
+            };
+            match found
+                .file
+                .references
+                .iter_mut()
+                .find(|saved| saved.id == *id)
+            {
+                Some(saved) if *saved == changed => Ok(Edit::Keep(answer)),
+                Some(saved) => {
+                    *saved = changed;
+                    Ok(Edit::Save(answer, Vec::new()))
+                },
+                None => Err(format!("{} no longer has that reference.", found.file.name)),
+            }
         })
         .map(|saved| saved.answer)
     }
@@ -207,6 +241,43 @@ impl<H: Host> Owner<H> {
 }
 
 /// `names` as a list in a sentence, such as `A, B and C`.
+/// The saved reference `id` of `app` with those of its samples' pictures
+/// that can be read.
+fn reference_of(app: &SavedApp, id: &str) -> Result<SavedReference, String> {
+    let saved = app
+        .file
+        .reference(id)
+        .ok_or_else(|| format!("{} no longer has that reference.", app.file.name))?
+        .clone();
+    let pictures = saved
+        .samples
+        .iter()
+        .filter_map(|sample| Some((sample.image.clone(), app.picture(&sample.image).ok()?)))
+        .collect();
+    Ok(SavedReference {
+        reference: saved,
+        pictures,
+    })
+}
+
+/// Fails when another reference of `file` than `id` is named like `name`.
+/// Names that differ only in spaces at either end or the capitals of ASCII
+/// letters, such as "Digits" and "digits ", are one name, as automations
+/// and applications compare names. The IDs never clash, since
+/// `new_reference_id` numbers a taken one.
+fn named_apart(file: &AppFile, id: &str, name: &str) -> Result<(), String> {
+    file.references
+        .iter()
+        .find(|saved| saved.id != id && saved.name.trim().eq_ignore_ascii_case(name.trim()))
+        .map_or(Ok(()), |other| {
+            Err(format!(
+                "{} already has a reference named \"{}\". Pick another name.",
+                file.name,
+                other.name.trim()
+            ))
+        })
+}
+
 pub(super) fn and_list(names: &[&str]) -> String {
     match names.split_last() {
         None => String::new(),
@@ -533,6 +604,103 @@ mod tests {
             Err("A reference needs at most 128 characters. Remove some.".to_owned()),
         );
         assert_eq!(save(saved, ""), Ok((None, 3)), "none chosen");
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_saved_reference_s_settings_save_without_a_window_and_keep_its_samples() {
+        let (stores, root) = scratch_store("references-settings");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        for name in ["Digits", "Other"] {
+            harness
+                .ask(|owner| owner.save_reference(&reference("example", name, None)))
+                .expect("saves");
+        }
+        // With no window picked there is no screenshot to draw a region on.
+        harness.ask(Owner::stop);
+        let digits = |harness: &mut Harness| {
+            let apps = harness.ask(Owner::apps).expect("lists");
+            let file = apps[0].file.as_ref().expect("a good file");
+            file.reference("digits").expect("saved").clone()
+        };
+        let before = digits(&mut harness);
+        let settings = |id: &str, name: &str, ink: ColorDef, expects: &str| ReferenceSettingsSpec {
+            reference: ReferenceRef {
+                app: "example".to_owned(),
+                id: id.to_owned(),
+            },
+            reference_name: name.to_owned(),
+            ink,
+            tolerance: 10,
+            expects: expects.to_owned(),
+        };
+        let red = before.ink;
+        let save = |harness: &mut Harness, spec: ReferenceSettingsSpec| {
+            harness.ask(move |owner| owner.save_reference_settings(&spec))
+        };
+        assert_eq!(
+            save(&mut harness, settings("digits", " ", red, "")),
+            Err("Name the reference first.".to_owned())
+        );
+        assert_eq!(
+            save(&mut harness, settings("digits", "other", red, "")),
+            Err(
+                "Example App already has a reference named \"Other\". Pick another name."
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            save(&mut harness, settings("gone", "Gone", red, "")),
+            Err("Example App no longer has that reference.".to_owned())
+        );
+        let blue = ColorDef {
+            red: 0,
+            green: 0,
+            blue: 255,
+        };
+        assert!(
+            save(&mut harness, settings("digits", "Digits", blue, "")).is_err(),
+            "a color its samples have no pixel of teaches it nothing"
+        );
+        assert_eq!(
+            digits(&mut harness),
+            before,
+            "a refused save changes nothing"
+        );
+
+        assert_eq!(
+            save(
+                &mut harness,
+                settings("digits", " Score digits ", red, "1 0 1")
+            ),
+            Ok(SavedReferenceId {
+                app: "example".to_owned(),
+                reference: "digits".to_owned()
+            })
+        );
+        let after = digits(&mut harness);
+        assert_eq!(
+            (
+                after.name.as_str(),
+                after.tolerance,
+                after.expects.as_deref()
+            ),
+            ("Score digits", 10, Some("01"))
+        );
+        assert_eq!(after.samples, before.samples);
+        assert_eq!(after.origin, before.origin);
+
+        harness.forget_reloads();
+        assert!(save(&mut harness, settings("digits", "Score digits", red, "01")).is_ok());
+        assert_eq!(
+            harness.reloads(),
+            0,
+            "settings that change nothing tell no one"
+        );
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

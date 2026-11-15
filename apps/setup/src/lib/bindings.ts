@@ -1694,6 +1694,33 @@ characters: CharactersSpec,
 expects: string, }>;
 
 /**
+ * A saved reference's settings to save, as the UI describes them. Its
+ * samples stay as they are saved.
+ */
+export type ReferenceSettingsSpec = DeepReadonly<{
+/**
+ * The saved reference.
+ */
+reference: ReferenceRef,
+/**
+ * The reference's name, the one it has or a new one.
+ */
+referenceName: string,
+/**
+ * The characters' color.
+ */
+ink: ColorDef,
+/**
+ * How far from `ink` a pixel of a character may be.
+ */
+tolerance: number,
+/**
+ * The characters the user says it needs to know, as
+ * [`ReferenceSaveSpec::expects`] has them.
+ */
+expects: string, }>;
+
+/**
  * A reference being taught to try on the live window before it is saved,
  * as the UI describes it.
  */

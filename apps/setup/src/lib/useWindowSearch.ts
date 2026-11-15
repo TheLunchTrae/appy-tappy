@@ -1,17 +1,19 @@
 // The look for the window of the application a saved value or reference belongs to, and the capture it starts.
 
-import { useCallback, useEffect, useMemo, useReducer } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 
-import { errorText } from './api.ts';
+import { captureEnded, errorText } from './api.ts';
 import type { WindowChoice } from './bindings.ts';
 import { type PickerApp, known, pickerStep } from './picker.ts';
+import { background } from './repeat.ts';
 import { ask } from './request.ts';
 import { useAppWindows } from './useAppWindows.ts';
-import { type WindowAbsence, NO_CAPTURE, searchStep, windowAbsence } from './windowSearch.ts';
+import { type WindowAbsence, NO_CAPTURE, fallbackWarning, searchStep, windowAbsence } from './windowSearch.ts';
 
 /**
  * Looks for the window of the saved application `app` when the flow opens and on `refresh`, and captures it with
- * `pick` once it is found: the only window that fits at once, and one of several when the user chooses it.
+ * `pick` once it is found: the only window that fits at once, and one of several when the user chooses it. A
+ * capture whose window closed is looked for again the same way.
  */
 export function useWindowSearch(
   app: string,
@@ -23,6 +25,10 @@ export function useWindowSearch(
   readonly found: PickerApp | null;
   /** The anti-cheat products that ran at the newest look that answered. */
   readonly antiCheat: readonly string[];
+  /** What to say of a captured window that was taken only as the fallback, or null. */
+  readonly fallback: string | null;
+  /** Hears that the captured window's live view failed, which a closed window is one cause of. */
+  readonly liveFailed: () => void;
   readonly refresh: () => void;
   readonly choose: (window: WindowChoice) => void;
   /** Looks again from the start, once the flow stopped its capture. */
@@ -58,9 +64,34 @@ export function useWindowSearch(
     send({ kind: 'refreshed' });
     lookAgain();
   }, [lookAgain]);
-  const choose = useCallback((window: WindowChoice): void => {
-    send({ kind: 'chose', window });
-  }, []);
+  const severalFallback = step.kind === 'several' && step.fallback;
+  const choose = useCallback(
+    (window: WindowChoice): void => {
+      send({ kind: 'chose', window, fallback: severalFallback });
+    },
+    [severalFallback],
+  );
+  const running = capture.kind === 'running' ? capture.window.handle : null;
+  // One ask at a time: the live view fails again with every frame it asks for.
+  const asking = useRef(false);
+  const liveFailed = useCallback((): void => {
+    if (running === null || asking.current) {
+      return;
+    }
+    asking.current = true;
+    background(
+      captureEnded()
+        .then((ended) => {
+          if (ended) {
+            send({ kind: 'ended', window: running });
+            lookAgain();
+          }
+        })
+        .finally(() => {
+          asking.current = false;
+        }),
+    );
+  }, [running, lookAgain]);
   const restart = useCallback((): void => {
     send({ kind: 'stopped' });
     lookAgain();
@@ -69,6 +100,8 @@ export function useWindowSearch(
     absence: windowAbsence(step, capture, found?.name ?? null),
     found,
     antiCheat: seen?.antiCheat ?? [],
+    fallback: fallbackWarning(capture, found?.name ?? 'The application'),
+    liveFailed,
     refresh,
     choose,
     restart,

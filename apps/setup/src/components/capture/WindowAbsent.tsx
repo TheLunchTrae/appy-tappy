@@ -25,10 +25,11 @@ export function WindowAbsent({ absence, onRefresh, onChoose, matchEdit }: Props)
         </div>
         {absence.windows.length === 0 ? null : (
           <ul className="window-list" aria-label="Windows that fit">
-            {absence.windows.map((each) => (
+            {absence.windows.map((each, index) => (
               <li key={each.handle}>
                 <button
                   type="button"
+                  data-landing={index === 0 ? 'windows' : undefined}
                   disabled={absence.busy}
                   onClick={() => {
                     onChoose(each);
@@ -48,7 +49,13 @@ export function WindowAbsent({ absence, onRefresh, onChoose, matchEdit }: Props)
           </ul>
         )}
         <div className="row">
-          <button type="button" className="btn primary" disabled={absence.busy} onClick={onRefresh}>
+          <button
+            type="button"
+            className="btn primary"
+            data-landing="refresh"
+            disabled={absence.busy}
+            onClick={onRefresh}
+          >
             Refresh
           </button>
         </div>

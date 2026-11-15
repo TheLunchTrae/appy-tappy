@@ -42,8 +42,8 @@ use crate::overlay::{Card, OverlayView};
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
     FixSpec, FoundClick, FoundView, ImportSpec, Live, Message, Owner, RecordSpec,
-    ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, SharedView,
-    TrialSpec,
+    ReferenceSaveSpec, ReferenceSettingsSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId,
+    SavedValue, SharedView, TrialSpec,
 };
 use crate::reading::Reading;
 use crate::recording::RecordingView;
@@ -118,10 +118,25 @@ pub(crate) async fn list_windows(app: AppHandle) -> Result<WindowList, String> {
 }
 
 /// Starts capturing `window` for the preview, and answers the capture's
-/// number.
+/// number. The session of capture `continues` goes on with its screenshots
+/// when the owner still holds it; any other pick starts a session.
 #[tauri::command]
-pub(crate) async fn pick_window(app: AppHandle, window: u64) -> Result<u64, String> {
-    try_ask(&app, "pick_window", move |owner| owner.pick(window)).await
+pub(crate) async fn pick_window(
+    app: AppHandle,
+    window: u64,
+    continues: Option<u64>,
+) -> Result<u64, String> {
+    try_ask(&app, "pick_window", move |owner| match continues {
+        Some(earlier) => owner.pick_again(window, earlier),
+        None => owner.pick(window),
+    })
+    .await
+}
+
+/// Whether the picked window closed, which ended its capture for good.
+#[tauri::command]
+pub(crate) async fn capture_ended(app: AppHandle) -> Result<bool, String> {
+    ask(&app, "capture_ended", |owner| owner.capture_ended()).await
 }
 
 /// The newest frame, at most `max_width` wide; no bytes until one arrives.
@@ -577,6 +592,18 @@ pub(crate) async fn save_reference(
 ) -> Result<SavedReferenceId, String> {
     try_ask(&app, "save_reference", move |owner| {
         owner.save_reference(&spec)
+    })
+    .await
+}
+
+/// Saves a saved reference's settings, with its samples as they are.
+#[tauri::command]
+pub(crate) async fn save_reference_settings(
+    app: AppHandle,
+    spec: ReferenceSettingsSpec,
+) -> Result<SavedReferenceId, String> {
+    try_ask(&app, "save_reference_settings", move |owner| {
+        owner.save_reference_settings(&spec)
     })
     .await
 }

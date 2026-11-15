@@ -17,7 +17,9 @@ import {
   type Built,
   type CheckKind,
   type Draft,
+  type ReferenceSaving,
   buildCharacters,
+  buildReferenceSave,
   buildSpec,
   EMPTY_DRAFT,
   firstWithPixels,
@@ -36,6 +38,7 @@ import { type Placed, liveDrawFrame, regionFromLiveBox, regionOverFrame, useLive
 import { boxTextId } from './BoxList.tsx';
 import { DraftButtons } from './capture/DraftButtons.tsx';
 import { ReadWith } from './capture/ReadWith.tsx';
+import { useLanding } from '../lib/landing.ts';
 import { ScreenshotStage, useScreenshotStage } from './capture/ScreenshotStage.tsx';
 import { ChangeWindow } from './capture/StageBar.tsx';
 import { Stepper, nextFromWhere, stepTabs } from './capture/Stepper.tsx';
@@ -108,6 +111,9 @@ export type CaptureMode =
   | { readonly kind: 'fix'; readonly value: ValueDef }
   | { readonly kind: 'edit'; readonly value: ValueDef };
 
+/** What the reference editor's save waits for while no reference is edited, which never shows. */
+const NO_REFERENCE_SAVE: Built<ReferenceSaving> = { ok: false, next: '' };
+
 /** The name a draft of the capture lists under: what was typed, or else what it makes or fixes. */
 function draftName(mode: Exclude<CaptureMode, { readonly kind: 'edit' }>, setup: CaptureSetup): string {
   switch (mode.kind) {
@@ -176,6 +182,13 @@ interface Props {
   readonly absent: { readonly panel: ReactNode; readonly reason: string } | null;
   /** What the flow says about the window, above the picture. */
   readonly windowNotes: ReactNode;
+  /** Hears each failure of the window's live view, or null for a flow that does not look for its window again. */
+  readonly onLiveFailed: (() => void) | null;
+  /**
+   * Whether the flow shows because another flow ended, so the focus has to land somewhere, and the control it lands
+   * on, or null while that is not known.
+   */
+  readonly landing: { readonly owed: boolean; readonly target: string | null };
   readonly mode: CaptureMode;
   /** The draft the flow finishes, or null. */
   readonly resumed: Resumed | null;
@@ -199,6 +212,8 @@ export function Capture({
   choice,
   absent,
   windowNotes,
+  onLiveFailed,
+  landing,
   mode,
   resumed,
   restored,
@@ -228,6 +243,8 @@ export function Capture({
   const [draft, setDraft] = useState<Draft>(start.draft);
   const appId = choice.app;
   const windowless = absent?.reason ?? null;
+  const page = useRef<HTMLElement>(null);
+  useLanding(landing.owed, landing.target, page);
   const appFile = useAppFile(appId);
   const { file } = appFile;
   const [step, setStep] = useState<Step>(opening.setup.step);
@@ -311,7 +328,11 @@ export function Capture({
     [isEditing, draft, editingRef],
   );
   const valueCheck = useMemo(() => buildSpec(draft, appId), [draft, appId]);
-  const built: Built<unknown> = characters ?? valueCheck;
+  const referenceSave = useMemo(
+    () => (isEditing ? buildReferenceSave(draft, editingRef) : null),
+    [isEditing, draft, editingRef],
+  );
+  const built: Built<unknown> = referenceSave ?? valueCheck;
   const builtKind = characters === null ? (valueCheck.ok ? valueCheck.spec.kind : 'none') : 'characters';
   const missing = captureMissing(setup, built, fixing !== null);
   // An edit changes a saved value in place and is never a draft.
@@ -356,7 +377,7 @@ export function Capture({
     setDraft,
     boxes,
     reference: editingRef,
-    characters,
+    saving: referenceSave,
     pin: fixPin ?? pin,
     windowless,
     full,
@@ -911,7 +932,7 @@ export function Capture({
   };
 
   return (
-    <main className="capture">
+    <main className="capture" ref={page}>
       <ScreenshotStage
         stage={stage}
         label="Capture"
@@ -952,6 +973,7 @@ export function Capture({
           ) : null
         }
         absent={absent}
+        onLiveFailed={onLiveFailed}
         onTake={takeShot}
         sheet={teachingSheet(teaching)}
         notes={
@@ -1263,7 +1285,7 @@ export function Capture({
           position={position}
           setSelected={setSelected}
           preview={previewField}
-          built={built}
+          saving={referenceSave ?? NO_REFERENCE_SAVE}
           check={check}
           windowless={windowless}
           busy={busy}

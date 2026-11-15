@@ -8,9 +8,10 @@ import { Capture, type CaptureMode, type Restored } from '../components/Capture.
 import { WindowAbsent } from '../components/capture/WindowAbsent.tsx';
 import { MatchEdit } from '../components/MatchEdit.tsx';
 import { type Choice, Picker } from '../components/Picker.tsx';
-import type { Changing, Made, RefFlow, ValueFlow } from '../lib/flow.ts';
+import type { Made, RefFlow, ValueFlow } from '../lib/flow.ts';
 import type { Held } from '../lib/unsaved.ts';
 import { useWindowSearch } from '../lib/useWindowSearch.ts';
+import { windowLanding } from '../lib/windowSearch.ts';
 import type { ReportDraft } from '../lib/drafts.ts';
 
 interface Props {
@@ -40,41 +41,34 @@ interface Props {
   readonly onDraft: ReportDraft;
 }
 
-/** The picker's heading for each way a saved value changes. */
-const HEADINGS: Readonly<Record<Changing['how'], (name: string) => string>> = {
-  fix: (name) => `Fix ${name} at this size`,
-  edit: (name) => `Edit ${name}`,
-};
-
-/** How the capture runs for `flow`, the saved application it is locked to, and the picker's heading. */
-function subject(flow: ValueFlow | RefFlow): {
-  readonly mode: CaptureMode;
-  readonly lockedApp: string | null;
-  readonly heading: string;
-} {
+/** How the capture runs for `flow`, and the saved application it is locked to. */
+function subject(flow: ValueFlow | RefFlow): { readonly mode: CaptureMode; readonly lockedApp: string | null } {
   if (flow.kind === 'reference') {
     const { existing } = flow;
-    return {
-      mode: { kind: 'reference', existing: existing?.reference ?? null },
-      lockedApp: existing?.app ?? null,
-      heading: existing === null ? 'New reference' : `Edit ${existing.reference.name}`,
-    };
+    return { mode: { kind: 'reference', existing: existing?.reference ?? null }, lockedApp: existing?.app ?? null };
   }
   const { changing } = flow;
   return changing === null
-    ? { mode: { kind: 'value' }, lockedApp: null, heading: 'New value' }
-    : {
-        mode: { kind: changing.how, value: changing.value },
-        lockedApp: changing.app,
-        heading: HEADINGS[changing.how](changing.value.name),
-      };
+    ? { mode: { kind: 'value' }, lockedApp: null }
+    : { mode: { kind: changing.how, value: changing.value }, lockedApp: changing.app };
 }
+
+/** The picker's heading for `flow`. Of the saved values, it shows only for the draft of a fix. */
+function pickerHeading(flow: ValueFlow | RefFlow): string {
+  if (flow.kind === 'reference') {
+    return flow.existing === null ? 'New reference' : `Edit ${flow.existing.reference.name}`;
+  }
+  return flow.changing === null ? 'New value' : `Fix ${flow.changing.value.name} at this size`;
+}
+
+const NO_LANDING = { owed: false, target: null };
 
 /** The editor of a saved value or reference, which shows with or without its application's window. */
 function SavedCapture({
   app,
   mode,
   trail,
+  continued,
   onCancel,
   onSaved,
   onDrafted,
@@ -83,9 +77,10 @@ function SavedCapture({
   onHeld,
   onDraft,
 }: Props & { readonly app: string; readonly mode: CaptureMode }) {
-  // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at.
-  const { pick, stop } = useCapture();
-  const { absence, found, antiCheat, refresh, choose, restart } = useWindowSearch(app, pick);
+  // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at. A window that
+  // closed and opened again is picked in place of the capture that ended, so the editor keeps its screenshots.
+  const { pickAgain, stop } = useCapture();
+  const { absence, found, antiCheat, fallback, liveFailed, refresh, choose, restart } = useWindowSearch(app, pickAgain);
   // Each start over is a new editor, as each pick of a window is.
   const [startedOver, setStartedOver] = useState(0);
   const [held, setHeld] = useState<Held>('nothing');
@@ -96,6 +91,22 @@ function SavedCapture({
     },
     [onHeld],
   );
+  const matchEdit =
+    found === null ? null : (
+      <MatchEdit
+        app={found}
+        drafted={draftedApps.has(app)}
+        disabled={absence?.busy ?? false}
+        blocked={
+          held === 'nothing'
+            ? null
+            : "Save or discard what you changed here first: changing how it's found leaves this editor."
+        }
+        onEdit={() => {
+          onEditApplication(found.summary);
+        }}
+      />
+    );
   return (
     <Capture
       key={startedOver}
@@ -110,28 +121,24 @@ function SavedCapture({
                   absence={absence}
                   onRefresh={refresh}
                   onChoose={choose}
-                  matchEdit={
-                    found !== null && absence.offersMatchEdit ? (
-                      <MatchEdit
-                        app={found}
-                        drafted={draftedApps.has(app)}
-                        disabled={absence.busy}
-                        blocked={
-                          held === 'nothing'
-                            ? null
-                            : "Save or discard what you changed here first: changing how it's found leaves this editor."
-                        }
-                        onEdit={() => {
-                          onEditApplication(found.summary);
-                        }}
-                      />
-                    ) : null
-                  }
+                  matchEdit={absence.offersMatchEdit ? matchEdit : null}
                 />
               ),
             }
       }
-      windowNotes={<AntiCheatRunning products={antiCheat} />}
+      windowNotes={
+        <>
+          <AntiCheatRunning products={antiCheat} />
+          {fallback === null ? null : (
+            <>
+              <p className="warn">{fallback}</p>
+              {matchEdit}
+            </>
+          )}
+        </>
+      }
+      onLiveFailed={liveFailed}
+      landing={{ owed: continued, target: windowLanding(absence) }}
       mode={mode}
       resumed={null}
       restored={null}
@@ -165,8 +172,7 @@ function PickedCapture({
   onDraft,
   lockedApp,
   mode,
-  heading,
-}: Props & { readonly lockedApp: string | null; readonly mode: CaptureMode; readonly heading: string }) {
+}: Props & { readonly lockedApp: string | null; readonly mode: CaptureMode }) {
   const draft = flow.resumed;
   const [choice, setChoice] = useState<Choice | null>(null);
   const [picking, setPicking] = useState(true);
@@ -178,7 +184,7 @@ function PickedCapture({
   if (picking || choice === null) {
     return (
       <Picker
-        heading={heading}
+        heading={pickerHeading(flow)}
         trail={trail}
         continued={continued}
         lockedApp={lockedApp ?? draft?.def.app ?? null}
@@ -206,6 +212,8 @@ function PickedCapture({
       choice={choice}
       absent={null}
       windowNotes={null}
+      onLiveFailed={null}
+      landing={NO_LANDING}
       mode={mode}
       resumed={draft}
       restored={restored}
@@ -232,10 +240,10 @@ function PickedCapture({
  */
 export function CaptureFlow(props: Props) {
   // What the flow started for: its mode stays the same object while it shows.
-  const [{ mode, lockedApp, heading }] = useState(() => subject(props.flow));
+  const [{ mode, lockedApp }] = useState(() => subject(props.flow));
   return lockedApp !== null && props.flow.resumed === null ? (
     <SavedCapture {...props} app={lockedApp} mode={mode} />
   ) : (
-    <PickedCapture {...props} lockedApp={lockedApp} mode={mode} heading={heading} />
+    <PickedCapture {...props} lockedApp={lockedApp} mode={mode} />
   );
 }

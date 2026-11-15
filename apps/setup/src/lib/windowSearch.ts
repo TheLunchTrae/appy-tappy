@@ -2,26 +2,31 @@
 // the window, and captures it once it is found.
 
 import type { WindowChoice } from './bindings.ts';
-import { type PickerStep, offersMatchEdit, stepStatus } from './picker.ts';
+import { type PickerStep, fallbackNote, offersMatchEdit, stepStatus } from './picker.ts';
 
-/** The capture of the application's window: not asked for, starting, refused with the reason, or running. */
+/**
+ * The capture of the application's window: not asked for, starting, refused with the reason, or running. `fallback`
+ * says whether the window was taken only as the fallback, because none matched everything that must match.
+ */
 export type WindowCapture =
   | { readonly kind: 'none' }
-  | { readonly kind: 'starting'; readonly window: WindowChoice }
+  | { readonly kind: 'starting'; readonly window: WindowChoice; readonly fallback: boolean }
   | { readonly kind: 'refused'; readonly error: string }
-  | { readonly kind: 'running'; readonly window: WindowChoice };
+  | { readonly kind: 'running'; readonly window: WindowChoice; readonly fallback: boolean };
 
 export const NO_CAPTURE: WindowCapture = { kind: 'none' };
 
 export type SearchEvent =
   /** A look answered, or one started: where the picker's steps stand for the flow's application. */
   | { readonly kind: 'looked'; readonly step: PickerStep }
-  /** The user picked `window` among several that fit equally well. */
-  | { readonly kind: 'chose'; readonly window: WindowChoice }
+  /** The user picked `window` among several that fit equally well, as the fallback or not. */
+  | { readonly kind: 'chose'; readonly window: WindowChoice; readonly fallback: boolean }
   /** The capture that was starting runs. */
   | { readonly kind: 'started' }
   /** The capture that was starting was refused. */
   | { readonly kind: 'refused'; readonly error: string }
+  /** The capture of the window with the handle `window` ended because that window closed. */
+  | { readonly kind: 'ended'; readonly window: number }
   /** The user asked to look again. */
   | { readonly kind: 'refreshed' }
   /** The flow stopped its capture to start over. */
@@ -30,22 +35,26 @@ export type SearchEvent =
 /**
  * The capture after `event`. The only window that fits is captured without asking, and one of several once the
  * user picks it. A refusal stays until the user looks again or picks a window, so a window that cannot be captured
- * is not asked for over and over. An answer that arrives while no capture is starting is dropped.
+ * is not asked for over and over. A capture whose window closed is asked for again like one that never ran. An
+ * answer that arrives while no capture is starting is dropped, and so is the end of a capture of another window
+ * than the one that runs.
  */
 export function searchStep(capture: WindowCapture, event: SearchEvent): WindowCapture {
   switch (event.kind) {
     case 'looked':
       return capture.kind === 'none' && event.step.kind === 'one'
-        ? { kind: 'starting', window: event.step.window }
+        ? { kind: 'starting', window: event.step.window, fallback: event.step.fallback }
         : capture;
     case 'chose':
       return capture.kind === 'none' || capture.kind === 'refused'
-        ? { kind: 'starting', window: event.window }
+        ? { kind: 'starting', window: event.window, fallback: event.fallback }
         : capture;
     case 'started':
-      return capture.kind === 'starting' ? { kind: 'running', window: capture.window } : capture;
+      return capture.kind === 'starting' ? { ...capture, kind: 'running' } : capture;
     case 'refused':
       return capture.kind === 'starting' ? { kind: 'refused', error: event.error } : capture;
+    case 'ended':
+      return capture.kind === 'running' && capture.window.handle === event.window ? NO_CAPTURE : capture;
     case 'refreshed':
       return capture.kind === 'refused' ? NO_CAPTURE : capture;
     case 'stopped':
@@ -125,7 +134,38 @@ export function windowAbsence(step: PickerStep, capture: WindowCapture, name: st
       return {
         ...still,
         heading: "The application can't be read",
-        text: "The application this belongs to can't be read any more. Discard, then check the Applications page.",
+        text: "The application this belongs to can't be read anymore. Discard, then check the Applications page.",
       };
   }
+}
+
+/** The control the focus lands on when the editor shows again after another flow ended. */
+export type WindowControl = 'screenshot' | 'windows' | 'match' | 'refresh';
+
+/**
+ * Where the focus lands for `absence`: on the way forward, as the picker's landing chooses it, and on taking a
+ * screenshot once the window is captured. Null while a look or a capture's start is under way, which the landing
+ * waits for.
+ */
+export function windowLanding(absence: WindowAbsence | null): WindowControl | null {
+  if (absence === null) {
+    return 'screenshot';
+  }
+  if (absence.busy) {
+    return null;
+  }
+  if (absence.windows.length > 0) {
+    return 'windows';
+  }
+  return absence.offersMatchEdit ? 'match' : 'refresh';
+}
+
+/**
+ * What the capture screen says of a captured window that was taken only as the fallback, for the application
+ * called `name`, or null for any other capture.
+ */
+export function fallbackWarning(capture: WindowCapture, name: string): string | null {
+  return capture.kind === 'running' && capture.fallback
+    ? `${name}'s window is “${capture.window.title}”.${fallbackNote('It is', true)}`
+    : null;
 }
