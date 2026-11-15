@@ -198,9 +198,10 @@ and **Zoom out** (**−**) change how large the screenshot shows, and the
 percentage between them says how large that is against the window's own
 pixels. **Fit** shows the whole screenshot again. Hold Ctrl and turn the mouse
 wheel to zoom around the pointer. While the screenshot is larger than the
-view, turn the wheel or drag the scroll bars to move around it. The wheel
-also works in the middle of a drag, and the box follows the screenshot as it
-scrolls, to draw a box larger than the view shows.
+view, hold the right or the middle mouse button and drag, turn the wheel, or
+drag the scroll bars to move around it. The **?** beside **Fit** says the
+same. The wheel also works in the middle of a drag, and the box follows the
+screenshot as it scrolls, to draw a box larger than the view shows.
 Zoom changes only how you see the screenshot: the region keeps its pixels.
 The live window always shows whole, and a screenshot of another size starts
 whole again.
@@ -670,8 +671,8 @@ Each value has **Fix at this size** beside it there, unless the window is at
 the size the value was first drawn at. At that size, [edit the
 value](#edit-a-value) instead. **Matches no state** isn't always wrong: the
 region may show none of the states right now. A value that can't be read
-there says why, such as a character whose shape its reference hasn't
-learned.
+there says why, such as **Cannot read: a character has a shape the reference
+has not learned**.
 
 1. AppyTappy finds the application's window and takes a screenshot of it at
    its size now, with the region where the value would be read there: it

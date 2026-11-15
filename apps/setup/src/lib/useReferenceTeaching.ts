@@ -151,7 +151,7 @@ export function useReferenceTeaching({
   const fitted = useContrastTolerance(recording === null ? taughtCharacters : null, (tolerance) => {
     setDraft((current) => ({ ...current, tolerance }));
   });
-  // What may keep it from reading as its samples do, asked once the tolerance that depends on is fitted.
+  // What may keep it from reading as its samples do, asked once the tolerance it depends on is fitted.
   const risks = useReadingRisks(fitted ? taughtCharacters : null);
   // The saved pictures a save would refuse, which the editor shows so they can be left out. A reference taught by
   // contrast is judged with its fitted tolerance, like its risks.

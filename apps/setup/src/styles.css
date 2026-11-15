@@ -627,6 +627,12 @@ select {
   overflow: auto;
 }
 
+/* A drag with the right or the middle button holds the picture. */
+.scroller.panning,
+.scroller.panning * {
+  cursor: grabbing;
+}
+
 /* The picture and the room around it: as large as the view at least, and as large as the zoomed picture needs. */
 .pad {
   display: grid;

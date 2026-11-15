@@ -112,7 +112,7 @@ it was about has gone. Fifteen guards drop such stale messages:
   `apps/setup/src/lib/useUnlearned.ts`). An answer under another key than
   the editor asks under now is not shown (`unlearnedArrived`), and neither
   are the pictures fetched for it.
-- **Reading risk keys.** The [reading risks](#look-alike-characters)
+- **Reading risk keys.** The [reading risks](#reading-risks)
   of a reference being taught are asked for under a key made of its whole
   spec: the region, the samples, the text color, and the tolerance
   (`riskKey` in `apps/setup/src/lib/useReadingRisks.ts`). An answer under
@@ -2230,6 +2230,14 @@ The zoom of the view (`apps/setup/src/components/ZoomView.tsx`) is one number
 kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
 the live view shows or a screenshot of another size does. It changes only the
 size the screenshot shows at, so a drag goes on through a zoom or a scroll.
+A drag with the right or the middle button pans instead (`panStart`,
+`panMove`, and `panEnd` in `apps/setup/src/lib/zoom.ts`): the view holds that
+pointer, so the surface never hears its press or its moves, and moves of any
+other pointer change nothing. The pan ends when its pointer is let go,
+cancelled, or loses the hold, and when a move comes with neither the right
+nor the middle button down, which is how a button let go while another stays
+down shows. A pan with the right button turns off the next context menu,
+wherever it opens, until the next press.
 
 ### Draft screenshot pixels
 
@@ -3081,8 +3089,8 @@ stateDiagram-v2
   reference's own messages say what is wrong with the sample: the box's row,
   the character check, and the save. A change to a sample or the region asks
   again.
-- **Settled** is what the page tells the [look-alike
-  check](#look-alike-characters), which waits for it, so it asks about the
+- **Settled** is what the page tells the [reading risks
+  check](#reading-risks), which waits for it, so it asks about the
   tolerance the reference keeps (`fitSettles`). A key that names no fit,
   such as one with a text color, counts as settled. Each new key starts
   unsettled, even a key the page settled before, since a reference saved
@@ -3096,7 +3104,7 @@ stateDiagram-v2
   different distances. One text color in place of another keeps the
   tolerance.
 
-### Look-alike characters
+### Reading risks
 
 The reference editor warns about what may keep the reference from reading
 as its samples do: two learned characters it may read as each other, as

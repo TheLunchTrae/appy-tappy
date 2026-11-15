@@ -142,3 +142,7 @@ export const IMPORT_ANTI_CHEAT_HINT =
 /** Why two characters a reference learned can look alike, and what changes that. */
 export const LOOKALIKE_HINT =
   'AppyTappy reads a character as the learned shape it matches, and forgives an edge that is a little off. When the shapes it learned for two characters are that close, it can read one as the other. This happens most with bold text that has a thick outline, found by how it stands out: the outline counts as part of each character and fills the holes in 0, 6, 8, and 9. A text color counts only the pixels of that color, so the holes stay open.';
+
+/** How to zoom a screenshot and move around it. */
+export const ZOOM_HINT =
+  'Hold Ctrl and turn the mouse wheel to zoom around the pointer. While the screenshot is larger than the view, hold the right or the middle mouse button and drag to move around it, or turn the wheel.';

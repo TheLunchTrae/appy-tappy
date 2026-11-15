@@ -1,8 +1,22 @@
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type PointerEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { type Point, type Size, toPicture } from '../lib/region.ts';
 import { useSize } from '../lib/size.ts';
-import { GUTTER, ZOOM_STEP, clampZoom, percent, scrollShift, shownAt, wheelZoom } from '../lib/zoom.ts';
+import { ZOOM_HINT } from '../lib/hints.ts';
+import {
+  GUTTER,
+  type Pan,
+  ZOOM_STEP,
+  clampZoom,
+  panEnd,
+  panMove,
+  panStart,
+  percent,
+  scrollShift,
+  shownAt,
+  wheelZoom,
+} from '../lib/zoom.ts';
+import { Hint } from './Hint.tsx';
 
 /** A pixel of the picture, and the place in the window it is kept at while the zoom changes. */
 interface Anchor {
@@ -24,7 +38,7 @@ interface Props {
 
 /**
  * Where a capture screen shows its picture: the whole picture at first, with room around it, and a screenshot zoomed
- * in on request. A zoomed picture pans by scrolling.
+ * in on request. A zoomed picture pans by scrolling, or by a drag with the right or the middle button.
  */
 export function ZoomView({ picture, zoomable, hidden = false, hint, children }: Props) {
   const view = useRef<HTMLDivElement>(null);
@@ -95,11 +109,77 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
     const listener = (event: WheelEvent): void => {
       latestWheel.current(event);
     };
+    // A middle press during a left drag sends no pointer press for a pan to cancel, so its own scrolling is stopped
+    // here. The right button's menu opens on its release, which a pan replaces.
+    const press = (event: MouseEvent): void => {
+      if (event.button === 1) {
+        event.preventDefault();
+      }
+    };
+    const menu = (event: MouseEvent): void => {
+      event.preventDefault();
+    };
     target.addEventListener('wheel', listener, { passive: false });
+    target.addEventListener('mousedown', press);
+    target.addEventListener('contextmenu', menu);
     return () => {
       target.removeEventListener('wheel', listener);
+      target.removeEventListener('mousedown', press);
+      target.removeEventListener('contextmenu', menu);
     };
   }, []);
+
+  // A drag with the right or the middle button pans. The view holds the pointer, so the surface under it never hears
+  // the press or its moves and draws nothing.
+  const pan = useRef<Pan | null>(null);
+  const [panning, setPanning] = useState(false);
+  const follow = (next: Pan | null): void => {
+    pan.current = next;
+    setPanning(next !== null);
+  };
+  const startPan = (event: PointerEvent<HTMLDivElement>): void => {
+    const started = panStart(event.button, event.pointerId, { x: event.clientX, y: event.clientY });
+    if (started === null) {
+      return;
+    }
+    // Keeps the middle button from scrolling on its own, and the press from reaching the surface.
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (event.button === 2) {
+      // The menu opens on the release, which goes to whatever is under the pointer once the view lets it go, often
+      // past the view's edge. So the next menu is turned off wherever it opens, or until the next press.
+      const armed = new AbortController();
+      const listening = { capture: true, signal: armed.signal };
+      window.addEventListener(
+        'contextmenu',
+        (opened) => {
+          opened.preventDefault();
+          armed.abort();
+        },
+        listening,
+      );
+      window.addEventListener(
+        'pointerdown',
+        () => {
+          armed.abort();
+        },
+        listening,
+      );
+    }
+    follow(started);
+  };
+  const movePan = (event: PointerEvent<HTMLDivElement>): void => {
+    if (pan.current === null) {
+      return;
+    }
+    const moved = panMove(pan.current, event.pointerId, { x: event.clientX, y: event.clientY }, event.buttons);
+    follow(moved.pan);
+    scroller.current?.scrollBy(moved.scroll.x, moved.scroll.y);
+  };
+  const endPan = (event: PointerEvent<HTMLDivElement>): void => {
+    follow(panEnd(pan.current, event.pointerId));
+  };
 
   // The most this picture zooms, which is 1 for the live view. A control that can do nothing more says so and keeps
   // the focus: a press on it changes nothing.
@@ -116,7 +196,15 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
           event.preventDefault();
         }}
       >
-        <div className="scroller" ref={scroller}>
+        <div
+          className={panning ? 'scroller panning' : 'scroller'}
+          ref={scroller}
+          onPointerDownCapture={startPan}
+          onPointerMove={movePan}
+          onPointerUp={endPan}
+          onPointerCancel={endPan}
+          onLostPointerCapture={endPan}
+        >
           <div className="pad" style={{ padding: GUTTER }}>
             <div className={crisp ? 'frame crisp' : 'frame'} ref={frame} style={shown}>
               {children({ space, shown })}
@@ -165,6 +253,7 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
           >
             Fit
           </button>
+          {zoomable ? <Hint topic="Zoom">{ZOOM_HINT}</Hint> : null}
         </div>
       </div>
     </div>

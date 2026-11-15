@@ -50,10 +50,10 @@ export function lookalikeWarning(pairs: readonly Pair[], ink: Color | null, tole
 
 /**
  * What the reference editor says of a reference whose tolerance leaves an outline or a shadow out of its samples. It
- * reads while the background hides that tone as the samples' does, and not over another.
+ * reads while the background hides that tone as the samples' does, and may not over another.
  */
 export const HIDDEN_TONE_WARNING =
-  "The characters have an outline or a shadow that doesn't count here, because it is close to the background in what it learned. Over a background of another color it counts, and the number can't be read. Pick a text color below, so only the inside of the characters counts.";
+  "An outline or a shadow around the characters is close to the background color in what this reference learned from, so it isn't part of the shapes it learned. Over a background of another color it can count, and the number won't read. Pick a text color below, so only the inside of the characters counts.";
 
 /** A name for the risks `spec` asks for, which stays while nothing they depend on changes, or null for none. */
 export function riskKey(spec: CharactersSpec | null): string | null {

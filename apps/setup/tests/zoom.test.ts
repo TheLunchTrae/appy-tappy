@@ -1,7 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 
 import { toPicture } from '../src/lib/region.ts';
-import { GUTTER, ZOOM_STEP, clampZoom, percent, scrollShift, shownAt, wheelZoom } from '../src/lib/zoom.ts';
+import {
+  GUTTER,
+  ZOOM_STEP,
+  clampZoom,
+  panEnd,
+  panMove,
+  panStart,
+  percent,
+  scrollShift,
+  shownAt,
+  wheelZoom,
+} from '../src/lib/zoom.ts';
 
 const picture = { width: 1920, height: 1080 };
 // The picture fits this space at half its size, with the gutter around it.
@@ -103,5 +114,40 @@ describe('zooming around a point', () => {
     const shift = scrollShift(under(anchor, box), anchor, box, picture);
     expect(shift.x).toBeCloseTo(0, 9);
     expect(shift.y).toBeCloseTo(0, 9);
+  });
+});
+
+describe('pan', () => {
+  test('starts with the right or the middle button, not the main one', () => {
+    expect(panStart(2, 7, { x: 10, y: 20 })).toEqual({ pointer: 7, at: { x: 10, y: 20 } });
+    expect(panStart(1, 7, { x: 10, y: 20 })).toEqual({ pointer: 7, at: { x: 10, y: 20 } });
+    expect(panStart(0, 7, { x: 10, y: 20 })).toBeNull();
+  });
+
+  const pan = { pointer: 7, at: { x: 10, y: 20 } };
+  const RIGHT = 2;
+  const MIDDLE = 4;
+  const MAIN = 1;
+
+  test('scrolls against the pointer, so the picture moves with it', () => {
+    expect(panMove(pan, 7, { x: 40, y: 5 }, RIGHT)).toEqual({
+      pan: { pointer: 7, at: { x: 40, y: 5 } },
+      scroll: { x: -30, y: 15 },
+    });
+    expect(panMove(pan, 7, { x: 40, y: 5 }, MIDDLE | MAIN).pan).toEqual({ pointer: 7, at: { x: 40, y: 5 } });
+  });
+
+  test('ends when its button is let go while the main one stays down', () => {
+    expect(panMove(pan, 7, { x: 40, y: 5 }, MAIN)).toEqual({ pan: null, scroll: { x: 0, y: 0 } });
+  });
+
+  test('ignores another pointer', () => {
+    expect(panMove(pan, 8, { x: 40, y: 5 }, MAIN)).toEqual({ pan, scroll: { x: 0, y: 0 } });
+    expect(panEnd(pan, 8)).toBe(pan);
+  });
+
+  test('ends when its own pointer is let go', () => {
+    expect(panEnd(pan, 7)).toBeNull();
+    expect(panEnd(null, 7)).toBeNull();
   });
 });

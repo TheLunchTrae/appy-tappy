@@ -83,9 +83,10 @@ pub(crate) fn fitted(samples: &[(Image, &str)], current: u8) -> u8 {
     })
 }
 
-/// How far from the background a pixel must be to count as drawn, for
-/// [`hides_a_tone`]: further than the grain of a plain background.
-const DRAWN: u8 = 16;
+/// How far past the colors of a sample's background and characters a
+/// pixel's red, green, or blue must be for [`hides_a_tone`] to take it for
+/// another tone: further than the grain of a flat color.
+const GRAIN: u8 = 16;
 
 /// How many pixels a sample's characters have for each pixel of a tone it
 /// leaves out, at the fewest. An outline or a shadow has more pixels than
@@ -102,97 +103,105 @@ const CHARACTER_PIXELS_PER_HIDDEN: u64 = 4;
 /// characters are thicker or touch, and no shape matches what the reference
 /// learned.
 ///
-/// The tone is told from a character's anti-aliased edge by where its color
-/// lies: an edge is between the background and the characters, and an
-/// outline or shadow is on the background's other side.
+/// A sample hides a tone when, for each [`CHARACTER_PIXELS_PER_HIDDEN`]
+/// pixels of its characters, it has a pixel inside its border that is not
+/// ink and whose red, green, or blue is more than [`GRAIN`] outside what
+/// the border's pixels and the characters' span between them. The border is
+/// the background, whatever colors it has, so a gradient, grain, or a
+/// panel's line through the sample is no tone of the text. A character's
+/// anti-aliased edge blends the background and the character, so each of
+/// its channels lies between theirs.
+///
+/// An outline or a shadow whose every channel lies between the
+/// background's and the characters' looks like such an edge, as blue
+/// around white on gray does, so this finds none there. It finds none that
+/// reaches the border either, since it is then among the background's
+/// colors.
 pub(crate) fn hides_a_tone(samples: &[(Image, &str)], tolerance: u8) -> bool {
-    tolerance > DRAWN
-        && samples
-            .iter()
-            .any(|(picture, _text)| hidden_tone(picture, tolerance))
+    samples
+        .iter()
+        .any(|(picture, _text)| hidden_tone(picture, tolerance))
 }
 
 /// [`hides_a_tone`] for one picture.
 fn hidden_tone(picture: &Image, tolerance: u8) -> bool {
-    let characters = DigitReader::new(InkRule::Contrast { tolerance }).ink(picture);
-    let drawn = DigitReader::new(InkRule::Contrast { tolerance: DRAWN }).ink(picture);
+    let ink = DigitReader::new(InkRule::Contrast { tolerance }).ink(picture);
     let Size { width, height } = picture.size();
-    let mut text = Mean::default();
-    let mut background = Mean::default();
-    // The pixels drawn on the background that the characters leave out.
+    let mut expected = Span::default();
+    let mut character_pixels = 0_u64;
+    // The pixels inside the border that the characters leave out.
     let mut left_out = Vec::new();
     for (x, y) in (0..height).flat_map(|y| (0..width).map(move |x| (x, y))) {
         let Some(color) = picture.pixel(x, y) else {
             continue;
         };
-        if characters.at(x, y) {
-            text.add(color);
-        } else if drawn.at(x, y) {
-            left_out.push(color);
+        let on_border =
+            x == 0 || y == 0 || x.saturating_add(1) == width || y.saturating_add(1) == height;
+        if ink.at(x, y) {
+            expected.add(color);
+            character_pixels = character_pixels.saturating_add(1);
+        } else if on_border {
+            expected.add(color);
         } else {
-            background.add(color);
+            left_out.push(color);
         }
     }
-    let (Some(text_color), Some(background_color)) = (text.color(), background.color()) else {
-        return false;
-    };
-    let toward_text = offset(text_color, background_color);
     let hidden = left_out
         .into_iter()
-        .filter(|&color| {
-            let along: i64 = offset(channels(color), background_color)
-                .into_iter()
-                .zip(toward_text)
-                .map(|(from_background, toward)| from_background.saturating_mul(toward))
-                .sum();
-            along < 0
-        })
+        .filter(|&color| !expected.holds(color))
         .count();
-    u64::try_from(hidden)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(CHARACTER_PIXELS_PER_HIDDEN)
-        >= text.count
+    character_pixels > 0
+        && u64::try_from(hidden)
+            .unwrap_or(u64::MAX)
+            .saturating_mul(CHARACTER_PIXELS_PER_HIDDEN)
+            >= character_pixels
 }
 
-/// The mean color of the pixels added to it.
-#[derive(Default)]
-struct Mean {
-    sums: [u64; 3],
-    count: u64,
+/// The lowest and the highest red, green, and blue among the colors added
+/// to it.
+struct Span {
+    lowest: [u8; 3],
+    highest: [u8; 3],
 }
 
-impl Mean {
-    fn add(&mut self, color: Rgb) {
-        for (sum, channel) in self.sums.iter_mut().zip(channels(color)) {
-            *sum = sum.saturating_add(channel.unsigned_abs());
+impl Default for Span {
+    fn default() -> Self {
+        Self {
+            lowest: [u8::MAX; 3],
+            highest: [0; 3],
         }
-        self.count = self.count.saturating_add(1);
+    }
+}
+
+impl Span {
+    fn add(&mut self, color: Rgb) {
+        for ((lowest, highest), channel) in self
+            .lowest
+            .iter_mut()
+            .zip(&mut self.highest)
+            .zip(channels(color))
+        {
+            *lowest = (*lowest).min(channel);
+            *highest = (*highest).max(channel);
+        }
     }
 
-    /// The mean's red, green, and blue, or `None` without a pixel.
-    fn color(&self) -> Option<[i64; 3]> {
-        let [red, green, blue] = self.sums.map(|sum| {
-            sum.checked_div(self.count)
-                .and_then(|mean| i64::try_from(mean).ok())
-        });
-        Some([red?, green?, blue?])
+    /// Whether each of `color`'s red, green, and blue is within [`GRAIN`]
+    /// of the span of that channel. An empty span holds no color.
+    fn holds(&self, color: Rgb) -> bool {
+        self.lowest
+            .into_iter()
+            .zip(self.highest)
+            .zip(channels(color))
+            .all(|((lowest, highest), channel)| {
+                (lowest.saturating_sub(GRAIN)..=highest.saturating_add(GRAIN)).contains(&channel)
+            })
     }
 }
 
 /// The red, green, and blue of `color`.
-fn channels(color: Rgb) -> [i64; 3] {
-    [color.red, color.green, color.blue].map(i64::from)
-}
-
-/// How far `color` is from `from` in each of red, green, and blue.
-fn offset(color: [i64; 3], from: [i64; 3]) -> [i64; 3] {
-    let [red, green, blue] = color;
-    let [from_red, from_green, from_blue] = from;
-    [
-        red.saturating_sub(from_red),
-        green.saturating_sub(from_green),
-        blue.saturating_sub(from_blue),
-    ]
+fn channels(color: Rgb) -> [u8; 3] {
+    [color.red, color.green, color.blue]
 }
 
 #[cfg(test)]
@@ -278,21 +287,18 @@ mod tests {
         assert_eq!(fitted(&[(twice, "11")], 64), 12);
     }
 
-    /// A picture of `rows`, whose `.` is `background`, `o` black, `#`
-    /// white, and `+` halfway from the background to white, as an
-    /// anti-aliased edge is.
-    fn painted(rows: &[&str], background: [u8; 3]) -> Image {
-        let halfway = background.map(|channel| channel.midpoint(u8::MAX));
-        let bgra = rows
-            .iter()
-            .flat_map(|row| row.chars())
-            .flat_map(|pixel| {
-                let [red, green, blue] = match pixel {
-                    'o' => [0; 3],
-                    '#' => [u8::MAX; 3],
-                    '+' => halfway,
-                    _ => background,
-                };
+    /// A picture of `rows`, each pixel the color `color` gives its
+    /// character, column, and row.
+    fn picture(rows: &[&str], color: impl Fn(char, u32, u32) -> [u8; 3]) -> Image {
+        let bgra = (0_u32..)
+            .zip(rows)
+            .flat_map(|(y, row)| {
+                (0_u32..)
+                    .zip(row.chars())
+                    .map(move |(x, pixel)| (pixel, x, y))
+            })
+            .flat_map(|(pixel, x, y)| {
+                let [red, green, blue] = color(pixel, x, y);
                 [blue, green, red, 0]
             })
             .collect();
@@ -303,7 +309,32 @@ mod tests {
         Image::new(size, bgra).expect("matching length")
     }
 
-    /// Two white characters whose black outlines touch.
+    /// A picture of `rows`, whose `.` is `background`, `o` `outline`, `#`
+    /// white, and `+` halfway from the background to white, as an
+    /// anti-aliased edge is.
+    fn outlined(rows: &[&str], background: [u8; 3], outline: [u8; 3]) -> Image {
+        let halfway = background.map(|channel| channel.midpoint(u8::MAX));
+        picture(rows, |pixel, _, _| match pixel {
+            'o' => outline,
+            '#' => [u8::MAX; 3],
+            '+' => halfway,
+            _ => background,
+        })
+    }
+
+    /// [`outlined`] in black.
+    fn painted(rows: &[&str], background: [u8; 3]) -> Image {
+        outlined(rows, background, [0; 3])
+    }
+
+    /// Whether the pixel of `picture` at `x` and `y` is ink at `tolerance`.
+    fn inked(picture: &Image, tolerance: u8, x: u32, y: u32) -> bool {
+        DigitReader::new(InkRule::Contrast { tolerance })
+            .ink(picture)
+            .at(x, y)
+    }
+
+    /// Two white characters whose outlines touch.
     const OUTLINED: [&str; 8] = [
         "............",
         ".oooooooooo.",
@@ -315,6 +346,21 @@ mod tests {
         "............",
     ];
 
+    /// The color of a background at a column and a row.
+    type ColorAt = dyn Fn(u32, u32) -> [u8; 3];
+
+    /// Two white characters with nothing around them.
+    const PLAIN: [&str; 8] = [
+        "............",
+        "............",
+        "..##....##..",
+        "..##....##..",
+        "..##....##..",
+        "..##....##..",
+        "............",
+        "............",
+    ];
+
     const DARK: [u8; 3] = [10, 30, 90];
     const BRIGHT: [u8; 3] = [60, 120, 200];
 
@@ -322,10 +368,10 @@ mod tests {
     fn a_tolerance_that_hides_an_outline_reads_only_over_a_background_that_hides_it() {
         // On the dark background the outline is 90 from it and the
         // characters 245, so only tolerances from 90 up tell the two
-        // characters apart.
+        // characters apart, and they leave the outline out.
         let samples = [(painted(&OUTLINED, DARK), "11")];
         let tolerance = fitted(&samples, 40);
-        assert_eq!(tolerance, 168);
+        assert!(!inked(&samples[0].0, tolerance, 1, 1));
         let mut reader = DigitReader::new(InkRule::Contrast { tolerance });
         reader.learn(&samples[0].0, "11").expect("learns");
         assert!(reader.read(&painted(&OUTLINED, DARK), false).is_ok());
@@ -336,10 +382,65 @@ mod tests {
     }
 
     #[test]
-    fn only_a_tone_on_the_far_side_of_the_background_is_hidden() {
+    fn an_outline_of_a_color_beside_the_background_and_the_text_is_hidden() {
+        // A red outline around white on teal is brighter than the
+        // background in red and darker in green and blue, so it is not
+        // behind the background as seen from the text.
+        let samples = [(outlined(&OUTLINED, [0, 80, 80], [200, 0, 0]), "11")];
+        let tolerance = fitted(&samples, 40);
+        assert!(!inked(&samples[0].0, tolerance, 1, 1));
+        assert!(hides_a_tone(&samples, tolerance));
+    }
+
+    #[test]
+    fn a_background_of_more_than_one_color_is_no_hidden_tone() {
+        // Each background runs 60 or more from end to end, so much of it
+        // is further from its median than a plain background's grain, and
+        // darker than it.
+        let across = |x: u32, _: u32| [10, 30, u8::try_from(x).map_or(u8::MAX, |x| x * 8 + 60)];
+        let down = |_: u32, y: u32| [10, 30, u8::try_from(y).map_or(u8::MAX, |y| y * 9 + 60)];
+        // No pattern a row or a column shares.
+        let noisy = |x: u32, y: u32| {
+            let grain = u8::try_from((x * 7 + y * 13 + x * y * 5) % 61).unwrap_or(0);
+            [10, 30, 60 + grain]
+        };
+        // A panel's darker line through the text's rows.
+        let lined = |_: u32, y: u32| if y == 4 { [0, 10, 40] } else { DARK };
+        // A color of its own on each of three sides, corners aside, as
+        // where the sample meets a panel's edges: only that side of the
+        // border has it.
+        let framed = |x: u32, y: u32| match (x, y) {
+            (_, 0) => [100, 100, 40],
+            (_, 7) => [100; 3],
+            (0, _) => [40, 100, 100],
+            (11, _) => [100, 40, 100],
+            _ => [100; 3],
+        };
+        let backgrounds: [(&str, &ColorAt); 5] = [
+            ("across", &across),
+            ("down", &down),
+            ("noisy", &noisy),
+            ("lined", &lined),
+            ("framed", &framed),
+        ];
+        for (name, background) in backgrounds {
+            let sample = picture(&PLAIN, |pixel, x, y| match pixel {
+                '#' => [u8::MAX; 3],
+                _ => background(x, y),
+            });
+            let samples = [(sample, "11")];
+            let tolerance = fitted(&samples, 40);
+            assert!(inked(&samples[0].0, tolerance, 2, 2), "{name}");
+            assert!(!hides_a_tone(&samples, tolerance), "{name}");
+        }
+    }
+
+    #[test]
+    fn only_a_tone_beside_the_background_and_the_text_is_hidden() {
         // Where the outline is ink, nothing is left out.
         assert!(!hides_a_tone(&[(painted(&OUTLINED, BRIGHT), "1")], 40));
-        // An anti-aliased edge is left out, and lies toward the characters.
+        // An anti-aliased edge is left out, 122 from the background, and
+        // lies between it and the characters.
         let edged = [
             ".........",
             ".+##+##+.",
@@ -348,13 +449,15 @@ mod tests {
             ".........",
         ];
         let samples = [(painted(&edged, DARK), "11")];
-        assert_eq!(fitted(&samples, 40), 184);
-        assert!(!hides_a_tone(&samples, 184));
+        assert!(!inked(&samples[0].0, 150, 4, 2));
+        assert!(!hides_a_tone(&samples, 150));
         // A pixel or two of another tone is no outline.
         let speck = [".......", ".o##.#.", "..##.#.", "..##.#.", "......."];
         assert!(!hides_a_tone(&[(painted(&speck, DARK), "11")], 168));
-        // Neither a low tolerance nor a picture without ink hides one.
-        assert!(!hides_a_tone(&[(painted(&OUTLINED, DARK), "1")], DRAWN));
+        // One pixel of it for each four of the characters is one.
+        let shadow = [".......", ".o##.#.", ".o##.#.", "..##...", "......."];
+        assert!(hides_a_tone(&[(painted(&shadow, DARK), "11")], 168));
+        // A picture without ink hides none.
         assert!(!hides_a_tone(
             &[(painted(&["...", "...", "..."], DARK), "")],
             168
