@@ -69,23 +69,17 @@ impl Ink {
     /// itself, or the part of `image` whose text is looked for in the rest
     /// of it.
     pub(super) fn new(image: &Image, rule: InkRule, backdrop: &Image) -> Self {
-        match rule {
-            InkRule::Contrast { tolerance } => {
-                let background = background(backdrop);
-                Self::of_pixels(image, |pixel| !pixel.near(background, tolerance))
-            },
-            InkRule::Color { color, tolerance } => {
-                Self::of_pixels(image, |pixel| pixel.near(color, tolerance))
-            },
-        }
-    }
-
-    fn of_pixels(image: &Image, is_ink: impl Fn(Rgb) -> bool) -> Self {
+        // One pass serves both rules: a pixel is ink when it is near the
+        // text color, or when it is not near the background.
+        let (color, tolerance, near_is_ink) = match rule {
+            InkRule::Contrast { tolerance } => (background(backdrop), tolerance, false),
+            InkRule::Color { color, tolerance } => (color, tolerance, true),
+        };
         Self {
             inked: image
                 .pixels()
                 .iter()
-                .map(|&pixel| is_ink(Rgb::of_pixel(pixel)))
+                .map(|&pixel| Rgb::of_pixel(pixel).near(color, tolerance) == near_is_ink)
                 .collect(),
             size: image.size(),
         }
@@ -179,20 +173,16 @@ fn background(image: &Image) -> Rgb {
     border.median()
 }
 
-/// How many pixels have each value of red, green, and blue.
+/// How many pixels have each value of red, of green, and of blue.
 struct ChannelCounts {
-    red: [u32; 256],
-    green: [u32; 256],
-    blue: [u32; 256],
+    channels: [[u32; 256]; 3],
     pixels: u32,
 }
 
 impl Default for ChannelCounts {
     fn default() -> Self {
         Self {
-            red: [0; 256],
-            green: [0; 256],
-            blue: [0; 256],
+            channels: [[0; 256]; 3],
             pixels: 0,
         }
     }
@@ -200,11 +190,11 @@ impl Default for ChannelCounts {
 
 impl ChannelCounts {
     fn count(&mut self, pixel: Rgb) {
-        for (counts, value) in [
-            (&mut self.red, pixel.red),
-            (&mut self.green, pixel.green),
-            (&mut self.blue, pixel.blue),
-        ] {
+        for (counts, value) in self
+            .channels
+            .iter_mut()
+            .zip([pixel.red, pixel.green, pixel.blue])
+        {
             if let Some(count) = counts.get_mut(usize::from(value)) {
                 *count = count.saturating_add(1);
             }
@@ -214,21 +204,17 @@ impl ChannelCounts {
 
     /// The color made of each channel's median.
     fn median(&self) -> Rgb {
-        let median = |counts: &[u32; 256]| {
+        let [red, green, blue] = self.channels.map(|counts| {
             let mut at_most = 0_u32;
             (0..=u8::MAX)
                 .zip(counts)
-                .find(|&(_, &count)| {
+                .find(|&(_, count)| {
                     at_most = at_most.saturating_add(count);
                     at_most.saturating_mul(2) >= self.pixels
                 })
                 .map_or(0, |(value, _)| value)
-        };
-        Rgb {
-            red: median(&self.red),
-            green: median(&self.green),
-            blue: median(&self.blue),
-        }
+        });
+        Rgb { red, green, blue }
     }
 }
 
