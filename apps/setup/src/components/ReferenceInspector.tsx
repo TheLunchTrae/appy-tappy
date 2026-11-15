@@ -160,8 +160,8 @@ export function ReferenceInspector({
 }: Props) {
   const { taught, finder, guided, review, recorder, checking, covered } = teaching;
   const chosen = boxes.selected;
-  // The characters to warn about look-alikes among: the value's, or for a reference by itself those of every value
-  // that reads with it.
+  // A look-alike pair warns when it has one of these characters: the value's, or for a reference by itself those of
+  // every value that reads with it.
   const lookalikeNeeds =
     needsField !== 'hidden'
       ? teaching.needs
