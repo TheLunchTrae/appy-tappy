@@ -102,6 +102,62 @@ pub(crate) struct SavedReference {
     pub(crate) pictures: Pictures,
 }
 
+impl SavedReference {
+    /// The reference as it is saved under the name `name`, with the text
+    /// color `ink`, or none to find its characters by contrast, the
+    /// tolerance `tolerance`, and the characters `expected` that it needs,
+    /// as [`expected_characters`] lists them. Its samples stay as they are
+    /// saved, so no screenshot is needed, and it learns them back with the
+    /// new text color and tolerance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SpecError::TooManyExpected`] for more expected characters
+    /// than a reference saves, or why a sample cannot be learned.
+    pub(crate) fn with_settings(
+        self,
+        name: &str,
+        ink: Option<ColorDef>,
+        tolerance: u8,
+        expected: &str,
+    ) -> Result<ReferenceDef, SpecError> {
+        let saved_name = self.reference.name.clone();
+        let reference = ReferenceDef {
+            name: name.to_owned(),
+            ink,
+            tolerance,
+            expects: expected_characters(expected)?,
+            ..self.reference
+        };
+        learned(&reference, self.pictures.iter(), Some(saved_name)).map(|_reader| reference)
+    }
+}
+
+/// The reader `reference` learns from its samples' `pictures`, as
+/// `saved::reader` learns it. Only a saved sample can be missing, so that
+/// problem names the saved reference, `saved_name`, whatever the one
+/// learned here is called.
+fn learned<'a>(
+    reference: &ReferenceDef,
+    pictures: impl Iterator<Item = &'a (String, Vec<u8>)> + Clone,
+    saved_name: Option<String>,
+) -> Result<DigitReader, SpecError> {
+    saved::reader(reference, |picture| {
+        pictures
+            .clone()
+            .find(|(name, _)| name == picture)
+            .map(|(_, png)| png.clone())
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+    })
+    .map_err(|error| match sample_problem(error, reference) {
+        SpecError::MissingSample { picture, .. } => SpecError::MissingSample {
+            reference: saved_name.unwrap_or_else(|| reference.name.clone()),
+            picture,
+        },
+        problem => problem,
+    })
+}
+
 /// The session's screenshots, recording, and saved references, which the
 /// characters the UI describes name.
 #[derive(Clone, Copy)]
@@ -255,23 +311,7 @@ impl CharactersSpec {
             samples,
             expects: None,
         };
-        let reader = saved::reader(&reference, |picture| {
-            pictures
-                .iter()
-                .chain(&kept)
-                .find(|(name, _)| name == picture)
-                .map(|(_, png)| png.clone())
-                .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
-        })
-        .map_err(|error| match sample_problem(error, &reference) {
-            // Only a saved sample can be missing, so the problem names the
-            // saved reference, whatever the one taught here is called.
-            SpecError::MissingSample { picture, .. } => SpecError::MissingSample {
-                reference: saved_name.unwrap_or_else(|| reference.name.clone()),
-                picture,
-            },
-            problem => problem,
-        })?;
+        let reader = learned(&reference, pictures.iter().chain(&kept), saved_name)?;
         Ok(Taught {
             region,
             window_size,

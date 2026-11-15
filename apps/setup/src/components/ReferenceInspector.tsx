@@ -4,7 +4,7 @@ import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
 import type { Editing } from '../lib/captureDraft.ts';
-import { type Built, type Draft, withTextColor } from '../lib/check.ts';
+import { type Built, type Draft, type ReferenceSaving, withTextColor } from '../lib/check.ts';
 import { TOO_MANY } from '../lib/expected.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers } from '../lib/reference.ts';
@@ -22,6 +22,10 @@ import { FoundPanel } from './Found.tsx';
 import { ReadingDetailsBox } from './ReadingDetails.tsx';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
+
+/** What the reading box says while a saved reference's settings are all there is to save. */
+const SETTINGS_ONLY =
+  'Saving keeps its samples as they are. Draw a box around some characters on a screenshot to teach it more and see what it reads.';
 
 /** The id of the note that says why Save reference waits, which the button points at. */
 const SAVE_WAITS_ID = 'save-reference-waits';
@@ -112,10 +116,12 @@ interface Props {
   readonly setSelected: (index: number | null) => void;
   /** The matching pixels' field. */
   readonly preview: ReactNode;
-  /** The characters as they would be saved, or what they still need. */
-  readonly built: Built<unknown>;
+  /** What saving the reference sends, or what it still needs. */
+  readonly saving: Built<ReferenceSaving>;
   /** The try of the characters on the live window. */
   readonly check: LiveCheck;
+  /** Why there is no live window to read, or null while one is captured. */
+  readonly windowless: string | null;
   readonly busy: boolean;
   readonly draftError: ReactNode;
   readonly draftButton: ReactNode;
@@ -141,8 +147,9 @@ export function ReferenceInspector({
   position,
   setSelected,
   preview,
-  built,
+  saving,
   check,
+  windowless,
   busy,
   draftError,
   draftButton,
@@ -150,10 +157,12 @@ export function ReferenceInspector({
 }: Props) {
   const { taught, finder, guided, review, recorder, checking, covered, overLimit } = teaching;
   const chosen = boxes.selected;
+  const settingsOnly = saving.ok && saving.spec.kind === 'settings';
   const refSave = referenceSave({
     named: editing.name.trim().length > 0,
-    built: built.ok,
-    tried: check.state.kind === 'set',
+    built: saving.ok,
+    // Settings alone teach nothing to try: the reference reads as it is saved.
+    tried: settingsOnly || check.state.kind === 'set',
     busy,
     overLimit,
     reviewing: teaching.reviewed !== null,
@@ -263,7 +272,12 @@ export function ReferenceInspector({
           />
         }
       />
-      <ReadingBox built={built.ok ? null : built.next} state={check.state} reads={check.reads} />
+      <ReadingBox
+        built={settingsOnly ? SETTINGS_ONLY : saving.ok ? null : saving.next}
+        state={check.state}
+        reads={check.reads}
+        windowless={windowless}
+      />
       {/* Scores are of the characters alone here, so they need no key by the check's kind. */}
       <ReadingDetailsBox ask={check.state.kind === 'set' ? explainReading : null} />
       <div className="sep" />

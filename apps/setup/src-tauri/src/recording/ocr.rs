@@ -165,14 +165,14 @@ fn load(model: &Path) -> Result<OcrEngine, String> {
         recognition_model: Some(model),
         ..OcrEngineParams::default()
     })
-    .map_err(|error| format!("The text reader could not start: {error}"))
+    .map_err(|error| format!("The text reader could not start: {error:#}"))
 }
 
 /// What `engine` reads on `line`.
 fn read(engine: &OcrEngine, line: &Line) -> Text {
     match recognize(engine, line) {
         Ok(text) => Text::Read(text),
-        Err(error) => Text::Failed(format!("The text reader failed: {error}")),
+        Err(error) => Text::Failed(format!("The text reader failed: {error:#}")),
     }
 }
 

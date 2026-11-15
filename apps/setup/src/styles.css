@@ -511,6 +511,42 @@ select {
   color: var(--capture);
 }
 
+/* What a capture's stage shows in place of the window while none is captured. */
+.window-absent {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.window-absent > div {
+  margin: auto;
+  padding: 24px;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.window-absent h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.window-absent p {
+  color: var(--muted);
+}
+
+.window-absent .window-list {
+  flex: none;
+  align-self: stretch;
+}
+
 /* The open flow, which is inert while leaving saves the drafts. It takes no box of its own. */
 .flow-hold {
   display: contents;

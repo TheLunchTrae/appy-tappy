@@ -14,7 +14,26 @@ This page covers what the user guide leaves out.
 
 ## Behavior the guide leaves out
 
-- **Picker.** The picker of a value or reference chooses a saved application
+- **Editing without the window.** A saved value's or reference's flow opens
+  its editor at once and looks for the application's window from there
+  (`lib/windowSearch.ts`, `lib/useWindowSearch.ts`);
+  [Window search](State-machines.md#window-search) lists its states. It
+  resolves the window as the picker does, with the same look and
+  `pickerStep`, so it captures only a window a session would read. The
+  owner's commands that the editor calls answer without a picked window:
+  `try_edit` judges the trial against the saved files, `reading`,
+  `explain_reading`, and `window_size` answer nothing, `edit_value` saves
+  what names no screenshot, and `save_reference_settings` saves a saved
+  reference's name, text color, tolerance, and needed characters with its
+  samples as they are. `set_characters` and `save_reference` learn from a
+  region on a screenshot, so they need a session that has one. The
+  anti-cheat products the look found show above the stage, and so does a
+  window taken only as the fallback. When the window closes, the editor
+  keeps its session and captures the window again once it is back, as
+  [Window search](State-machines.md#window-search) describes. A flow that
+  finishes a draft keeps the picker, since the draft's screenshots come back
+  only into a picked window's session.
+- **Picker.** The picker of a new value or reference chooses a saved application
   and then resolves that application's window with its own match
   (`lib/picker.ts`); [Picker](State-machines.md#picker) lists its states. One
   look (`lib/useAppWindows.ts`) is one `list_app_windows` command: the owner

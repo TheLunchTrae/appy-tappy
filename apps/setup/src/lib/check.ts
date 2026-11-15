@@ -359,6 +359,33 @@ export function buildCharacters(draft: Draft, reference: ReferenceRef | null): B
   return { ok: true, spec };
 }
 
+/**
+ * What saving a reference sends: the characters it is taught, or a saved reference's settings alone, which keep its
+ * samples and need no screenshot.
+ */
+export type ReferenceSaving =
+  | { readonly kind: 'taught'; readonly characters: CharactersSpec }
+  | {
+      readonly kind: 'settings';
+      readonly reference: ReferenceRef;
+      readonly ink: Color | null;
+      readonly tolerance: number;
+    };
+
+/**
+ * What saving the reference `draft` teaches sends, or what it still needs. A saved reference with no place to read,
+ * so with no box and no recording either, saves its settings: there is nothing new for it to learn.
+ */
+export function buildReferenceSave(draft: Draft, reference: ReferenceRef | null): Built<ReferenceSaving> {
+  const characters = buildCharacters(draft, reference);
+  if (characters.ok) {
+    return { ok: true, spec: { kind: 'taught', characters: characters.spec } };
+  }
+  return reference !== null && readingOf(draft).region === null
+    ? { ok: true, spec: { kind: 'settings', reference, ink: draft.ink, tolerance: draft.tolerance } }
+    : characters;
+}
+
 /** A saved check in a few words, and the colors it reads with. */
 interface CheckSummary {
   readonly name: string;

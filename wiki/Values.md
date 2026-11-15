@@ -105,7 +105,10 @@ from it: draw the region on another screenshot, or remove the state, first.
 ### When the window isn't found
 
 AppyTappy captures only a window it would read for the application, so what you
-draw is what your automations see.
+draw is what your automations see. A saved value's or reference's editor
+shows the same reasons in place of the window, as
+[While the application isn't open](#while-the-application-isnt-open)
+describes.
 
 - **The application isn't open, or its window doesn't match.** Open the
   application and select **Refresh**. If it is open, the way AppyTappy finds
@@ -125,6 +128,41 @@ draw is what your automations see.
   capture it; check that it is the window you mean.
 - **The applications couldn't be read.** AppyTappy says why. Select
   **Refresh** to read them again.
+
+### While the application isn't open
+
+**Edit** and **Fix at this size** on a value, and **Edit** on a
+[reference](References.md), open the editor at once, with no step before it.
+AppyTappy looks for the application's window and shows it live as soon as it
+finds the one window that fits.
+
+Until then, the editor shows a panel where the window would be, such as
+**Example App isn't open**, with **Refresh**. Open the application and select
+**Refresh**; the window then shows without another step. If several windows
+fit equally well, the panel lists them: pick one. **Change how it's found**
+is there when the window doesn't match, once you saved or discarded what you
+changed in the editor.
+
+Everything that doesn't need the window works meanwhile: names, the check's
+settings, **Stays at**, the tolerance of a reference's text color and
+**Characters it needs**, and saving a change that needs no new screenshot.
+What needs the window is off and says why: **Take screenshot**, recording,
+detecting a bar, and the box that shows what the value reads on the live
+window. The screenshot shortcut does nothing meanwhile, and the first tile
+under the stage reads **No window** instead of **Live**.
+
+If the application closes while you edit, the same panel takes the live
+window's place. What you changed stays, and so do the screenshots you took:
+select one under the stage to keep working on it. Open the application
+again and select **Refresh**, and the editor goes on with the window.
+
+If no open window matches everything that must match, AppyTappy captures the
+fallback window and says so above the window, with
+**Change how it's found** beside it. Check that it is the window you mean.
+
+If an anti-cheat product is running, the editor says so above the window:
+reading the screen is fine, but set the application's
+[anti-cheat](Applications.md#anti-cheat) before giving it key press or click actions.
 
 ## Draw the region
 
@@ -628,11 +666,11 @@ the size the value was first drawn at. At that size, [edit the
 value](#edit-a-value) instead. **Matches no state** isn't always wrong: the
 region may show none of the states right now.
 
-1. AppyTappy finds the application's window and names it; select
-   **Capture this window**. If it has none to capture, see
-   [When the window isn't found](#when-the-window-isnt-found). AppyTappy
-   takes a screenshot of the window at its size now, with the region where
-   the value would be read there: it **Starts from the scaled region**.
+1. AppyTappy finds the application's window and takes a screenshot of it at
+   its size now, with the region where the value would be read there: it
+   **Starts from the scaled region**. A fix is drawn on that screenshot, so
+   [while the application isn't open](#while-the-application-isnt-open) it
+   waits for the window.
 2. Move the region onto the value, then select **Next: how to read it**.
    For a value drawn as a [reading area](#content-that-moves), the region
    **Starts from the scaled reading area**, with a dashed outline: move or
@@ -673,11 +711,11 @@ and draws the value again at one other size. The editor is headed
 **Edit** with the value's name and saves with **Save changes**; a fix is
 headed **Fix** and saves with **Save fix**.
 
-1. AppyTappy finds the application's window and names it; select
-   **Capture this window**. If it has none to capture, see
-   [When the window isn't found](#when-the-window-isnt-found). AppyTappy
-   takes a screenshot of the window and opens the value as it is saved. The
-   application has to be running, as for a fix, whatever you change.
+1. The editor opens on the value as it is saved. AppyTappy finds the
+   application's window and takes a screenshot of it.
+   [While the application isn't open](#while-the-application-isnt-open), you
+   can still change and save everything but the region and a **State**
+   check's pictures, which need a screenshot.
 2. **Where to read.** Change the **Value name**, the **Check**,
    **This content may move**, or **Stays at**, or move the region.
    **Stays at** opens as automatic unless the value was saved with another

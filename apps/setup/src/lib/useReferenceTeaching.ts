@@ -3,13 +3,14 @@
 
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
 
-import type { CharactersSpec, PinDef, RecordingScope, ReferenceDef, ReferenceRef, SavedReference } from './bindings.ts';
-import { errorText, saveReference } from './api.ts';
+import type { PinDef, RecordingScope, ReferenceDef, ReferenceRef, SavedReference } from './bindings.ts';
+import { errorText, saveReference, saveReferenceSettings } from './api.ts';
 import { boxOf } from './boxes.ts';
 import type { Editing } from './captureDraft.ts';
 import {
   type Built,
   type Draft,
+  type ReferenceSaving,
   boxBlocked,
   findBlocked as findBlockedBy,
   fromReference,
@@ -48,10 +49,12 @@ interface TeachingSetup {
   readonly boxes: ReturnType<typeof useBoxes>;
   /** The saved reference the editor adds to, or null for a new one or while no editor is open. */
   readonly reference: ReferenceRef | null;
-  /** The characters the editor teaches, or null while no editor is open. */
-  readonly characters: Built<CharactersSpec> | null;
+  /** What saving the reference sends, or null while no editor is open. */
+  readonly saving: Built<ReferenceSaving> | null;
   /** The side a recording's region stays at. */
   readonly pin: PinDef | null;
+  /** Why nothing can be recorded for want of a window, or null while one is captured. */
+  readonly windowless: string | null;
   /** Each screenshot's pixels. */
   readonly full: ReadonlyMap<number, Picture>;
   /** The picture the stage shows, or null while it shows none. */
@@ -80,8 +83,9 @@ export function useReferenceTeaching({
   setDraft,
   boxes,
   reference,
-  characters,
+  saving,
   pin,
+  windowless,
   full,
   shown,
   setSelected,
@@ -136,7 +140,8 @@ export function useReferenceTeaching({
   });
   // A reference without a text color takes a tolerance its samples read with. A recording keeps the tolerance it
   // records with, which Record more needs, so the tolerance waits until the recording is saved or discarded.
-  useContrastTolerance(recording === null && characters?.ok === true ? characters.spec : null, (tolerance) => {
+  const taughtCharacters = saving?.ok === true && saving.spec.kind === 'taught' ? saving.spec.characters : null;
+  useContrastTolerance(recording === null ? taughtCharacters : null, (tolerance) => {
     setDraft((current) => ({ ...current, tolerance }));
   });
   // The check, like review, shows in place of the window's picture.
@@ -238,17 +243,21 @@ export function useReferenceTeaching({
   };
 
   const save = async (): Promise<void> => {
-    if (editing === null || characters === null || !characters.ok) {
+    if (editing === null || saving === null || !saving.ok) {
       return;
     }
+    const { spec } = saving;
+    const named = { referenceName: editing.name.trim(), expects: editing.expects.join('') };
     onSaving(true);
     try {
-      const saved = await saveReference({
-        app,
-        referenceName: editing.name.trim(),
-        characters: characters.spec,
-        expects: editing.expects.join(''),
-      });
+      const saved = await (spec.kind === 'taught'
+        ? saveReference({ ...named, app, characters: spec.characters })
+        : saveReferenceSettings({
+            ...named,
+            reference: spec.reference,
+            ...(spec.ink === null ? {} : { ink: spec.ink }),
+            tolerance: spec.tolerance,
+          }));
       setError(null);
       await onSaved(saved, close);
     } catch (failed: unknown) {
@@ -293,7 +302,7 @@ export function useReferenceTeaching({
     checkStep,
     recordError: recorder.commandError ?? review.error ?? recorder.pollError,
     /** Why it cannot record, or null when it can or no editor is open. */
-    recordBlocked: editing === null ? null : recordBlocked(draft),
+    recordBlocked: editing === null ? null : (windowless ?? recordBlocked(draft)),
     /** Why Find more like it cannot search from the selected box, or null. */
     findBlocked: findBlockedBy(boxes.selected),
     /** Why no box can be drawn on the picture shown, or null. */

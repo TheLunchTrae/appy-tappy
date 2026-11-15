@@ -162,10 +162,13 @@ export function ReadingBox({
   built,
   state,
   reads,
+  windowless,
 }: {
   readonly built: string | null;
   readonly state: CheckState;
   readonly reads: LiveReads;
+  /** Why there is no live window to read, or null while one is captured. */
+  readonly windowless: string | null;
 }) {
   const { reading, problem } = useLiveRead(reads);
   if (built !== null) {
@@ -178,6 +181,9 @@ export function ReadingBox({
     case 'error':
       return <p className="reading warn">{state.message}</p>;
     case 'set':
+      if (windowless !== null) {
+        return <p className="reading note">{windowless}</p>;
+      }
       if (reading === null && problem !== null) {
         return (
           <p className="reading warn" aria-live="polite">

@@ -23,8 +23,11 @@ macro_rules! with_commands {
     ($then:ident) => {
         $then! {
             commands::list_windows() -> WindowList;
-            /// Starts capturing `window` for the preview, and answers the capture's number.
-            commands::pick_window(window: U64AsNumber) -> U64AsNumber;
+            /// Starts capturing `window` for the preview, and answers the capture's number. The session of capture
+            /// `continues` goes on with its screenshots when the owner still holds it; any other pick starts a session.
+            commands::pick_window(window: U64AsNumber, continues: OptionalU64AsNumber) -> U64AsNumber;
+            /// Whether the picked window closed, which ended its capture for good.
+            commands::capture_ended() -> bool;
             /// Stops capture `capture` and forgets the session's screenshots and check, unless another capture took
             /// its place.
             commands::stop_capture(capture: U64AsNumber) -> ();
@@ -198,6 +201,8 @@ macro_rules! with_commands {
             commands::delete_value(application: String, value: String) -> ();
             /// Saves a reference, over the one `spec.check.reference` names when it names one.
             commands::save_reference(spec: ReferenceSaveSpec) -> SavedReferenceId;
+            /// Saves a saved reference's name, color, tolerance, and the characters it needs, with its samples as they are, so it needs no screenshot.
+            commands::save_reference_settings(spec: ReferenceSettingsSpec) -> SavedReferenceId;
             /// Removes a saved reference and its pictures; refused while a value reads with it.
             commands::delete_reference(application: String, reference: String) -> ();
             /// Sets how the application `application` protects itself from other programs.

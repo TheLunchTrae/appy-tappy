@@ -51,7 +51,11 @@ it was about has gone. Fourteen guards drop such stale messages:
   records (`Owner::stop_recording`). The page sends the screens' picks one
   at a time and drops a pick whose screen went before its turn
   (`screenCaptures` in `apps/setup/src/lib/capture.ts`), so a closed
-  screen's late pick never takes the slot from the next screen's pick. The
+  screen's late pick never takes the slot from the next screen's pick. A
+  pick that continues a capture keeps that capture's session only while the
+  slot still holds it (`Owner::pick_again`), and the
+  [window search](#window-search) drops the end of a capture of another
+  window than the one that runs. The
   automation editor's watch takes the slot outside that line
   (`Owner::watch`), so such a pick can still replace a watch; the owner then
   refuses the watch, and the editor watches again. The owner answers nothing
@@ -1109,6 +1113,7 @@ draft opens from its page with none waiting:
   saved automation, application, or reference with a draft of changes offers
   **Finish draft** in place of **Edit**, so the saved item and its draft
   never change apart. A value, fix, or reference flow that finishes a draft
+  starts with the [picker](#picker) and
   brings the draft's screenshots back only after its window is picked, since
   picking a window clears the session's. **Change window** after that asks
   first, then starts the capture over without what the draft kept; a draft
@@ -1238,9 +1243,11 @@ forward.
 
 ### Picker
 
-The first step of the value and reference flows
-(`apps/setup/src/components/Picker.tsx`) chooses the application and finds
-the window to capture. Its state is the chosen application, the window picked
+The first step of a flow that makes a value or a reference, or finishes a
+draft of one, (`apps/setup/src/components/Picker.tsx`) chooses the
+application and finds the window to capture. A flow that changes a saved
+value or reference has no such step: its editor makes the
+[window search](#window-search). Its state is the chosen application, the window picked
 among several, the capture it asked for (`Start`), and the newest look at the
 saved applications and the open windows (`Look`, from
 `apps/setup/src/lib/useAppWindows.ts`). `pickerStep` in
@@ -1294,9 +1301,9 @@ stateDiagram-v2
   **Refresh** looks again.
 - **NoApplications** and **Choosing** show the list of saved applications
   with **Add application** in it. With one saved application there is no
-  choice, and the picker resolves that one. A flow that has its application,
-  **Fix at this size**, or **Edit** on a value or a reference, shows no list
-  and never reaches them.
+  choice, and the picker resolves that one. A flow that finishes the draft
+  of a fix or of a reference's changes has its application already, so it
+  shows no list and never reaches them.
 - **Missing** is a chosen application that the look does not find: the flow's
   own, one handed over by the application flow, or the last choice. The
   picker says so instead of asking for a choice as if none had been made.
@@ -1324,6 +1331,84 @@ stateDiagram-v2
   it ends, as [Pages and flows](#pages-and-flows) describes. **Change window**
   in the capture opens a new picker with the same application, and with the
   same window picked when several fit.
+
+### Window search
+
+**Fix at this size** and **Edit** on a value, and **Edit** on a reference
+that has no draft, open the capture screen at once
+(`SavedCapture` in `apps/setup/src/pages/CaptureFlow.tsx`), which gets its
+window while it shows. Its state is the newest look at the saved
+applications and the open windows, as the [picker](#picker) makes them and
+resolved by `pickerStep` for the flow's application, and the capture it
+asked for, a `WindowCapture`. `searchStep` in
+`apps/setup/src/lib/windowSearch.ts` is the capture's transition, and
+`windowAbsence` names what the stage shows in place of the window.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None: the editor opens and the first look starts
+    None --> Starting: a look finds one window that fits best
+    None --> Starting: the user picks one of several that fit equally well
+    Starting --> Running: pick_window answers
+    Starting --> Refused: pick_window fails
+    Refused --> None: Refresh
+    Refused --> Starting: the user picks one of several
+    Running --> None: Change window, which stops the capture and looks again
+    Running --> None: the window closes, and a new look starts
+```
+
+- **None** shows a panel on the stage in place of the window
+  (`components/capture/WindowAbsent.tsx`) that says where the look stands:
+  under way, the application isn't open, several windows fit and are listed
+  to pick from, the look failed, or the application can't be read anymore.
+  **Refresh** makes a new look, and each look that finds exactly one window
+  starts its capture, so nothing else is pressed. Where the window cannot be
+  told from the application's match, the panel offers
+  **Change how it's found**, which opens the application flow as the picker
+  does; it is off while the editor holds unsaved work, which leaving would
+  drop.
+- **Starting** sends one `pick_window`, through the screens' one line of
+  picks ([Capture slot](#capture-slot)). The pick continues the capture the
+  editor still holds, which is one whose window closed, so the owner keeps
+  the session's screenshots, recording, and found text under the new
+  capture (`Owner::pick_again`). **Refresh** and the listed windows wait for
+  its answer. An answer that arrives while no capture is starting is
+  dropped.
+- **Refused** shows why, such as a window that closed since the look. A look
+  does not start the capture again by itself, so a window that cannot be
+  captured is not asked for over and over: **Refresh** returns to **None**
+  with a new look, and picking a listed window starts that one.
+- **Running** shows the live window, and the look is not consulted again.
+  When the window was taken only as the fallback, the editor says so above
+  the stage and offers **Change how it's found** there. **Change window**
+  stops the capture and opens a new editor on a new look, after asking
+  about unsaved work.
+- **The window closes.** Each failure of the live view asks the owner
+  whether the capture slot is **Ended** (`capture_ended`), one ask at a
+  time. When it is, the capture returns to **None** and a new look starts,
+  so the panel shows again with **Refresh**, and the window is captured
+  again once a look finds it. The editor is the same one: its draft, its
+  screenshots, and what it recorded stay, and the screenshots still show
+  while the panel takes the live window's place. The end carries the
+  window's handle, and `searchStep` drops one for another window than the
+  capture that runs, such as an answer that arrives after **Change window**
+  captured another. A failure that does not end the capture changes
+  nothing here: the stage shows it until a good frame.
+- When the editor shows again after **Change how it's found**, the focus
+  lands on the way forward (`windowLanding`): the first listed window,
+  **Change how it's found**, or **Refresh**, and **Take screenshot** once
+  the window is captured. It waits while a look or a capture's start is
+  under way.
+- While the capture is not **Running**, the editor works on everything that
+  needs no window. **Take screenshot**, recording, and bar detection are
+  off with the reason, the screenshot shortcut is not registered, the
+  strip's first tile reads **No window**, and the live reading says why it
+  reads nothing. A value's trial tried then is judged against the saved
+  files but not kept to read with (`Owner::go_live`), so it is tried again
+  once the capture runs. A saved reference with no box and no recording
+  saves its name, text color, tolerance, and needed characters with its samples
+  as they are (`save_reference_settings`), which needs no screenshot;
+  teaching it more needs a box on a screenshot.
 
 ### Click target tries
 
@@ -1571,6 +1656,7 @@ stateDiagram-v2
     Previewing --> Previewing: another window is picked, which stops and starts again
     Failed --> Previewing: another window is picked
     Ended --> Previewing: another window is picked
+    Ended --> Previewing: the window is picked again, which keeps the session
     Previewing --> Watching: the automation editor watches a value
     Watching --> Previewing: a window is picked
     Watching --> Watching: the window settles at another size, which starts the capture again at the value's region there
@@ -1603,7 +1689,12 @@ stateDiagram-v2
   answered, and a pick whose screen went by its turn is not sent. Otherwise
   a pick that a closed screen sent could take the slot after the next
   screen's, and the closed screen's stop of it would leave the next screen
-  with no capture. While one holds it, the pages' lists are read only after
+  with no capture. A pick can name the capture it continues
+  (`Owner::pick_again`): while the slot still holds that capture, the new
+  one takes its place and the session's screenshots, check, recording, and
+  found text stay, and when another capture took its place the pick starts
+  a session like any other. The [window search](#window-search) picks this
+  way after its window closed. While one holds it, the pages' lists are read only after
   a save.
 - The automation editor's watch (`liveWatchStep` in
   `apps/setup/src/lib/liveWatch.ts`) holds the owner's watch number, the
@@ -1621,7 +1712,8 @@ stateDiagram-v2
   error: a closed window, a lost graphics device, or a capture panic. Frames
   after it are dropped, and a screenshot, a new recording, and **Record
   more** are refused with "Change window to pick it
-  again". Only a stop or another pick leaves it.
+  again". `capture_ended` answers whether the slot is in it. Only a stop or
+  another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show. Nothing starts the capture again, at any window size: the
   editor watches the value again.
