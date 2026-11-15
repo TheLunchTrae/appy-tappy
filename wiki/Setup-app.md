@@ -667,16 +667,17 @@ The search looks for one size of text at a time (`sizes_among`): the
 sample's height first, then each other height a blob has from 8 pixels up
 (`SHORTEST_OTHER_SIZE`), largest first, where heights within 15% of one
 another (`SIZE_PERCENT`) are one size. For each size, the blobs up to twice
-as tall whose rows meet and that start no further than the size past each
+as tall, or for the sample's size up to twice the sample's line, whose rows
+meet and that start no further than the size past each
 other join into a run of text, and a run whose tallest blob is within 15% of
-the size is text of that size (`sized_runs`). Its blobs are left out of the
-sizes after it. So text of the sample's size is found as it is without the
-other sizes, and the marks and parts of larger characters, such as a comma
+the size is text of that size (`sized_runs`). The blobs that joined it are
+left out of the sizes after it; a blob that only lies inside its bounds
+joined nothing and stays for them. So the look for another size takes no
+ink from text of the sample's size, and the marks and parts of larger characters, such as a comma
 or the rings of a percent sign, stay with their text and are no small text
 of their own. Runs are looked up by bands of rows and dropped from the
 lookup once the next blobs start too far right of them, and filling the
-blobs is most of the work, so the other sizes add little: a 1920 by 1080
-screenshot with 98 runs of text takes about 26 ms with them and without. A
+blobs is most of the work, so the other sizes add little. A
 recording of the whole window joins runs the same way, for the sizes of its
 examples, smallest first.
 
