@@ -57,3 +57,42 @@ export function scrollShift(point: Point, anchor: Point, box: Box, picture: Size
 export function percent(shown: Size, picture: Size): string {
   return picture.width > 0 ? `${Math.round((shown.width * 100) / picture.width)}%` : '';
 }
+
+/** A pan of a zoomed picture: the pointer whose right or middle button drags it, and where it was last. */
+export interface Pan {
+  readonly pointer: number;
+  readonly at: Point;
+}
+
+/** The pan a press starts: the right and the middle button pan, as in image and video editors, and others don't. */
+export function panStart(button: number, pointer: number, at: Point): Pan | null {
+  return button === 1 || button === 2 ? { pointer, at } : null;
+}
+
+/** The bits of a pointer event's `buttons` that hold the right and the middle button down. */
+const PAN_BUTTONS = 2 | 4;
+
+/**
+ * Where `pan` is after `pointer` moves to `at` with `buttons` held, and how far the view scrolls so the picture
+ * follows the pointer. The pan ends, with no scroll, once neither the right nor the middle button is held: a button
+ * let go while another stays down sends a move, not a release.
+ */
+export function panMove(
+  pan: Pan,
+  pointer: number,
+  at: Point,
+  buttons: number,
+): { readonly pan: Pan | null; readonly scroll: Point } {
+  if (pointer !== pan.pointer) {
+    return { pan, scroll: { x: 0, y: 0 } };
+  }
+  if ((buttons & PAN_BUTTONS) === 0) {
+    return { pan: null, scroll: { x: 0, y: 0 } };
+  }
+  return { pan: { pointer, at }, scroll: { x: pan.at.x - at.x, y: pan.at.y - at.y } };
+}
+
+/** The pan after `pointer` is let go, cancelled, or loses the view's hold: over for its own pointer only. */
+export function panEnd(pan: Pan | null, pointer: number): Pan | null {
+  return pan?.pointer === pointer ? null : pan;
+}
