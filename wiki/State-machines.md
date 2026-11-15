@@ -2221,11 +2221,14 @@ The zoom of the view (`apps/setup/src/components/ZoomView.tsx`) is one number
 kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
 the live view shows or a screenshot of another size does. It changes only the
 size the screenshot shows at, so a drag goes on through a zoom or a scroll.
-A drag with the right or the middle button pans instead (`panStart` and
-`panMove` in `apps/setup/src/lib/zoom.ts`): the view holds that pointer, so
-the surface never hears its press or its moves, and moves of any other
-pointer change nothing. The pan ends when its pointer is let go, cancelled,
-or loses the hold.
+A drag with the right or the middle button pans instead (`panStart`,
+`panMove`, and `panEnd` in `apps/setup/src/lib/zoom.ts`): the view holds that
+pointer, so the surface never hears its press or its moves, and moves of any
+other pointer change nothing. The pan ends when its pointer is let go,
+cancelled, or loses the hold, and when a move comes with neither the right
+nor the middle button down, which is how a button let go while another stays
+down shows. A pan with the right button turns off the next context menu,
+wherever it opens, until the next press.
 
 ### Draft screenshot pixels
 
