@@ -64,6 +64,12 @@ jobs:
             target/
           key: rust-${{ runner.os }}-quality-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}
           restore-keys: rust-${{ runner.os }}-quality-
+      # The quality job's copy of the text reader model.
+      - name: Restore the text reader model
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/setup/src-tauri/models/
+          key: text-reader-model-${{ runner.os }}-${{ hashFiles('.config/mise/conf.d/installer.toml') }}
       # The setup app's Rust side embeds the built UI, so the UI builds first.
       - name: Build the setup UI
         run: mise run ui:build

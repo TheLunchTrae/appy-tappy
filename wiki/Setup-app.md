@@ -1010,7 +1010,8 @@ it, and expects the exact text. The rows are numbers whose first character a
 wider margin drops or doubles, a single character, letters with a dot and a
 descender, dark text on light, and small text. The tasks that run the setup
 app's tests depend on `ocr:model`, which downloads the model when it is
-missing, and the test fails without it. The test looks for the model in
+missing, and the test fails without it. CI caches the model under a key that
+follows the task that pins its hash. The test looks for the model in
 `apps/setup/src-tauri/models`, or where `APPYTAPPY_TEXT_READER_MODEL` says,
 which the [mutation lanes](Rust-standards.md#mutation-testing) set. The root
 manifest optimizes the crates that run the model in debug builds too, where a
