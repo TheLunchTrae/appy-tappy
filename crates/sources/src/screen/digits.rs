@@ -2201,7 +2201,7 @@ mod tests {
         for height in [16, 28, 40] {
             let by_contrast = taught_by(InkRule::Contrast { tolerance: 40 }, height, &LABELS);
             assert!(
-                !by_contrast.lookalikes().is_empty(),
+                by_contrast.lookalikes().contains(&('6', '8')),
                 "by contrast at {height} px"
             );
             assert_eq!(

@@ -124,11 +124,13 @@ list without the choices; edit the value to change it.
   it learned that the value does not need show below them. They are fine to
   keep: another value in the same font can need them.
 
-When two characters the value reads look so alike in what the reference
-learned that it may read one as the other, a warning under
-**Characters it knows** names them. By contrast, this happens most with bold
-text that has a thick outline: give it a
-[text color](#text-color). With a text color, lower the **Tolerance**.
+When two characters look so alike in what the reference learned that it may
+read one as the other, and the value needs at least one of them, a warning
+under **Characters it knows** names them. On the References page, it goes by
+what the values that read with the reference need. By contrast, this happens
+most with bold text that has a thick outline: give it a
+[text color](#text-color). With a text color, lower the **Tolerance**, or
+pick the color again from the middle of a character.
 
 AppyTappy learns a character from a box, found text you add, or a kept
 reading, never because a value needs it. A reference you make or edit from

@@ -9,22 +9,29 @@ const pairs = [
   ['O', '0'],
 ] as const;
 
-test('a value is warned about only the pairs it reads both of, and every pair when it needs no list', () => {
-  expect(neededPairs(pairs, ['0', '1', '6', '8'])).toEqual([
-    ['8', '6'],
+test('a value is warned about the pairs with a character it reads, and every pair when it needs no list', () => {
+  expect(neededPairs(pairs, ['0', '1', '6', '8'])).toEqual(pairs);
+  // A shown O it does not need reads as the 0 it does.
+  expect(neededPairs(pairs, ['0'])).toEqual([
     ['0', '8'],
+    ['O', '0'],
   ]);
-  expect(neededPairs(pairs, ['1', '6'])).toEqual([]);
+  expect(neededPairs(pairs, ['1', '%'])).toEqual([]);
   expect(neededPairs(pairs, [])).toEqual(pairs);
 });
 
 test('the warning names the pairs and the fix for how the reference finds its characters', () => {
-  expect(lookalikeWarning([], null)).toBeNull();
-  expect(lookalikeWarning([['8', '6']], null)).toBe(
+  expect(lookalikeWarning([], null, 40)).toBeNull();
+  expect(lookalikeWarning([['8', '6']], null, 40)).toBe(
     '8 and 6 look alike in what it learned, so it may read one as the other. Text with a thick outline often does this. Pick a text color below, so only the inside of the characters counts.',
   );
-  expect(lookalikeWarning(pairs.slice(0, 2), { red: 255, green: 255, blue: 255 })).toBe(
+  const white = { red: 255, green: 255, blue: 255 };
+  expect(lookalikeWarning(pairs.slice(0, 2), white, 40)).toBe(
     'Some characters look alike in what it learned, so it may read one of each pair as the other: 8 and 6; 0 and 8. Try a lower tolerance, so less of the edge around the characters counts.',
+  );
+  // No tolerance is lower than none.
+  expect(lookalikeWarning([['8', '6']], white, 0)).toBe(
+    '8 and 6 look alike in what it learned, so it may read one as the other. Pick the text color again from the middle of a character, so less of its edge counts.',
   );
 });
 

@@ -255,7 +255,7 @@ impl<H: Host> Owner<H> {
     }
 
     /// The pairs of characters whose shapes, as the reference `spec`
-    /// teaches learns them, match each other, so it may read one as the
+    /// teaches them, match each other, so it may read one as the
     /// other: each pair once, in the order it learned them.
     pub(crate) fn lookalike_characters(
         &mut self,

@@ -15,20 +15,20 @@ type Pair = readonly [string, string];
 const CHECK_DELAY_MS = 250;
 
 /**
- * The pairs of `pairs` a value that needs `needs` can misread: those whose characters it both needs, or every pair
- * when it needs none and so reads every character the reference knows. A character it does not need is not read as
- * one it does.
+ * The pairs of `pairs` a value that needs `needs` can misread: those with a character it needs, or every pair when it
+ * needs none and so reads every character the reference knows. A read takes a character it does not need for a
+ * lookalike it does, and a lookalike it does not need that is a digit fails the read.
  */
 export function neededPairs(pairs: readonly Pair[], needs: readonly string[]): readonly Pair[] {
-  return needs.length === 0 ? pairs : pairs.filter(([a, b]) => needs.includes(a) && needs.includes(b));
+  return needs.length === 0 ? pairs : pairs.filter(([a, b]) => needs.includes(a) || needs.includes(b));
 }
 
 /**
  * What the reference editor says about `pairs`, the characters a reference with the text color `ink`, null for
- * contrast, may read as each other, or null for none. The fix it names is the one that changes what counts as the
- * characters: a text color, or with one a lower tolerance.
+ * contrast, and `tolerance` may read as each other, or null for none. The fix it names is the one that changes what
+ * counts as the characters: a text color, with one a lower tolerance, and at none a color picked again.
  */
-export function lookalikeWarning(pairs: readonly Pair[], ink: Color | null): string | null {
+export function lookalikeWarning(pairs: readonly Pair[], ink: Color | null, tolerance: number): string | null {
   const [first, ...rest] = pairs;
   if (first === undefined) {
     return null;
@@ -37,10 +37,13 @@ export function lookalikeWarning(pairs: readonly Pair[], ink: Color | null): str
     rest.length === 0
       ? `${first[0]} and ${first[1]} look alike in what it learned, so it may read one as the other.`
       : `Some characters look alike in what it learned, so it may read one of each pair as the other: ${pairs.map(([a, b]) => `${a} and ${b}`).join('; ')}.`;
-  const fix =
-    ink === null
-      ? 'Text with a thick outline often does this. Pick a text color below, so only the inside of the characters counts.'
-      : 'Try a lower tolerance, so less of the edge around the characters counts.';
+  let fix = 'Try a lower tolerance, so less of the edge around the characters counts.';
+  if (ink === null) {
+    fix =
+      'Text with a thick outline often does this. Pick a text color below, so only the inside of the characters counts.';
+  } else if (tolerance === 0) {
+    fix = 'Pick the text color again from the middle of a character, so less of its edge counts.';
+  }
   return `${which} ${fix}`;
 }
 
@@ -54,6 +57,9 @@ interface Answer {
   readonly key: string;
   readonly pairs: readonly Pair[];
 }
+
+/** What the reference has been answered before it asks. */
+const NO_ANSWER: Answer = { key: '', pairs: [] };
 
 /**
  * The pairs to show while the reference asks under `wanted`: those of `answer` when it was asked under that key, and
@@ -71,7 +77,7 @@ export function pairsArrived(answer: Answer, wanted: string | null): readonly Pa
  */
 export function useLookalikes(spec: CharactersSpec | null): readonly Pair[] {
   const key = lookalikeKey(spec);
-  const [answer, setAnswer] = useState<Answer>({ key: '', pairs: [] });
+  const [answer, setAnswer] = useState<Answer>(NO_ANSWER);
   const latest = useRef(spec);
   latest.current = spec;
   useEffect(() => {
@@ -79,7 +85,7 @@ export function useLookalikes(spec: CharactersSpec | null): readonly Pair[] {
     if (asked === null || key === null) {
       return undefined;
     }
-    return ask(
+    const cancel = ask(
       () => lookalikeCharacters(asked),
       (pairs) => {
         setAnswer({ key, pairs });
@@ -89,6 +95,12 @@ export function useLookalikes(spec: CharactersSpec | null): readonly Pair[] {
       },
       CHECK_DELAY_MS,
     );
+    return () => {
+      cancel();
+      // A reference saved again keeps its ID and so its key, so an editor that opens again on that key asks afresh
+      // rather than showing the answer about the samples it had before.
+      setAnswer(NO_ANSWER);
+    };
   }, [key]);
   return pairsArrived(answer, key);
 }

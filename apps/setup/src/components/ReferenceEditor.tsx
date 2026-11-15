@@ -89,7 +89,8 @@ function TextColor(
       <summary>Text color (optional)</summary>
       <p className="note">
         AppyTappy finds the characters by how they stand out from the background behind them. Pick a text color only
-        when that misreads because the background is busy, such as a scene that shows through behind the text.
+        when that misreads: the background is busy, such as a scene that shows through behind the text, or a thick
+        outline makes characters look alike.
       </p>
       <ColorField
         label="Text color"
@@ -121,7 +122,7 @@ function TextColor(
 export function ReferenceEditor(props: Props) {
   const { name, appName, ink, tolerance, saved, labeled, recorded, finding } = props;
   const { expected, coverage, readers } = props;
-  const lookalike = lookalikeWarning(props.lookalikes, ink);
+  const lookalike = lookalikeWarning(props.lookalikes, ink, props.tolerance);
   // With no characters needed, every character it learned shows as one group.
   const chosen = expected.length > 0;
   // Characters of found text not added yet show outlined beside the ones it knows.

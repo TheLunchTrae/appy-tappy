@@ -71,7 +71,7 @@ export const REFERENCE_HINT =
 
 /** A reference's text color, which most references leave unset. */
 export const INK_HINT =
-  'A reference finds its characters by how they stand out from the background behind them, whatever their colors. Over a busy background, such as a scene that shows through behind the text, pick the text color instead: select a pixel inside a character, not on its edge. Then only pixels within the tolerance of that color count as part of the characters.';
+  'A reference finds its characters by how they stand out from the background behind them, whatever their colors. Over a busy background, such as a scene that shows through behind the text, or for bold text with a thick outline, pick the text color instead: select a pixel inside a character, not on its edge or outline. Then only pixels within the tolerance of that color count as part of the characters.';
 
 /** The boxes a reference learns from. */
 export const BOXES_HINT =
