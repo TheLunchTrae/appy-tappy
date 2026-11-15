@@ -341,11 +341,13 @@ pub struct ValueDef {
     pub screen: ScreenDef,
 }
 
-/// The characters of one font at one color, that number values read with.
+/// The characters of one font, that number values read with.
 ///
 /// It learns them from pictures of text in that font. One reference serves
 /// every value drawn in its font, whatever the size: the reader scales each
-/// character to its line's height.
+/// character to its line's height. It tells a picture's or a region's
+/// characters from the background by contrast with the background, or by
+/// their color when it has a text color.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
@@ -359,9 +361,15 @@ pub struct ReferenceDef {
     /// leaves it out.
     #[serde(default)]
     pub origin: OriginDef,
-    /// The characters' color.
-    pub ink: ColorDef,
-    /// How far a pixel may stray from `ink` and still count.
+    /// The text color, for text over a scene that is no one color: the
+    /// characters are the pixels within `tolerance` of it. `None` finds the
+    /// characters by contrast instead: they are the pixels further than
+    /// `tolerance` from the background, so they may be of any colors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub ink: Option<ColorDef>,
+    /// How far a pixel may be from `ink` and still be a character's, or
+    /// without `ink`, from the background and still be background.
     pub tolerance: u8,
     /// The pictures it learns from.
     pub samples: Vec<SampleDef>,
@@ -1152,11 +1160,11 @@ mod tests {
                 id: "percent".to_owned(),
                 name: "Percent".to_owned(),
                 origin: OriginDef::ByHand,
-                ink: ColorDef {
+                ink: Some(ColorDef {
                     red: 255,
                     green: 255,
                     blue: 255,
-                },
+                }),
                 tolerance: 40,
                 samples: vec![SampleDef {
                     image: sample_name("percent", 1),
@@ -1205,6 +1213,18 @@ mod tests {
         file.references[0].expects = Some("0123456789.%Aa".to_owned());
         let json = file.to_json();
         assert!(json.contains("\"expects\": \"0123456789.%Aa\""), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file));
+    }
+
+    #[test]
+    fn a_reference_s_text_color_is_left_out_until_chosen_and_round_trips() {
+        let mut file = dash();
+        let json = file.to_json();
+        assert!(json.contains("\"ink\": {"), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        file.references[0].ink = None;
+        let json = file.to_json();
+        assert!(!json.contains("ink"), "{json}");
         assert_eq!(AppFile::parse(&json), Ok(file));
     }
 

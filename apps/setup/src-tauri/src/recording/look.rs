@@ -46,8 +46,8 @@ pub(crate) struct Seen {
     /// The one of the job's sizes the look took it for.
     pub(crate) size: TextSize,
     /// Its pixels and the shape of each of its characters. `None` for a run
-    /// of more characters than a reading holds, which is a sentence in the
-    /// characters' color and not a value.
+    /// of more characters than a reading holds, which is a sentence and
+    /// not a value.
     pub(crate) reading: Option<(Image, Vec<Shape>)>,
 }
 
@@ -59,7 +59,7 @@ pub(crate) fn look(job: &Job) -> Vec<Seen> {
         .map(|find::Spot { region, size }| Seen {
             spot: region,
             size,
-            reading: job.frame.crop(region).and_then(|crop| {
+            reading: job.reader.cut(&job.frame, region).and_then(|crop| {
                 let shapes = job.reader.shapes(&crop).ok()?.characters().to_vec();
                 Some((crop, shapes))
             }),
@@ -93,6 +93,7 @@ mod tests {
     use std::sync::mpsc;
 
     use appytappy_sources::screen::Rgb;
+    use appytappy_sources::screen::digits::InkRule;
 
     use super::*;
 
@@ -114,7 +115,10 @@ mod tests {
             at: Instant::now(),
             sizes: Sizes::of(2),
             near: Region::new(0, 0, 2, 2).expect("not empty"),
-            reader: DigitReader::new(RED, 0),
+            reader: DigitReader::new(InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            }),
         };
         let (jobs, inbox) = mpsc::channel();
         let (sender, messages) = mpsc::channel();
@@ -165,7 +169,10 @@ mod tests {
             at,
             sizes: Sizes::of(4),
             near: Region::new(0, 0, 3, 6).expect("not empty"),
-            reader: DigitReader::new(RED, 0),
+            reader: DigitReader::new(InkRule::Color {
+                color: RED,
+                tolerance: 0,
+            }),
         })
         .expect("open");
         drop(jobs);

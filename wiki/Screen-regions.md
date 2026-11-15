@@ -27,7 +27,7 @@ give the same answer on every system. Only a number allocates as it reads: a
 byte for each pixel of its region, for which of them are ink.
 
 - **Number** reads digits, a decimal point, and a minus sign, with a reference
-  of the application's: the characters' color and tolerance, and pictures
+  of the application's: how it finds its characters, and pictures
   labeled with the text they show, such as `0123456789.%`, from which it
   learns each character's shape. Several values read with one reference, and
   each says whether only the whole part counts: a whole value ends the number
@@ -38,8 +38,8 @@ byte for each pixel of its region, for which of them are ink.
   skipped between groups of three digits, so `1,234,567` reads as 1234567. Any
   other character ends the number, so `12/50` reads as 12, and so does a `,`
   that is not followed by exactly three digits, so `12,5` reads as 12 rather
-  than guessing that the `,` is a decimal point. A read finds the ink (pixels
-  near the text color) once, as `digits::Ink`, splits it into characters at
+  than guessing that the `,` is a decimal point. A read finds the ink once, as `digits::Ink`
+  ([Ink](#ink) says which pixels it is), splits it into characters at
   blank columns, and scales each one to a fixed grid by the height of the
   text line. The text line is the band of rows with the most ink, so a stray
   speck elsewhere in the region does not throw it off. Each character takes
@@ -48,8 +48,8 @@ byte for each pixel of its region, for which of them are ink.
   read rather than being guessed, unless the number has already ended, as in
   the "HP" of "37% HP", and a read that fails
   [says at which stage](#why-a-number-is-not-read). It does not read rotated
-  text, characters that touch, or text on a background that shares the
-  text's color; those need a different check. A character drawn as marks
+  text, characters that touch, or text whose background the reference cannot
+  tell it from; those need a different check. A character drawn as marks
   with blank columns between them, as some fonts draw `%`, is one character
   for each mark. A value may name the characters it reads, `characters` in
   its check, and then takes its number from its reference's glyphs for them
@@ -93,6 +93,39 @@ byte for each pixel of its region, for which of them are ink.
   of kept pixel indexes once, when the check loads, so a read walks the runs
   without testing each pixel.
 
+### Ink
+
+A game draws text in more than one color: a gradient, an outline, a number
+that turns red when it is low. So a reference finds its characters by
+contrast with what is behind them rather than by one color
+(`InkRule::Contrast` in `screen/digits/ink.rs`). Such a reference is given
+a region together with the pixels around it, one on each side
+(`InkRule::reads`): `SavedValue::at` places a number there, so the capture
+copies them, and the setup app cuts its samples the same way
+(`DigitReader::cut`). Those outermost pixels are the background and never
+ink: the background is their median red, median green, and median blue. So
+a region may be as tight as its text, even where a character fills it edge
+to edge, and text beside the region does not change the background while it
+covers less than half of the pixels around. On a side at the window's edge
+there is no pixel past the region, and the region's own outermost pixels
+stand in. A pixel inside is ink when its red, green, or blue is more than
+the reference's tolerance from the background's. The same rule finds a fill,
+an outline, and a shadow, in any colors, and a number over a plain or gently
+shaded panel.
+
+The tolerance is the reference's saved `tolerance`. The setup app chooses it
+from the reference's samples, as
+[Setup app](Setup-app.md#contrast-tolerance) describes, so a read does no
+more than count the colors around the region and compare each pixel:
+integers only, with no allocation beyond the ink itself, and the same answer
+for the same pixels.
+
+Contrast needs a background that is nearly one color around the region.
+Text over a scene that shows through takes a text color instead, the
+reference's optional `ink` (`InkRule::Color`): a pixel is then ink when its
+red, green, and blue are each within the tolerance of that color, whatever
+the background.
+
 ### Matching
 
 An application that scales its interface, or centers a number whose width
@@ -128,7 +161,8 @@ A read fails at one of five stages, `ReadError` in `screen/digits.rs`, and
 its message says which, in the same words in the setup app and in the
 runtime's log:
 
-- **No ink.** No pixel in the region has the characters' color.
+- **No ink.** No pixel in the region stands out from its background, or has
+  the reference's text color.
 - **Too many characters.** The region holds more than 24.
 - **An unlearned shape.** A character matched no learned shape. The message
   shows every character the read made out, with a `?` for each unlearned

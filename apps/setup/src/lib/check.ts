@@ -49,8 +49,12 @@ export interface Draft {
   readonly drawnOn: number | null;
   /** How a new value's pin is picked. It lives beside the region, since a region drawn anew changes both. */
   readonly pin: PinChoice;
+  /**
+   * A color's or a state's tolerance, or a reference's: how far a pixel may be from its text color and still be a
+   * character's or, without a text color, from the background and still be background.
+   */
   readonly tolerance: number;
-  /** The reference's characters' color. */
+  /** The reference's text color, or null while it finds its characters by contrast with the background. */
   readonly ink: Color | null;
   /** The boxes a reference learns from, each around characters on a screenshot, in the order they are listed. */
   readonly boxes: readonly Box[];
@@ -75,8 +79,11 @@ export interface Draft {
   readonly characters: readonly string[] | null;
 }
 
-/** The tolerance a new reference's characters start with, and so a number check's. */
-const NEW_REFERENCE_TOLERANCE = 40;
+/**
+ * The tolerance a new reference starts with, and so a number check's. A reference that finds its characters by
+ * contrast keeps it while its samples read with it, as {@link useContrastTolerance} says.
+ */
+export const NEW_REFERENCE_TOLERANCE = 40;
 
 export const EMPTY_DRAFT: Draft = {
   kind: 'number',
@@ -114,17 +121,20 @@ export function readingOf(draft: Draft): Drawn {
   return first === undefined ? { region: null, drawnOn: null } : { region: first.region, drawnOn: first.screenshot };
 }
 
+/** Whether two references' text colors are the same: one color, or none for either. */
+export function sameTextColor(a: Color | null, b: Color | null): boolean {
+  return a === null || b === null ? a === b : a.red === b.red && a.green === b.green && a.blue === b.blue;
+}
+
 /**
- * Whether `draft` would record other than the stopped recording's `settings`: another reading region, characters' color or
+ * Whether `draft` would record other than the stopped recording's `settings`: another reading region, text color or
  * tolerance, or a region drawn on a screenshot whose window size `drawnSize` is not the recording's.
  */
 export function settingsDiffer(draft: Draft, settings: RecordingSettings, drawnSize: Size | null): boolean {
   return (
     draft.tolerance !== settings.tolerance ||
     !sameRect(readingOf(draft).region, settings.region) ||
-    draft.ink?.red !== settings.ink.red ||
-    draft.ink.green !== settings.ink.green ||
-    draft.ink.blue !== settings.ink.blue ||
+    !sameTextColor(draft.ink, settings.ink ?? null) ||
     drawnSize?.width !== settings.windowSize.width ||
     drawnSize.height !== settings.windowSize.height
   );
@@ -139,9 +149,19 @@ export function newestOfSize(screenshots: readonly (readonly [number, Size])[], 
   return found?.[0] ?? null;
 }
 
-/** `draft` with the characters' color and tolerance of the stopped recording's `settings`, and its place as it is. */
+/** `draft` with the text color and tolerance of the stopped recording's `settings`, and its place as it is. */
 export function withRecordedInk(draft: Draft, settings: RecordingSettings): Draft {
-  return { ...draft, ink: settings.ink, tolerance: settings.tolerance };
+  return { ...draft, ink: settings.ink ?? null, tolerance: settings.tolerance };
+}
+
+/**
+ * `draft`, a reference's, with the text color `color`, or finding its characters by contrast for null. Going from
+ * one way to the other starts the tolerance over, since it measures another distance; picking the text color again
+ * keeps it.
+ */
+export function withTextColor(draft: Draft, color: Color | null): Draft {
+  const sameWay = (draft.ink === null) === (color === null);
+  return { ...draft, ink: color, tolerance: sameWay ? draft.tolerance : NEW_REFERENCE_TOLERANCE };
 }
 
 /**
@@ -251,24 +271,14 @@ export function stateNamesNext(names: readonly string[]): string | null {
 /** Why the reference editor cannot record `draft`'s reading region yet, or null when it can. */
 export function recordBlocked(draft: Draft): string | null {
   const reading = readingOf(draft);
-  if (reading.region === null || reading.drawnOn === null) {
-    return 'Draw a box around the characters on a screenshot to record them.';
-  }
-  if (draft.ink === null) {
-    return "Pick the characters' color to record.";
-  }
-  return null;
+  return reading.region === null || reading.drawnOn === null
+    ? 'Draw a box around the characters on a screenshot to record them.'
+    : null;
 }
 
 /** Why Find more like it cannot search for text like `sample`, the selected box, yet, or null when it can. */
-export function findBlocked(draft: Draft, sample: Box | null): string | null {
-  if (sample === null) {
-    return 'Select a box around one sample first.';
-  }
-  if (draft.ink === null) {
-    return "Pick the characters' color first.";
-  }
-  return null;
+export function findBlocked(sample: Box | null): string | null {
+  return sample === null ? 'Select a box around one sample first.' : null;
 }
 
 /**
@@ -307,8 +317,7 @@ function recordedOf(draft: Draft): readonly RecordedLabel[] {
 /**
  * The characters review asks about: `draft`'s labeled boxes and `kept`
  * recorded readings, added to `reference` when it names a saved one, learned
- * the way saving learns them. Null until the draft has a place to read and the
- * characters' color.
+ * the way saving learns them. Null until the draft has a place to read.
  */
 export function reviewSpec(
   draft: Draft,
@@ -316,14 +325,14 @@ export function reviewSpec(
   reference: ReferenceRef | null,
 ): CharactersSpec | null {
   const { region, drawnOn } = readingOf(draft);
-  if (region === null || drawnOn === null || draft.ink === null) {
+  if (region === null || drawnOn === null) {
     return null;
   }
   return {
     region,
     screenshot: drawnOn,
     reference,
-    ink: draft.ink,
+    ...(draft.ink === null ? {} : { ink: draft.ink }),
     tolerance: draft.tolerance,
     labels: boxLabels(draft.boxes),
     recorded: kept,
@@ -332,7 +341,7 @@ export function reviewSpec(
 
 /**
  * The characters `draft` teaches so far, its kept recorded readings included, added to `reference` when it names a
- * saved one; null until the draft has a region and the characters' color.
+ * saved one; null until the draft has a region.
  */
 export function taughtSpec(draft: Draft, reference: ReferenceRef | null): CharactersSpec | null {
   return reviewSpec(draft, recordedOf(draft), reference);
@@ -342,11 +351,7 @@ export function taughtSpec(draft: Draft, reference: ReferenceRef | null): Charac
 export function buildCharacters(draft: Draft, reference: ReferenceRef | null): Built<CharactersSpec> {
   const spec = taughtSpec(draft, reference);
   if (spec === null) {
-    return missing(
-      readingOf(draft).region === null
-        ? 'Draw a box around the characters on a screenshot.'
-        : "Pick the characters' color.",
-    );
+    return missing('Draw a box around the characters on a screenshot.');
   }
   if (reference === null && spec.labels.length === 0 && spec.recorded.length === 0) {
     return missing('Type what a box shows, or record the characters.');
@@ -360,7 +365,12 @@ export function buildCharacters(draft: Draft, reference: ReferenceRef | null): B
  */
 export type ReferenceSaving =
   | { readonly kind: 'taught'; readonly characters: CharactersSpec }
-  | { readonly kind: 'settings'; readonly reference: ReferenceRef; readonly ink: Color; readonly tolerance: number };
+  | {
+      readonly kind: 'settings';
+      readonly reference: ReferenceRef;
+      readonly ink: Color | null;
+      readonly tolerance: number;
+    };
 
 /**
  * What saving the reference `draft` teaches sends, or what it still needs. A saved reference with no place to read,
@@ -371,7 +381,7 @@ export function buildReferenceSave(draft: Draft, reference: ReferenceRef | null)
   if (characters.ok) {
     return { ok: true, spec: { kind: 'taught', characters: characters.spec } };
   }
-  return reference !== null && draft.ink !== null && readingOf(draft).region === null
+  return reference !== null && readingOf(draft).region === null
     ? { ok: true, spec: { kind: 'settings', reference, ink: draft.ink, tolerance: draft.tolerance } }
     : characters;
 }
@@ -427,7 +437,7 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
         name:
           `Number, read with ${reference.name}${check.whole ? ', whole only' : ''}` +
           (check.characters === undefined ? '' : `, reading ${knownCharacters([check.characters]).join('')}`),
-        colors: [reference.ink],
+        colors: reference.ink === undefined ? [] : [reference.ink],
       };
     },
     kept: (check) => ({

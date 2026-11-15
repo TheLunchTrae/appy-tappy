@@ -490,11 +490,11 @@ mod tests {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: ColorDef {
+            ink: Some(ColorDef {
                 red: 255,
                 green: 0,
                 blue: 0,
-            },
+            }),
             tolerance: 0,
             samples: (1..=samples)
                 .map(|number| SampleDef {

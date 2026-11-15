@@ -7,8 +7,11 @@ import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import type { Selection } from './selection.ts';
 
-/** The color settings that decide pixel by pixel: a reference's characters, a bar's two colors, a color check's. */
-export type PreviewTarget = MatchRule['kind'];
+/**
+ * The settings that decide pixel by pixel: a reference's characters, by its text color or by contrast, a bar's two
+ * colors, a color check's.
+ */
+export type PreviewTarget = Exclude<MatchRule['kind'], 'contrast'>;
 
 /** What the preview asks the setup app: the pixels of `area` on a screenshot that `rule` takes. */
 export interface PreviewRequest {
@@ -26,12 +29,25 @@ export type Plan =
 /** The parts of a draft the preview reads. */
 export type PreviewDraft = Pick<Draft, 'ink' | 'tolerance' | 'filled' | 'empty' | 'color' | 'region'>;
 
+/**
+ * What makes a pixel one of the characters of `draft`'s reference: its text color, or without one how it stands out
+ * from the background of the region. Null while a reference without a text color has no region to take a
+ * background from.
+ */
+function charactersRule(draft: PreviewDraft): MatchRule | null {
+  if (draft.ink !== null) {
+    return { kind: 'ink', ink: draft.ink, tolerance: draft.tolerance };
+  }
+  return draft.region === null ? null : { kind: 'contrast', region: draft.region, tolerance: draft.tolerance };
+}
+
 const DRAW_FIRST = 'Draw the region on the screenshot to see its matching pixels.';
 
 /**
  * What to ask for `target` of `draft` on the screenshot shown, `selected`, whose size is `size` once its pixels
- * arrived. A reference's characters are looked for on the whole screenshot, to show what else has their color; a
- * bar's and a color check's pixels in the region, which is all the check reads.
+ * arrived. A reference's characters are looked for on the whole screenshot, to show what else counts as characters:
+ * what has its text color, or without one what stands out from the background of the region, the selected box. A
+ * bar's and a color check's pixels are looked for in the region, which is all the check reads.
  */
 export function plan(target: PreviewTarget, draft: PreviewDraft, selected: number | null, size: Size | null): Plan {
   if (selected === null) {
@@ -40,17 +56,16 @@ export function plan(target: PreviewTarget, draft: PreviewDraft, selected: numbe
   const blocked = (why: string): Plan => ({ kind: 'blocked', why });
   const ask = (area: Rect, rule: MatchRule): Plan => ({ kind: 'ask', request: { screenshot: selected, area, rule } });
   switch (target) {
-    case 'ink':
-      if (draft.ink === null) {
-        return blocked("Pick the characters' color to see its matching pixels.");
+    case 'ink': {
+      const rule = charactersRule(draft);
+      if (rule === null) {
+        return blocked('Select a box on this screenshot to see what stands out from its background.');
       }
       if (size === null) {
         return blocked('Waiting for the screenshot…');
       }
-      return ask(
-        { x: 0, y: 0, width: size.width, height: size.height },
-        { kind: 'ink', ink: draft.ink, tolerance: draft.tolerance },
-      );
+      return ask({ x: 0, y: 0, width: size.width, height: size.height }, rule);
+    }
     case 'barFill':
       if (draft.filled === null || draft.empty === null) {
         return blocked('Pick the filled and the empty color to see their matching pixels.');
@@ -263,12 +278,15 @@ function contrasting(picked: Color): readonly [Color, Color] {
 
 /**
  * The tint of each layer of `rule`'s answer: whichever of magenta and green stands out more against the picked
- * color. A bar's empty pixels take the other one, in stripes.
+ * color, or magenta for characters found by contrast, which have no one color. A bar's empty pixels take the other
+ * one, in stripes.
  */
 export function tintsFor(rule: MatchRule): readonly Tint[] {
   switch (rule.kind) {
     case 'ink':
       return [{ color: contrasting(rule.ink)[0], striped: false }];
+    case 'contrast':
+      return [SELECTED_TINT];
     case 'color':
       return [{ color: contrasting(rule.color)[0], striped: false }];
     case 'barFill': {
@@ -405,19 +423,33 @@ function ofRegion(count: number, total: number): string {
   return `${count.toLocaleString('en-US')} of ${pixelsText(total)} in the region (${share(count, total)})`;
 }
 
+/** The ways a reference tells its characters from the background: by its text color, or by contrast. */
+type CharactersBy = Extract<MatchRule['kind'], 'ink' | 'contrast'>;
+
+/** What to change when too much, nothing, or the whole region counts as a reference's characters. */
+const CHARACTERS_ADVICE: Readonly<Record<CharactersBy, { readonly less: string; readonly more: string }>> = {
+  ink: { less: 'Lower the tolerance', more: 'Raise the tolerance, or pick the text color again.' },
+  contrast: {
+    less: 'Draw the box tightly around the characters, or pick a text color',
+    more: 'Draw the box around some characters.',
+  },
+};
+
 /**
  * What a reference's tint shows, in words: how many pixels count as its characters in `region`, the draft's region,
- * and on the rest of the screenshot. A region that reaches past the screenshot shown is left out.
+ * and on the rest of the screenshot, found as `by` says. A region that reaches past the screenshot shown is left
+ * out.
  */
-export function inkLines(layer: Layer, asked: Rect, region: Rect | null): readonly string[] {
+export function inkLines(layer: Layer, asked: Rect, region: Rect | null, by: CharactersBy): readonly string[] {
+  const advice = CHARACTERS_ADVICE[by];
   const total = area(asked);
   if (layer.spans === null) {
     return [
-      `${TOO_MANY} ${layer.count.toLocaleString('en-US')} of ${pixelsText(total)} on the screenshot (${share(layer.count, total)}) count as characters. Lower the tolerance.`,
+      `${TOO_MANY} ${layer.count.toLocaleString('en-US')} of ${pixelsText(total)} on the screenshot (${share(layer.count, total)}) count as characters. ${advice.less}.`,
     ];
   }
   if (layer.count === 0) {
-    return ['No pixel on the screenshot counts as characters. Raise the tolerance, or pick the color again.'];
+    return [`No pixel on the screenshot counts as characters. ${advice.more}`];
   }
   if (region === null || !holds(asked, region)) {
     return [
@@ -433,7 +465,7 @@ export function inkLines(layer: Layer, asked: Rect, region: Rect | null): readon
   const counted = `${ofRegion(inside, within)} count as characters`;
   const rest = layer.count === inside ? 'none elsewhere on the screenshot' : elsewhere;
   return inside === within
-    ? [`Every pixel in the region counts as characters, and ${rest}. Lower the tolerance until only the characters do.`]
+    ? [`Every pixel in the region counts as characters, and ${rest}. ${advice.less} until only the characters do.`]
     : [`${counted}, and ${rest}.`];
 }
 

@@ -24,7 +24,7 @@ This page covers what the user guide leaves out.
   `try_edit` judges the trial against the saved files, `reading`,
   `explain_reading`, and `window_size` answer nothing, `edit_value` saves
   what names no screenshot, and `save_reference_settings` saves a saved
-  reference's name, color, tolerance, and needed characters with its
+  reference's name, text color, tolerance, and needed characters with its
   samples as they are. `set_characters` and `save_reference` learn from a
   region on a screenshot, so they need a session that has one. The
   anti-cheat products the look found show above the stage, and so does a
@@ -217,8 +217,10 @@ This page covers what the user guide leaves out.
   the page: `match_pixels` takes a screenshot's index, a rectangle of it, and
   the rule, and answers the pixels the rule takes (`match_preview.rs`). Each
   rule asks the function its reader asks, so the tint and the reading agree
-  at the tolerance's edge: `DigitReader::is_ink` for a reference's
-  characters, `BarFill::classify` for a bar, and `Rgb::near` for a
+  at the tolerance's edge: `DigitReader::ink` for a reference with a text
+  color and `DigitReader::ink_like` for one without, which takes the
+  background of the selected box and shows what stands out from it on the
+  whole screenshot; `BarFill::classify` for a bar, and `Rgb::near` for a
   color check, which the check itself asks about the region's average color.
   A color check's answer carries that average, its distance from the color,
   and what the check reads on the rectangle. The answer holds each kind of
@@ -345,7 +347,8 @@ This page covers what the user guide leaves out.
 - **Expected characters.** A reference may list the characters the user says
   it needs, as [Choose what it needs](References.md#choose-what-it-needs)
   describes. The list guides and never decides. `appytappy-sources` builds a
-  reference's reader from its color, tolerance, and samples alone, so the
+  reference's reader from its text color, if it has one, its tolerance, and
+  its samples alone, so the
   list adds no glyph, labels no shape, and leaves number parsing as it is.
   No rule of the file covers it either: the runtime and the setup app load
   an application whatever its list holds. The save is the one place that
@@ -426,9 +429,9 @@ value and for a reference.
 
 [Recording readings](References.md#record-readings) runs in the reference
 editor. A number value's **Record readings** opens that editor on the value's
-region, for the reference picked or a new one. A saved reference has its
-characters' color, so its recording starts at once; for a new one the editor
-opens on the screenshot the region is drawn on, with the color next to pick. Each frame is cut to the region and reduced
+region, for the reference picked or a new one, and the recording starts at
+once: with the saved reference's text color and tolerance, or by contrast at
+the tolerance a new reference starts with. Each frame is cut to the region and reduced
 to the shapes a reference reads: `DigitReader::shapes` finds the ink, splits it
 into characters, and scales each to the grid the check compares. A crop with
 no ink is skipped, and so is a frame of another size than the screenshot the
@@ -483,7 +486,7 @@ character is one shape.
 - **The whole window.** A recording that looks over the whole window
   (`Scope::Window`, **Look in** in the UI) collects from every run of text
   like its region's, as [Finding more like it](#finding-more-like-it) finds
-  them (`find::lines`): in the characters' color and within 15% of the
+  them (`find::lines`): ink as the region's is and within 15% of the
   height the region's characters had on its screenshot, which starting the
   recording measures once (`find::sample_heights`) and refuses when the
   region shows no ink there. Each of the reference's boxes is one more
@@ -521,7 +524,7 @@ character is one shape.
   500 ms, and skips the frames between without counting them
   ([Window look](State-machines.md#window-look)). A look takes the 32 runs
   nearest the region (`MAX_LINES`), nearest first, so a window full of text
-  in the characters' color does not use up the recording's 256 shapes
+  does not use up the recording's 256 shapes
   before the value's. The view carries where the last look found text
   (`spots`), which the page outlines on the live window.
 - **Sizes.** A recording follows its window to another size as a saved
@@ -551,16 +554,16 @@ character is one shape.
   wrong side records other pixels at another size, which review shows as
   readings that are not the value's: that is why the region's side is the
   value's where there is one, and why the rule is in one place.
-- **Color and tolerance.** The shapes are the ones the recording's own
-  characters' color and tolerance show, and "every shape is in a kept
+- **Text color and tolerance.** The shapes are the ones the recording's own
+  text color, or contrast without one, and tolerance show, and "every shape is in a kept
   reading" holds for those. A reference learns the kept crops again with the
-  color and tolerance it has at the save, as it does its labeled
+  text color and tolerance it has at the save, as it does its labeled
   screenshots. If the user changes either before saving, a crop can split
   into other shapes: its text may have another count of characters than the
   crop then shows, which `review_problems` and the save refuse by name, and
   a shape the recording counted as known may be in no kept crop. The page's
   own lists still follow the recording's shapes, so they can be off until
-  **Use its settings** puts the recording's color and tolerance back.
+  **Use its settings** puts the recording's text color and tolerance back.
 - **Signs in several marks.** The reader splits characters at columns with no
   ink. A sign whose marks share no column, such as a `%` drawn as two dots
   and a stroke apart, is one shape for each mark, each time alike, and no
@@ -612,10 +615,10 @@ pictures first, then the labeled screenshots, then the kept readings, and
 saves the new ones as samples after its old ones. Review sends the characters
 it would save and asks which kept readings it could not learn. The owner
 learns them as saving would, in that order, with the reference's own
-characters' color and tolerance, and leaves out each reading that fails, so a
+text color and tolerance, and leaves out each reading that fails, so a
 conflict such as one shape typed as `l` in one reading and `1` in another is
 flagged on the reading that causes it. **Record more** goes on with the stopped
-recording only when the region, color, tolerance, and window size are the
+recording only when the region, text color, tolerance, and window size are the
 ones it was recorded with, and otherwise says so rather than start over. The
 window size is the one the region was drawn at, not the one the window has
 by then. The
@@ -632,10 +635,15 @@ review without keeping, and review's edits stay for the next one.
 
 [Find more like it](References.md#find-more-like-it) searches the screenshot
 the selected box is on for more text like the box shows
-(`recording/find.rs`). It reads the screenshot's ink with `DigitReader::ink`,
-the ink a read works from, and takes the band of inked rows with the most ink
+(`recording/find.rs`). It reads the screenshot's ink with
+`DigitReader::ink_like`: the reference's text color wherever it shows, or,
+for a reference that finds its characters by contrast, every pixel that
+stands out from the background of the box, which the pixels around the box
+give as they do for a read's region. It takes the band of inked rows with the most ink
 in the region with `Ink::line`, the rule a read finds its line by, so the two
-cannot differ. It joins touching ink, corners included, into blobs, leaving
+cannot differ. A search by contrast finds text on the box's background
+alone: text on a panel of another color is ink together with its panel, too
+tall a blob to be a run. It joins touching ink, corners included, into blobs, leaving
 out blobs over twice that band's height, such as a panel in the same color.
 The sample's height is its tallest blob centered in the region,
 and a run's is its tallest blob, so a comma or a mark below the characters
@@ -662,14 +670,46 @@ the finds that may show the characters the reference needs (`fitsNeeds` in
 finds the reference cannot learn (`found_problems`), learning them after the
 draft's own boxes the way review learns recorded readings. **Reread**
 (`reread_found`) cuts the named finds' ink again from the pixels the search
-kept, with the color and tolerance the draft has now, and sends it to the
-text reader; the reader is deterministic, so only a changed color or
-tolerance changes what it reads. Each find's view carries the color and
-tolerance it was last read with, and the UI reads a find again only when
+kept, with the text color and tolerance the draft has now, and sends it to
+the text reader; the reader is deterministic, so only a changed text color
+or tolerance changes what it reads. Each find's view carries the text color
+and tolerance it was last read with, and the UI reads a find again only when
 the draft's differ or its read failed (`rereadOffer`). Added finds become boxes of the draft
 (`lib/boxes.ts`), each a label with a `region` of its own on its screenshot,
 which the reference cuts instead of the spec's region, so they save as
 samples like any box the user drew.
+
+### Contrast tolerance
+
+A reference without a text color finds its characters by contrast, and the
+setup app chooses the tolerance it does that with (`contrast_tolerance`,
+`check_spec/contrast.rs`). The tolerance must do one thing: the reference
+learns every sample it has, saved, labeled, or recorded, so each splits into
+as many characters as its text has. The reference keeps the tolerance it has
+while that holds, so a reference that reads keeps reading the same way. When
+it cannot learn a sample, the owner tries the tolerances from 0 to 252 in
+steps of 4, and takes the middle of the longest run of them that every
+sample reads with, the lower run when two are as long. The middle leaves the
+most room on both sides: toward a tolerance so low that shading in the
+background counts as ink, and toward one so high that a character's
+anti-aliased edge counts as background. When no tolerance reads every
+sample, the reference keeps the one it has, and the save or the character
+check names the sample that fails.
+
+The page asks once a sample, the region, or the tolerance of the draft
+changed and then rested for a quarter of a second, so a label asks when it
+is typed and not at each key (`useContrastTolerance` in
+`lib/useContrastTolerance.ts`), and sets
+the draft's tolerance to the answer;
+[Contrast tolerance](State-machines.md#contrast-tolerance) has its states.
+It does not ask while the capture holds a recording, which keeps the
+tolerance it records with. A reference with a text color has its tolerance
+from the user, on a slider under **Text color**, and the page asks for none.
+Changing between the two starts the tolerance at 40, since it measures
+a distance from another color; one text color in place of another keeps
+it. A saved reference with no box has no samples in the draft to ask
+about, so `save_reference_settings` chooses the tolerance the same way,
+from the saved samples, when it saves the reference without a text color.
 
 ### Checking characters
 
@@ -679,9 +719,9 @@ way wherever it shows. `DigitReader::placed` gives each shape of a picture
 with the columns it came from, and `recording/character.rs` gives the shape
 a name, a hash of it, so the UI can tell that two places show the same
 shape without holding shapes. Finds (`FindView`) and recorded readings
-(`ReadingView`) both carry them, cut with the color and tolerance the place
+(`ReadingView`) both carry them, cut with the text color and tolerance the place
 was last read with, and `box_characters` answers them for a box of the
-draft, cut with the characters' color and tolerance the draft has.
+draft, cut with the text color and tolerance the draft has.
 `lib/confirm.ts` groups the shapes by the character the places' texts give
 them and turns each answer into edits of those texts and ticks, so the check
 keeps no texts of its own, and the list of finds and review show what it
@@ -892,7 +932,6 @@ saved file still names.
       "id": "percent_font",
       "name": "Percent font",
       "origin": { "kind": "recording" },
-      "ink": { "red": 255, "green": 255, "blue": 255 },
       "tolerance": 40,
       "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }],
       "expects": "0123456789.%"
@@ -989,6 +1028,14 @@ reference, or whose fix's reference, knows none of them is not read. The
 setup app writes each character once, the digits first, then the rest by
 code point. Its live check reads with the same glyphs, since `saved::build` chooses
 them for both.
+
+A reference's `tolerance` is how far a pixel's red, green, or blue may be
+from the background of a region and still be background, as
+[Ink](Screen-regions.md#ink) describes. A reference with a text color has
+it as `ink`, a color like `"ink": { "red": 255, "green": 255, "blue": 255 }`,
+and its `tolerance` is then how far a pixel may be from that color and still
+be ink. `ink` is left out when the reference finds its characters by
+contrast.
 
 A reference's `expects` is the characters the user says it needs to know,
 and is left out when the user chose none. Only the setup app reads it, to
@@ -1314,13 +1361,20 @@ application's `app.json` does.
 
 A sample of a labeled screenshot or a recorded reading keeps the whole region,
 not only the box around its characters. A
-reference that is edited learns its saved samples again with the color and
-tolerance the editor has then, and another color or a higher tolerance counts
-pixels as ink that a box cut for the saved settings would have dropped. A
+reference that is edited learns its saved samples again with the text color
+and tolerance the editor has then, which can count pixels as ink that a box
+cut for the saved settings would have dropped, and a reference that finds
+its characters by contrast takes each sample's background from the sample's
+outermost pixels, as a read takes its region's: its samples are cut with
+the pixels around the box, where a reference with a text color keeps the
+box alone. A reference that loses its text color keeps the pictures it has,
+so each of those samples needs room around its text; one drawn edge to edge
+is drawn again. A
 state's picture is the whole region because that is what the check compares.
 An added find's sample is the box the search cut around its text, with a
-margin of a quarter of the text's height, so a color or tolerance that counts
-more pixels as ink sees only those within the margin.
+margin of a quarter of the text's height, so a text color or tolerance that
+counts more pixels as ink sees only those within the margin, and the margin
+is the background the find's characters stand out from.
 
 ### Removal
 

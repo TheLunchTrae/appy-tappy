@@ -786,7 +786,7 @@ pub(crate) async fn overlay_card(
 }
 
 /// Records the region of the picked window that `spec` names, keeping each
-/// reading it shows in the characters' color. With `more`,
+/// reading it shows. With `more`,
 /// goes on with the stopped recording; otherwise starts a new one. Answers
 /// the recording's number, which going on keeps.
 #[tauri::command]
@@ -880,16 +880,27 @@ pub(crate) async fn review_problems(
     .await
 }
 
-/// Finds text like what `region` of screenshot `screenshot` shows, in the
-/// characters' color and at their size, elsewhere on that screenshot and
-/// away from `added`, in place of any earlier search.
+/// The tolerance the reference `spec` teaches finds its characters by
+/// contrast with.
+#[tauri::command]
+pub(crate) async fn contrast_tolerance(app: AppHandle, spec: CharactersSpec) -> Result<u8, String> {
+    try_ask(&app, "contrast_tolerance", move |owner| {
+        owner.contrast_tolerance(&spec)
+    })
+    .await
+}
+
+/// Finds text like what `region` of screenshot `screenshot` shows, as its
+/// characters stand out from its background and at their size, elsewhere
+/// on that screenshot and away from `added`, in place of any earlier
+/// search.
 #[tauri::command]
 pub(crate) async fn find_like(
     app: AppHandle,
     screenshot: usize,
     region: RegionDef,
     added: Vec<RegionDef>,
-    ink: ColorDef,
+    ink: Option<ColorDef>,
     tolerance: u8,
 ) -> Result<FoundView, String> {
     try_ask(&app, "find_like", move |owner| {
@@ -921,14 +932,14 @@ pub(crate) async fn found_picture(
 }
 
 /// Has the text reader read finds `indexes` of search `search` again, with
-/// the characters' color `ink` within `tolerance`; `None` when that search
+/// the text color `ink`, if any, and `tolerance`; `None` when that search
 /// was replaced or forgotten.
 #[tauri::command]
 pub(crate) async fn reread_found(
     app: AppHandle,
     search: u64,
     indexes: Vec<usize>,
-    ink: ColorDef,
+    ink: Option<ColorDef>,
     tolerance: u8,
 ) -> Result<Option<FoundView>, String> {
     ask(&app, "reread_found", move |owner| {
@@ -943,14 +954,14 @@ pub(crate) async fn forget_found(app: AppHandle) -> Result<(), String> {
     ask(&app, "forget_found", Owner::forget_found).await
 }
 
-/// The characters the box `region` of screenshot `screenshot` shows, in the
-/// characters' color `ink` within `tolerance`.
+/// The characters the box `region` of screenshot `screenshot` shows, as the
+/// text color `ink`, if any, and `tolerance` split them.
 #[tauri::command]
 pub(crate) async fn box_characters(
     app: AppHandle,
     screenshot: usize,
     region: RegionDef,
-    ink: ColorDef,
+    ink: Option<ColorDef>,
     tolerance: u8,
 ) -> Result<Vec<CharacterView>, String> {
     ask(&app, "box_characters", move |owner| {

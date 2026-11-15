@@ -15,7 +15,8 @@
 
 use appytappy_config::app_file::{CheckDef, ColorDef, OriginDef, RegionDef, StateDef};
 use appytappy_config::names::state_image_name;
-use appytappy_sources::screen::{EmptyRegion, Image, Region, Size};
+use appytappy_sources::screen::digits::InkRule;
+use appytappy_sources::screen::{EmptyRegion, Image, Region, Rgb, Size};
 use serde::Deserialize;
 
 use crate::screenshots::Shots;
@@ -23,6 +24,7 @@ use crate::selection::{self, SelectionSpec};
 
 pub(crate) mod bar;
 pub(crate) mod characters;
+mod contrast;
 mod error;
 
 pub(crate) use characters::{
@@ -315,6 +317,13 @@ fn state_picture(
     png.map_err(|_encode| SpecError::Picture)
 }
 
+/// How a reference with the text color `ink`, or one that finds its
+/// characters by contrast when it has none, tells ink from background at
+/// its `tolerance`.
+pub(crate) fn ink_rule(ink: Option<ColorDef>, tolerance: u8) -> InkRule {
+    InkRule::new(ink.map(Rgb::from), tolerance)
+}
+
 /// `region` as a [`Region`].
 fn to_region(region: RegionDef) -> Result<Region, SpecError> {
     Region::try_from(region).map_err(|EmptyRegion| SpecError::EmptyRegion)
@@ -341,12 +350,18 @@ pub(crate) fn drawn(
     }
 }
 
-/// The `region` of screenshot `screenshot`.
-fn cut(screenshots: &dyn Shots, region: Region, screenshot: usize) -> Result<Image, SpecError> {
-    screenshots
-        .get(screenshot)
-        .ok_or(SpecError::NoScreenshot)?
-        .crop(region)
+/// The pixels of screenshot `screenshot` that a reference that tells ink
+/// from background by `rule` is given to read `region`
+/// ([`InkRule::reads`]).
+fn cut(
+    screenshots: &dyn Shots,
+    region: Region,
+    screenshot: usize,
+    rule: InkRule,
+) -> Result<Image, SpecError> {
+    let image = screenshots.get(screenshot).ok_or(SpecError::NoScreenshot)?;
+    image
+        .crop(rule.reads(region, image.size()))
         .ok_or(SpecError::Outside)
 }
 

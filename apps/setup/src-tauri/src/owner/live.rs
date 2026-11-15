@@ -382,8 +382,8 @@ mod tests {
         assert_eq!(
             harness.ask(Owner::reading),
             Err(
-                "Not read on the live window now: no pixel in the region has the characters' \
-                 color."
+                "Not read on the live window now: no pixel in the region stands out from its \
+                 background, or has the reference's text color."
                     .to_owned()
             )
         );

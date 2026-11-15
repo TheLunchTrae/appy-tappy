@@ -21,10 +21,10 @@ use appytappy_config::app_file::{
 use appytappy_config::signal::StateName;
 
 use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
-use super::digits::{DigitReader, LearnError};
+use super::digits::{DigitReader, InkRule, LearnError};
 use super::mask::Mask;
 use super::scale::scaled;
-use super::{EmptyRegion, Image, ImageError, Region, Size};
+use super::{EmptyRegion, Image, ImageError, Region, Rgb, Size};
 
 /// A saved value's first drawing: the window size it was drawn at, its
 /// region, and its check.
@@ -75,7 +75,9 @@ pub struct SavedValue {
 /// [`SavedValue::at`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtSize {
-    /// The region of the window's content it reads.
+    /// The region of the window's content its check is given: the value's
+    /// region, and for a number the pixels around it that its reader's rule
+    /// reads it from ([`InkRule::reads`]).
     pub region: Region,
     /// Which check reads it.
     check: Drawing,
@@ -141,11 +143,19 @@ impl SavedValue {
     /// Where it reads on a window of the size it was first drawn at, where
     /// it always reads.
     #[must_use]
-    pub const fn first(&self) -> AtSize {
-        AtSize {
-            region: self.drawn.region,
-            check: Drawing::First,
+    pub fn first(&self) -> AtSize {
+        self.reading(self.drawn.region, self.drawn.window_size, Drawing::First)
+    }
+
+    /// Where `check` reads `region` of a window of `size`: a number's
+    /// reader is given the pixels its rule reads the region from
+    /// ([`InkRule::reads`]).
+    fn reading(&self, region: Region, size: Size, check: Drawing) -> AtSize {
+        let mut at = AtSize { region, check };
+        if let Check::Number { reader, .. } = self.check(&at) {
+            at.region = reader.reads(region, size);
         }
+        at
     }
 
     /// Where and with what it reads on a window of `size`: the drawing made
@@ -171,7 +181,7 @@ impl SavedValue {
                 },
             },
         };
-        Ok(AtSize { region, check })
+        Ok(self.reading(region, size, check))
     }
 
     /// The check that reads it where `at` says.
@@ -511,7 +521,10 @@ pub fn reader(
     reference: &ReferenceDef,
     mut picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Result<DigitReader, SavedError> {
-    let mut reader = DigitReader::new(reference.ink.into(), reference.tolerance);
+    let mut reader = DigitReader::new(InkRule::new(
+        reference.ink.map(Rgb::from),
+        reference.tolerance,
+    ));
     for sample in &reference.samples {
         reader
             .learn(&load(&sample.image, &mut picture)?, &sample.text)
@@ -993,7 +1006,7 @@ mod tests {
             id: "counter".to_owned(),
             name: "Counter".to_owned(),
             origin: OriginDef::ByHand,
-            ink: RED,
+            ink: Some(RED),
             tolerance: 10,
             samples: vec![SampleDef {
                 image: sample_name("counter", 1),
@@ -1077,11 +1090,11 @@ mod tests {
             id: "percent".to_owned(),
             name: "Percent".to_owned(),
             origin: OriginDef::ByHand,
-            ink: ColorDef {
+            ink: Some(ColorDef {
                 red: 255,
                 green: 255,
                 blue: 255,
-            },
+            }),
             tolerance: 40,
             samples,
             expects: None,
@@ -1139,6 +1152,74 @@ mod tests {
                 "{text} in a {size} window"
             );
         }
+    }
+
+    #[test]
+    fn a_number_found_by_contrast_reads_a_region_as_tight_as_its_text() {
+        // Ones two pixels wide and four tall, a pixel apart, from (3, 2):
+        // a region drawn around them holds nothing of the background but
+        // the gaps between them.
+        let window = Size {
+            width: 14,
+            height: 8,
+        };
+        // How wide `ones` of them are with the gap after each.
+        let wide = |ones: u32| ones.checked_mul(3).expect("a few ones");
+        let showing = |ones: u32| {
+            let bgra = (0..window.height)
+                .flat_map(|y| (0..window.width).map(move |x| (x, y)))
+                .flat_map(|(x, y)| {
+                    let across = x.wrapping_sub(3);
+                    let ink =
+                        (2..6).contains(&y) && across < wide(ones) && across.rem_euclid(3) < 2;
+                    if ink {
+                        [250, 250, 250, 255]
+                    } else {
+                        [40, 40, 40, 255]
+                    }
+                })
+                .collect();
+            Image::new(window, bgra).expect("matching length")
+        };
+        let around = |ones: u32| {
+            let width = wide(ones).checked_sub(1).expect("at least one");
+            Region::new(3, 2, width, 4).expect("not empty")
+        };
+        let reader = DigitReader::new(InkRule::Contrast { tolerance: 40 });
+        let sample = reader.cut(&showing(2), around(2)).expect("in the window");
+        let files = pictures(&[(&sample_name("counter", 1), &sample)]);
+        let reference = ReferenceDef {
+            ink: None,
+            tolerance: 40,
+            ..counter("11")
+        };
+        let mut value = screen(CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: true,
+            characters: None,
+        });
+        value.window_size = SizeDef {
+            width: window.width,
+            height: window.height,
+        };
+        value.region = RegionDef {
+            x: 3,
+            y: 2,
+            width: 8,
+            height: 4,
+        };
+        let built =
+            build(&value, &mut Readers::new(&[reference]), OFTEN, from(&files)).expect("builds");
+        let given = Region::new(2, 1, 10, 6).expect("not empty");
+        assert_eq!(built.first().region, given, "with the pixels around it");
+        let at = built.at(window).expect("reads where it was drawn");
+        assert_eq!(at.region, given);
+        assert_eq!(
+            built
+                .check(&at)
+                .read(&showing(3).crop(at.region).expect("inside the window")),
+            Ok(Value::Number(Number::new(111.0).expect("finite")))
+        );
     }
 
     #[test]
@@ -1401,8 +1482,13 @@ mod tests {
             .expect("read with the reader handed in, with no picture");
         assert_eq!(built, from_pictures);
         // A reader for no reference the application has is not kept.
-        let mut unknown =
-            Readers::new(&references).learned("other", DigitReader::new(RED.into(), 10));
+        let mut unknown = Readers::new(&references).learned(
+            "other",
+            DigitReader::new(InkRule::Color {
+                color: RED.into(),
+                tolerance: 10,
+            }),
+        );
         assert!(matches!(
             build(&number, &mut unknown, OFTEN, from(&BTreeMap::new())),
             Err(SavedError::Missing { .. })

@@ -799,7 +799,7 @@ mod tests {
                 id: "percent".to_owned(),
                 name: "Percent".to_owned(),
                 origin: OriginDef::ByHand,
-                ink: white,
+                ink: Some(white),
                 tolerance: 10,
                 samples: vec![SampleDef {
                     image: sample_name("percent", 1),

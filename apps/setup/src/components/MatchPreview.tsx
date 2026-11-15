@@ -21,7 +21,7 @@ import type { MatchPreview, SelectedPreview } from '../lib/useMatchPreview.ts';
 const SWITCHES = {
   ink: {
     name: 'Show matching pixels',
-    help: 'Tints every pixel on the screenshot that counts as part of the characters at this color and tolerance.',
+    help: "Tints every pixel on the screenshot that counts as part of the characters: what stands out as the selected box's characters do from its background, or what is within the tolerance of the text color.",
   },
   barFill: {
     name: 'Show matching pixels',
@@ -55,7 +55,7 @@ function Found({ tint, region }: { readonly tint: Answered; readonly region: Rec
       return (
         <p className="note">
           <Key tint={tints[0] ?? null} />
-          {inkLines(view.ink, request.area, region).join(' ')}
+          {inkLines(view.ink, request.area, region, request.rule.kind === 'contrast' ? 'contrast' : 'ink').join(' ')}
         </p>
       );
     case 'barFill': {

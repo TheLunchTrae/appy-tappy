@@ -12,7 +12,7 @@ describe('movingContent', () => {
 
   test('reads a number or a bar anywhere in a reading area, and says what else the area would read', () => {
     const number = movingContent('number', true);
-    expect(number.kind === 'area' && number.limits.includes("characters' color")).toBe(true);
+    expect(number.kind === 'area' && number.limits.includes('stands out from the background')).toBe(true);
     const bar = movingContent('barFill', true);
     expect(bar.kind === 'area' && bar.limits.includes('near the filled or the empty color')).toBe(true);
   });

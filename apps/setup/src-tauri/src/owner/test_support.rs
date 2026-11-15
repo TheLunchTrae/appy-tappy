@@ -514,7 +514,7 @@ pub(super) fn characters_in(region: RegionDef, ink: ColorDef) -> RecordSpec {
         region,
         screenshot: 0,
         pin: None,
-        ink,
+        ink: Some(ink),
         tolerance: 0,
         scope: Scope::Place,
         examples: Vec::new(),

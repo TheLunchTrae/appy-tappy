@@ -434,9 +434,19 @@ fn prune(folder: &Path, keep: usize) {
             (name.starts_with("trace-") && csv).then(|| (modified, name, entry.path()))
         })
         .collect();
-    traces.sort();
-    let extra = traces.len().saturating_sub(keep);
-    for (_, _, path) in traces.into_iter().take(extra) {
+    // The oldest is looked for once for each file to delete, which are
+    // few. Sorting the files would build a sort of these triples into the
+    // runtime, which has a size target (`rust:footprint`).
+    for _ in keep..traces.len() {
+        let oldest = traces
+            .iter()
+            .enumerate()
+            .min_by(|(_, one), (_, other)| (one.0, &one.1).cmp(&(other.0, &other.1)))
+            .map(|(index, _)| index);
+        let Some(index) = oldest else {
+            return;
+        };
+        let (_, _, path) = traces.swap_remove(index);
         // A file that stays is deleted at a later try.
         drop(fs::remove_file(path));
     }
@@ -696,10 +706,22 @@ mod tests {
     fn only_trace_files_are_deleted_to_keep_the_newest() {
         let folder = folder("prune");
         fs::create_dir_all(&folder).expect("make");
-        for name in ["notes.csv", "trace-a.txt", "trace-b.csv"] {
+        for name in ["notes.csv", "trace-a.txt", "trace-0.csv", "trace-b.csv"] {
             fs::write(folder.join(name), "").expect("write");
         }
         fs::write(folder.join("trace-c.csv"), "").expect("write");
+        prune(&folder, 4);
+        assert_eq!(
+            files(&folder),
+            [
+                "notes.csv",
+                "trace-0.csv",
+                "trace-a.txt",
+                "trace-b.csv",
+                "trace-c.csv"
+            ],
+            "no more than it keeps"
+        );
         prune(&folder, 1);
         assert_eq!(files(&folder), ["notes.csv", "trace-a.txt", "trace-c.csv"]);
         fs::remove_dir_all(folder).expect("clean up");

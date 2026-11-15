@@ -53,11 +53,11 @@ export interface Finder {
   readonly leaveOutFlagged: () => void;
   /**
    * Whether Reread is offered, and with `blocked` why it waits: every find it would read again was last read with
-   * the characters' color and tolerance the draft has now.
+   * the text color and tolerance the draft has now.
    */
   readonly rereadOffer: { readonly blocked: string | null } | null;
   /**
-   * Has the text reader read again, with the characters' color as the draft has it now, the finds it could not read
+   * Has the text reader read again, with the text color and tolerance the draft has now, the finds it could not read
    * and the flagged ones whose text is its guess and was read with another. Ticks and typed text stay.
    */
   readonly reread: () => Promise<void>;
@@ -190,9 +190,6 @@ export function useFound(
 
   const search = async (sample: Box): Promise<void> => {
     const { ink, tolerance, boxes } = draft;
-    if (ink === null) {
-      return;
-    }
     const { screenshot, region } = sample;
     // The server leaves these out, so a search after adding offers the rest.
     const added = boxesOn(boxes, screenshot)
@@ -238,7 +235,7 @@ export function useFound(
     rereadOffer: offer,
     reread: async () => {
       const again = offer?.indexes ?? [];
-      if (view === null || draft.ink === null || again.length === 0) {
+      if (view === null || again.length === 0) {
         return;
       }
       // The search's state read before this would show the finds as they were, and end the wait for their text.

@@ -3,9 +3,8 @@ import { useState } from 'react';
 import type { ReferenceDef } from '../lib/bindings.ts';
 import { READ_CHOICE_NAMES, readChoice, readChoices, withCharacter, withReadChoice } from '../lib/charactersRead.ts';
 import { CHARACTERS_READ_HINT } from '../lib/hints.ts';
-import { hex } from '../lib/pixels.ts';
 import { knownCharacters, referenceCharacters } from '../lib/reference.ts';
-import { CharacterChips } from './CharacterChips.tsx';
+import { CharacterChips, glyphStyle } from './CharacterChips.tsx';
 import { Hint } from './Hint.tsx';
 
 interface Props {
@@ -69,7 +68,7 @@ export function CharactersRead({ reference, characters, onCharacters }: Props) {
                   }}
                 />
                 <span className={learned ? undefined : 'glyphs missing'} aria-hidden="true">
-                  <span className="glyph" style={learned ? { color: hex(reference.ink) } : undefined}>
+                  <span className="glyph" style={learned ? glyphStyle(reference.ink) : undefined}>
                     {character}
                   </span>
                 </span>

@@ -25,7 +25,7 @@ const GAP: f64 = 0.12;
 /// The background's blue, green, and red.
 const BACKGROUND: [u32; 3] = [200, 120, 60];
 
-/// The characters' color.
+/// The brightness of the characters' own pixels.
 const INK: u32 = 255;
 
 /// A stroke's center line, from one point to another. In a glyph the

@@ -40,8 +40,8 @@ export function movingContent(kind: CheckKind, mayMove: boolean): MovingContent 
           'Draw the box around everywhere the number can show. AppyTappy reads the number wherever it is inside ' +
           'the box.',
         limits:
-          "It reads everything in the box that has the characters' color, so keep other text and shapes of that " +
-          'color out. It does not look outside the box.',
+          'It reads everything in the box that stands out from the background, or that has the text color of a ' +
+          'reference that has one, so keep other text and shapes out. It does not look outside the box.',
       };
     case 'barFill':
       return {

@@ -43,9 +43,12 @@ pub(crate) struct ReferenceSettingsSpec {
     pub(crate) reference: ReferenceRef,
     /// The reference's name, the one it has or a new one.
     pub(crate) reference_name: String,
-    /// The characters' color.
-    pub(crate) ink: ColorDef,
-    /// How far from `ink` a pixel of a character may be.
+    /// The reference's text color, or `None` when it finds its characters
+    /// by contrast.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub(crate) ink: Option<ColorDef>,
+    /// The reference's tolerance, as `ReferenceDef` has it.
     pub(crate) tolerance: u8,
     /// The characters the user says it needs to know, as
     /// [`ReferenceSaveSpec::expects`] has them.
@@ -169,10 +172,10 @@ impl<H: Host> Owner<H> {
     }
 
     /// Saves the settings `spec` gives a saved reference, its name, its
-    /// characters' color and tolerance, and the characters it needs, and
+    /// text color and tolerance, and the characters it needs, and
     /// says where it is saved. Its samples stay as they are, so this needs
     /// no screenshot and no picked window. The reference must still learn
-    /// every sample with the new color and tolerance.
+    /// every sample with the new text color and tolerance.
     pub(crate) fn save_reference_settings(
         &mut self,
         spec: &ReferenceSettingsSpec,
@@ -628,16 +631,17 @@ mod tests {
             file.reference("digits").expect("saved").clone()
         };
         let before = digits(&mut harness);
-        let settings = |id: &str, name: &str, ink: ColorDef, expects: &str| ReferenceSettingsSpec {
-            reference: ReferenceRef {
-                app: "example".to_owned(),
-                id: id.to_owned(),
-            },
-            reference_name: name.to_owned(),
-            ink,
-            tolerance: 10,
-            expects: expects.to_owned(),
-        };
+        let settings =
+            |id: &str, name: &str, ink: Option<ColorDef>, expects: &str| ReferenceSettingsSpec {
+                reference: ReferenceRef {
+                    app: "example".to_owned(),
+                    id: id.to_owned(),
+                },
+                reference_name: name.to_owned(),
+                ink,
+                tolerance: 10,
+                expects: expects.to_owned(),
+            };
         let red = before.ink;
         let save = |harness: &mut Harness, spec: ReferenceSettingsSpec| {
             harness.ask(move |owner| owner.save_reference_settings(&spec))
@@ -657,11 +661,11 @@ mod tests {
             save(&mut harness, settings("gone", "Gone", red, "")),
             Err("Example App no longer has that reference.".to_owned())
         );
-        let blue = ColorDef {
+        let blue = Some(ColorDef {
             red: 0,
             green: 0,
             blue: 255,
-        };
+        });
         assert!(
             save(&mut harness, settings("digits", "Digits", blue, "")).is_err(),
             "a color its samples have no pixel of teaches it nothing"

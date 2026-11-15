@@ -832,7 +832,7 @@ mod tests {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: RED,
+            ink: Some(RED),
             tolerance: 10,
             samples: vec![SampleDef {
                 image: sample_name("digits", 1),

@@ -24,6 +24,7 @@ import {
   EMPTY_DRAFT,
   firstWithPixels,
   fixDraft,
+  NEW_REFERENCE_TOLERANCE,
   onPicture,
   readsOf,
   charactersOnceTaught,
@@ -32,6 +33,7 @@ import {
   withFixRegion,
   withReference,
   withState,
+  withTextColor,
 } from '../lib/check.ts';
 import { boxNumber } from '../lib/boxes.ts';
 import { type Placed, liveDrawFrame, regionFromLiveBox, regionOverFrame, useLiveDraw } from '../lib/liveDraw.ts';
@@ -97,7 +99,6 @@ import { type Trial, trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
 import { useReferenceTeaching } from '../lib/useReferenceTeaching.ts';
 import { useMatchPreview, useSelectedPreview } from '../lib/useMatchPreview.ts';
-import { focusNext } from '../lib/useReview.ts';
 import type { Taken } from '../lib/useScreenshots.ts';
 import { useStateSelections } from '../lib/useStateSelections.ts';
 import { useValueEdit } from '../lib/useValueEdit.ts';
@@ -511,7 +512,7 @@ export function Capture({
     }
     const color = colorAt(shownPicture, point.x, point.y);
     if (color !== null) {
-      setDraft((current) => ({ ...current, [picking]: color }));
+      setDraft((current) => (picking === 'ink' ? withTextColor(current, color) : { ...current, [picking]: color }));
       setPicking(null);
     }
   };
@@ -728,9 +729,9 @@ export function Capture({
     await looks.discard();
   };
 
-  // Opens the reference editor on the picked reference, or on a new one, to
-  // record the value's region. A saved reference has its characters' color,
-  // so recording starts at once; a new one has none, so picking it is next.
+  // Opens the reference editor on the picked reference, or on a new one, and
+  // starts recording the value's region with that reference's text color and
+  // tolerance.
   const recordReadings = async (): Promise<void> => {
     const existing = file?.references.find((reference) => reference.id === draft.reference) ?? null;
     if (existing !== null && draftHolds(existing, drafted) !== null) {
@@ -741,13 +742,12 @@ export function Capture({
     if (region === null || drawnOn === null) {
       return;
     }
-    if (existing === null) {
-      setSelected(drawnOn);
-      setPicking('ink');
-      focusNext(teaching.focus.title);
-      return;
-    }
-    await teaching.record(false, { region, drawnOn, ink: existing.ink, tolerance: existing.tolerance });
+    await teaching.record(false, {
+      region,
+      drawnOn,
+      ink: existing?.ink ?? null,
+      tolerance: existing?.tolerance ?? NEW_REFERENCE_TOLERANCE,
+    });
   };
 
   // Why the screenshot shown cannot be removed, or null when it can or the live view shows.

@@ -36,6 +36,7 @@ import {
   withoutState,
   withState,
   withStateAt,
+  withTextColor,
   withStateStep,
 } from '../src/lib/check.ts';
 
@@ -282,13 +283,9 @@ describe('buildCharacters', () => {
       ok: false,
       next: 'Draw a box around the characters on a screenshot.',
     });
-    expect(buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0 }, null)).toEqual({
-      ok: false,
-      next: "Pick the characters' color.",
-    });
     expect(
       buildCharacters(
-        { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red, boxes: [{ id: 0, screenshot: 0, region, text: ' ' }] },
+        { ...EMPTY_DRAFT, region, drawnOn: 0, boxes: [{ id: 0, screenshot: 0, region, text: ' ' }] },
         null,
       ),
     ).toEqual({
@@ -303,8 +300,15 @@ describe('buildCharacters', () => {
   });
 });
 
-test('reviewSpec waits for the region and color, and names the reference', () => {
-  expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1 }, [], null)).toBeNull();
+test('reviewSpec waits for the region, names the reference, and has a text color only when one is picked', () => {
+  expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1 }, [], null)).toEqual({
+    region,
+    screenshot: 1,
+    reference: null,
+    tolerance: CHECKS.number.tolerance,
+    labels: [],
+    recorded: [],
+  });
   expect(reviewSpec({ ...EMPTY_DRAFT, region, ink: red }, [], null)).toBeNull();
   const kept = [{ reading: 0, text: '5' }];
   expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1, ink: red }, kept, percent)).toEqual({
@@ -545,23 +549,28 @@ describe('state names', () => {
   });
 });
 
-test("recording waits for a place to read and the characters' color", () => {
-  const ready = { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red };
+test('recording waits for a place to read', () => {
+  const ready = { ...EMPTY_DRAFT, region, drawnOn: 0 };
   const drawFirst = 'Draw a box around the characters on a screenshot to record them.';
   expect(recordBlocked(ready)).toBeNull();
   expect(recordBlocked({ ...ready, region: null })).toBe(drawFirst);
   expect(recordBlocked({ ...ready, drawnOn: null })).toBe(drawFirst);
   // A box is a place to read while the value has none.
   expect(recordBlocked({ ...ready, region: null, boxes: [{ id: 0, screenshot: 1, region, text: '' }] })).toBeNull();
-  expect(recordBlocked({ ...ready, ink: null })).toBe("Pick the characters' color to record.");
 });
 
-test('finding more like it waits for a selected box and the color', () => {
-  const ready = { ...EMPTY_DRAFT, ink: red };
-  const box = { id: 0, screenshot: 0, region, text: '' };
-  expect(findBlocked(ready, box)).toBeNull();
-  expect(findBlocked(ready, null)).toBe('Select a box around one sample first.');
-  expect(findBlocked({ ...ready, ink: null }, box)).toBe("Pick the characters' color first.");
+test('finding more like it waits for a selected box', () => {
+  expect(findBlocked({ id: 0, screenshot: 0, region, text: '' })).toBeNull();
+  expect(findBlocked(null)).toBe('Select a box around one sample first.');
+});
+
+test('a text color starts the tolerance over only when the reference goes to or from contrast', () => {
+  const byContrast = { ...EMPTY_DRAFT, tolerance: 72 };
+  const blue = { red: 0, green: 0, blue: 255 };
+  expect(withTextColor(byContrast, red)).toMatchObject({ ink: red, tolerance: 40 });
+  expect(withTextColor({ ...byContrast, ink: red }, blue)).toMatchObject({ ink: blue, tolerance: 72 });
+  expect(withTextColor({ ...byContrast, ink: red }, null)).toMatchObject({ ink: null, tolerance: 40 });
+  expect(withTextColor(byContrast, null)).toEqual(byContrast);
 });
 
 test('boxes go on screenshots of the size the reference reads at, once it has one', () => {
@@ -730,8 +739,14 @@ describe('buildReferenceSave', () => {
     expect(built.ok && built.spec.kind).toBe('taught');
   });
 
-  test('a new reference, and one without a color, still say what they need', () => {
+  test('a saved reference without a text color saves its settings without one', () => {
+    expect(buildReferenceSave(EMPTY_DRAFT, percent)).toEqual({
+      ok: true,
+      spec: { kind: 'settings', reference: percent, ink: null, tolerance: 40 },
+    });
+  });
+
+  test('a new reference still says what it needs', () => {
     expect(buildReferenceSave({ ...EMPTY_DRAFT, ink: red }, null).ok).toBe(false);
-    expect(buildReferenceSave(EMPTY_DRAFT, percent).ok).toBe(false);
   });
 });

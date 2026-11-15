@@ -97,16 +97,20 @@ The reasons a number has no reading:
   was when you drew the value, and windowed and fullscreen are different
   sizes. [Window size](Values.md#window-size) says how to resize the window
   or fix the value at this size.
-- **No pixel in the region has the characters' color.** The region isn't on
-  the number now, or the number is another color than the reference's. When
+- **No pixel in the region stands out from its background, or has the
+  reference's text color.** The region isn't on the number now, or the number
+  is another color than the reference's [text color](References.md#text-color).
+  When
   the log line says **where its region scales to**, the window isn't at a
   size the value was drawn at, and the scaled region can lie beside the
-  number: [fix the value at this size](Values.md#fix-a-value-at-one-size). Otherwise
-  [edit the reference](References.md#make-a-reference): pick the color on the
+  number: [fix the value at this size](Values.md#fix-a-value-at-one-size).
+  Otherwise, for a reference with a text color,
+  [edit the reference](References.md#text-color): pick the color on the
   middle of a character, or raise **Tolerance**.
-- **The region holds more than 24 characters.** Something else in the
-  characters' color is in the region. Draw the region around the number
-  alone, or lower **Tolerance**.
+- **The region holds more than 24 characters.** Something else that stands
+  out from the background is in the region, or the background is too busy to
+  tell the characters from. Draw the region around the number alone, or
+  give the reference a [text color](References.md#text-color).
 - **A character has a shape the reference has not learned.** The message
   shows what it read, with a `?` for each character it couldn't, such as
   `8 7 ?`, and the character it learned that the first `?` looks most like.
@@ -139,8 +143,9 @@ screenshot of the window at the size you play at.
 
 [Edit its reference](References.md#make-a-reference) and draw more
 [boxes](References.md#boxes), or record more readings, so that every digit
-the number can show appears in at least one of them, and check the
-characters' color.
+the number can show appears in at least one of them. Where the background
+behind the number is busy, give the reference a
+[text color](References.md#text-color).
 [**Characters still missing**](References.md#choose-what-it-needs) lists what
 is left to teach. If it reads a digit as a letter that looks like it, such as
 `0` as `O`, set the value's

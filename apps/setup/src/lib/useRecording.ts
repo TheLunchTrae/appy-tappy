@@ -4,7 +4,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 
 import type { ExampleSpec, PinDef, RecordingSettings, RecordingView } from './bindings.ts';
 import { discardRecording, recordedReading, recordingState, startRecording } from './api.ts';
-import type { Picture } from './pixels.ts';
+import type { Color, Picture } from './pixels.ts';
 import { background } from './repeat.ts';
 import { type CropAsks, type Crops, cropAskFailed, cropsToAsk, NO_CROP_ASKS, NO_CROPS, withCrop } from './review.ts';
 import { useRecorder } from './useRecorder.ts';
@@ -21,12 +21,13 @@ const CROP_WIDTH = 480;
 const CROP_RETRY_MS = 1000;
 
 /**
- * What a recording records: a region drawn on a screenshot of `app`'s window, read with the characters' color and
- * tolerance, in that place alone or wherever the window shows text like it or like one of the `examples`, the
- * reference's boxes. As the window changes size the region stays at `pin`, or at the side it is nearest for null.
+ * What a recording records: a region drawn on a screenshot of `app`'s window, read with the reference's text color,
+ * null for contrast, and tolerance, in that place alone or wherever the window shows text like it or like one of the
+ * `examples`, the reference's boxes. As the window changes size the region stays at `pin`, or at the side it is nearest for null.
  */
-type Recordable = Omit<RecordingSettings, 'windowSize'> & {
+type Recordable = Omit<RecordingSettings, 'windowSize' | 'ink'> & {
   readonly app: string;
+  readonly ink: Color | null;
   readonly pin: PinDef | null;
   readonly drawnOn: number;
   readonly examples: readonly ExampleSpec[];
@@ -99,7 +100,10 @@ export function useRecording(): {
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
     await command(async () => {
       const { app, pin, region, ink, tolerance, drawnOn, scope, examples } = settings;
-      started(await startRecording({ app, region, screenshot: drawnOn, pin, ink, tolerance, scope, examples }, more));
+      const textColor = ink === null ? {} : { ink };
+      started(
+        await startRecording({ app, region, screenshot: drawnOn, pin, ...textColor, tolerance, scope, examples }, more),
+      );
       if (!more) {
         // A new recording replaced the old one, whose readings' pixels go with it.
         setCrops(NO_CROPS);
