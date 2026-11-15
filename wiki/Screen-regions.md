@@ -147,19 +147,20 @@ tests draw text as a game does, bold with an outline and anti-aliased at any
 fraction of a pixel (`screen/digits/drawn.rs`), and read it at any
 fraction and at other sizes from three labeled pictures.
 
-Three limits follow from the grid. Where the text line is less than 16 pixels tall, a
-cell is smaller than a pixel, so a moved edge is more than a cell and the
-reference needs more labeled pictures. And the grid is scaled by the text
-line's height, which is that of the characters the region shows: a
-character that reaches above or below the digits, such as a `,`, makes the
-line taller and every shape beside it another, so the reference learns the
-digits again from pictures that show it. And a match forgives an edge that
-moved by a cell on either side, so a part less than about two cells wide, an
-eighth of the line's height, does not tell two characters apart. A bold
-font's outline counts as ink by contrast, which leaves the holes of `0`,
-`6`, `8`, and `9` that narrow: the learned shapes of two digits then match
-each other, and a read can take one digit for another. Such text takes a
-text color, the color inside its characters, so the outline is not ink.
+Three limits follow from the grid. Where the text line is less than 16
+pixels tall, a cell is smaller than a pixel, so a moved edge is more than a
+cell and the reference needs more labeled pictures. The grid is scaled by
+the text line's height, which is that of the characters the region shows:
+a character that reaches above or below the digits, such as a `,`, makes
+the line taller and every shape beside it another, so the reference learns
+the digits again from pictures that show it. A match forgives an edge that
+moved by a cell on either side, so a hole or stroke no more than about two
+cells wide, an eighth of the line's height, does not tell two characters
+apart. A bold font's outline counts as ink by contrast, which leaves the
+holes of `0`, `6`, `8`, and `9` that narrow: the learned shapes of two
+digits then match each other, and a read can take one digit for another.
+Such text takes a text color, the color inside its characters, so the
+outline is not ink.
 
 A reference reads each size it learned. At another size a character's
 strokes can land more than a cell from the learned shape's, and the read

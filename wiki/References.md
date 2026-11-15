@@ -335,15 +335,6 @@ boxes show more characters than you typed. Give it a text color instead:
    still count: drag the slider or type a number. Raise it until the
    characters are whole, and lower it if the background counts too.
 
-Bold text with a thick outline takes a text color too. By contrast the
-outline is part of each character, so the strokes are thicker and the holes
-in `0`, `6`, `8`, and `9` are small, and the reference can read one of them
-as another, such as `0` as `8`. Pick the color inside a character, not its
-outline: only the inside counts then, and the digits stay apart. Without a
-text color, draw each box and the value's region around the whole
-character, outline included. A box that cuts through the outline cuts the
-character.
-
 Only pixels near the text color count as characters then, whatever is behind
 them, so the text has to be drawn in one color. **Remove text color** goes
 back to finding the characters by contrast. A box that was drawn while the
@@ -352,6 +343,16 @@ the reference then can't learn a box, draw it again. A saved picture whose
 text touches its edge can't be learned by contrast either, and has no box to
 draw again: put the text color back, or teach the reference afresh from new
 boxes or readings.
+
+An outline usually reads by contrast, but a thick one around bold text
+can't. When AppyTappy finds the characters by contrast, the outline counts as
+part of each character, so the strokes are thicker, the holes in `0`, `6`,
+`8`, and `9` are small, and the reference can read one of them as another,
+such as `0` as `8`. Give such text a text color: pick the color inside a
+character, not on its outline, so that only the inside counts and the
+reference tells the digits apart. Without a text color, draw each box and the
+value's region around the whole character, outline included. A box that cuts
+through the outline leaves part of the character out.
 
 With or without a text color, turn on **Show matching pixels** to tint every
 pixel on the screenshot that counts as part of the characters. Without a
