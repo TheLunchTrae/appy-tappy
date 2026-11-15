@@ -1067,9 +1067,12 @@ and its `tolerance` is then how far a pixel may be from that color and still
 be ink. `ink` is left out when the reference finds its characters by
 contrast.
 
-A reference takes only the keys above and `expects`, a list of characters
-that it reads and forgets, so the next save leaves that key out. Any other
-key stops the file loading, as everywhere else in the file.
+A reference takes only the keys above. Any other key stops the file
+loading, as everywhere else in the file, with one exception: `expects`, a
+list of characters, is read and forgotten, so the next save leaves that key
+out (`ReferenceKeys` in `appytappy-config`). The exception is for the
+owner's saved files, and `ReferenceKeys`'s `expects` goes once they are
+saved again.
 
 An application's `overlay` is left out until the user first picks one. Its
 `mode` is `overlay` or `pictureInPicture`, and once the panel has been moved
