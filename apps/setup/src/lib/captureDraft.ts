@@ -148,6 +148,17 @@ export function refreshedEditing(editing: Editing | null, references: readonly R
 }
 
 /**
+ * `draft`, kept with the reference editor open on the reference as `copied` has it, going on from the reference as
+ * `now` has it saved. The saved pictures it left out are named by file, and a reference saved since can give a new
+ * picture a removed one's file name, so they stay left out only while the reference has the very pictures the draft
+ * copied.
+ */
+export function refreshedDraft(draft: Draft, copied: ReferenceDef | null, now: ReferenceDef | null): Draft {
+  const same = JSON.stringify(copied?.samples ?? []) === JSON.stringify(now?.samples ?? []);
+  return same || draft.dropped.length === 0 ? draft : { ...draft, dropped: [] };
+}
+
+/**
  * Whether the fix draft `def` no longer fits `value`: a fix reads its value the way that was first drawn, and the
  * value's check, colors, states, or number settings were changed since the draft copied them.
  */

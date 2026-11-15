@@ -66,6 +66,31 @@ export function unlearnedArrived(answer: Answer, wanted: string | null): readonl
   return answer.key === wanted ? answer.samples : NONE;
 }
 
+/** The pixels fetched for an answer, by picture file name, and the key the answer was asked under. */
+interface Crops {
+  readonly key: string;
+  readonly pictures: ReadonlyMap<string, Picture>;
+}
+
+/**
+ * `crops` with the pixels `picture` of the saved picture `image`, fetched for the answer asked under `asked`, while
+ * the editor still asks under that key, `wanted`. Pixels that arrive for another key are dropped, so a slow fetch for
+ * settings since changed never replaces the pictures of the rows that show now.
+ */
+export function cropArrived(
+  crops: Crops,
+  asked: string,
+  wanted: string | null,
+  image: string,
+  picture: Picture,
+): Crops {
+  if (asked !== wanted) {
+    return crops;
+  }
+  const pictures = crops.key === asked ? new Map(crops.pictures) : new Map<string, Picture>();
+  return { key: asked, pictures: pictures.set(image, picture) };
+}
+
 /** The saved pictures a reference can't learn, and the pixels of those that have arrived, by file name. */
 export interface Unlearned {
   readonly samples: readonly UnlearnedSample[];
@@ -82,15 +107,12 @@ export interface Unlearned {
 export function useUnlearned(saving: ReferenceSaving | null, samples: readonly SampleDef[], ready: boolean): Unlearned {
   const asked = unlearnedAsk(saving);
   const key = unlearnedKey(asked, samples);
-  const latest = useRef(asked);
-  latest.current = asked;
+  const latest = useRef({ asked, key });
+  latest.current = { asked, key };
   const [answer, setAnswer] = useState<Answer>({ key: '', samples: NONE });
-  const [crops, setCrops] = useState<{ readonly key: string; readonly pictures: ReadonlyMap<string, Picture> }>({
-    key: '',
-    pictures: new Map(),
-  });
+  const [crops, setCrops] = useState<Crops>({ key: '', pictures: NO_PICTURES });
   useEffect(() => {
-    const now = latest.current;
+    const now = latest.current.asked;
     if (now === null || key === null || !ready) {
       return undefined;
     }
@@ -104,10 +126,7 @@ export function useUnlearned(saving: ReferenceSaving | null, samples: readonly S
               if (picture === null) {
                 return;
               }
-              setCrops((current) => {
-                const pictures = current.key === key ? new Map(current.pictures) : new Map<string, Picture>();
-                return { key, pictures: pictures.set(image, picture) };
-              });
+              setCrops((current) => cropArrived(current, key, latest.current.key, image, picture));
             }),
           );
         }

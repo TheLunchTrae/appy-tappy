@@ -178,6 +178,7 @@ export function ReferenceInspector({
     tried: settingsOnly || check.state.kind === 'set',
     busy,
     reviewing: teaching.reviewed !== null,
+    unlearned: teaching.unlearned.samples.length,
   });
   return (
     <aside className="inspector" aria-label="Reference">
@@ -255,6 +256,7 @@ export function ReferenceInspector({
         unlearned={
           <UnlearnedPictures
             unlearned={teaching.unlearned}
+            hasTextColor={draft.ink !== null}
             removed={saved.length - taught.saved.length}
             onRemove={(image) => {
               setDraft((current) => withoutSample(current, image));

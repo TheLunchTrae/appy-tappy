@@ -2418,7 +2418,12 @@ text: string,
 /**
  * Why the reference cannot learn it, as a sentence.
  */
-problem: string, }>;
+problem: string,
+/**
+ * Whether its picture is missing or cannot be decoded, which no text
+ * color or tolerance helps.
+ */
+missing: boolean, }>;
 
 /**
  * A newer release the user can install.

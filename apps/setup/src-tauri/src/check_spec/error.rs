@@ -67,7 +67,8 @@ pub(crate) enum SpecError {
     Picture,
     /// A saved reference being taught cannot be had, and why.
     Reference(String),
-    /// A saved reference lacks a sample's picture, or cannot decode it.
+    /// The saved reference a value reads with lacks a sample's picture, or
+    /// cannot decode it.
     MissingSample {
         /// The reference's name.
         reference: String,
@@ -89,11 +90,25 @@ pub(crate) enum SpecError {
     /// A number value is to need more than [`MAX_EXPECTED_CHARACTERS`]
     /// characters.
     TooManyExpected,
-    /// A saved reference cannot learn from one of its saved samples with
-    /// the text color and tolerance it is tried with.
-    SavedLearn {
+    /// The saved reference a value reads with cannot learn from one of its
+    /// saved samples.
+    ReferenceLearn {
         /// The reference's name.
         reference: String,
+        /// The text the sample shows.
+        text: String,
+        /// Why the reference cannot learn from it.
+        source: LearnError,
+    },
+    /// The saved reference being edited lacks a sample's picture, or
+    /// cannot decode it.
+    MissingPicture {
+        /// The picture's file name.
+        picture: String,
+    },
+    /// The saved reference being edited cannot learn from one of its saved
+    /// samples with the text color and tolerance it is tried with.
+    SavedLearn {
         /// The text the sample shows.
         text: String,
         /// Why the reference cannot learn from it.
@@ -208,7 +223,7 @@ impl fmt::Display for SpecError {
                 "{reference} is missing its saved picture {picture}. Edit {reference} and remove \
                  that picture under Saved pictures it can't learn."
             ),
-            Self::SavedLearn {
+            Self::ReferenceLearn {
                 reference,
                 text,
                 source,
@@ -217,6 +232,18 @@ impl fmt::Display for SpecError {
                 "{reference} can't learn from its saved picture of \"{text}\": {source}. Edit \
                  {reference} and remove that picture under Saved pictures it can't learn, or \
                  change its text color."
+            ),
+            // The reference's own editor says these, where the picture
+            // shows in the list they name.
+            Self::MissingPicture { picture } => write!(
+                formatter,
+                "Its saved picture {picture} is missing. Remove it under Saved pictures it can't \
+                 learn."
+            ),
+            Self::SavedLearn { text, source } => write!(
+                formatter,
+                "Can't learn from its saved picture of \"{text}\": {source}. Remove it under \
+                 Saved pictures it can't learn, or change the text color."
             ),
             Self::Unreadable(why) => {
                 write!(formatter, "AppyTappy could not read this value as saved: {why}.")
@@ -246,7 +273,9 @@ impl From<SavedError> for SpecError {
 impl Error for SpecError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Learn { source, .. } | Self::SavedLearn { source, .. } => Some(source),
+            Self::Learn { source, .. }
+            | Self::SavedLearn { source, .. }
+            | Self::ReferenceLearn { source, .. } => Some(source),
             _ => None,
         }
     }

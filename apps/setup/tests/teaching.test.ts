@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   type ReferenceSave,
   SAVE_AFTER_REVIEW,
+  SAVE_AFTER_UNLEARNED,
   checkBackLabel,
   draftHolds,
   referenceSave,
@@ -14,6 +15,7 @@ const READY: ReferenceSave = {
   tried: true,
   busy: false,
   reviewing: false,
+  unlearned: 0,
 };
 
 test('a reference saves once it is named, built and tried', () => {
@@ -26,6 +28,15 @@ test('a reference saves once it is named, built and tried', () => {
 test('saving waits while review is open, and says so', () => {
   // Review's edits reach the reference only with Keep, and saving drops the recording they are edits of.
   expect(referenceSave({ ...READY, reviewing: true })).toEqual({ can: false, waits: SAVE_AFTER_REVIEW });
+});
+
+test("saving waits while the reference keeps a saved picture it can't learn, and says so", () => {
+  // The save would be refused, and settings alone are saved without a try that would have said so.
+  expect(referenceSave({ ...READY, unlearned: 2 })).toEqual({ can: false, waits: SAVE_AFTER_UNLEARNED });
+  expect(referenceSave({ ...READY, unlearned: 1, reviewing: true })).toEqual({
+    can: false,
+    waits: SAVE_AFTER_REVIEW,
+  });
 });
 
 test("the character check's Back label follows the reviewed recording", () => {

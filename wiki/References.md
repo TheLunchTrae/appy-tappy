@@ -423,7 +423,8 @@ The editor then lists each such picture under
 **Saved pictures it can't learn**, below **Text color (optional)**: the
 picture, what you typed for it, and why the reference can't learn it. Its
 **?** says the same in short. The reference can't be saved while it keeps
-one of them, so do one of these:
+one of them: **Save reference** waits, and says
+`Remove the saved pictures it can't learn first.` Do one of these:
 
 - **Remove the picture.** Select **Remove** beside it. The reference loses
   only what that picture taught it. If
@@ -431,8 +432,10 @@ one of them, so do one of these:
   character, draw a box around it on a screenshot. The editor counts the
   pictures you removed, and **Put back** brings them all back. Saving the
   reference deletes them.
-- **Change the text color back**, or its tolerance, to what the reference
-  was saved with.
+- **Change the text color**, or its tolerance, until the list is empty.
+  Without a text color, pick one: a picture cut for a text color learns
+  again with it. This doesn't help a picture that is missing from the
+  application's folder.
 
 A reference needs at least one picture, box, or kept reading, so draw a box
 before you save one whose pictures you removed.
