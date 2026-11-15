@@ -33,7 +33,9 @@ also `rust:bench` on pushes to main and manual runs. `footprint` runs
 `rust:footprint` on Windows. `quality`, `windows`, and `footprint` restore a
 Rust build cache that only pushes to main save, once for each set of
 manifests, `Cargo.lock` and toolchain; the `mutants` jobs read the `quality`
-job's cache. `.github/workflows/mutation-sweep.yml` runs `rust:mutants` in
+job's cache. `quality` and `windows` also cache the text reader model that
+`ocr:model` downloads, and the mutation jobs read the `quality` job's copy.
+`.github/workflows/mutation-sweep.yml` runs `rust:mutants` in
 shards on Linux, from that cache too, and only a manual run starts it: a
 final check before a release, not a gate.
 

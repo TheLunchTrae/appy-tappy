@@ -64,6 +64,14 @@ jobs:
             target/
           key: rust-${{ runner.os }}-${{ github.job }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}
           restore-keys: ${{ github.event_name != 'push' && format('rust-{0}-{1}-', runner.os, github.job) || '' }}
+      # The model the setup app's tests read, which `ocr:model` downloads only
+      # when it is missing. The key follows installer.toml, which pins the
+      # model's hash, so a new model downloads once.
+      - name: Cache the text reader model
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/setup/src-tauri/models/
+          key: text-reader-model-${{ runner.os }}-${{ hashFiles('.config/mise/conf.d/installer.toml') }}
       - name: Run the mandatory gate
         run: mise run standards:check:base
       - name: Drop build output the cache leaves out
@@ -142,6 +150,13 @@ jobs:
             target/
           key: rust-${{ runner.os }}-quality-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}
           restore-keys: rust-${{ runner.os }}-quality-
+      # The quality job's copy of the text reader model; the shards never save
+      # one.
+      - name: Restore the text reader model
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/setup/src-tauri/models/
+          key: text-reader-model-${{ runner.os }}-${{ hashFiles('.config/mise/conf.d/installer.toml') }}
       # The setup app's Rust side embeds the built UI, so the UI builds first.
       - name: Build the setup UI
         run: mise run ui:build
@@ -193,6 +208,12 @@ jobs:
         run: mise run rust:lint
       - name: Build documentation
         run: mise run rust:doc
+      # The text reader model, as in the quality job.
+      - name: Cache the text reader model
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/setup/src-tauri/models/
+          key: text-reader-model-${{ runner.os }}-${{ hashFiles('.config/mise/conf.d/installer.toml') }}
       - name: Test member crates
         run: mise run rust:test:members
       # Saved before the benchmarks, whose release build pull requests never
