@@ -27,6 +27,8 @@ export interface StageView {
   /** Whether the screenshot shown has another size than the edited value was drawn at. */
   readonly otherSize: boolean;
   readonly drawing: Drawing;
+  /** The window size an edited value's region is drawn at, as text, which a drag over the live window needs. */
+  readonly drawnAt: string | null;
   /** Why no box can go on the screenshot shown, or null. */
   readonly boxBlock: string | null;
 }
@@ -42,6 +44,7 @@ export function stageHint({
   area,
   otherSize,
   drawing,
+  drawnAt,
   boxBlock,
 }: StageView): string {
   if (selected === null && liveError !== null) {
@@ -52,8 +55,12 @@ export function stageHint({
       ? 'Recording. Use the application; a reading is kept for each new shape.'
       : 'Recording. Use the application; a screenshot is kept of each different look.';
   }
+  if (drawing === 'none') {
+    return 'Go back to Where to read to change the region.';
+  }
   if (selected === null && drawing === 'live') {
-    return `Drag over the window where the value shows; that takes the screenshot. Or take one (${shortcut}).`;
+    const where = drawnAt === null ? 'where the value shows' : `at ${drawnAt} where the value shows`;
+    return `Drag over the window ${where}; that takes the screenshot. Or take one (${shortcut}).`;
   }
   if (selected === null) {
     return shotCount === 0
@@ -68,9 +75,6 @@ export function stageHint({
       boxBlock ??
       'Drag to draw a box around some characters. Press a box to select it, drag it to move it, or press Delete to remove it.'
     );
-  }
-  if (drawing === 'none') {
-    return 'Go back to Where to read to change the region.';
   }
   if (otherSize) {
     return 'The region shows on screenshots of the size the value was drawn at.';

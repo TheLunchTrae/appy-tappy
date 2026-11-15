@@ -34,7 +34,7 @@ import {
   withTextColor,
 } from '../lib/check.ts';
 import { boxNumber } from '../lib/boxes.ts';
-import { type Placed, liveDrawFrame, useLiveDraw } from '../lib/liveDraw.ts';
+import { type Placed, liveDrawFrame, regionFromLiveBox, regionOverFrame, useLiveDraw } from '../lib/liveDraw.ts';
 import { boxTextId } from './BoxList.tsx';
 import { DraftButtons } from './capture/DraftButtons.tsx';
 import { ReadWith } from './capture/ReadWith.tsx';
@@ -57,7 +57,7 @@ import { colorAt } from '../lib/pixels.ts';
 import { RecordingSpots } from './Recording.tsx';
 import { LookPanel } from './LookRecording.tsx';
 import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
-import { type Point, scaleRect } from '../lib/region.ts';
+import type { Point } from '../lib/region.ts';
 import { CaptureOutlineNote, CaptureOutlines, useCaptureOutline } from './CaptureOutlines.tsx';
 import { RegionSurface } from './RegionSurface.tsx';
 import { PinGuides } from './PinGuides.tsx';
@@ -487,18 +487,25 @@ export function Capture({
     if (shot === null) {
       return;
     }
-    setSelected(shot.index);
     const size = shot.size;
-    const region = box === null ? null : scaleRect(box.rect, box.at, size);
+    const fits = regionSize !== null && sameSize(regionSize, size);
+    const region = regionFromLiveBox(box, size, edited?.screen.windowSize ?? null);
     if (region === null) {
-      onValuePicture(shot);
+      // A press that places nothing takes a screenshot, but leaves a region placed at another size where it is.
+      if (draft.region === null || fits) {
+        setSelected(shot.index);
+        onValuePicture(shot);
+      } else {
+        background(screenshots.remove([shot.index]));
+      }
       return;
     }
+    setSelected(shot.index);
     setDraft((current) => ({
       ...current,
       region,
       drawnOn: shot.index,
-      pin: pinChoiceAfterRegion(current.pin, current.region, region, size),
+      pin: pinChoiceAfterRegion(current.pin, fits ? current.region : null, region, size),
     }));
   });
   const { liveFrozen } = stage;
@@ -754,10 +761,9 @@ export function Capture({
   const liveFrame = liveDrawFrame({
     settingPlace: shownStep === 'where' && editing === null,
     live: selected === null ? liveSize : null,
-    hasRegion: draft.region !== null,
-    editsSaved: edited !== null,
     occupied: recordingNow !== null || sheeted || picking !== null,
   });
+  const regionOnLive = liveFrame === null ? null : regionOverFrame(draft.region, regionSize, liveFrame);
   const regionShown = regionOnStage(shownStep, draft.kind, recordingNow !== null);
   const drawing: Drawing = liveFrame !== null ? 'live' : editing !== null ? 'boxes' : regionShown ? 'region' : 'none';
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
@@ -943,6 +949,7 @@ export function Capture({
             area,
             otherSize: otherSize !== null,
             drawing,
+            drawnAt: edited === null ? null : sizeText(edited.screen.windowSize),
             boxBlock: teaching.boxBlock,
           })
         }
@@ -981,8 +988,9 @@ export function Capture({
                 size={liveFrame}
                 shown={shown}
                 screenshot={null}
-                // The box drawn stays outlined from when the pointer is let go until its screenshot arrives.
-                region={live.shown.box?.rect ?? null}
+                // The box drawn stays outlined from when the pointer is let go until its screenshot arrives, and a
+                // region placed at the live frame's size shows over it until a press.
+                region={live.shown.frozen ? (live.shown.box?.rect ?? null) : regionOnLive}
                 area={area}
                 label={regionLabel(valueName, moving)}
                 editable={live.shown.box === null}

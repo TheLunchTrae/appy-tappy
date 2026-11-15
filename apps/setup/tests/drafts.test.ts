@@ -456,8 +456,15 @@ test("a number's later steps leave its region to Where to read, unless a recordi
     tool: 'box',
     area: false,
     otherSize: false,
+    drawnAt: null,
     boxBlock: null,
   } as const;
   expect(stageHint({ ...onScreenshot, drawing: 'none' })).toBe('Go back to Where to read to change the region.');
+  expect(stageHint({ ...onScreenshot, selected: null, drawing: 'none' })).toBe(
+    'Go back to Where to read to change the region.',
+  );
   expect(stageHint({ ...onScreenshot, drawing: 'region' })).toStartWith('Drag to draw a region.');
+  expect(stageHint({ ...onScreenshot, selected: null, drawing: 'live', drawnAt: '1920 × 1080' })).toStartWith(
+    'Drag over the window at 1920 × 1080 where the value shows;',
+  );
 });
