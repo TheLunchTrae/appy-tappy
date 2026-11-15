@@ -12,10 +12,10 @@ use appytappy_config::app_file::{
 use appytappy_config::names::sample_name;
 use appytappy_config::signal::Number;
 use appytappy_sources::screen::check::ImageMatch;
-use appytappy_sources::screen::digits::InkRule;
-use appytappy_sources::screen::saved;
+use appytappy_sources::screen::digits::{InkRule, LearnError};
+use appytappy_sources::screen::saved::{self, SavedError};
 
-use super::characters::{RecordedLabel, Taught};
+use super::characters::{RecordedLabel, Taught, UnlearnedSample};
 use super::*;
 use crate::recording::Recording;
 use crate::recording::follow::Follows;
@@ -154,6 +154,7 @@ fn characters(
         tolerance: 0,
         labels,
         recorded,
+        dropped: Vec::new(),
     }
 }
 
@@ -427,8 +428,205 @@ fn a_saved_reference_is_relearned_in_the_color_being_tried() {
     };
     let error = teach(&gray, session(&[screenshot()], None)).expect_err("no gray in the sample");
     assert!(
-        matches!(&error, SpecError::Learn { text, .. } if text == "1"),
+        matches!(&error, SpecError::SavedLearn { text, .. } if text == "1"),
         "{error:?}"
+    );
+    // The reference is taught in its own editor, which lists the picture
+    // no box shows, so the words point at that list and name no reference
+    // to open.
+    assert_eq!(
+        error.to_string(),
+        "Can't learn from its saved picture of \"1\": no pixel in the region stands out from \
+         its background, or has the reference's text color. Remove it under Saved pictures it \
+         can't learn, or change the text color."
+    );
+    assert!(error.source().is_some());
+}
+
+/// The gray half of [`screenshot`], labeled `text`.
+fn gray_half(text: &str) -> Vec<Label> {
+    vec![Label {
+        screenshot: 0,
+        region: Some(RegionDef {
+            x: 2,
+            y: 0,
+            width: 2,
+            height: 2,
+        }),
+        text: text.to_owned(),
+    }]
+}
+
+#[test]
+fn a_saved_sample_the_reference_leaves_out_is_not_learned_or_saved() {
+    let shots = [screenshot()];
+    let picture = sample_name("digits", 1);
+    // In gray the saved red sample teaches nothing, and a new box does not
+    // help: the save is refused over a picture no box shows.
+    let gray = CharactersSpec {
+        ink: Some(GRAY),
+        ..characters(whole(), Some(digits_ref()), gray_half("2"), Vec::new())
+    };
+    assert!(matches!(
+        teach(&gray, session(&shots, None)),
+        Err(SpecError::SavedLearn { .. })
+    ));
+    let dropped = CharactersSpec {
+        dropped: vec![picture.clone()],
+        ..gray.clone()
+    };
+    let taught = teach(&dropped, session(&shots, None)).expect("learns the box alone");
+    assert_eq!(
+        taught.reference.samples,
+        [SampleDef {
+            image: picture.clone(),
+            text: "2".to_owned(),
+        }],
+        "the box takes the number the sample left"
+    );
+    let [(name, png)] = taught.pictures.as_slice() else {
+        panic!("one new picture, not {:?}", taught.pictures.len());
+    };
+    assert_eq!(name, &picture);
+    let gray_square = screenshot()
+        .crop(Region::new(2, 0, 2, 2).expect("not empty"))
+        .expect("inside");
+    assert_eq!(
+        Some(png),
+        gray_square.encode_png().ok().as_ref(),
+        "the new picture is the box, not the sample it replaces"
+    );
+    // The fit and the judging of more labels leave it out too.
+    assert_eq!(
+        dropped.label_problems(session(&shots, None), &gray_half("2")),
+        Ok(vec![None])
+    );
+    assert!(
+        gray.label_problems(session(&shots, None), &gray_half("2"))
+            .is_err()
+    );
+    // A name the reference has no sample of leaves nothing out.
+    let other = CharactersSpec {
+        dropped: vec![sample_name("digits", 7)],
+        ..gray
+    };
+    assert!(teach(&other, session(&shots, None)).is_err());
+    // With every sample left out and nothing new, there is nothing to
+    // learn from.
+    let nothing = CharactersSpec {
+        dropped: vec![picture],
+        ..characters(whole(), Some(digits_ref()), Vec::new(), Vec::new())
+    };
+    assert_eq!(
+        teach(&nothing, session(&shots, None)).err(),
+        Some(SpecError::NoLabels)
+    );
+}
+
+#[test]
+fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
+    let saved = digits(&digits_ref()).expect("saved");
+    assert_eq!(saved.unlearned(Some(RED), 0), []);
+    let unlearned = |problem: &str| UnlearnedSample {
+        image: sample_name("digits", 1),
+        text: "1".to_owned(),
+        problem: problem.to_owned(),
+        missing: false,
+    };
+    assert_eq!(
+        saved.unlearned(Some(GRAY), 0),
+        [unlearned(
+            "No pixel in the region stands out from its background, or has the reference's \
+             text color."
+        )]
+    );
+    // By contrast the plain red square shows no character either, and the
+    // settings saved for it fit no tolerance that helps.
+    assert_eq!(saved.unlearned(None, 40).len(), 1);
+    assert_eq!(saved.unlearned_with_settings(None, 40).len(), 1);
+    assert_eq!(saved.unlearned_with_settings(Some(RED), 0), []);
+
+    // A sample after one that cannot be learned is judged without it: the
+    // second red square is a 1 like the first would be, were it learned
+    // as a 7.
+    let second = sample_name("digits", 2);
+    let mut two = saved.clone();
+    two.reference.samples[0].text = "77".to_owned();
+    two.reference.samples.push(SampleDef {
+        image: second.clone(),
+        text: "1".to_owned(),
+    });
+    two.pictures
+        .push((second.clone(), saved.pictures[0].1.clone()));
+    let named: Vec<String> = two
+        .unlearned(Some(RED), 0)
+        .into_iter()
+        .map(|sample| sample.image)
+        .collect();
+    assert_eq!(named, [sample_name("digits", 1)]);
+    // Without the samples it names, the reference learns every sample.
+    assert!(
+        two.clone()
+            .without(&named)
+            .with_settings("Digits", Some(RED), 0)
+            .is_ok()
+    );
+    assert!(two.clone().with_settings("Digits", Some(RED), 0).is_err());
+
+    // A picture that is gone cannot be learned, and can be left out.
+    two.pictures.remove(1);
+    assert_eq!(
+        two.unlearned(Some(RED), 0)
+            .into_iter()
+            .map(|sample| (sample.image, sample.problem, sample.missing))
+            .collect::<Vec<_>>(),
+        [
+            (
+                sample_name("digits", 1),
+                "The region shows 1 characters but the text has 2; characters that touch count \
+                 as one."
+                    .to_owned(),
+                false
+            ),
+            (
+                second,
+                "Its picture is missing or can't be opened.".to_owned(),
+                true
+            ),
+        ]
+    );
+    // A value that reads with the reference names it and says to edit it,
+    // since the picture shows only in the reference's editor.
+    let from_value = |error: &SavedError| {
+        sample_problem_of(error, "Digits", &two.reference.samples)
+            .map(|problem| problem.to_string())
+    };
+    assert_eq!(
+        from_value(&SavedError::Learn {
+            name: sample_name("digits", 1),
+            source: LearnError::NoInk,
+        }),
+        Some(
+            "Digits can't learn from its saved picture of \"77\": no pixel in the region stands \
+             out from its background, or has the reference's text color. Edit Digits and remove \
+             that picture under Saved pictures it can't learn, or change its text color."
+                .to_owned()
+        )
+    );
+    assert_eq!(
+        from_value(&SavedError::Learn {
+            name: sample_name("other", 1),
+            source: LearnError::NoInk,
+        }),
+        None,
+        "another reference's picture"
+    );
+    // A reference left with no sample has nothing to learn from.
+    assert_eq!(
+        saved
+            .without(&[sample_name("digits", 1)])
+            .with_settings("Digits", Some(RED), 0),
+        Err(SpecError::NoLabels)
     );
 }
 
@@ -485,8 +683,9 @@ fn a_reference_by_contrast_takes_a_tolerance_its_samples_read_with() {
         "a text color's tolerance is the user's to set"
     );
     // The saved reference's sample is one plain color, which shows no
-    // character by contrast, whatever the tolerance.
-    assert_eq!(fitted(spec(Some(digits_ref()), None, 40)), Ok(40));
+    // character by contrast, whatever the tolerance, so the box alone
+    // chooses it.
+    assert_eq!(fitted(spec(Some(digits_ref()), None, 40)), Ok(128));
     assert_eq!(
         fitted(CharactersSpec {
             screenshot: 3,
@@ -583,9 +782,15 @@ fn a_saved_sample_without_its_picture_says_how_to_recover() {
         teach(&spec, session)
             .expect_err("a sample is gone")
             .to_string(),
-        "The reference Digits is missing its picture ref-digits-1.png. Remove the values that \
-         read with it, then delete the reference and make it again."
+        "Its saved picture ref-digits-1.png is missing. Remove it under Saved pictures it can't \
+         learn."
     );
+    // Left out, it stops nothing.
+    let without = CharactersSpec {
+        dropped: vec![sample_name("digits", 1)],
+        ..characters(left(), Some(digits_ref()), one(0), Vec::new())
+    };
+    assert!(teach(&without, session).is_ok());
     let gone = characters(
         left(),
         Some(ReferenceRef {
@@ -804,6 +1009,7 @@ fn the_ui_describes_checks_in_camel_case_json() {
                 text: "12".to_owned(),
             }],
             recorded: Vec::new(),
+            dropped: Vec::new(),
         }
     );
     let json = r#"{"kind":"number","region":{"x":0,"y":0,"width":2,"height":2},

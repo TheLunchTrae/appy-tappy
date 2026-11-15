@@ -29,7 +29,7 @@ use tokio::sync::oneshot;
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
-use crate::check_spec::{CharactersSpec, Label};
+use crate::check_spec::{CharactersSpec, Label, ReferenceRef, UnlearnedSample};
 use crate::debug::bundle::BundleSpec;
 use crate::debug::outline::CaptureOutline;
 use crate::debug::trace_file::TraceFile;
@@ -43,7 +43,7 @@ use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
     FixSpec, FoundClick, FoundView, ImportSpec, Live, Message, Owner, ReadingRisks, RecordSpec,
     ReferenceSaveSpec, ReferenceSettingsSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId,
-    SavedValue, SharedView, TrialSpec,
+    SavedValue, SavingKind, SharedView, TrialSpec,
 };
 use crate::reading::Reading;
 use crate::recording::RecordingView;
@@ -606,6 +606,40 @@ pub(crate) async fn save_reference_settings(
         owner.save_reference_settings(&spec)
     })
     .await
+}
+
+/// The saved samples the saved reference `reference` cannot learn with the
+/// text color `ink` and `tolerance`, saved as `saving` says without the
+/// samples `dropped` names.
+#[tauri::command]
+pub(crate) async fn unlearned_samples(
+    app: AppHandle,
+    reference: ReferenceRef,
+    ink: Option<ColorDef>,
+    tolerance: u8,
+    dropped: Vec<String>,
+    saving: SavingKind,
+) -> Result<Vec<UnlearnedSample>, String> {
+    try_ask(&app, "unlearned_samples", move |owner| {
+        owner.unlearned_samples(&reference, ink, tolerance, &dropped, saving)
+    })
+    .await
+}
+
+/// The picture `image` of a sample of the saved reference `reference`, at
+/// most `max_width` wide; no bytes when there is none.
+#[tauri::command]
+pub(crate) async fn sample_picture(
+    app: AppHandle,
+    reference: ReferenceRef,
+    image: String,
+    max_width: u32,
+) -> Result<Response, String> {
+    ask(&app, "sample_picture", move |owner| {
+        owner.sample_pixels(&reference, &image, max_width)
+    })
+    .await
+    .map(pixels)
 }
 
 /// Removes a saved reference, unless a value reads with it.

@@ -2247,6 +2247,15 @@ div.match-answer {
   color: var(--muted);
 }
 
+/* The saved pictures a reference can't learn: each one's pixels, what it shows, its remove button, and why. */
+.box-list.unlearned li {
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+}
+
+.box-list.unlearned .where {
+  grid-column: 1 / 4;
+}
+
 /* The box a reference taught by itself reads and records at. */
 .box-list .reads-here {
   margin-left: 8px;

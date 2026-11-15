@@ -25,7 +25,7 @@ This page covers what the user guide leaves out.
   `explain_reading`, and `window_size` answer nothing, `edit_value` saves
   what names no screenshot, and `save_reference_settings` saves a saved
   reference's name, text color, and tolerance with its samples as they
-  are. `set_characters` and `save_reference` learn from a
+  are, but for the ones the editor left out. `set_characters` and `save_reference` learn from a
   region on a screenshot, so they need a session that has one. The
   anti-cheat products the look found show above the stage, and so does a
   window taken only as the fallback. When the window closes, the editor
@@ -729,13 +729,18 @@ learns every sample it has, saved, labeled, or recorded, so each splits into
 as many characters as its text has. The reference keeps the tolerance it has
 while that holds, so a reference that reads keeps reading the same way. When
 it cannot learn a sample, the owner tries the tolerances from 0 to 252 in
-steps of 4, and takes the middle of the longest run of them that every
-sample reads with, the lower run when two are as long. The middle leaves the
+steps of 4, and takes the middle of the longest run of them that the most
+samples read with, the lower run when two are as long. The middle leaves the
 most room on both sides: toward a tolerance so low that shading in the
 background counts as ink, and toward one so high that a character's
-anti-aliased edge counts as background. When no tolerance reads every
-sample, the reference keeps the one it has, and the save or the character
-check names the sample that fails.
+anti-aliased edge counts as background. The owner counts the samples a
+tolerance reads as a save learns them, in order and each on the ones before
+it that worked. A sample that no tolerance reads, such as a box whose text
+is half typed or a saved picture cut for a text color, therefore leaves the
+others the tolerance they read with: the reference keeps the one it has
+when no other reads more samples. The save, the character check, or the
+[saved pictures the reference can't learn](#saved-pictures-a-reference-cant-learn)
+name the sample that fails.
 
 The page asks once a sample, the region, or the tolerance of the draft
 changed and then rested for a quarter of a second, so a label asks when it
@@ -751,6 +756,75 @@ a distance from another color; one text color in place of another keeps
 it. A saved reference with no box has no samples in the draft to ask
 about, so `save_reference_settings` chooses the tolerance the same way,
 from the saved samples, when it saves the reference without a text color.
+
+### Saved pictures a reference can't learn
+
+A reference learns its saved samples again on each save and each trial,
+with the text color and tolerance of the draft, before its boxes and kept
+readings (`CharactersSpec::learn`, `saved::reader`). A save writes only
+what `saved::reader` learned from the very bytes it writes. A sample stops
+teaching the reference when the draft
+finds the characters another way: with another text color or tolerance, or
+by contrast where the sample was cut for a text color and so has no
+background around its text. A picture that is missing from the
+application's folder teaches nothing either. The user sees no screenshot
+or box for such a sample, so the editor shows it
+([Saved pictures it can't learn](References.md#saved-pictures-it-cant-learn)).
+
+The page asks which saved samples fail (`unlearned_samples`, `useUnlearned`
+in `lib/useUnlearned.ts`) and fetches each one's picture
+(`sample_picture`). The owner learns the saved samples in order and leaves
+out each one that fails, so the ones after it are judged on the ones that
+worked (`SavedReference::unlearned`): a reference without the samples it
+names learns every sample it keeps. It judges with the tolerance the save
+uses, which `SavingKind` names: the draft's for a reference taught from a
+box or a reading, and for settings alone the one `save_reference_settings`
+fits to the saved samples.
+[Saved pictures a reference can't learn](State-machines.md#saved-pictures-a-reference-cant-learn)
+has the states.
+
+**Remove** adds the sample's picture file name to the draft's `dropped`
+list, which goes with every spec the editor sends (`CharactersSpec.dropped`,
+`ReferenceSettingsSpec.dropped`). The owner leaves those samples out before
+it learns, fits, or judges anything (`SavedReference::without`), and a save
+writes the reference without them; the store then removes the pictures the
+file no longer names. A new sample takes the lowest number no kept sample
+has, so it can take a removed picture's file name, and its picture replaces
+that file. A reference left with no sample is refused, as a new one with no
+label is. The draft keeps `dropped` only while the editor is open on that
+reference: opening and leaving the editor clear it.
+
+Every `CharactersSpec` is taught in the reference's own editor, so a learn
+error on a saved sample there points at the list and names no reference to
+open (`SpecError::SavedLearn`, and `SpecError::MissingPicture` for a
+picture that is gone). An error on a box or a reading the draft adds stays
+the box's own (`SpecError::Learn`). A value that reads with the reference
+names it and says to edit it (`SpecError::ReferenceLearn`,
+`SpecError::MissingSample`, from `sample_problem_of`), since the value's
+reference picker offers **Edit** for it. While the answer lists a sample,
+**Save reference** waits and says so (`referenceSave` in
+`lib/teaching.ts`), so settings alone, which no trial judges, are not sent
+to be refused. The answer marks a sample whose picture is missing
+(`UnlearnedSample.missing`), and the list suggests another text color only
+for a sample that one could help.
+
+A draft resumed with the editor open goes on from the reference as it is
+saved now. When its samples are not the ones the draft copied, the draft's
+`dropped` is cleared (`refreshedDraft` in `lib/captureDraft.ts`): a file
+name it holds could name a picture saved since.
+
+The owner decisions behind this:
+
+- Listing only the samples that fail keeps the editor as it is for a
+  reference that learns everything. Listing every saved sample was weighed
+  and left out: a recorded reference has many, and the ones that learn need
+  no action.
+- The user removes a sample; a save never drops one on its own, since that
+  would lose characters the user taught without saying so.
+- The samples stay cut as they were saved. Cutting every sample with room
+  around it would let more of them learn by contrast, but not one whose
+  characters count differently, such as a percent sign that is one mark by
+  contrast and three in its text color.
 
 ### Look-alike characters
 

@@ -9,6 +9,7 @@ import {
   captureProblem,
   fixOutdated,
   needsField,
+  refreshedDraft,
   refreshedEditing,
   startEditing,
   withTaught,
@@ -134,6 +135,7 @@ describe('what a draft keeps', () => {
         { id: 3, screenshot: 2, region: { x: 1, y: 2, width: 3, height: 4 }, text: '99' },
       ],
       recorded: new Map([[3, '45']]),
+      dropped: ['ref-percent-1.png'],
       filled: { red: 1, green: 2, blue: 3 },
       empty: { red: 4, green: 5, blue: 6 },
       color: { red: 7, green: 8, blue: 9 },
@@ -182,7 +184,7 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(5);
+    expect(DRAFT_FORMAT).toBe(6);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -221,6 +223,7 @@ describe('the shape a draft keeps', () => {
       'color',
       'colorMatch',
       'drawnOn',
+      'dropped',
       'empty',
       'filled',
       'ignoreBackground',
@@ -402,6 +405,27 @@ describe('a draft and what it belongs to', () => {
     const fresh = { ...editing, existing: null };
     expect(refreshedEditing(fresh, [taught])).toBe(fresh);
     expect(refreshedEditing(null, [taught])).toBeNull();
+  });
+
+  test('saved pictures a draft left out stay out only while the reference has the pictures it copied', () => {
+    const copied = {
+      id: 'percent',
+      name: 'Percent',
+      origin: { kind: 'byHand' } as const,
+      tolerance: 40,
+      samples: [
+        { image: 'ref-percent-1.png', text: '87%' },
+        { image: 'ref-percent-2.png', text: '12%' },
+      ],
+    };
+    const draft = { ...EMPTY_DRAFT, dropped: ['ref-percent-2.png'] };
+    expect(refreshedDraft(draft, copied, { ...copied, name: 'Renamed', tolerance: 60 })).toBe(draft);
+    // Saved again since, the file name can be a new picture's, or no picture's.
+    const retaught = { ...copied, samples: [copied.samples[0]!, { image: 'ref-percent-2.png', text: '5' }] };
+    expect(refreshedDraft(draft, copied, retaught).dropped).toEqual([]);
+    expect(refreshedDraft(draft, copied, { ...copied, samples: copied.samples.slice(0, 1) }).dropped).toEqual([]);
+    expect(refreshedDraft(draft, copied, null).dropped).toEqual([]);
+    expect(refreshedDraft(EMPTY_DRAFT, copied, null)).toBe(EMPTY_DRAFT);
   });
 
   test('the newest draft of a saved item is the one finished', () => {

@@ -14,7 +14,7 @@ use appytappy_config::names::sample_name;
 use appytappy_sources::screen::digits::{DigitReader, InkRule};
 use appytappy_sources::screen::saved::{self, SavedError};
 use appytappy_sources::screen::{Image, Region, Size};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::recording::Recording;
 use crate::screenshots::Shots;
@@ -54,9 +54,9 @@ pub(crate) struct RecordedLabel {
 }
 
 /// The characters a reference is being taught, as the UI describes them:
-/// the saved samples of `reference`, when it is saved, then `labels`, then
-/// `recorded`, their characters told from the background by `ink` and
-/// `tolerance`.
+/// the saved samples of `reference`, when it is saved, but for `dropped`,
+/// then `labels`, then `recorded`, their characters told from the
+/// background by `ink` and `tolerance`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct CharactersSpec {
@@ -83,6 +83,26 @@ pub(crate) struct CharactersSpec {
     /// Readings of the session's recording, which must be of `region`.
     #[serde(default)]
     pub(crate) recorded: Vec<RecordedLabel>,
+    /// The picture file names of the saved samples the reference leaves
+    /// out, which saving it removes.
+    #[serde(default)]
+    pub(crate) dropped: Vec<String>,
+}
+
+/// A saved sample a reference cannot learn with the text color and
+/// tolerance it is tried with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(crate) struct UnlearnedSample {
+    /// The sample's picture file name, which names it in `dropped`.
+    pub(crate) image: String,
+    /// The text the sample shows.
+    pub(crate) text: String,
+    /// Why the reference cannot learn it, as a sentence.
+    pub(crate) problem: String,
+    /// Whether its picture is missing or cannot be decoded, which no text
+    /// color or tolerance helps.
+    pub(crate) missing: bool,
 }
 
 /// A saved reference and those of its samples' pictures that can be read,
@@ -106,68 +126,159 @@ impl SavedReference {
     ///
     /// # Errors
     ///
-    /// Returns why a sample cannot be learned.
+    /// Returns [`SpecError::NoLabels`] for a reference with no sample, or
+    /// why a sample cannot be learned.
     pub(crate) fn with_settings(
         self,
         name: &str,
         ink: Option<ColorDef>,
         tolerance: u8,
     ) -> Result<ReferenceDef, SpecError> {
-        let saved_name = self.reference.name.clone();
-        let tolerance = match ink {
-            Some(_) => tolerance,
-            None => contrast::fitted(&self.samples(), tolerance),
-        };
+        if self.reference.samples.is_empty() {
+            return Err(SpecError::NoLabels);
+        }
         let reference = ReferenceDef {
             name: name.to_owned(),
             ink,
-            tolerance,
-            ..self.reference
+            tolerance: self.settled_tolerance(ink, tolerance),
+            ..self.reference.clone()
         };
-        learned(&reference, self.pictures.iter(), Some(saved_name)).map(|_reader| reference)
+        learned(&reference, &[], &self.pictures).map(|_reader| reference)
     }
-}
 
-impl SavedReference {
+    /// The tolerance [`Self::with_settings`] saves for `ink` and
+    /// `tolerance`.
+    fn settled_tolerance(&self, ink: Option<ColorDef>, tolerance: u8) -> u8 {
+        match ink {
+            Some(_) => tolerance,
+            None => contrast::fitted(&self.samples(), tolerance),
+        }
+    }
+
+    /// The reference without the samples whose pictures `dropped` names.
+    #[must_use]
+    pub(crate) fn without(mut self, dropped: &[String]) -> Self {
+        self.reference
+            .samples
+            .retain(|sample| !dropped.contains(&sample.image));
+        self.pictures.retain(|(name, _)| !dropped.contains(name));
+        self
+    }
+
+    /// The samples the reference cannot learn with the text color `ink`,
+    /// or none to find its characters by contrast, and `tolerance`, in
+    /// order. It learns them in order as `saved::reader` does, but leaves
+    /// out each one it cannot learn, so the ones after it are judged on the
+    /// ones that worked: a reference without the samples this names learns
+    /// every sample it has. A picture that is missing or cannot be decoded
+    /// cannot be learned either.
+    pub(crate) fn unlearned(&self, ink: Option<ColorDef>, tolerance: u8) -> Vec<UnlearnedSample> {
+        let mut reader = DigitReader::new(ink_rule(ink, tolerance));
+        self.reference
+            .samples
+            .iter()
+            .filter_map(|sample| {
+                let picture = self.picture(sample);
+                let problem = match &picture {
+                    Some(picture) => {
+                        let mut trial = reader.clone();
+                        match trial.learn(picture, &sample.text) {
+                            Ok(()) => {
+                                reader = trial;
+                                return None;
+                            },
+                            Err(error) => sentence(&error.to_string()),
+                        }
+                    },
+                    None => "Its picture is missing or can't be opened.".to_owned(),
+                };
+                Some(UnlearnedSample {
+                    image: sample.image.clone(),
+                    text: sample.text.clone(),
+                    problem,
+                    missing: picture.is_none(),
+                })
+            })
+            .collect()
+    }
+
+    /// [`Self::unlearned`] for the settings [`Self::with_settings`] saves
+    /// from `ink` and `tolerance`.
+    pub(crate) fn unlearned_with_settings(
+        &self,
+        ink: Option<ColorDef>,
+        tolerance: u8,
+    ) -> Vec<UnlearnedSample> {
+        self.unlearned(ink, self.settled_tolerance(ink, tolerance))
+    }
+
+    /// The picture of `sample`, when it is there and decodes.
+    pub(crate) fn picture(&self, sample: &SampleDef) -> Option<Image> {
+        let (_, png) = self
+            .pictures
+            .iter()
+            .find(|(name, _)| *name == sample.image)?;
+        Image::decode_png(png).ok()
+    }
+
     /// Each sample's picture and the text it shows, in order. A sample
     /// whose picture cannot be read is left out.
     fn samples(&self) -> Vec<(Image, &str)> {
         self.reference
             .samples
             .iter()
-            .filter_map(|sample| {
-                let (_, png) = self
-                    .pictures
-                    .iter()
-                    .find(|(name, _)| *name == sample.image)?;
-                Some((Image::decode_png(png).ok()?, sample.text.as_str()))
-            })
+            .filter_map(|sample| Some((self.picture(sample)?, sample.text.as_str())))
             .collect()
     }
 }
 
-/// The reader `reference` learns from its samples' `pictures`, as
-/// `saved::reader` learns it. Only a saved sample can be missing, so that
-/// problem names the saved reference, `saved_name`, whatever the one
-/// learned here is called.
-fn learned<'a>(
+/// The reader `reference` learns from its samples' pictures, the `new` ones
+/// and those `kept` from the saved reference it adds to, as `saved::reader`
+/// learns it. Every caller teaches the reference in its own editor, so a
+/// problem with a kept sample points at the editor's list of saved
+/// pictures, which shows the picture no box does.
+fn learned(
     reference: &ReferenceDef,
-    pictures: impl Iterator<Item = &'a (String, Vec<u8>)> + Clone,
-    saved_name: Option<String>,
+    new: &[(String, Vec<u8>)],
+    kept: &[(String, Vec<u8>)],
 ) -> Result<DigitReader, SpecError> {
     saved::reader(reference, |picture| {
-        pictures
-            .clone()
+        new.iter()
+            .chain(kept)
             .find(|(name, _)| name == picture)
             .map(|(_, png)| png.clone())
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
     })
-    .map_err(|error| match sample_problem(error, reference) {
-        SpecError::MissingSample { picture, .. } => SpecError::MissingSample {
-            reference: saved_name.unwrap_or_else(|| reference.name.clone()),
-            picture,
-        },
-        problem => problem,
+    .map_err(|error| {
+        let text_of = |name: &str| {
+            reference
+                .samples
+                .iter()
+                .find(|sample| sample.image == name)
+                .map(|sample| sample.text.clone())
+        };
+        match &error {
+            SavedError::Learn { name, source } => match text_of(name) {
+                Some(text) if new.iter().any(|(new_name, _)| new_name == name) => {
+                    SpecError::Learn {
+                        text,
+                        source: source.clone(),
+                    }
+                },
+                Some(text) => SpecError::SavedLearn {
+                    text,
+                    source: source.clone(),
+                },
+                None => error.into(),
+            },
+            // `saved::reader` only asks for the pictures the samples name.
+            SavedError::Missing { name, .. } | SavedError::Picture { name, .. } => {
+                SpecError::MissingPicture {
+                    picture: name.clone(),
+                }
+            },
+            _ => error.into(),
+        }
     })
 }
 
@@ -225,8 +336,10 @@ impl CharactersSpec {
     ///
     /// # Errors
     ///
-    /// Returns [`SpecError::NoLabels`] when there is nothing to learn from,
-    /// or what [`Self::learn`] does.
+    /// Returns [`SpecError::NoLabels`] when there is nothing to learn from:
+    /// a new reference with no label, or a saved one that leaves every
+    /// sample out and adds none. Otherwise returns what [`Self::learn`]
+    /// does.
     pub(crate) fn teach(
         &self,
         session: Session<'_>,
@@ -236,7 +349,24 @@ impl CharactersSpec {
         if self.reference.is_none() && self.labels.is_empty() && self.recorded.is_empty() {
             return Err(SpecError::NoLabels);
         }
-        self.learn(session, id, name, &self.recorded)
+        let taught = self.learn(session, id, name, &self.recorded)?;
+        if taught.reference.samples.is_empty() {
+            return Err(SpecError::NoLabels);
+        }
+        Ok(taught)
+    }
+
+    /// The saved reference these characters add to, without the samples
+    /// they leave out, or `None` for a new one.
+    fn saved(&self, session: Session<'_>) -> Result<Option<SavedReference>, SpecError> {
+        self.reference
+            .as_ref()
+            .map(|saved| {
+                (session.references)(saved)
+                    .map(|saved| saved.without(&self.dropped))
+                    .map_err(SpecError::Reference)
+            })
+            .transpose()
     }
 
     /// The reference the saved samples, the labeled screenshots and, of the
@@ -258,21 +388,16 @@ impl CharactersSpec {
     ) -> Result<Taught, SpecError> {
         let (region, window_size) = self.drawn(session.screenshots)?;
         self.same_sizes(session, window_size)?;
-        let saved = self
-            .reference
-            .as_ref()
-            .map(|saved| (session.references)(saved).map_err(SpecError::Reference))
-            .transpose()?;
+        let saved = self.saved(session)?;
         let id = id
             .or_else(|| self.reference.as_ref().map(|saved| saved.id.as_str()))
             .unwrap_or(UNSAVED);
-        let (mut samples, kept, made, saved_name): (Vec<SampleDef>, Pictures, OriginDef, _) = saved
-            .map_or_else(Default::default, |saved| {
+        let (mut samples, kept, made): (Vec<SampleDef>, Pictures, OriginDef) =
+            saved.map_or_else(Default::default, |saved| {
                 (
                     saved.reference.samples,
                     saved.pictures,
                     saved.reference.origin,
-                    Some(saved.reference.name),
                 )
             });
         // A recording that teaches a reference made by hand makes it one a
@@ -320,7 +445,7 @@ impl CharactersSpec {
             tolerance: self.tolerance,
             samples,
         };
-        let reader = learned(&reference, pictures.iter().chain(&kept), saved_name)?;
+        let reader = learned(&reference, &pictures, &kept)?;
         Ok(Taught {
             region,
             window_size,
@@ -403,11 +528,7 @@ impl CharactersSpec {
     ) -> Result<T, SpecError> {
         let (region, window_size) = self.drawn(session.screenshots)?;
         self.same_sizes(session, window_size)?;
-        let saved = self
-            .reference
-            .as_ref()
-            .map(|saved| (session.references)(saved).map_err(SpecError::Reference))
-            .transpose()?;
+        let saved = self.saved(session)?;
         let mut samples: Vec<(Image, &str)> =
             saved.iter().flat_map(SavedReference::samples).collect();
         samples.extend(self.new_samples(session, region, &self.recorded)?);
@@ -520,36 +641,35 @@ impl AsRef<str> for RecordedLabel {
     }
 }
 
-/// Why `reference` cannot be learned, from what `saved::reader` or
-/// `saved::build` said of one of its samples' pictures: in the UI's words
-/// for a picture that is missing or teaches nothing, and `None` for an
-/// error that names no sample of it.
-pub(crate) fn sample_problem_of(error: &SavedError, reference: &ReferenceDef) -> Option<SpecError> {
+/// Why a value cannot read with the saved reference named `reference`, from
+/// what `saved::build` said of the picture of one of its `samples`: in the
+/// UI's words for a picture that is missing or teaches nothing, which send
+/// the user to the reference's editor, and `None` for an error that names
+/// none of them.
+pub(crate) fn sample_problem_of(
+    error: &SavedError,
+    reference: &str,
+    samples: &[SampleDef],
+) -> Option<SpecError> {
     let (SavedError::Missing { name, .. }
     | SavedError::Picture { name, .. }
     | SavedError::Learn { name, .. }) = error
     else {
         return None;
     };
-    let sample = reference
-        .samples
-        .iter()
-        .find(|sample| sample.image == *name)?;
+    let sample = samples.iter().find(|sample| sample.image == *name)?;
+    let reference = reference.to_owned();
     Some(match error {
-        SavedError::Learn { source, .. } => SpecError::Learn {
+        SavedError::Learn { source, .. } => SpecError::ReferenceLearn {
+            reference,
             text: sample.text.clone(),
             source: source.clone(),
         },
         _ => SpecError::MissingSample {
-            reference: reference.name.clone(),
+            reference,
             picture: name.clone(),
         },
     })
-}
-
-/// [`sample_problem_of`], or the error in `saved::reader`'s own words.
-fn sample_problem(error: SavedError, reference: &ReferenceDef) -> SpecError {
-    sample_problem_of(&error, reference).unwrap_or_else(|| error.into())
 }
 
 /// What `label` labels, as a reference that tells ink from background by

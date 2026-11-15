@@ -17,30 +17,54 @@ use appytappy_sources::screen::{Image, Rgb, Size};
 const STEP: u8 = 4;
 
 /// The tolerance at which a reference that finds its characters by
-/// contrast learns every one of `samples`, each a picture and the text it
-/// shows, in order.
+/// contrast learns the most of `samples`, each a picture and the text it
+/// shows, in order: every one of them, when a tolerance does that.
 ///
-/// It is `current` while that works, so the tolerance changes only when a
-/// sample needs it to, and what was read or recorded with it stays as it
-/// was read. Otherwise it is the middle of the longest run of tolerances
-/// that work, the lower of two runs as long, among every [`STEP`]th from
-/// 0: as far as can be from both a tolerance too low and one too high.
-/// With no tolerance that works, as while a box's text is half typed, it
-/// stays `current`.
+/// It is `current` while no tolerance learns more, so the tolerance changes
+/// only when a sample needs it to, and what was read or recorded with it
+/// stays as it was read. Otherwise it is the middle of the longest run of
+/// tolerances that learn the most, the lower of two runs as long, among
+/// every [`STEP`]th from 0: as far as can be from both a tolerance too low
+/// and one too high.
+///
+/// A sample no tolerance learns, such as a box whose text is half typed or
+/// a saved picture cut for a text color, is left out of the count as it is
+/// left out of each lesson, so it does not move the tolerance the others
+/// read with.
 pub(crate) fn fitted(samples: &[(Image, &str)], current: u8) -> u8 {
-    let learns_all = |tolerance: u8| {
+    let learned = |tolerance: u8| {
         let mut reader = DigitReader::new(InkRule::Contrast { tolerance });
         samples
             .iter()
-            .all(|(picture, text)| reader.learn(picture, text).is_ok())
+            .filter(|(picture, text)| {
+                let mut trial = reader.clone();
+                let learns = trial.learn(picture, text).is_ok();
+                if learns {
+                    reader = trial;
+                }
+                learns
+            })
+            .count()
     };
-    if learns_all(current) {
+    let at_current = learned(current);
+    if at_current == samples.len() {
+        return current;
+    }
+    let grid: Vec<(u8, usize)> = (0..=u8::MAX)
+        .step_by(usize::from(STEP))
+        .map(|tolerance| (tolerance, learned(tolerance)))
+        .collect();
+    let most = grid
+        .iter()
+        .map(|&(_, count)| count)
+        .fold(at_current, usize::max);
+    if at_current == most {
         return current;
     }
     let mut longest: Option<(u8, u8)> = None;
     let mut run: Option<(u8, u8)> = None;
-    for tolerance in (0..=u8::MAX).step_by(usize::from(STEP)) {
-        if learns_all(tolerance) {
+    for (tolerance, count) in grid {
+        if count == most {
             let (_, last) = run.get_or_insert((tolerance, tolerance));
             *last = tolerance;
         } else {
@@ -233,9 +257,21 @@ mod tests {
         // The second sample's shadow is 120, so only 120 to 196 work.
         let samples = [(shadowed(), "11"), (strip(&[200, 120, 200]), "11")];
         assert_eq!(fitted(&samples, 40), 156);
+    }
+
+    #[test]
+    fn a_sample_no_tolerance_reads_leaves_the_others_their_tolerance() {
         // A sample labeled as another character than the shape it shares
         // with an earlier one fails whatever the tolerance.
-        assert_eq!(fitted(&[(shadowed(), "11"), (shadowed(), "12")], 40), 40);
+        let samples = [(shadowed(), "11"), (shadowed(), "12")];
+        assert_eq!(fitted(&samples, 100), 100, "the first reads as it is");
+        assert_eq!(fitted(&samples, 40), 128, "the first needs another");
+        // It fails first too, and the one after it is learned without it.
+        let samples = [(shadowed(), "1"), (strip(&[200, 120, 200]), "11")];
+        assert_eq!(fitted(&samples[..1], 156), 28);
+        assert_eq!(fitted(&[(shadowed(), "111"), samples[1].clone()], 40), 156);
+        // No sample reads at any tolerance.
+        assert_eq!(fitted(&[(shadowed(), "111")], 40), 40);
     }
 
     #[test]

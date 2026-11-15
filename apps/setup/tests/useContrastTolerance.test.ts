@@ -10,6 +10,7 @@ const spec: CharactersSpec = {
   tolerance: 40,
   labels: [{ screenshot: 0, region: { x: 0, y: 0, width: 10, height: 10 }, text: '87%' }],
   recorded: [],
+  dropped: [],
 };
 
 test('a reference asks for a fit by contrast alone, and anew when a sample or the tolerance changes', () => {

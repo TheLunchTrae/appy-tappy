@@ -205,8 +205,15 @@ macro_rules! with_commands {
             commands::delete_value(application: String, value: String) -> ();
             /// Saves a reference, over the one `spec.check.reference` names when it names one.
             commands::save_reference(spec: ReferenceSaveSpec) -> SavedReferenceId;
-            /// Saves a saved reference's name, color, and tolerance, with its samples as they are, so it needs no screenshot.
+            /// Saves a saved reference's name, color, and tolerance, with its samples as they are but for those it leaves
+            /// out, so it needs no screenshot.
             commands::save_reference_settings(spec: ReferenceSettingsSpec) -> SavedReferenceId;
+            /// The saved pictures the saved reference `reference` can't learn with the text color `ink`, or by contrast
+            /// without one, and `tolerance`, saved as `saving` says without the pictures `dropped` names.
+            commands::unlearned_samples(reference: ReferenceRef, ink: Option<ColorDef>, tolerance: u8, dropped: Vec<String>, saving: SavingKind) -> Vec<UnlearnedSample>;
+            /// The saved picture `image` of the saved reference `reference` at most `maxWidth` wide, or null when there
+            /// is none.
+            commands::sample_picture(reference: ReferenceRef, image: String, max_width: u32) -> Pixels;
             /// Removes a saved reference and its pictures; refused while a value reads with it.
             commands::delete_reference(application: String, reference: String) -> ();
             /// Sets how the application `application` protects itself from other programs.

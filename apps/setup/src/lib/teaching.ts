@@ -12,7 +12,12 @@ export interface ReferenceSave {
   readonly busy: boolean;
   /** Whether a recording's review is open, under the character check or not. */
   readonly reviewing: boolean;
+  /** How many of its saved pictures it can't learn as it finds its characters now. */
+  readonly unlearned: number;
 }
+
+/** What Save reference says while the reference keeps saved pictures it can't learn. */
+export const SAVE_AFTER_UNLEARNED = "Remove the saved pictures it can't learn first.";
 
 /** What Save reference says while review is open. */
 export const SAVE_AFTER_REVIEW =
@@ -22,11 +27,13 @@ export const SAVE_AFTER_REVIEW =
  * Whether the reference can be saved now, and what the editor says when it waits for review. Saving ends the
  * recording, and the reference learns the readings the last Keep put on it: what review changed since, and what a
  * character check opened from review answered, would go with the recording. So while review is open the save waits
- * for Keep, or for the way back to the screenshot.
+ * for Keep, or for the way back to the screenshot. A reference that keeps a saved picture it can't learn would be
+ * refused, so its save waits until the picture is removed or learned again, and says so.
  */
 export function referenceSave(save: ReferenceSave): { readonly can: boolean; readonly waits: string | null } {
   const ready = save.named && save.built && save.tried && !save.busy;
-  return { can: ready && !save.reviewing, waits: save.reviewing ? SAVE_AFTER_REVIEW : null };
+  const waits = save.reviewing ? SAVE_AFTER_REVIEW : save.unlearned > 0 ? SAVE_AFTER_UNLEARNED : null;
+  return { can: ready && waits === null, waits };
 }
 
 /**

@@ -4,7 +4,7 @@ import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
 import type { Editing, NeedsField } from '../lib/captureDraft.ts';
-import { type Built, type Draft, type ReferenceSaving, withTextColor } from '../lib/check.ts';
+import { type Built, type Draft, type ReferenceSaving, withTextColor, withoutSample } from '../lib/check.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers, readersNeed } from '../lib/reference.ts';
 import { neededPairs } from '../lib/useReadingRisks.ts';
@@ -22,6 +22,7 @@ import { FoundPanel } from './Found.tsx';
 import { ReadingDetailsBox } from './ReadingDetails.tsx';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
+import { UnlearnedPictures } from './UnlearnedPictures.tsx';
 
 /** What the reading box says while a saved reference's settings are all there is to save. */
 const SETTINGS_ONLY =
@@ -160,6 +161,7 @@ export function ReferenceInspector({
 }: Props) {
   const { taught, finder, guided, review, recorder, checking, covered } = teaching;
   const chosen = boxes.selected;
+  const saved = editing.existing?.samples ?? [];
   // A look-alike pair warns when it has one of these characters: the value's, or for a reference by itself those of
   // every value that reads with it.
   const lookalikeNeeds =
@@ -176,6 +178,7 @@ export function ReferenceInspector({
     tried: settingsOnly || check.state.kind === 'set',
     busy,
     reviewing: teaching.reviewed !== null,
+    unlearned: teaching.unlearned.samples.length,
   });
   return (
     <aside className="inspector" aria-label="Reference">
@@ -250,6 +253,19 @@ export function ReferenceInspector({
           )
         }
         preview={preview}
+        unlearned={
+          <UnlearnedPictures
+            unlearned={teaching.unlearned}
+            hasTextColor={draft.ink !== null}
+            removed={saved.length - taught.saved.length}
+            onRemove={(image) => {
+              setDraft((current) => withoutSample(current, image));
+            }}
+            onPutBack={() => {
+              setDraft((current) => ({ ...current, dropped: [] }));
+            }}
+          />
+        }
         record={
           <RecordPanel
             view={teaching.recording}

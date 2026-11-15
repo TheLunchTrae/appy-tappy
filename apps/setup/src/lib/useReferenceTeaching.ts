@@ -3,7 +3,7 @@
 
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
 
-import type { PinDef, RecordingScope, ReferenceRef, SavedReference } from './bindings.ts';
+import type { PinDef, RecordingScope, ReferenceRef, SampleDef, SavedReference } from './bindings.ts';
 import { errorText, saveReference, saveReferenceSettings } from './api.ts';
 import { boxOf } from './boxes.ts';
 import type { Editing } from './captureDraft.ts';
@@ -31,12 +31,16 @@ import type { useBoxes } from './useBoxes.ts';
 import { useCharacterCheck } from './useCharacterCheck.ts';
 import { useContrastTolerance } from './useContrastTolerance.ts';
 import { useReadingRisks } from './useReadingRisks.ts';
+import { useUnlearned } from './useUnlearned.ts';
 import { useFound } from './useFound.ts';
 import { useRecording } from './useRecording.ts';
 import { focusNext, useRecordFocus, useReview } from './useReview.ts';
 
 /** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
 const NO_NEEDS: readonly string[] = [];
+
+/** The saved samples of a new reference. */
+const NO_SAMPLES: readonly SampleDef[] = [];
 
 /** What the capture screen gives the teaching of its reference. */
 interface TeachingSetup {
@@ -109,11 +113,13 @@ export function useReferenceTeaching({
   const savedSamples = editing?.existing?.samples;
   const taught = useMemo(
     () => ({
-      saved: (savedSamples ?? []).map((sample) => sample.text),
+      saved: (savedSamples ?? [])
+        .filter((sample) => !draft.dropped.includes(sample.image))
+        .map((sample) => sample.text),
       labeled: draft.boxes.map((box) => box.text).filter((text) => text.trim() !== ''),
       recorded: [...draft.recorded.values()],
     }),
-    [savedSamples, draft.boxes, draft.recorded],
+    [savedSamples, draft.dropped, draft.boxes, draft.recorded],
   );
   // Every text it learns from already, which tells a find's letters apart from a misread.
   const learnedTexts = useMemo(() => [...taught.saved, ...taught.labeled, ...taught.recorded], [taught]);
@@ -147,6 +153,13 @@ export function useReferenceTeaching({
   });
   // What may keep it from reading as its samples do, asked once the tolerance it depends on is fitted.
   const risks = useReadingRisks(fitted ? taughtCharacters : null);
+  // The saved pictures a save would refuse, which the editor shows so they can be left out. A reference taught by
+  // contrast is judged with its fitted tolerance, like its risks.
+  const unlearned = useUnlearned(
+    saving?.ok === true ? saving.spec : null,
+    savedSamples ?? NO_SAMPLES,
+    fitted || (saving?.ok === true && saving.spec.kind === 'settings'),
+  );
   // The check, like review, shows in place of the window's picture.
   const checking = guided.guide !== null;
   // The recording review shows. Review is open only on a recording, and one name decides everything review changes
@@ -259,6 +272,7 @@ export function useReferenceTeaching({
             reference: spec.reference,
             ...(spec.ink === null ? {} : { ink: spec.ink }),
             tolerance: spec.tolerance,
+            dropped: spec.dropped,
           }));
       setError(null);
       await onSaved(saved, close);
@@ -296,6 +310,7 @@ export function useReferenceTeaching({
     taught,
     covered,
     risks,
+    unlearned,
     finder,
     guided,
     checking,

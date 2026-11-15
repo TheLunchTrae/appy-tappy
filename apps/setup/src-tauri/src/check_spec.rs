@@ -31,7 +31,9 @@ pub(crate) mod characters;
 mod contrast;
 mod error;
 
-pub(crate) use characters::{CharactersSpec, Label, SavedReference, Session, sample_problem_of};
+pub(crate) use characters::{
+    CharactersSpec, Label, SavedReference, Session, UnlearnedSample, sample_problem_of,
+};
 pub(crate) use error::{Cut, SpecError};
 
 /// A saved reference of a saved application.
