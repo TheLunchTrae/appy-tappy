@@ -27,6 +27,8 @@ The same setting adds debug details to the pages that read a window live.
     apart, so a close second means the reference needs more samples of both.
     A character marked **left out** is one the value's characters do not
     name: it reads as text, and the read fails when it is a part of the
+    number. When the number cannot be read, its reason appears above the
+    scores, including when every character matches but the text holds no
     number.
   - **State:** how far the region is from each state, on average per color
     channel, against the state's tolerance. The state read is marked.

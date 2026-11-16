@@ -25,7 +25,7 @@ pub(crate) struct ReadingDetails {
     pub(crate) frame_age_ms: u64,
     /// The check's scores, or `None` when the region has none.
     pub(crate) workings: Option<WorkingsView>,
-    /// Why the region has no scores, such as no ink in it.
+    /// Why the check could not read the region or compare its pixels.
     pub(crate) problem: Option<String>,
 }
 
@@ -146,7 +146,7 @@ pub(crate) fn details(check: &Check, region: &Image, frame_age: Duration) -> Rea
             {
                 state.read = true;
             }
-            (Some(view), None)
+            (Some(view), read.err().map(|error| error.to_string()))
         },
         Err(error) => (None, Some(error.to_string())),
     };
@@ -298,5 +298,56 @@ mod tests {
         let details = details(&check, &row("###"), Duration::ZERO);
         assert_eq!(details.workings, None);
         assert!(details.problem.is_some());
+    }
+
+    #[test]
+    fn a_failed_number_keeps_its_reason_beside_its_character_scores() {
+        let image = |rows: &[&str]| {
+            let size = Size {
+                width: u32::try_from(rows[0].len()).unwrap(),
+                height: u32::try_from(rows.len()).unwrap(),
+            };
+            Image::new(size, row(&rows.concat()).as_bgra().to_vec()).unwrap()
+        };
+        let mut reader = appytappy_sources::screen::digits::DigitReader::new(
+            appytappy_sources::screen::digits::InkRule::Color {
+                color: Rgb {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                },
+                tolerance: 0,
+            },
+        );
+        reader.learn(&image(&["#", "#", "#"]), "1").unwrap();
+        reader.learn(&image(&["#.#", ".#.", "#.#"]), "%").unwrap();
+        reader
+            .learn(&image(&["#.....", "#.###.", "#....."]), "1-")
+            .unwrap();
+        let check = Check::Number {
+            reader: reader.clone(),
+            whole: false,
+        };
+        let digits_only = Check::Number {
+            reader: reader.reading(Some("1")).unwrap(),
+            whole: false,
+        };
+        for (check, rows) in [
+            (&check, ["###", "###", "###"].as_slice()),
+            (&check, ["#.#", ".#.", "#.#"].as_slice()),
+            (&digits_only, ["....#", "###.#", "....#"].as_slice()),
+        ] {
+            let image = image(rows);
+            let error = check.read(&image).expect_err("the number cannot be read");
+            let details = details(check, &image, Duration::ZERO);
+            assert_eq!(details.problem, Some(error.to_string()));
+            assert!(matches!(
+                details.workings,
+                Some(WorkingsView::Number { .. })
+            ));
+        }
+        let read = details(&check, &image(&["#.#.#", "#..#.", "#.#.#"]), Duration::ZERO);
+        assert_eq!(read.problem, None, "a learned percent ends a valid number");
+        assert!(matches!(read.workings, Some(WorkingsView::Number { .. })));
     }
 }
