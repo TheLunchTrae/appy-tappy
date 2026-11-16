@@ -20,6 +20,22 @@ mise run standards:check
 says which tasks run on Windows and which need Linux, and that mise runs from
 Git Bash on Windows.
 
+## Setup UI tests
+
+`mise run ui:test` runs the setup UI's logic and component tests with Bun.
+The `bunfig.toml` preload installs happy-dom before Testing Library loads,
+so component tests under `tests/dom/` have a document, focus, and DOM events.
+Testing Library's user events drive typing and pointer sequences on the
+mounted React components; each test unmounts its components afterward.
+Tests that use native commands install Tauri's IPC mock for the test and
+clear it after unmounting.
+
+The character-review tests cover Escape closing only the topmost review,
+retyping on Enter or blur, and a click that starts on one step never
+answering the next step after a retype changes it. They use the production
+review hooks and guide transitions. Screen capture and native window
+behavior are tested separately on Windows.
+
 ## Test builds
 
 To get an installer of a branch without a release, use one of these:
