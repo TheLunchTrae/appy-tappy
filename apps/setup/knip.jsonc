@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/main.tsx", "tests/**/*.test.ts"],
-  "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts"],
+  "entry": ["src/main.tsx", "tests/**/*.test.{ts,tsx}"],
+  "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"],
   "includeEntryExports": true,
   // The setup app's bindings test writes every type its commands reach, so
   // some are only parts of others.
