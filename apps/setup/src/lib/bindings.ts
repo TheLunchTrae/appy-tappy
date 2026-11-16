@@ -1405,7 +1405,7 @@ frameAgeMs: number,
  */
 workings: WorkingsView | null,
 /**
- * Why the region has no scores, such as no ink in it.
+ * Why the check could not read the region or compare its pixels.
  */
 problem: string | null, }>;
 

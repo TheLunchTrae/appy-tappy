@@ -1655,7 +1655,8 @@ only while `showDebug` is true, so with it off they cost nothing:
   scores: a number's read takes the closest glyph by `GlyphScore`, and a
   state's by the `Difference` that `StateScore::within` also checks. The state
   marked as read comes from a read of the same region, so the scores and the
-  state marked as read always agree; the runtime never asks for them. The live
+  state marked as read always agree. A failed read keeps its reason beside
+  the scores, even when scoring succeeds; the runtime never asks for them. The live
   reading above them is its own read, so it can come from a frame before or
   after. The page asks every 500 ms, less often than the reading, as scoring a
   number checks each character against every glyph.
