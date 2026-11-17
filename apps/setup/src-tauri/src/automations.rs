@@ -8,9 +8,8 @@
 //! kind of target. A value that later goes away shows as a problem on the
 //! automation that used it, and so does an automation that breaks a rule on
 //! its own, such as after a hand edit; either can still be turned off and
-//! deleted. The ID is this app's own key for an automation: the runtime does
-//! not read it, so a hand edit that breaks or repeats it stops nothing, and
-//! [`unique_ids`] gives each automation one the page can go by.
+//! deleted. The shared file parser gives each automation a distinct, valid
+//! ID, so the setup app and the runtime agree on requests to run one once.
 
 mod problem;
 #[cfg(test)]
@@ -20,7 +19,6 @@ mod uses;
 use appytappy_config::action::KeyChord;
 use appytappy_config::automation_file::{ActionDef, AutomationDef, AutomationsFile};
 use appytappy_config::names::new_automation_id;
-use appytappy_config::signal::SignalName;
 use appytappy_sources::automation::AppReaders;
 use serde::Serialize;
 
@@ -44,36 +42,12 @@ pub(crate) struct AutomationSummary {
 }
 
 /// Loads the automations, saying what went wrong for the user. Each one
-/// has an ID that no other one has, as [`unique_ids`] makes them.
+/// has a distinct, valid ID, as the shared file parser makes them.
 fn load(stores: &Stores) -> Result<AutomationsFile, String> {
-    let mut file = stores
+    stores
         .automations
         .load()
-        .map_err(|error| sentence(&format!("AppyTappy cannot read your automations: {error}")))?;
-    unique_ids(&mut file);
-    Ok(file)
-}
-
-/// Gives a new ID, made from its name, to each automation whose ID a hand
-/// edit made invalid or gave to an automation before it, so the page, which
-/// goes by ID, can tell every automation apart. Only the first of those
-/// sharing an ID keeps it, so the same file always gets the same IDs, and
-/// the next save writes them.
-fn unique_ids(file: &mut AutomationsFile) {
-    let mut taken: Vec<String> = file
-        .automations
-        .iter()
-        .map(|automation| automation.id.clone())
-        .collect();
-    let mut kept: Vec<String> = Vec::with_capacity(taken.len());
-    for automation in &mut file.automations {
-        if SignalName::new(&automation.id).is_err() || kept.contains(&automation.id) {
-            let names: Vec<&str> = taken.iter().map(String::as_str).collect();
-            automation.id = new_automation_id(&automation.name, &names);
-            taken.push(automation.id.clone());
-        }
-        kept.push(automation.id.clone());
-    }
+        .map_err(|error| sentence(&format!("AppyTappy cannot read your automations: {error}")))
 }
 
 /// Every automation, with what stops each one from running.

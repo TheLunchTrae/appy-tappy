@@ -115,7 +115,7 @@ fn shot_name(shot: DraftShot) -> String {
 
 /// The screenshot a draft keeps as `name`, or `None` for any other file.
 /// Only a name [`shot_name`] gives counts.
-fn draft_shot(name: &str) -> Option<DraftShot> {
+pub(crate) fn draft_shot(name: &str) -> Option<DraftShot> {
     let (recorded, rest) = match name.strip_prefix("recorded-") {
         Some(rest) => (true, rest),
         None => (false, name.strip_prefix("shot-")?),

@@ -108,7 +108,10 @@ passes.
 rather than hours. In the quality workflow the `quality` job runs the rest of
 the gate, and the `mutants` jobs split the lane: with `MUTANTS_SHARD` set to
 `k/n`, either lane tests only the kth of n shards of the selected mutants, so
-together the jobs test every one. A stack of pull requests that lands on main
+together the jobs test every one. Each diff shard lists its selected mutants
+before installing native webview libraries, restoring builds and the text
+reader model, or building the UI. A shard with no selected mutants finishes
+there. A stack of pull requests that lands on main
 as one squash pushes a diff as large as the whole stack, and the shards keep
 that run within each job's time limit. CI diffs against the base that
 `.github/workflows/quality.yml` sets for each event: a pull request diffs

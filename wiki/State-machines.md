@@ -21,8 +21,12 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Fifteen guards drop such stale messages:
+it was about has gone. These guards reject stale state and messages:
 
+- **Attached executables.** The runtime starts a session only when the
+  attached executable matches its current plan. Detection keeps both the PID
+  and executable name, so a PID reused by another executable ends its session
+  even under a wildcard.
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
   longer runs.
@@ -309,7 +313,9 @@ automations run while all of these hold:
 - `enabled` is true: automations are on in the tray. It starts true, or as
   the tray last left it when the settings remember that, as
   [Files and handoff](Architecture.md#files-and-handoff) describes.
-- The plan has automations for it.
+- The plan has automations for it, and its executable pattern matches the
+  executable detection attached. A changed pattern waits for detection to
+  identify a matching process before starting another session.
 
 When they all hold, the application has an entry in `running`, keyed by its
 reader's `SessionId`, with its engine session and its newest plan. The entry
@@ -327,7 +333,8 @@ stateDiagram-v2
     Detached --> Attached: Started, while disabled or not planned
     Attached --> Running: enabled, or a reload plans it
     Running --> Attached: disabled, or a reload drops it
-    Running --> Running: a reload changes what it runs, so it stops and starts again
+    Running --> Running: a reload changes what it runs and its process still matches
+    Running --> Attached: a reload changes its executable pattern and its process no longer matches
     Running --> Running: a reload changes only its names, which it takes as it runs
     Running --> Running: its reader ends, and after a wait the next one starts
     Running --> Detached: Exited
@@ -338,7 +345,8 @@ stateDiagram-v2
   which releases every rule that restores. The reader is stopped.
 - **A reload that changes what it runs.** `replan` compares each plan's
   `Runs`: its window match, its values' checks and its rules, but not the
-  automations' names that each rule's entry carries. When they differ, the
+  automations' names that each rule's entry carries or the click targets'
+  display names. When they differ, the
   application stops, which undoes what its automations changed, and starts
   again in a new session.
 - **A reload that changes only names.** When only the plan's names differ, or
@@ -775,7 +783,9 @@ The journal in `crates/actions/src/journal.rs` holds one entry per change that
 a restoring rule made, in the order they were made. For each target, such as
 one audio session's volume, the entries form a stack:
 
-- **Perform, restoring.** The change is pushed with the state before it. If a
+- **Perform, restoring.** A pause holds every target media session, even
+  one that another rule already paused while other sessions still play.
+  The change is pushed with the state before it. If a
   restore of that target is pending, the change takes it over, so its own
   release puts back the state from before the first change.
 - **Perform, not restoring.** Every entry for that target is removed, so no
@@ -1797,6 +1807,11 @@ Settling at a size where the value reads places it there and forgets
 `unread`. Each new trial places its value at the newest frame's size at
 once, so an edit that the page tries again on a size change reads there
 without waiting for the size to settle.
+A capture failure makes both the live reading and its debug details answer
+that failure, without reading the frame from before it. A good frame clears
+the failure and readings resume; an ended capture stays failed until another
+window is picked.
+
 Its state is `state`, a `CheckState`; `reads`, the reading or the problem
 shown, which is kept outside the capture screen's own state (`liveReads` in
 `apps/setup/src/lib/liveCheck.ts`) so that a new reading renders only the
@@ -2544,7 +2559,9 @@ stateDiagram-v2
   drawing, which needs no screenshot, so the name, the pin, the check's kind
   and its settings still save. A window that never takes that size never
   leaves this state; the editor points to **Fix at this size** for it.
-- **Placed.** `drawnOn` is the newest screenshot of that size, and the region
+- **Placed.** A screenshot of another size keeps the region and its current
+  `drawnOn`, so returning to its size can continue the edit. `drawnOn` is the
+  newest screenshot of that size, and the region
   shows on every screenshot of that size. The edit is still a `kept` drawing
   while the region equals the saved one.
 - **Moved.** The region differs from the saved one, so the edit is a `drawn`
@@ -3373,6 +3390,11 @@ in the editor or imported, has no reference kept, since its ID is new. A file
 changed outside the setup app while a reference is kept is not seen until
 then.
 
+A reference edit gives every added sample a picture name different from
+all its kept and dropped samples. Pictures are written before the application's
+file is replaced, so a failed save cannot overwrite a sample the saved file
+still names.
+
 A click's picture is written to the `clicks` folder when its target is set
 up, before its automation is saved. Each save of the automations removes the
 click pictures that neither they nor a draft names, and so does the end of
@@ -3381,12 +3403,25 @@ saved nor kept as a draft leaves no file. While the drafts cannot be listed,
 none is removed.
 [Pictures kept](Setup-app.md#pictures-kept) lists what each folder holds.
 
+Resuming a reference draft keeps the reference it copied until the current
+saved file is read. The saved pictures it chose to leave out stay left out
+only while the saved samples match that copy; otherwise those choices clear,
+so a reused picture name cannot remove a different sample.
+A fix draft whose color or state tolerance differs from its saved value is
+outdated, as one whose colors or states differ is: it cannot preview settings
+that saving the fix would discard.
+
 Drafts are files of the setup app alone, in their own folder, and saving or
 deleting one tells no one. Each draft's folder is in one of three states: in
 place, being written beside it in a `.saving` folder, or moved aside to an
 `.old` folder while the new one takes its place. A save that stops between
 them leaves the old draft, or the next listing puts it back, as
 [Drafts](Setup-app.md#drafts) describes.
+
+The debug bundle takes its draft listing on the owner thread, where draft
+saves and recovery are serialized. Its background packing job receives that
+listing and performs no draft recovery, so it cannot remove staging folders
+that a later save is still writing.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another

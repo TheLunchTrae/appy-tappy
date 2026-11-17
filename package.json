@@ -1,6 +1,6 @@
 {
   "name": "appy-tappy-docs",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.4",
@@ -14,7 +14,7 @@
     "standards:check": "bun run lint && bun run format:check"
   },
   "devDependencies": {
-    "markdownlint-cli2": "^0.24.0",
+    "markdownlint-cli2": "^0.24.1",
     "oxfmt": "^0.77.0"
   },
   "overrides": {

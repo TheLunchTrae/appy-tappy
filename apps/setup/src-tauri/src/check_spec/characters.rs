@@ -415,19 +415,22 @@ impl CharactersSpec {
         };
         let new = self.new_samples(session, region, recorded)?;
         let mut pictures = Vec::new();
-        let mut number = samples.len();
+        let mut taken: Vec<String> = samples.iter().map(|sample| sample.image.clone()).collect();
+        taken.extend(self.dropped.iter().cloned());
+        let mut number = taken.len();
         for (image, text) in new {
             // The next number no sample's picture has, even when a file edited
             // by hand left a gap. Of the next `samples.len() + 1` numbers at
             // least one is free; past them all is free too.
-            number = (1..=samples.len().saturating_add(1))
+            number = (1..=taken.len().saturating_add(1))
                 .map(|step| number.saturating_add(step))
                 .find(|&next| {
                     let name = sample_name(id, next);
-                    samples.iter().all(|sample| sample.image != name)
+                    !taken.contains(&name)
                 })
-                .unwrap_or_else(|| number.saturating_add(samples.len()).saturating_add(1));
+                .unwrap_or_else(|| number.saturating_add(taken.len()).saturating_add(1));
             let name = sample_name(id, number);
+            taken.push(name.clone());
             pictures.push((
                 name.clone(),
                 image.encode_png().map_err(|_encode| SpecError::Picture)?,

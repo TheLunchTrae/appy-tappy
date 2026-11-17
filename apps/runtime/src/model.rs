@@ -554,7 +554,10 @@ impl Model {
         let (Some(watched), Some(plan)) = (self.attached.get(app), self.plan.get(app)) else {
             return Vec::new();
         };
-        if !self.enabled || self.session_of(app).is_some() {
+        if !self.enabled
+            || self.session_of(app).is_some()
+            || !plan.runs.window.executable.matches(&watched.executable)
+        {
             return Vec::new();
         }
         let id = SessionId(self.next);
@@ -974,6 +977,57 @@ mod tests {
             model.active_automations(),
             ["Pause A", "Pause B"],
             "listed app by app, whichever started first"
+        );
+    }
+
+    #[test]
+    fn renaming_a_click_target_keeps_the_session_and_fired_rule() {
+        let mut model = Model::default();
+        let make = |name: &str| {
+            let mut plan = plan("A", 90.0);
+            let mut target: appytappy_config::app_file::AppFile = appytappy_config::app_file::AppFile::parse(
+                r#"{"format":1,"name":"Target","window":{"title":"*","class":"*","executable":"Target.exe","mustMatch":{"title":false,"class":false},"fallback":"none"},"sizeChanges":"often","antiCheat":"none","values":[],"references":[]}"#
+            ).unwrap();
+            name.clone_into(&mut target.name);
+            Arc::get_mut(&mut Arc::get_mut(&mut plan).unwrap().runs.clicks)
+                .unwrap()
+                .add(&[("target", &target)], []);
+            plan
+        };
+        model.replan(plans(&[("a", &make("Target"))]));
+        model.apply(started("a", 7));
+        let now = Instant::now();
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
+        assert_eq!(model.replan(plans(&[("a", &make("Renamed"))])), []);
+        assert_eq!(
+            kinds(&model.sample(SessionId(0), ReaderNumber(0), 0, number(10.0), now)),
+            ["undo 0 Pause A"]
+        );
+    }
+
+    #[test]
+    fn a_changed_executable_waits_for_detection_before_starting_again() {
+        let mut model = Model::default();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.apply(started("a", 7));
+        let mut changed = plan("A", 90.0);
+        Arc::get_mut(&mut changed).unwrap().runs.window.executable =
+            appytappy_config::window_match::Pattern::new("Other.exe");
+        assert_eq!(
+            kinds(&model.replan(plans(&[("a", &changed)]))),
+            ["stop 0 A"]
+        );
+        assert_eq!(model.set_enabled(true), []);
+        assert_eq!(
+            kinds(&model.apply(Change::Started {
+                app: "a".to_owned(),
+                process: ProcessId::new(8),
+                executable: "Other.exe".to_owned(),
+            })),
+            ["read 1 A"]
+        );
+        assert!(
+            matches!(model.run_once("pause_a"), Ok(orders) if matches!(orders.first(), Some(Order::Run { watched, .. }) if watched.process == ProcessId::new(8)))
         );
     }
 

@@ -144,11 +144,7 @@ export interface Restored {
 function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restored | null): CaptureSetup {
   const kept = (restored?.screenshots ?? null) === null ? null : (resumed?.def.state ?? null);
   if (kept !== null && mode.kind !== 'edit' && isKept<CaptureKept>(kept, mode.kind)) {
-    const setup = restoreSetup(kept.state);
-    // A reference's draft changes the reference as it is saved now.
-    return mode.kind === 'reference' && setup.editing !== null
-      ? { ...setup, editing: { ...setup.editing, existing: mode.existing } }
-      : setup;
+    return restoreSetup(kept.state, mode.kind === 'reference' ? mode.existing : undefined);
   }
   const editing: Editing | null =
     mode.kind === 'reference' ? startEditing('reference', mode.existing, EMPTY_DRAFT) : null;
@@ -528,7 +524,7 @@ export function Capture({
     }
     // Until the region's size is known, the region stays where it is.
     const fits = regionSize === null ? null : sameSize(regionSize, shot.size);
-    setDraft((current) => onPicture(current, shot.index, fits));
+    setDraft((current) => onPicture(current, shot.index, fits, edited === null ? 'draw' : 'edit'));
   };
   const takeShot = async (): Promise<void> => {
     const shot = await take();

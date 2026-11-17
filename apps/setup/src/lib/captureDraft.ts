@@ -98,9 +98,19 @@ export function storeSetup(setup: CaptureSetup): StoredSetup {
   return { ...setup, draft: rest };
 }
 
-/** The setup a draft kept, as the capture screen holds it again. */
-export function restoreSetup(stored: StoredSetup): CaptureSetup {
-  return { ...stored, draft: { ...stored.draft, recorded: new Map() } };
+/**
+ * The setup a draft kept, on `current` when its saved reference is already known. Refresh the sample removals
+ * against the copied reference before replacing it; with no current file yet, keep the copy until it arrives.
+ */
+export function restoreSetup(stored: StoredSetup, current?: ReferenceDef | null): CaptureSetup {
+  const draft = { ...stored.draft, recorded: new Map<number, string>() };
+  return current === undefined || stored.editing === null
+    ? { ...stored, draft }
+    : {
+        ...stored,
+        editing: { ...stored.editing, existing: current },
+        draft: refreshedDraft(draft, stored.editing.existing, current),
+      };
 }
 
 /**
@@ -176,6 +186,7 @@ export function fixOutdated(def: DraftDef, value: ValueDef): boolean {
     draft.stateNames,
     draft.whole,
     draft.characters,
+    draft.kind === 'color' || draft.kind === 'state' ? draft.tolerance : null,
   ];
   return !sameContent(taken(now), taken(kept));
 }

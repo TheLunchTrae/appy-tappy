@@ -431,6 +431,22 @@ mod tests {
     }
 
     #[test]
+    fn capture_failures_hide_the_previous_reading_and_its_details() {
+        let (mut harness, mut handler, root) = capturing("live-capture-failure");
+        harness.ask(|owner| owner.set_check(&trial(BAR))).unwrap();
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(50.0))));
+        harness.deliver(&mut handler, Err(std::io::Error::other("lost frame")));
+        assert_eq!(harness.ask(Owner::reading), Err("lost frame".to_owned()));
+        assert_eq!(
+            harness.ask(|owner| owner.explain_reading()),
+            Err("lost frame".to_owned())
+        );
+        harness.deliver(&mut handler, Ok(&crate::owner::test_support::frame_image()));
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(50.0))));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn the_check_reads_the_live_frame() {
         let (mut harness, _handler, root) = capturing("live-reads");
         assert_eq!(harness.ask(Owner::reading), Ok(None));

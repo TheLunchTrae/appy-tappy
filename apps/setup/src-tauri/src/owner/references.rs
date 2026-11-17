@@ -754,6 +754,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let picture = "ref-digits-1.png".to_owned();
+        let before = std::fs::read(folder.join(&picture)).unwrap();
         let refused = harness
             .ask(|owner| owner.save_reference(&in_gray("")))
             .expect_err("the saved picture has no gray");
@@ -788,6 +789,11 @@ mod tests {
             None
         );
 
+        assert_eq!(
+            std::fs::read(folder.join(&picture)).unwrap(),
+            before,
+            "a refused edit leaves its saved picture untouched"
+        );
         // Left out, it is gone from the file and the folder once saved.
         harness
             .ask(|owner| owner.save_reference(&in_gray(r#""ref-digits-1.png""#)))
@@ -812,8 +818,8 @@ mod tests {
             .collect();
         assert_eq!(
             pictures,
-            std::slice::from_ref(&picture),
-            "the box took its name"
+            ["ref-digits-2.png"],
+            "the new box never overwrites the saved picture it replaces"
         );
         assert_eq!(
             unlearned(&mut harness, Some(gray), &[], SavingKind::Taught),
@@ -822,6 +828,7 @@ mod tests {
 
         // Its settings alone leave a picture out the same way, but not the
         // last one.
+        let picture = saved(&mut harness).samples[0].image.clone();
         let settings = |ink, dropped: &[String]| ReferenceSettingsSpec {
             reference: digits.clone(),
             reference_name: "Digits".to_owned(),

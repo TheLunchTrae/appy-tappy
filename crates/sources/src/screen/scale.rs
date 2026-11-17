@@ -113,6 +113,11 @@ fn span(
     let first = place(along, i128::from(start), side, new_side, factor)?;
     let end = i128::from(start).checked_add(i128::from(length))?;
     let last = place(along, end, side, new_side, factor)?;
+    let first = if first == last && last == new_side {
+        last.checked_sub(1)?
+    } else {
+        first
+    };
     Some((first, last.checked_sub(first)?.max(1)))
 }
 
@@ -199,6 +204,24 @@ mod tests {
         // 100 by 40 at (40, 60): near the top-left corner of a 1920 by 1080
         // window, 1880 from its right edge and 1020 from its bottom.
         scaled(region(40, 60, 100, 40), DRAWN, now, pin)
+    }
+
+    #[test]
+    fn a_pixel_on_the_trailing_edges_stays_inside_when_shrunk() {
+        let drawn = Size {
+            width: 100,
+            height: 100,
+        };
+        let now = Size {
+            width: 50,
+            height: 50,
+        };
+        for pin in [PinDef::TopLeft, PinDef::BottomRight, PinDef::Center] {
+            assert_eq!(
+                scaled(region(99, 99, 1, 1), drawn, now, pin),
+                Some(region(49, 49, 1, 1))
+            );
+        }
     }
 
     #[test]

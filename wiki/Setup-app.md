@@ -788,9 +788,9 @@ list, which goes with every spec the editor sends (`CharactersSpec.dropped`,
 `ReferenceSettingsSpec.dropped`). The owner leaves those samples out before
 it learns, fits, or judges anything (`SavedReference::without`), and a save
 writes the reference without them; the store then removes the pictures the
-file no longer names. A new sample takes the lowest number no kept sample
-has, so it can take a removed picture's file name, and its picture replaces
-that file. A reference left with no sample is refused, as a new one with no
+file no longer names. A new sample takes a number no kept or dropped sample
+has, so writing its picture cannot overwrite one the saved file still names
+if the save fails. A reference left with no sample is refused, as a new one with no
 label is. The draft keeps `dropped` only while the editor is open on that
 reference: opening and leaving the editor clear it.
 
@@ -1276,12 +1276,11 @@ runs it; the user can turn it off or delete it, and the others keep working.
 Saving an automation, turning one on, and listing them all ask
 `Runnable::new` in `appytappy-sources`, which runs `AutomationDef::compile`,
 builds the value it watches with `saved::build`, and fits each click's picture,
-the same check the runtime runs. An automation's ID is the setup app's own key:
-the runtime does not read it, so an ID that a hand edit made invalid, or gave to
-more than one automation, stops nothing. When the setup app reads the file, it
-gives a new ID, made from the name, to each automation whose ID is invalid or
-held by one before it, the same way each time, so every row can be edited or
-deleted on its own; the next save writes the new IDs. Saving a value reads it
+the same check the runtime runs. Both apps read through `AutomationsFile::parse`,
+which gives a new ID, made from the name, to each automation whose ID is invalid
+or held by one before it, the same way each time. Every row can be edited or
+deleted on its own, and the runtime recognizes its ID in a request to run its
+actions once; the next save writes the new IDs. Saving a value reads it
 back with `saved::build`, from its new pictures and those already saved, as the
 runtime will, and refuses it if the runtime could not read it. A new
 application's anti-cheat class starts as `unknown`, which blocks key press

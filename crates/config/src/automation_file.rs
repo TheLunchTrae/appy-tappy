@@ -30,6 +30,7 @@ use crate::app_file::{AppFile, RegionDef, SizeDef, ValueDef, ValueKind};
 use crate::click::{
     Click, ClickAt, ClickButton, ClickDelivery, ClickPicture, Corner, InvalidClick, Spot,
 };
+use crate::names::new_automation_id;
 use crate::rule::{Comparison, Condition, Restore, Rule, RuleError};
 use crate::signal::{Number, SignalName, StateName, Value};
 
@@ -604,18 +605,43 @@ impl AutomationDef {
     }
 }
 
+/// Gives a new ID, made from its name, to each automation whose ID a hand
+/// edit made invalid or gave to an automation before it, so the page, which
+/// goes by ID, can tell every automation apart. Only the first of those
+/// sharing an ID keeps it, so the same file always gets the same IDs, and
+/// the next save writes them.
+fn unique_ids(file: &mut AutomationsFile) {
+    let mut taken: Vec<String> = file
+        .automations
+        .iter()
+        .map(|automation| automation.id.clone())
+        .collect();
+    let mut kept: Vec<String> = Vec::with_capacity(taken.len());
+    for automation in &mut file.automations {
+        if SignalName::new(&automation.id).is_err() || kept.contains(&automation.id) {
+            let names: Vec<&str> = taken.iter().map(String::as_str).collect();
+            automation.id = new_automation_id(&automation.name, &names);
+            taken.push(automation.id.clone());
+        }
+        kept.push(automation.id.clone());
+    }
+}
+
 impl AutomationsFile {
     /// Reads a file's JSON and checks its format version. An automation that
     /// breaks a rule is kept, and [`AutomationDef::compile`] says why.
+    /// Invalid and repeated IDs are replaced deterministically, so both apps
+    /// address the same automation after a hand edit.
     ///
     /// # Errors
     ///
     /// Returns an [`AutomationsError`] naming the problem: JSON that does not
     /// fit the format, or another format version.
     pub fn parse(json: &str) -> Result<Self, AutomationsError> {
-        let file: Self = serde_json::from_str(json)
+        let mut file: Self = serde_json::from_str(json)
             .map_err(|error| AutomationsError::Json(error.to_string()))?;
         file.check()?;
+        unique_ids(&mut file);
         Ok(file)
     }
 

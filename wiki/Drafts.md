@@ -71,7 +71,9 @@ draft from its own row.
 
 - **Finish** opens it where you left off. A value, fix, or reference draft
   first asks for its application's window again, then brings back its
-  screenshots. Save it as usual and the draft goes away. If you select
+  screenshots. If a reference's saved pictures changed since, its choices
+  under **Saved pictures it can't learn** are reviewed again. Save it as usual and
+  the draft goes away. If you select
   **Change window** there, AppyTappy asks first and starts over on the new
   window; the draft stays as it is unless you save it again.
 - **Delete**, then **Delete draft** to confirm, removes it with its

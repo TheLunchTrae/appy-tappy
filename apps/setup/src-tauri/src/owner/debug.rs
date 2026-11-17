@@ -122,7 +122,13 @@ impl<H: Host> Owner<H> {
 
     /// The debug bundle `spec` asks for, to make away from this thread.
     pub(crate) fn debug_bundle(&self, spec: BundleSpec) -> Result<BundleJob, String> {
-        Ok(BundleJob::new(self.debug_stores()?.clone(), spec))
+        let stores = self.debug_stores()?;
+        // Listing recovers interrupted saves, so it stays on the owner
+        // alongside draft writes, never on the background packing thread.
+        let drafts = stores.drafts.list().map_err(|error| {
+            format!("AppyTappy cannot list drafts for the debug bundle: {error}.")
+        })?;
+        Ok(BundleJob::new(stores.clone(), spec, drafts))
     }
 
     /// What the runtime copies out of each frame of the saved application
@@ -439,29 +445,91 @@ mod tests {
     }
 
     #[test]
+    fn packing_a_bundle_never_recovers_or_removes_an_in_progress_draft_save() {
+        let (stores, root) = scratch_store("owner-debug-bundle-save");
+        let saving = stores.locations.drafts().join("0000019a.saving");
+        let old = stores.locations.drafts().join("0000019a.old");
+        let mut harness = harness_with(false, Ok(stores));
+        let job = harness
+            .ask(|owner| {
+                owner.debug_bundle(BundleSpec {
+                    pictures: true,
+                    trace: None,
+                })
+            })
+            .unwrap();
+        fs::create_dir_all(&saving).unwrap();
+        fs::create_dir_all(&old).unwrap();
+        fs::write(saving.join("draft.json"), "new draft").unwrap();
+        fs::write(old.join("draft.json"), "old draft").unwrap();
+        job.make().unwrap();
+        assert_eq!(
+            fs::read_to_string(saving.join("draft.json")).unwrap(),
+            "new draft"
+        );
+        assert_eq!(
+            fs::read_to_string(old.join("draft.json")).unwrap(),
+            "old draft"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn the_bundle_holds_the_files_and_the_pictures_and_trace_only_when_asked() {
-        let (stores, root) = scratch_store("owner-debug-bundle");
+        let (mut harness, root) = with_saved_bar("owner-debug-bundle");
+        let stores = harness.ask(|owner| owner.stores().cloned()).unwrap();
         let locations = stores.locations.clone();
         let app = locations.apps().join("example");
         fs::create_dir_all(&app).expect("app folder");
         fs::write(locations.settings(), "{\"format\": 1}").expect("settings");
-        fs::write(app.join("app.json"), "{}").expect("app file");
+        let mut file = stores.app("example").unwrap().file;
+        file.values[0].screen.check = appytappy_config::app_file::CheckDef::State {
+            states: vec![appytappy_config::app_file::StateDef {
+                name: "Shown".to_owned(),
+                image: "shown-1.png".to_owned(),
+            }],
+            tolerance: 0,
+        };
+        fs::write(app.join("app.json"), file.to_json()).expect("app file");
         fs::write(app.join("shown-1.png"), [1, 2]).expect("picture");
         fs::write(app.join("notes.txt"), "mine").expect("another file");
+        fs::write(app.join("unrelated.png"), [9]).unwrap();
+        let staging = locations.apps().join("example.saving");
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("app.json"), "{}").unwrap();
+        fs::write(staging.join("private.png"), [9]).unwrap();
         let pictures = stores.automations.pictures();
         fs::create_dir_all(&pictures).expect("pictures folder");
         fs::write(pictures.join("click-1.png"), [3]).expect("picture");
+        fs::write(pictures.join("unrelated.png"), [9]).unwrap();
         fs::write(pictures.join("click-1.png.tmp"), [3]).expect("half-written picture");
         let draft = locations.drafts().join("0000019a");
         fs::create_dir_all(&draft).expect("draft folder");
-        fs::write(draft.join("draft.json"), "{}").expect("draft file");
+        let def = crate::drafts::DraftDef {
+            kind: crate::drafts::DraftKind::Value,
+            app: Some("example".to_owned()),
+            changes: None,
+            name: "Draft".to_owned(),
+            missing: Vec::new(),
+            pictures: vec!["click-1.png".to_owned()],
+            state: serde_json::Value::Null,
+        };
+        fs::write(draft.join("draft.json"), serde_json::to_vec(&def).unwrap()).expect("draft file");
+        fs::write(draft.join("unrelated.png"), [9]).unwrap();
+        let broken = locations.drafts().join("0000019b");
+        fs::create_dir_all(&broken).unwrap();
+        fs::write(broken.join("draft.json"), "{}").unwrap();
+        fs::write(broken.join("shot-0.png"), [9]).unwrap();
+        let staging = locations.drafts().join("0000019a.saving");
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("draft.json"), "{}").unwrap();
+        fs::write(staging.join("shot-0.png"), [9]).unwrap();
         fs::write(draft.join("shot-0.png"), [4]).expect("screenshot");
         fs::write(draft.join("notes.txt"), "mine").expect("another file");
         fs::create_dir_all(&stores.logs).expect("logs");
         fs::write(stores.logs.join("setup.log"), "pick_window took 1.0 ms\n").expect("log");
         fs::create_dir_all(&stores.traces).expect("traces");
         fs::write(stores.traces.join("trace-2026-11-12-100000.csv"), HEADER).expect("trace");
-        let mut harness = harness_with(false, Ok(stores));
 
         let plain = harness
             .ask(|owner| {
@@ -481,6 +549,7 @@ mod tests {
                 "settings.json",
                 "apps/example/app.json",
                 "drafts/0000019a/draft.json",
+                "drafts/0000019b/draft.json",
                 "logs/setup.log"
             ]
         );
@@ -509,9 +578,11 @@ mod tests {
             "a draft's screenshots are pictures: {names:?}"
         );
         assert!(
-            names
-                .iter()
-                .all(|name| !name.contains("notes") && !name.contains("png.tmp")),
+            names.iter().all(|name| !name.contains("notes")
+                && !name.contains("png.tmp")
+                && !name.contains("unrelated")
+                && !name.contains(".saving")
+                && name != "drafts/0000019b/shot-0.png"),
             "only pictures: {names:?}"
         );
         assert!(
@@ -529,7 +600,7 @@ mod tests {
             .expect("bundle");
         assert_eq!(
             unzip(outside, "about.txt").0.len(),
-            5,
+            6,
             "only a trace file in the trace folder goes in"
         );
         fs::remove_dir_all(root).expect("clean up");

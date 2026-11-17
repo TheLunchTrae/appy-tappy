@@ -9,16 +9,15 @@
 //! applications' windows, a draft's whole screenshots among them, and the
 //! newest trace file.
 
-use std::fs;
 use std::io;
-use std::path::Path;
 
 use appytappy_platform::LocalTime;
 use serde::Deserialize;
 
 use crate::debug::trace_file;
+use crate::drafts::{DraftSummary, draft_shot};
 use crate::stores::Stores;
-use crate::zip_pack::{ZipPack, is_picture};
+use crate::zip_pack::ZipPack;
 
 /// What goes in the bundle beyond the files it always holds.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -47,12 +46,17 @@ const LOGS: [&str; 4] = [
 pub(crate) struct BundleJob {
     stores: Stores,
     spec: BundleSpec,
+    drafts: Vec<DraftSummary>,
 }
 
 impl BundleJob {
     /// A bundle of the files `stores` names, holding what `spec` asks for.
-    pub(crate) const fn new(stores: Stores, spec: BundleSpec) -> Self {
-        Self { stores, spec }
+    pub(crate) const fn new(stores: Stores, spec: BundleSpec, drafts: Vec<DraftSummary>) -> Self {
+        Self {
+            stores,
+            spec,
+            drafts,
+        }
     }
 
     /// Makes the bundle, as the bytes of a zip file.
@@ -61,7 +65,7 @@ impl BundleJob {
     ///
     /// Returns why it could not be made, as the user reads it.
     pub(crate) fn make(self) -> Result<Vec<u8>, String> {
-        build(&self.stores, self.spec)
+        build(&self.stores, self.spec, &self.drafts)
             .map_err(|error| format!("AppyTappy cannot make the debug bundle: {error}."))
     }
 }
@@ -71,7 +75,7 @@ impl BundleJob {
 /// # Errors
 ///
 /// Returns the error from reading a file that is there, or from packing.
-pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
+fn build(stores: &Stores, spec: BundleSpec, drafts: &[DraftSummary]) -> io::Result<Vec<u8>> {
     let mut bundle = ZipPack::new();
     bundle.add(
         "about.txt",
@@ -86,29 +90,49 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
     let locations = &stores.locations;
     bundle.file_if_there("settings.json", &locations.settings())?;
     bundle.file_if_there("automations.json", &locations.automations())?;
+    // Only pictures named by readable saved files are shared. A broken file
+    // still goes in as text, but cannot authorize sharing other pictures nearby.
     if spec.pictures {
+        let mut named = stores
+            .automations
+            .load()
+            .map(|file| {
+                file.images()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        named.extend(
+            drafts
+                .iter()
+                .filter_map(|summary| summary.draft.as_ref())
+                .flat_map(|draft| draft.pictures.iter().cloned()),
+        );
         bundle.folder(
             "automation pictures",
             &stores.automations.pictures(),
-            is_picture,
+            |file| named.iter().any(|name| name == file),
         )?;
     }
-    for app in folders(&locations.apps())? {
-        let name = app
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        bundle.folder(&format!("apps/{name}"), &app, |file| {
-            file == "app.json" || (spec.pictures && is_picture(file))
+    for app in stores.apps.load()? {
+        let folder = stores.apps.folder(&app.id);
+        let named = app
+            .file
+            .as_ref()
+            .map(|file| file.images())
+            .unwrap_or_default();
+        bundle.folder(&format!("apps/{}", app.id), &folder, |file| {
+            file == "app.json" || (spec.pictures && named.contains(&file))
         })?;
     }
     // A draft's folder holds its file and, for a value, fix, or reference,
     // its screenshots; the click pictures it names are with the others.
-    for draft in folders(&locations.drafts())? {
-        let name = draft
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        bundle.folder(&format!("drafts/{name}"), &draft, |file| {
-            file == "draft.json" || (spec.pictures && is_picture(file))
+    for draft in drafts {
+        let folder = locations.drafts().join(&draft.id);
+        bundle.folder(&format!("drafts/{}", draft.id), &folder, |file| {
+            file == "draft.json"
+                || (spec.pictures && draft.draft.is_some() && draft_shot(file).is_some())
         })?;
     }
     for log in LOGS {
@@ -124,27 +148,9 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
     bundle.finish()
 }
 
-/// The folders in `parent`, or none when it is not there.
-fn folders(parent: &Path) -> io::Result<Vec<std::path::PathBuf>> {
-    let entries = match fs::read_dir(parent) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut found = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        if entry.file_type()?.is_dir() {
-            found.push(entry.path());
-        }
-    }
-    found.sort();
-    Ok(found)
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{env, process};
+    use std::{env, fs, process};
 
     use super::*;
 
@@ -162,8 +168,6 @@ mod tests {
         // file, and neither is simply missing.
         let file = scratch.join("file.txt");
         fs::write(&file, "x").expect("write");
-        assert_eq!(folders(&missing).expect("missing is fine").len(), 0);
-        assert!(folders(&file).is_err());
         let mut bundle = ZipPack::new();
         bundle
             .file_if_there("a", &missing)

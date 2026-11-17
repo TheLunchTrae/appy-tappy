@@ -400,6 +400,13 @@ impl<H: Host> Owner<H> {
     /// placed too.
     pub(crate) fn reading(&mut self) -> Result<Option<Reading>, String> {
         let now = self.host.now();
+        if let Some(failure) = self
+            .capture
+            .picked()
+            .and_then(|picked| picked.failure.as_ref())
+        {
+            return Err(failure.error.clone());
+        }
         let Some(Picked {
             check: Some(check),
             latest: Some((latest, _arrived)),
@@ -415,6 +422,13 @@ impl<H: Host> Owner<H> {
     /// How the check reads the newest frame, for the debug details: `None`
     /// while [`Owner::reading`] answers none.
     pub(crate) fn explain_reading(&self) -> Result<Option<ReadingDetails>, String> {
+        if let Some(failure) = self
+            .capture
+            .picked()
+            .and_then(|picked| picked.failure.as_ref())
+        {
+            return Err(failure.error.clone());
+        }
         let Some(Picked {
             check: Some(check),
             latest: Some((latest, arrived)),

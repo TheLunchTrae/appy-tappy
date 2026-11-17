@@ -324,7 +324,8 @@ window fits, a session keeps its process, and a new one follows the process
 with the lowest ID. So a second copy of an application starts no second
 session, and it takes over when the first exits or has shown no window
 that fits for that long. A process ID that
-Windows reused for another executable ends the session. An application
+Windows reused for another executable ends the session, even when both
+executable names fit the same wildcard. An application
 relaunched within 5 seconds that gets its old process ID back keeps its session,
 because a snapshot cannot tell the two processes apart. A crashed application is
 the same as one that exits: its windows are destroyed and its process leaves the
@@ -335,7 +336,10 @@ The runtime watches the saved applications that have at least one automation
 that can run, and matches each by its window match's executable pattern, such
 as `Example.exe`, against the file names in the snapshot. A reload changes the
 list at once: an application that is no longer watched detaches, and one that
-is newly watched is found by the next snapshot.
+is newly watched is found by the next snapshot. The model starts a session
+only while the attached executable still matches the plan, so a reload that
+changes that pattern waits for detection instead of reading the old process
+with the new plan.
 
 #### Build detection
 
@@ -697,6 +701,10 @@ changing.
   detection](#build-detection) describes.
 
 ### Running once
+
+The shared automation file parser gives invalid or repeated IDs distinct,
+valid replacements deterministically. The setup app and runtime address the
+same automation after a hand edit; the next save writes those IDs.
 
 **Run actions now** in the automation editor asks the runtime to run one saved
 automation's actions once, as if its condition had just become true

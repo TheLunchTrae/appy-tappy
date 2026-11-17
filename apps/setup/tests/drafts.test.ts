@@ -388,6 +388,20 @@ describe('a draft and what it belongs to', () => {
     expect(fixOutdated({ ...asBar, kind: 'value' }, progress)).toBe(false);
   });
 
+  test('a fix with an old color or state tolerance cannot preview settings it would not save', () => {
+    for (const check of [
+      { kind: 'color' as const, color: { red: 1, green: 2, blue: 3 }, tolerance: 7 },
+      { kind: 'state' as const, states: [{ name: 'Shown', image: 'status-1.png' }], tolerance: 7 },
+    ]) {
+      const saved = { ...progress, screen: { ...progress.screen, check } };
+      const kept = fixOf(fixDraft(check));
+      expect(fixOutdated(kept, saved)).toBe(false);
+      expect(fixOutdated(kept, { ...saved, screen: { ...saved.screen, check: { ...check, tolerance: 8 } } })).toBe(
+        true,
+      );
+    }
+  });
+
   test('a reference editor a draft kept open goes on from the reference as it is saved now', () => {
     const saved = {
       id: 'percent',
@@ -423,6 +437,11 @@ describe('a draft and what it belongs to', () => {
     // Saved again since, the file name can be a new picture's, or no picture's.
     const retaught = { ...copied, samples: [copied.samples[0]!, { image: 'ref-percent-2.png', text: '5' }] };
     expect(refreshedDraft(draft, copied, retaught).dropped).toEqual([]);
+    const stored = storeSetup({ ...EMPTY_SETUP, editing: { existing: copied, name: 'Percent', needs: [] }, draft });
+    expect(restoreSetup(stored, retaught).draft.dropped).toEqual([]);
+    expect(restoreSetup(stored, retaught).editing?.existing).toBe(retaught);
+    expect(restoreSetup(stored, copied).draft.dropped).toEqual(draft.dropped);
+    expect(restoreSetup(stored, null).draft.dropped).toEqual([]);
     expect(refreshedDraft(draft, copied, { ...copied, samples: copied.samples.slice(0, 1) }).dropped).toEqual([]);
     expect(refreshedDraft(draft, copied, null).dropped).toEqual([]);
     expect(refreshedDraft(EMPTY_DRAFT, copied, null)).toBe(EMPTY_DRAFT);
