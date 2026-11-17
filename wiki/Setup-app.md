@@ -783,16 +783,17 @@ fits to the saved samples.
 [Saved pictures a reference can't learn](State-machines.md#saved-pictures-a-reference-cant-learn)
 has the states.
 
-**Remove** adds the sample's picture file name to the draft's `dropped`
-list, which goes with every spec the editor sends (`CharactersSpec.dropped`,
-`ReferenceSettingsSpec.dropped`). The owner leaves those samples out before
-it learns, fits, or judges anything (`SavedReference::without`), and a save
-writes the reference without them; the store then removes the pictures the
-file no longer names. New pictures, for references, values, redraws, and size
-fixes, take names no other picture in the application's file has. Writing a
-picture cannot overwrite one the saved file still names if the save fails.
-A reference left with no sample is refused, as a new one with no label is. The draft keeps `dropped` only while the editor is open on that
-reference: opening and leaving the editor clear it.
+**Remove** adds the sample's picture file name to the draft's `dropped` list,
+which goes with every spec the editor sends (`CharactersSpec.dropped`,
+`ReferenceSettingsSpec.dropped`). The owner leaves those samples out before it
+learns, fits, or judges anything (`SavedReference::without`), and a save writes
+the reference without them; the store then removes the pictures the file no
+longer names. New pictures, for references, values, redraws, and size fixes,
+take names no other picture in the application's file has. Writing a picture
+cannot overwrite one the saved file still names if the save fails. A reference
+left with no sample is refused, as a new one with no label is. The draft keeps
+`dropped` only while the editor is open on that reference: opening and leaving
+the editor clear it.
 
 Every `CharactersSpec` is taught in the reference's own editor, so a learn
 error on a saved sample there points at the list and names no reference to
