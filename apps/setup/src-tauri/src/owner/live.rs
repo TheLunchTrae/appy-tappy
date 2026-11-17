@@ -243,7 +243,7 @@ impl<H: Host> Owner<H> {
         self.keep_reference(trial.characters.reference.as_ref());
         let mut found = self.stores()?.app(&trial.app)?;
         let taught = self
-            .with_session(|session| trial.characters.teach(session, None, TAUGHT))
+            .with_session(|session| trial.characters.teach(session, None, TAUGHT, &[]))
             .map_err(|error| error.to_string())?;
         let id = taught.reference.id.clone();
         let characters = expected_characters(&trial.needs);
@@ -276,7 +276,7 @@ impl<H: Host> Owner<H> {
         self.keep_reference(spec.reference.as_ref());
         self.with_session(|session| {
             Ok(ReadingRisks {
-                lookalikes: spec.teach(session, None, TAUGHT)?.reader.lookalikes(),
+                lookalikes: spec.teach(session, None, TAUGHT, &[])?.reader.lookalikes(),
                 hides_tone: spec.hides_a_tone(session)?,
             })
         })

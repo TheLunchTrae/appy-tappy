@@ -161,7 +161,10 @@ impl<H: Host> Owner<H> {
             );
             named_apart(file, &id, name)?;
             let taught = owner
-                .with_session(|session| spec.characters.teach(session, Some(&id), name))
+                .with_session(|session| {
+                    spec.characters
+                        .teach(session, Some(&id), name, &file.images())
+                })
                 .map_err(|error| error.to_string())?;
             match file.references.iter_mut().find(|saved| saved.id == id) {
                 Some(saved) => *saved = taught.reference,

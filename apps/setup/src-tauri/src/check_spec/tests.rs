@@ -160,7 +160,7 @@ fn characters(
 
 /// What `spec` teaches a reference saved as `digits`, expecting nothing.
 fn teach(spec: &CharactersSpec, session: Session<'_>) -> Result<Taught, SpecError> {
-    spec.teach(session, Some("digits"), "Digits")
+    spec.teach(session, Some("digits"), "Digits", &[])
 }
 
 /// What saving `spec` on screenshot 0 and reading it back gives: the value
@@ -1026,10 +1026,36 @@ fn the_ui_describes_checks_in_camel_case_json() {
 }
 
 #[test]
+fn reference_pictures_leave_every_saved_picture_untouched() {
+    let spec = characters(left(), None, [one(0), one(1)].concat(), Vec::new());
+    let taught = spec
+        .teach(
+            session(&[screenshot(), screenshot()], None),
+            Some("digits"),
+            "Digits",
+            &["ref-digits-1.png", "ref-digits-2.png", "ref-digits-3.png"],
+        )
+        .expect("learns without overwriting another saved item's picture");
+    assert_eq!(
+        taught
+            .pictures
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["ref-digits-4.png", "ref-digits-5.png"]
+    );
+}
+
+#[test]
 fn a_new_reference_names_one_picture_per_label() {
     let spec = characters(left(), None, one(0), Vec::new());
     let taught = spec
-        .teach(session(&[screenshot()], None), Some("digits"), "Digits")
+        .teach(
+            session(&[screenshot()], None),
+            Some("digits"),
+            "Digits",
+            &[],
+        )
         .expect("valid characters");
     assert_eq!(
         taught.reference,
@@ -1159,7 +1185,7 @@ fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
     };
     // Without an ID of its own, it is taught under the saved one's.
     let taught = spec
-        .teach(session(&[screenshot()], None), None, "Red digits")
+        .teach(session(&[screenshot()], None), None, "Red digits", &[])
         .expect("valid characters");
     let reference = taught.reference;
     let images: Vec<&str> = reference

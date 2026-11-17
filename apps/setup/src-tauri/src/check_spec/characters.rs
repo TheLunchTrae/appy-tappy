@@ -332,7 +332,9 @@ impl CharactersSpec {
     /// and their pictures, and the new ones are numbered after them:
     /// `ref-{id}-1.png` onward, the labeled screenshots first and then the
     /// recorded readings. `None` for `id` teaches a saved reference under
-    /// its own ID, or a new one under a stand-in.
+    /// its own ID, or a new one under a stand-in. `reserved` names every
+    /// picture still used by the application's saved file; no new sample
+    /// takes one of those names.
     ///
     /// # Errors
     ///
@@ -345,11 +347,12 @@ impl CharactersSpec {
         session: Session<'_>,
         id: Option<&str>,
         name: &str,
+        reserved: &[&str],
     ) -> Result<Taught, SpecError> {
         if self.reference.is_none() && self.labels.is_empty() && self.recorded.is_empty() {
             return Err(SpecError::NoLabels);
         }
-        let taught = self.learn(session, id, name, &self.recorded)?;
+        let taught = self.learn(session, id, name, &self.recorded, reserved)?;
         if taught.reference.samples.is_empty() {
             return Err(SpecError::NoLabels);
         }
@@ -385,6 +388,7 @@ impl CharactersSpec {
         id: Option<&str>,
         name: &str,
         recorded: &[RecordedLabel],
+        reserved: &[&str],
     ) -> Result<Taught, SpecError> {
         let (region, window_size) = self.drawn(session.screenshots)?;
         self.same_sizes(session, window_size)?;
@@ -417,18 +421,13 @@ impl CharactersSpec {
         let mut pictures = Vec::new();
         let mut taken: Vec<String> = samples.iter().map(|sample| sample.image.clone()).collect();
         taken.extend(self.dropped.iter().cloned());
-        let mut number = taken.len();
+        taken.extend(reserved.iter().map(|name| (*name).to_owned()));
         for (image, text) in new {
-            // The next number no sample's picture has, even when a file edited
-            // by hand left a gap. Of the next `samples.len() + 1` numbers at
-            // least one is free; past them all is free too.
-            number = (1..=taken.len().saturating_add(1))
-                .map(|step| number.saturating_add(step))
-                .find(|&next| {
-                    let name = sample_name(id, next);
-                    !taken.contains(&name)
-                })
-                .unwrap_or_else(|| number.saturating_add(taken.len()).saturating_add(1));
+            // One more candidate than occupied names guarantees a free one.
+            let last = taken.len().saturating_add(1);
+            let number = (1..=last)
+                .find(|&number| !taken.contains(&sample_name(id, number)))
+                .unwrap_or(last);
             let name = sample_name(id, number);
             taken.push(name.clone());
             pictures.push((
@@ -610,7 +609,7 @@ impl CharactersSpec {
         more: &[L],
         image: impl Fn(Region, &L) -> Result<Image, SpecError>,
     ) -> Result<Vec<Option<String>>, SpecError> {
-        let taught = self.learn(session, None, "", &[])?;
+        let taught = self.learn(session, None, "", &[], &[])?;
         let mut reader = taught.reader;
         Ok(more
             .iter()

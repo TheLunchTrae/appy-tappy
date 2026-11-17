@@ -3392,7 +3392,7 @@ changed outside the setup app while a reference is kept is not seen until
 then.
 
 A reference edit gives every added sample a picture name different from
-all its kept and dropped samples. Pictures are written before the application's
+all the pictures its application keeps, including its dropped samples. Pictures are written before the application's
 file is replaced, so a failed save cannot overwrite a sample the saved file
 still names.
 
