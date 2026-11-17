@@ -67,10 +67,7 @@ impl Pattern {
                 text.eq_ignore_ascii_case(candidate)
                     || (!candidate.is_ascii() && *text == candidate.to_lowercase())
             },
-            Matcher::Wildcard(pattern) => {
-                let folded: Vec<char> = candidate.to_lowercase().chars().collect();
-                glob(pattern, &folded)
-            },
+            Matcher::Wildcard(pattern) => glob(pattern, candidate.to_lowercase().chars()),
         }
     }
 }
@@ -84,30 +81,29 @@ impl fmt::Display for Pattern {
 /// Whether `text` matches `pattern`. On a mismatch after a `*`, the `*` takes
 /// one more character and matching resumes, so the work stays near the
 /// product of the two lengths at worst.
-fn glob(mut pattern: &[char], mut text: &[char]) -> bool {
-    // The pattern after the last `*`, and where in the text that `*` stops.
-    let mut star: Option<(&[char], &[char])> = None;
+fn glob(mut pattern: &[char], mut text: std::str::Chars<'_>) -> bool {
+    // The pattern after the last star and where it stops in the folded text.
+    let mut star = None;
     loop {
-        match (pattern.split_first(), text.split_first()) {
-            (Some(('*', after)), _) => {
-                star = Some((after, text));
+        if let Some(('*', after)) = pattern.split_first() {
+            star = Some((after, text.clone()));
+            pattern = after;
+            continue;
+        }
+        match (pattern.split_first(), text.next()) {
+            (Some((&wanted, after)), Some(found)) if wanted == '?' || wanted == found => {
                 pattern = after;
-            },
-            (Some((&wanted, after)), Some((&found, rest))) if wanted == '?' || wanted == found => {
-                pattern = after;
-                text = rest;
             },
             (None, None) => return true,
             _ => {
-                let Some((after, stop)) = star else {
+                let Some((after, stop)) = &mut star else {
                     return false;
                 };
-                let Some((_, later)) = stop.split_first() else {
+                if stop.next().is_none() {
                     return false;
-                };
-                star = Some((after, later));
+                }
+                text = stop.clone();
                 pattern = after;
-                text = later;
             },
         }
     }
@@ -249,6 +245,8 @@ mod tests {
             ("MÜNCHEN", "München", true),
             ("MÜNCHEN", "Zürich", false),
             ("?Ü*", "München", true),
+            ("*🌗?", "a🌗🌗x", true),
+            ("*🌗?", "a🌗xy", false),
             ("Example*", "Example App", true),
             ("*App", "Example App", true),
             ("*amp*", "Example App", true),
