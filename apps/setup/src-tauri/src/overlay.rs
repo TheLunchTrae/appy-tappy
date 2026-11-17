@@ -19,9 +19,8 @@
 
 pub(crate) mod window;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
-use std::mem;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
@@ -431,10 +430,18 @@ impl<S: CaptureSession> Overlays<S> {
     ///
     /// Returns the first error a capture's thread ended with.
     pub(crate) fn close_all(&mut self) -> io::Result<()> {
-        self.failed.clear();
-        mem::take(&mut self.open)
-            .into_values()
-            .filter_map(|overlay| overlay.capture)
+        self.retain_apps(&BTreeSet::new())
+    }
+
+    /// Closes captures and clears retry entries for applications absent
+    /// from the Values page's latest poll.
+    /// # Errors
+    /// Returns the first error a capture's thread ended with.
+    pub(crate) fn retain_apps(&mut self, apps: &BTreeSet<String>) -> io::Result<()> {
+        self.failed.retain(|app, _| apps.contains(app));
+        self.open
+            .extract_if(.., |app, _| !apps.contains(app))
+            .filter_map(|(_, overlay)| overlay.capture)
             .map(Running::close)
             .fold(Ok(()), Result::and)
     }

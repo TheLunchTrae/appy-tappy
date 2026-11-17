@@ -34,12 +34,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Branches restore main's tools without filling the repository cache.
       - name: Install pinned tools
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: '2026.10.19'
           install: true
           cache: true
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       # Tauri builds the setup app against the Linux webview stack here, so
       # the workspace lints and tests on this runner too.
       - name: Install the webview build libraries
@@ -134,6 +136,7 @@ jobs:
           install: true
           install_args: rust github:sourcefrog/cargo-mutants bun
           cache: true
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Install the webview build libraries
         run: |
           sudo apt-get update
@@ -189,6 +192,7 @@ jobs:
           install: true
           install_args: rust github:nextest-rs/nextest bun
           cache: true
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       # The same build cache setup as the quality job, kept per job.
       - name: Restore the Rust build cache
         id: rust-cache
@@ -264,6 +268,7 @@ jobs:
           install: true
           install_args: rust
           cache: true
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       # The same build cache setup as the quality job, kept per job.
       - name: Restore the Rust build cache
         id: rust-cache

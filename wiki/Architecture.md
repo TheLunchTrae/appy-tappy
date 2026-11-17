@@ -33,7 +33,7 @@ defines the domain terms.
   ┌─────────────────────────────────────────────────────────┐
   │ reload watch ─ reload ──────────┐                       │
   │ lifecycle ─ started, exited ────┤                       │
-  │ readers ─ samples, problems ────┼─► owner thread:       │
+  │ readers ─ frames, problems  ────┼─► owner thread:       │
   │ action thread ─ notes, can run ─┤   model + engine      │
   │ tray ─ enable, disable, quit ───┘           │           │
   │ ◄── actions, undos, readers started, stopped┘           │
@@ -176,8 +176,9 @@ Each thread below is a plain `std::thread`, and each channel is a
   ([Window sizes](Screen-regions.md#window-sizes)). A `Layout` in
   `appytappy-sources::screen` says where each region goes, and copies the one
   rectangle around them instead when that is smaller, such as for values
-  that overlap. It sends a `Sample` only when a value changes, and reads less
-  often while nothing changes. When the window closes or changes size, it
+  that overlap. It sends the changed readings from a frame together, including
+  any value that has stopped reading. It sends nothing for steady readings and
+  reads less often while nothing changes. When the window closes or changes size, it
   sends `Unseen`, and the owner forgets the application's values, so no rule
   acts on a value nobody can see. Each rule stays as it was, run or not,
   until the values read next decide its condition. When the window closes,

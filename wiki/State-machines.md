@@ -21,17 +21,25 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Fifteen guards drop such stale messages:
+it was about has gone. These guards drop stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
   longer runs.
 - **Reader numbers.** A session numbers its readers with a `ReaderNumber`,
-  which each reader sends with every value it reads, when its values can no
-  longer be seen, and when it ends. The owner drops each of those unless it
+  which each reader sends with each batch of changed readings, when its values
+  can no longer be seen, and when it ends. The owner drops each of those unless it
   carries the number of the session's newest reader and that reader has not
   ended (`Model::read_by`): what a reader that the session replaced still
   sent, and what the capture of a reader that panicked still read.
+- **Screenshot shortcut.** A key press goes only to the capture screen
+  whose shortcut registration still belongs to its active effect
+  (`useScreenshotShortcut`). Cleanup stops accepting key presses before it
+  queues the native unregister.
+- **Values page polls.** `useLiveValues` shows an answer only for the list
+  it requested and while that poll still belongs to the page. A list change
+  or page exit cancels the callback with `ask`, and the next poll goes to the
+  owner after the old one finishes.
 - **Tickets.** The setup app's owner thread hands each capture, each
   recording, of readings or of looks, and each search for text like a
   reference's box a new `Ticket` from one counter, `Tickets`
@@ -507,7 +515,7 @@ records to, the newest that the reader handed it before the frame).
 ```mermaid
 stateDiagram-v2
     [*] --> Reading
-    Reading --> Reading: frame read, a Sample for each value that changed
+    Reading --> Reading: frame read, one batch of changed or lost readings
     Reading --> Reading: frame error, logged once and counted
     Reading --> Reading: another size, Unseen, and Resizing once for each size
     Reading --> Reading: its own size again, Resizing
@@ -517,8 +525,9 @@ stateDiagram-v2
     Ended --> [*]: the reader closes the capture
 ```
 
-- A `Sample` goes to the owner only when a value reads differently from its
-  last reading.
+- A `Frame` goes to the owner when a value changes, stops reading, or becomes
+  readable again. The batch carries all of those changes from that frame.
+  The owner applies them together before evaluating any rule.
 - A frame error is logged once until another problem or a good frame replaces
   it. A good frame starts the count again. A region that lies outside a window
   of the capture's own size does not count, because a new capture would fail
@@ -557,8 +566,10 @@ stateDiagram-v2
 - A value that does not read at the capture's own size, such as one whose
   scaled region reaches outside the window, says why once and is not
   copied.
-- A value whose check fails on a frame keeps its last reading and says why.
-  The handler keeps every problem it said for the value since the value was
+- A value whose check fails on a frame becomes unknown and the handler says
+  why. The first reading after the failure goes to the owner even if it
+  matches the reading from before the failure. The handler keeps every
+  problem it said for the value since the value was
   last read, and says each once: a good read forgets them. A number's check
   fails one way for each stage of its read, such as a character its
   reference has not learned, whatever the characters are, so a counter that
@@ -716,7 +727,7 @@ stateDiagram-v2
     Held --> Fired: the cooldown ends while the condition still holds, sample or not
     Held --> Armed: the condition is false or unknown
     Fired --> Armed: the condition is false, and a restoring rule is released
-    Fired --> Fired: the condition is unknown, such as after Unseen
+    Fired --> Fired: the condition is unknown after a value or window stops reading
 ```
 
 - **Fired** means `armed` is false. A rule that restores is also `active` until
@@ -724,13 +735,13 @@ stateDiagram-v2
 - **Held** is not a field: it is a rule that is `armed`, whose condition holds
   on the values the session has, and whose cooldown from `last_fired` has not
   passed.
-- In one sample, releases run before fires, so a restore never undoes a change
+- In one frame, releases run before fires, so a restore never undoes a change
   another rule makes on the same value.
 - A session that stops, because the application exited or its automations
   stop running, releases every active rule.
-- The engine runs when a sample of any of the session's values arrives, and
-  at the end of a held rule's cooldown. A value that holds still sends no
-  sample, so `Session::next_due` gives the earliest time a held rule's
+- The engine runs once after applying all changes in a frame, and at the end
+  of a held rule's cooldown. A steady frame sends no changes, so
+  `Session::next_due` gives the earliest time a held rule's
   cooldown ends. The owner wakes then if no event came first, and
   `Session::recheck` fires each held rule whose cooldown passed.
 
@@ -1772,7 +1783,12 @@ stateDiagram-v2
   size.
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
-  second click, or when focus leaves **Change shortcut**.
+  second click, or when focus leaves **Change shortcut**. The capture screens
+  share the shortcut registration queue. Leaving the view or starting to
+  choose ends its key handler, then releases any registration that succeeded.
+  The next screen registers only after that cleanup. A refused registration
+  shows the shortcut error and leaves nothing to release. Choosing another
+  shortcut or returning to the capture view tries again.
 
 ### Live check
 
@@ -3279,11 +3295,20 @@ stateDiagram-v2
     Retrying --> Off: the overlay is turned off, or its application is removed
 ```
 
-The Values page keeps a second set of entries, `live`, one for each running
-application whose values it shows, whether its overlay is on or not. They
-move through the same states but have no window: the page's poll opens one,
-and leaving the page turns them all off. Each value's reading carries the
-value's ID, so the page matches a reading to its row by ID.
+The Values page keeps a second set of entries, `live`, for the running
+applications it shows. They move through the same states and have no overlay
+window. The page sends one poll with the application IDs it wants to read.
+The owner stops the captures and clears the retry state for IDs the poll
+leaves out. An empty poll, when the last window closes or the page goes away,
+stops all Values page captures. Each value's reading carries its ID, so the
+page matches it to its row.
+
+The page sends its polls in order, including the final empty poll on
+unmount. A reopened page's first poll follows the old page's final poll.
+While a poll is pending, the page discards its answer if the application
+list changes or the page unmounts, and hides the readings of the earlier
+list. A failed poll for the current list shows its error and the next poll
+tries again.
 
 Each frame means to an entry what `Placed::meaning` says, as it does to the
 runtime's frame handler. At another window size, an entry reads nothing

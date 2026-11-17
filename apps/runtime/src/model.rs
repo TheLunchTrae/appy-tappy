@@ -434,26 +434,25 @@ impl Model {
             .filter(|running| running.reader == reader && running.read_again.is_none())
     }
 
-    /// Records the value at `position` among the values that session `id`
-    /// reads, as its reader `reader` read it at `at`. A reading from any
-    /// reader but the one that reads the session's values is dropped.
-    pub(crate) fn sample(
+    /// Records the changes from one frame of session `id`, read at `at`.
+    /// A frame from any reader but the current one is dropped.
+    pub(crate) fn frame(
         &mut self,
         id: SessionId,
         reader: ReaderNumber,
-        position: usize,
-        value: Value,
+        changes: impl IntoIterator<Item = (usize, Option<Value>)>,
         at: Instant,
     ) -> Vec<Order> {
         let Some(running) = self.read_by(id, reader) else {
             return Vec::new();
         };
-        // The session reads the values of its plan, which a reload replaces
-        // only with a plan that reads the same.
-        let Some(read) = running.plan.runs.values.get(position) else {
-            return Vec::new();
-        };
-        let effects = running.session.sample(read.signal.clone(), value, at);
+        // A reload replaces the plan only with one that reads the same
+        // values in the same order.
+        let changes = changes.into_iter().filter_map(|(position, value)| {
+            let read = running.plan.runs.values.get(position)?;
+            Some((read.signal.clone(), value))
+        });
+        let effects = running.session.sample(changes, at);
         acts(id, &running.plan, &running.watched, effects, Some(at), None)
     }
 
@@ -712,6 +711,19 @@ mod tests {
                 Order::Held((id, rule), _) => format!("held {} {}", id.0, rule.0),
             })
             .collect()
+    }
+
+    impl Model {
+        fn sample(
+            &mut self,
+            session: SessionId,
+            reader: ReaderNumber,
+            position: usize,
+            value: Value,
+            at: Instant,
+        ) -> Vec<Order> {
+            self.frame(session, reader, [(position, Some(value))], at)
+        }
     }
 
     #[test]

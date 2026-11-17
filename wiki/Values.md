@@ -667,6 +667,10 @@ The Values page shows each value's size and side under **Region**, such as
 
 While the application runs, the Values page adds a column for the window's
 size now, such as **At 3440 × 1440 now**, with what each value reads there.
+Closing an application's window clears its live readings. When no windows
+are open for the listed values, their saved rows stay and the live column
+goes away.
+
 Each value has **Fix at this size** beside it there, unless the window is at
 the size the value was first drawn at. At that size, [edit the
 value](#edit-a-value) instead. **Matches no state** isn't always wrong: the

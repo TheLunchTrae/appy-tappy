@@ -153,10 +153,10 @@ pub(super) struct Tripwire(pub(super) Reading);
 )]
 impl From<Reading> for Tripwire {
     fn from(reading: Reading) -> Self {
-        if let Reading::Sample {
-            value: Value::Flag(true),
-            ..
-        } = reading
+        if let Reading::Frame { changes, .. } = &reading
+            && changes
+                .iter()
+                .any(|(_, value)| *value == Some(Value::Flag(true)))
         {
             panic!("broke");
         }

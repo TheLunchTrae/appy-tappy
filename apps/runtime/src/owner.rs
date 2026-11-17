@@ -66,7 +66,7 @@ impl Event {
             Self::Tray(_) => "tray",
             Self::DetectionEnded => "detection ended",
             Self::Reload => "reload",
-            Self::Reading(Reading::Sample { .. }) => "sample",
+            Self::Reading(Reading::Frame { .. }) => "sample",
             Self::Reading(_) => "reader",
             Self::Actions(_) => "actions",
             Self::Trace(_) => "trace",
@@ -77,7 +77,7 @@ impl Event {
     /// When the frame arrived whose reading this is.
     const fn cause(&self) -> Option<Instant> {
         match self {
-            Self::Reading(Reading::Sample { at, .. }) => Some(*at),
+            Self::Reading(Reading::Frame { at, .. }) => Some(*at),
             _ => None,
         }
     }
@@ -848,24 +848,27 @@ fn unix_ms() -> u64 {
         })
 }
 
-/// Records that the owner received a changed value, `event`, now.
+/// Records the new readings the owner received from a frame.
 fn receive(trace: &mut Trace, event: &Event) {
-    if let Event::Reading(Reading::Sample {
+    if let Event::Reading(Reading::Frame {
         session,
-        position,
-        value,
+        changes,
         at,
         ..
     }) = event
     {
-        trace.record(What::Received, |record| Record {
-            session: Some(*session),
-            item: Some(*position),
-            value: Some(value.clone()),
-            took: Some(record.at.saturating_duration_since(*at)),
-            cause: Some(*at),
-            ..record
-        });
+        for (position, value) in changes {
+            if let Some(value) = value {
+                trace.record(What::Received, |record| Record {
+                    session: Some(*session),
+                    item: Some(*position),
+                    value: Some(value.clone()),
+                    took: Some(record.at.saturating_duration_since(*at)),
+                    cause: Some(*at),
+                    ..record
+                });
+            }
+        }
     }
 }
 
@@ -1161,13 +1164,12 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
             );
             Step::Reload
         },
-        Event::Reading(Reading::Sample {
+        Event::Reading(Reading::Frame {
             session,
             reader,
-            position,
-            value,
+            changes,
             at,
-        }) => Step::Carry(model.sample(session, reader, position, value, at)),
+        }) => Step::Carry(model.frame(session, reader, changes, at)),
         Event::Reading(Reading::Problem { session, problem }) => {
             if let Some(name) = model.app_name(session) {
                 note(log, &format!("{name}: {problem}"));
@@ -2025,11 +2027,10 @@ mod tests {
         });
         let at = Instant::now();
         for progress in [95.0, 10.0, 95.0] {
-            model.sample(
+            model.frame(
                 SessionId(0),
                 ReaderNumber(0),
-                0,
-                plan::examples::number(progress),
+                [(0, Some(plan::examples::number(progress)))],
                 at,
             );
         }
@@ -2357,11 +2358,10 @@ mod tests {
     #[test]
     fn a_sample_is_handled_as_a_sample_of_its_frame() {
         let at = Instant::now();
-        let sample = Event::from(Reading::Sample {
+        let sample = Event::from(Reading::Frame {
             session: SessionId(0),
             reader: ReaderNumber(0),
-            position: 0,
-            value: plan::examples::number(95.0),
+            changes: vec![(0, Some(plan::examples::number(95.0)))],
             at,
         });
         assert_eq!((sample.kind(), sample.cause()), ("sample", Some(at)));
@@ -2380,11 +2380,10 @@ mod tests {
         let value = plan::examples::number(95.0);
         receive(
             &mut trace,
-            &Event::from(Reading::Sample {
+            &Event::from(Reading::Frame {
                 session: SessionId(0),
                 reader: ReaderNumber(0),
-                position: 2,
-                value: value.clone(),
+                changes: vec![(2, Some(value.clone())), (1, None)],
                 at,
             }),
         );
