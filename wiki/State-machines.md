@@ -60,8 +60,10 @@ it was about has gone. Fifteen guards drop such stale messages:
   (`Owner::watch`), so such a pick can still replace a watch; the owner then
   refuses the watch, and the editor watches again. The owner answers nothing
   for a picture asked of another search than the one it holds and rereads
-  nothing for one (`apps/setup/src-tauri/src/owner/found.rs`), and
-  an ask about another watch than the one it holds is refused. A reading's
+  nothing for one (`apps/setup/src-tauri/src/owner/found.rs`). The page
+  drops pictures fetched for a replaced or dismissed search, or after its
+  editor closes (`ask` in `useFound`); a reread keeps its picture asks.
+  An ask about another watch than the one the owner holds is refused. A reading's
   picture is asked for with its recording's number: the owner answers
   nothing for a recording that was discarded or replaced (`recorded_pixels`
   in `apps/setup/src-tauri/src/owner/recording.rs`), and the page drops a
@@ -2807,8 +2809,11 @@ stateDiagram-v2
   unticked. It is listed when its text may show only characters the value
   the reference is taught for needs, a lookalike digit counted as its digit
   (`fitsNeeds`), or while it is being read or the user typed it. Answers to a search the user
-  moved on from are ignored by the UI's turn and, for pictures, by the
-  search's number. A reread also starts a new turn, so the search's state as it
+  moved on from are ignored by the UI's turn. Picture callbacks end when
+  the search is replaced or dismissed, or its editor closes, through the
+  cleanup of their effect (`ask` in `useFound`); a late picture cannot
+  replace the current search's pictures. A reread keeps that effect and
+  accepts its pending pictures. It also starts a new turn, so the search's state as it
   was read before the reread does not put the finds back and end the wait for
   their text.
 - A ticked find is flagged without asking the owner when it has no text, or
