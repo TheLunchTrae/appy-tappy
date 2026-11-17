@@ -610,14 +610,17 @@ test('boxes go on screenshots of the size the reference reads at, once it has on
 
 test("a new screenshot carries the value's region when it fits, and clears it when it does not", () => {
   const drawn = { ...EMPTY_DRAFT, region, drawnOn: 0 };
-  expect(onPicture(drawn, 1, true)).toEqual({ ...drawn, drawnOn: 1 });
-  expect(onPicture(drawn, 1, false)).toEqual({ ...drawn, region: null, drawnOn: null });
-  expect(onPicture(EMPTY_DRAFT, 1, true)).toBe(EMPTY_DRAFT);
+  expect(onPicture(drawn, 1, true, 'draw')).toEqual({ ...drawn, drawnOn: 1 });
+  expect(onPicture(drawn, 1, false, 'draw')).toEqual({ ...drawn, region: null, drawnOn: null });
+  expect(onPicture(EMPTY_DRAFT, 1, true, 'draw')).toBe(EMPTY_DRAFT);
   // A saved value's region waits, on no screenshot, for one of the size it was drawn at.
   const saved = { ...EMPTY_DRAFT, region };
-  expect(onPicture(saved, 1, false)).toBe(saved);
+  expect(onPicture(saved, 1, false, 'draw')).toBe(saved);
   // While a size is unknown, such as before the screenshot's pixels arrive, the region stays where it is drawn.
-  expect(onPicture(drawn, 1, null)).toBe(drawn);
+  expect(onPicture(drawn, 1, null, 'draw')).toBe(drawn);
+  // A saved value can only move its region at its original size, even after it sat on a screenshot.
+  expect(onPicture(drawn, 1, false, 'edit')).toBe(drawn);
+  expect(onPicture(drawn, 1, true, 'edit')).toEqual({ ...drawn, drawnOn: 1 });
 });
 
 describe('fixDraft', () => {

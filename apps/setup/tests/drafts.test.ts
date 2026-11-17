@@ -9,7 +9,6 @@ import {
   captureProblem,
   fixOutdated,
   needsField,
-  refreshedDraft,
   refreshedEditing,
   startEditing,
   withTaught,
@@ -176,7 +175,7 @@ describe('what a draft keeps', () => {
       expect([key, made[key]]).not.toEqual([key, start]);
     }
     const kept: unknown = JSON.parse(JSON.stringify(keep('value', storeSetup(setup))));
-    expect(keptSetup(def('value', kept))).toEqual({ ...setup, draft: { ...draft, recorded: new Map() } });
+    expect(keptSetup(def('value', kept))).toEqual({ ...setup, draft: { ...draft, recorded: new Map(), dropped: [] } });
   });
 });
 
@@ -360,6 +359,7 @@ describe('a draft and what it belongs to', () => {
     expect(captureProblem(fits, apps)).toBeNull();
     // The reference a fix reads with is its own choice, so another one still fits.
     expect(fixOutdated(fixOf({ ...fixDraft(progress.screen.check), reference: 'other' }), progress)).toBe(false);
+    expect(fixOutdated(fixOf({ ...fixDraft(progress.screen.check), tolerance: 173 }), progress)).toBe(false);
     // What a number counts and which characters it reads are the value's, which a fix follows.
     const whole = { ...progress.screen.check, whole: true };
     expect(fixOutdated(fits, { ...progress, screen: { ...progress.screen, check: whole } })).toBe(true);
@@ -388,6 +388,20 @@ describe('a draft and what it belongs to', () => {
     expect(fixOutdated({ ...asBar, kind: 'value' }, progress)).toBe(false);
   });
 
+  test('a fix with an old color or state tolerance cannot preview settings it would not save', () => {
+    for (const check of [
+      { kind: 'color' as const, color: { red: 1, green: 2, blue: 3 }, tolerance: 7 },
+      { kind: 'state' as const, states: [{ name: 'Shown', image: 'status-1.png' }], tolerance: 7 },
+    ]) {
+      const saved = { ...progress, screen: { ...progress.screen, check } };
+      const kept = fixOf(fixDraft(check));
+      expect(fixOutdated(kept, saved)).toBe(false);
+      expect(fixOutdated(kept, { ...saved, screen: { ...saved.screen, check: { ...check, tolerance: 8 } } })).toBe(
+        true,
+      );
+    }
+  });
+
   test('a reference editor a draft kept open goes on from the reference as it is saved now', () => {
     const saved = {
       id: 'percent',
@@ -407,25 +421,22 @@ describe('a draft and what it belongs to', () => {
     expect(refreshedEditing(null, [taught])).toBeNull();
   });
 
-  test('saved pictures a draft left out stay out only while the reference has the pictures it copied', () => {
-    const copied = {
+  test('a resumed draft reviews removals again even when picture names and labels were reused', () => {
+    const saved = {
       id: 'percent',
       name: 'Percent',
       origin: { kind: 'byHand' } as const,
       tolerance: 40,
-      samples: [
-        { image: 'ref-percent-1.png', text: '87%' },
-        { image: 'ref-percent-2.png', text: '12%' },
-      ],
+      samples: [{ image: 'ref-percent-2.png', text: '1' }],
     };
     const draft = { ...EMPTY_DRAFT, dropped: ['ref-percent-2.png'] };
-    expect(refreshedDraft(draft, copied, { ...copied, name: 'Renamed', tolerance: 60 })).toBe(draft);
-    // Saved again since, the file name can be a new picture's, or no picture's.
-    const retaught = { ...copied, samples: [copied.samples[0]!, { image: 'ref-percent-2.png', text: '5' }] };
-    expect(refreshedDraft(draft, copied, retaught).dropped).toEqual([]);
-    expect(refreshedDraft(draft, copied, { ...copied, samples: copied.samples.slice(0, 1) }).dropped).toEqual([]);
-    expect(refreshedDraft(draft, copied, null).dropped).toEqual([]);
-    expect(refreshedDraft(EMPTY_DRAFT, copied, null)).toBe(EMPTY_DRAFT);
+    const setup = { ...EMPTY_SETUP, editing: { existing: saved, name: 'Percent', needs: [] }, draft };
+    // Two replacements can give a different picture the same name and label.
+    const reused = { ...saved, samples: [{ image: 'ref-percent-2.png', text: '1' }] };
+    for (const current of [undefined, saved, reused, null]) {
+      expect(restoreSetup(storeSetup(setup), current).draft.dropped).toEqual([]);
+    }
+    expect(restoreSetup(storeSetup(setup), reused).editing?.existing).toBe(reused);
   });
 
   test('the newest draft of a saved item is the one finished', () => {

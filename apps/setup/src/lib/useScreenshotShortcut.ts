@@ -9,6 +9,29 @@ import { ask } from './request.ts';
 import { shortcutLabel } from './shortcut.ts';
 import { useShortcutChoice } from './useShortcutChoice.ts';
 
+interface Registration {
+  readonly shortcut: string;
+}
+
+let registered: Registration | null = null;
+
+async function release(registration: Registration): Promise<void> {
+  if (registered === registration) {
+    await unregister(registration.shortcut);
+    registered = null;
+  }
+}
+
+// The native registration belongs to the app, including when one capture
+// screen has unmounted and another is registering the same keys.
+let shortcutQueue = Promise.resolve();
+
+function inOrder(change: () => Promise<void>): Promise<void> {
+  const next = shortcutQueue.then(change);
+  shortcutQueue = next.catch(() => undefined);
+  return next;
+}
+
 /**
  * The global shortcut that takes a screenshot with `onPress`, and the user's choice of a new one, which is saved in
  * the settings. It is on while the component that uses it shows, except while the user is choosing and while
@@ -29,26 +52,29 @@ export function useScreenshotShortcut(onPress: (() => Promise<unknown>) | null):
     latest.current = onPress;
   });
 
-  // Registering and unregistering run one after another, in the order the
-  // effect asked for them, so a quick unregister cannot overtake a register.
-  const queue = useRef<Promise<void>>(Promise.resolve());
   const takes = onPress !== null;
   useEffect(() => {
     if (choosing || !takes) {
       return undefined;
     }
+    let active = true;
+    const registration = { shortcut };
     const pressed = (event: ShortcutEvent): void => {
-      if (event.state === 'Pressed' && latest.current !== null) {
+      if (active && event.state === 'Pressed' && latest.current !== null) {
         background(latest.current());
       }
     };
     const cancel = ask(
-      async () => {
-        const registered = queue.current.then(async () => register(shortcut, pressed));
-        // The queue goes on whether or not the shortcut registered.
-        queue.current = registered.catch(() => undefined);
-        return registered;
-      },
+      () =>
+        inOrder(async () => {
+          if (active && registered !== null) {
+            await release(registered);
+          }
+          if (active) {
+            await register(shortcut, pressed);
+            registered = registration;
+          }
+        }),
       () => {
         setError(null);
       },
@@ -57,12 +83,9 @@ export function useScreenshotShortcut(onPress: (() => Promise<unknown>) | null):
       },
     );
     return () => {
+      active = false;
       cancel();
-      queue.current = queue.current
-        .then(async () => unregister(shortcut))
-        .catch(() => {
-          // A shortcut that never registered has nothing to remove.
-        });
+      background(inOrder(async () => release(registration)));
     };
   }, [shortcut, choosing, takes]);
 

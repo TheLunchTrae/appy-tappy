@@ -26,7 +26,6 @@ import { discovery } from './discovery.ts';
 import { coverage } from './expected.ts';
 import type { Picture } from './pixels.ts';
 import { knownCharacters } from './reference.ts';
-import { background } from './repeat.ts';
 import type { useBoxes } from './useBoxes.ts';
 import { useCharacterCheck } from './useCharacterCheck.ts';
 import { useContrastTolerance } from './useContrastTolerance.ts';
@@ -98,7 +97,7 @@ export function useReferenceTeaching({
   onSaving,
   onSaved,
 }: TeachingSetup) {
-  const recorder = useRecording();
+  const recorder = useRecording(editing !== null);
   const recording = recorder.view;
   // Where the next new recording looks for characters. Record more goes on with the recording's own.
   const [recordScope, setRecordScope] = useState<RecordingScope>('place');
@@ -245,9 +244,6 @@ export function useReferenceTeaching({
 
   // Leaves the editor for the value, forgetting its boxes and recording.
   const close = (): void => {
-    if (recording !== null) {
-      background(discard());
-    }
     setEditing(null);
     setError(null);
     stopPicking();

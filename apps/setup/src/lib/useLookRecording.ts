@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 
 import type { LookRecordingView } from './bindings.ts';
-import { discardRecording, lookRecordingState, startLookRecording } from './api.ts';
+import { discardRecording, lookRecordingState, startLookRecording, stopRecording } from './api.ts';
 import type { Rect } from './region.ts';
 import { useRecorder } from './useRecorder.ts';
 
@@ -51,8 +51,13 @@ export function useLookRecording(adopt: (index: number) => void): {
   }, [kept, adopt]);
 
   const start = async (settings: Recordable, onStarted: () => void): Promise<void> => {
-    await command(async () => {
-      started(await startLookRecording(settings.region, settings.tolerance, settings.drawnOn));
+    await command(async (current) => {
+      const recording = await startLookRecording(settings.region, settings.tolerance, settings.drawnOn);
+      if (!current()) {
+        await stopRecording(recording);
+        return;
+      }
+      started(recording);
       onStarted();
       await recorder.readState();
     });
@@ -60,19 +65,25 @@ export function useLookRecording(adopt: (index: number) => void): {
 
   const stop = async (): Promise<LookRecordingView | null> => {
     let stopped: LookRecordingView | null = null;
-    const worked = await command(async () => {
+    const worked = await command(async (current) => {
       await recorder.stop();
-      stopped = await lookRecordingState();
-      show(stopped);
+      if (current()) {
+        stopped = await lookRecordingState();
+        if (current()) {
+          show(stopped);
+        }
+      }
     });
     return worked ? stopped : null;
   };
 
   const discard = async (): Promise<void> => {
     if (view !== null) {
-      await command(async () => {
+      await command(async (current) => {
         await discardRecording();
-        forget();
+        if (current()) {
+          forget();
+        }
       });
     }
   };
