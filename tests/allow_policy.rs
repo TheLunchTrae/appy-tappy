@@ -3080,13 +3080,14 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
             "the diff mutation task is missing base-resolution contract {contract}"
         );
     }
-    // cargo-mutants writes a report without outcomes when a shard selects no
-    // mutants, so the diff lane lists the selected mutants under its lock and
-    // stops when there are none, before it builds anything.
+    // Listing changes no report. Empty shards and CI selection-only runs
+    // stop before acquiring the build lock or downloading the text model.
     let steps = [
-        "acquire_mutants_task_lock diff",
         "cargo mutants --list ",
+        "${MUTANTS_SELECTION_FILE:-}",
         "if [ -z \"$selected\" ]; then",
+        "acquire_mutants_task_lock diff",
+        "mise run ocr:model",
         "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then",
     ];
     let positions: Vec<usize> = steps
@@ -3098,7 +3099,7 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         .collect();
     assert!(
         positions.is_sorted(),
-        "the diff mutation task must, under its lock, list the selected mutants and stop when there are none before it builds"
+        "the diff mutation task must select work before downloading or building, and lock before mutating"
     );
     let Some(mutants_run) = diff
         .lines()

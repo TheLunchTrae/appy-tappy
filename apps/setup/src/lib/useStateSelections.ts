@@ -41,6 +41,9 @@ export function useStateSelections(
   const shownRegion = useRef(draft.region);
   shownRegion.current = draft.region;
   useEffect(() => {
+    if (draft.kind !== 'state') {
+      return undefined;
+    }
     const stale = states.filter((state) => state.steps.length > 0 && madeFor(selections, state, colorMatch) === null);
     if (stale.length === 0) {
       return undefined;
@@ -77,7 +80,7 @@ export function useStateSelections(
       },
       SELECT_DELAY_MS,
     );
-  }, [states, colorMatch, selections, setDraft]);
+  }, [draft.kind, states, colorMatch, selections, setDraft]);
 
   const { masks, ignored } = useMemo(() => {
     const masks = new Map<number, Masking>();

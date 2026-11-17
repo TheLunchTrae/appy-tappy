@@ -420,11 +420,15 @@ impl CharactersSpec {
             // The next number no sample's picture has, even when a file edited
             // by hand left a gap. Of the next `samples.len() + 1` numbers at
             // least one is free; past them all is free too.
-            number = (1..=samples.len().saturating_add(1))
+            number = (1..=samples
+                .len()
+                .saturating_add(self.dropped.len())
+                .saturating_add(1))
                 .map(|step| number.saturating_add(step))
                 .find(|&next| {
                     let name = sample_name(id, next);
                     samples.iter().all(|sample| sample.image != name)
+                        && !self.dropped.contains(&name)
                 })
                 .unwrap_or_else(|| number.saturating_add(samples.len()).saturating_add(1));
             let name = sample_name(id, number);

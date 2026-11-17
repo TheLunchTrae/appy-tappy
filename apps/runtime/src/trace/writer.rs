@@ -23,7 +23,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use appytappy_platform::LocalTime;
 
-use super::rows::{dropped_row, part_row, row, start_row};
+use super::rows::{Names, dropped_row, part_row, row, start_row};
 use super::{Categories, Record, Trace, Tracer};
 use crate::model::SessionId;
 use crate::plan::AppPlan;
@@ -56,7 +56,7 @@ pub(crate) enum Entry {
 enum Order {
     /// The plan of a session, which names its application, values, and
     /// automations in the rows that follow.
-    Names(SessionId, Arc<AppPlan>),
+    Names(SessionId, Names),
     /// Write what the buffer holds and stop.
     Stop,
 }
@@ -205,7 +205,7 @@ impl Writer {
             clippy::let_underscore_must_use,
             reason = "a writer that stopped has reported why, and needs no names"
         )]
-        let _ = self.orders.send(Order::Names(session, plan));
+        let _ = self.orders.send(Order::Names(session, Names::of(&plan)));
     }
 
     /// Tells the writer to write what its buffer holds, close the file, and
@@ -246,7 +246,7 @@ fn write(
     orders: &Receiver<Order>,
     files: &mut Files,
 ) -> io::Result<()> {
-    let mut names: BTreeMap<SessionId, Arc<AppPlan>> = BTreeMap::new();
+    let mut names: BTreeMap<SessionId, Names> = BTreeMap::new();
     let mut flushed = Instant::now();
     loop {
         let entry = received.recv_timeout(FLUSH_EVERY);
@@ -281,7 +281,7 @@ fn flush_due(flushed: Instant, now: Instant) -> bool {
 
 /// Takes the orders that wait into `names`. Returns false when the writer
 /// should stop: it was told to, or the owner is gone.
-fn take_orders(orders: &Receiver<Order>, names: &mut BTreeMap<SessionId, Arc<AppPlan>>) -> bool {
+fn take_orders(orders: &Receiver<Order>, names: &mut BTreeMap<SessionId, Names>) -> bool {
     loop {
         match orders.try_recv() {
             Ok(Order::Names(session, plan)) => {
@@ -372,11 +372,7 @@ impl Files {
 
     /// Writes `record`'s row, after a row that counts the records dropped
     /// before it, if any.
-    fn record(
-        &mut self,
-        record: &Record,
-        names: &BTreeMap<SessionId, Arc<AppPlan>>,
-    ) -> io::Result<()> {
+    fn record(&mut self, record: &Record, names: &BTreeMap<SessionId, Names>) -> io::Result<()> {
         if record.dropped > 0 {
             self.row(&dropped_row(record, self.started))?;
         }
@@ -519,7 +515,12 @@ mod tests {
         let (writer, mut trace) =
             Writer::start(7, options(&folder, 1 << 20, 5), reports).expect("start");
         let plan = crate::plan::examples::plan("Skyward, \"Quest\"", 90.0);
+        let released = Arc::downgrade(&plan);
         writer.name(SessionId(3), plan);
+        assert!(
+            released.upgrade().is_none(),
+            "tracing retains labels, not compiled pictures"
+        );
         let frame = Instant::now();
         trace.record(What::Fired, |record| Record {
             session: Some(SessionId(3)),

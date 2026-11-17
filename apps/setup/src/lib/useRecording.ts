@@ -3,10 +3,11 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 
 import type { ExampleSpec, PinDef, RecordingSettings, RecordingView } from './bindings.ts';
-import { discardRecording, recordedReading, recordingState, startRecording } from './api.ts';
+import { discardRecording, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
 import type { Color, Picture } from './pixels.ts';
 import { background } from './repeat.ts';
 import { type CropAsks, type Crops, cropAskFailed, cropsToAsk, NO_CROP_ASKS, NO_CROPS, withCrop } from './review.ts';
+import { useNewest } from './request.ts';
 import { useRecorder } from './useRecorder.ts';
 
 /** Whether the recording's state still changes: it records, or the text reader is still reading a reading. */
@@ -38,7 +39,7 @@ type Recordable = Omit<RecordingSettings, 'windowSize' | 'ink'> & {
  * pixels. Leaving the component that uses it stops the recording it started, since it samples the window until it
  * stops.
  */
-export function useRecording(): {
+export function useRecording(active = true): {
   readonly view: RecordingView | null;
   /** Each recorded reading's pixels, by its index, once they arrive. */
   readonly crops: ReadonlyMap<number, Picture>;
@@ -59,9 +60,19 @@ export function useRecording(): {
   readonly discard: () => Promise<boolean>;
 } {
   const recorder = useRecorder(recordingState, stillRead);
-  const { view, command, show, forget, started } = recorder;
+  const { view, command, show, forget, started, stop: stopOwned } = recorder;
   // Each recorded reading's pixels, for the recording they belong to.
   const [crops, setCrops] = useState<Crops>(NO_CROPS);
+  const starts = useNewest();
+  useEffect(() => {
+    if (!active) {
+      starts.drop();
+      forget();
+      background(stopOwned());
+      setCrops(NO_CROPS);
+    }
+    return starts.drop;
+  }, [active, starts, forget, stopOwned]);
 
   // Fetches the pixels of each reading that has none yet, once, and again after a pause when the ask fails, up to
   // `CROP_TRIES` asks in all.
@@ -98,12 +109,19 @@ export function useRecording(): {
   // The owner refuses to go on with other settings rather than start over,
   // so kept readings and review edits are never dropped without a discard.
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
+    const current = starts.begin();
     await command(async () => {
       const { app, pin, region, ink, tolerance, drawnOn, scope, examples } = settings;
       const textColor = ink === null ? {} : { ink };
-      started(
-        await startRecording({ app, region, screenshot: drawnOn, pin, ...textColor, tolerance, scope, examples }, more),
+      const recording = await startRecording(
+        { app, region, screenshot: drawnOn, pin, ...textColor, tolerance, scope, examples },
+        more,
       );
+      if (!current()) {
+        await stopRecording(recording);
+        return;
+      }
+      started(recording);
       if (!more) {
         // A new recording replaced the old one, whose readings' pixels go with it.
         setCrops(NO_CROPS);

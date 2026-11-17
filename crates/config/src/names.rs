@@ -241,7 +241,7 @@ pub fn state_image_name(value: &str, set: Option<usize>, state: usize) -> String
 /// A file with any other name, such as one the user put in the folder, is
 /// not AppyTappy's to remove.
 #[must_use]
-pub(crate) fn is_own_image_name(name: &str) -> bool {
+pub fn is_own_image_name(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".png").filter(|_| is_image_name(name)) else {
         return false;
     };
@@ -266,9 +266,10 @@ pub(crate) fn click_picture_name(number: u32) -> String {
     format!("click-{number}.png")
 }
 
-/// The number in a name [`click_picture_name`] makes, such as 3 in
+/// The number in a click picture name, such as 3 in
 /// `click-3.png`, or `None` for any other name.
-pub(crate) fn click_picture_number(name: &str) -> Option<u32> {
+#[must_use]
+pub fn click_picture_number(name: &str) -> Option<u32> {
     let number = name.strip_prefix("click-")?.strip_suffix(".png")?;
     is_number(number).then(|| number.parse().ok()).flatten()
 }

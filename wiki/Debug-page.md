@@ -152,5 +152,6 @@ even one you chose to replace. It holds:
 actions keep, which [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps)
 lists, and the screenshots your drafts keep. They are off at first, because
 they show parts of your applications' windows, and a draft's screenshots show
-whole windows. Even without them, the bundle holds your applications' window titles
+whole windows. Unrelated picture files and temporary draft folders are left
+out. Even without them, the bundle holds your applications' window titles
 and executable names.

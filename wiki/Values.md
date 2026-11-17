@@ -844,3 +844,7 @@ Draw the region again and the value says how you make it now.
 Select **Delete** next to a value, then confirm. A value that an automation
 watches cannot be deleted: the Values page names the automations to change or
 delete first.
+
+While editing a saved value, taking a screenshot at another window size keeps
+the region and the screenshot it was drawn on. Draw at the saved size to edit
+it, or add a fix for another size.

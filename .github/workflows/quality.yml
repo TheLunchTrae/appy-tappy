@@ -134,13 +134,18 @@ jobs:
           install: true
           install_args: rust github:sourcefrog/cargo-mutants bun
           cache: true
+      - name: Select changed mutants
+        id: selection
+        run: MUTANTS_SELECTION_FILE="$GITHUB_OUTPUT" mise run rust:mutants:diff
       - name: Install the webview build libraries
+        if: steps.selection.outputs.selected == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
       # Reads the quality job's cache, which holds the same Linux builds. The
       # shards never save a cache, so they can always start from an older one.
       - name: Restore the Rust build cache
+        if: steps.selection.outputs.selected == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -153,14 +158,17 @@ jobs:
       # The quality job's copy of the text reader model; the shards never save
       # one.
       - name: Restore the text reader model
+        if: steps.selection.outputs.selected == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/setup/src-tauri/models/
           key: text-reader-model-${{ runner.os }}-${{ hashFiles('.config/mise/conf.d/installer.toml') }}
       # The setup app's Rust side embeds the built UI, so the UI builds first.
       - name: Build the setup UI
+        if: steps.selection.outputs.selected == 'true'
         run: mise run ui:build
       - name: Mutation-test the changed code
+        if: steps.selection.outputs.selected == 'true'
         run: mise run rust:mutants:diff
 
   # AppyTappy ships for Windows only. This job proves the Rust workspace

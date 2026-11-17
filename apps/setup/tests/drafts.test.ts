@@ -354,6 +354,18 @@ describe('a draft and what it belongs to', () => {
   const fixOf = (draft: Draft): DraftDef =>
     def('fix', JSON.parse(JSON.stringify(keep('fix', storeSetup({ ...EMPTY_SETUP, draft })))), 'progress', 'example');
 
+  test('fix drafts reject changed state and color tolerances, but not reference teaching tolerance', () => {
+    for (const check of [
+      { kind: 'color' as const, color: { red: 1, green: 2, blue: 3 }, tolerance: 10 },
+      { kind: 'state' as const, states: [{ name: 'Ready', image: 'ready-1.png' }], tolerance: 10 },
+    ]) {
+      const value = { ...progress, screen: { ...progress.screen, check } };
+      expect(fixOutdated(fixOf(fixDraft(check)), value)).toBe(false);
+      expect(fixOutdated(fixOf(fixDraft({ ...check, tolerance: 20 })), value)).toBe(true);
+    }
+    expect(fixOutdated(fixOf({ ...fixDraft(progress.screen.check), tolerance: 99 }), progress)).toBe(false);
+  });
+
   test('a fix whose value was changed since no longer fits it, and can only be deleted', () => {
     const fits = fixOf(fixDraft(progress.screen.check));
     expect(fixOutdated(fits, progress)).toBe(false);
@@ -407,25 +419,10 @@ describe('a draft and what it belongs to', () => {
     expect(refreshedEditing(null, [taught])).toBeNull();
   });
 
-  test('saved pictures a draft left out stay out only while the reference has the pictures it copied', () => {
-    const copied = {
-      id: 'percent',
-      name: 'Percent',
-      origin: { kind: 'byHand' } as const,
-      tolerance: 40,
-      samples: [
-        { image: 'ref-percent-1.png', text: '87%' },
-        { image: 'ref-percent-2.png', text: '12%' },
-      ],
-    };
+  test('resuming a draft reviews removals again because a filename can contain replaced pixels', () => {
     const draft = { ...EMPTY_DRAFT, dropped: ['ref-percent-2.png'] };
-    expect(refreshedDraft(draft, copied, { ...copied, name: 'Renamed', tolerance: 60 })).toBe(draft);
-    // Saved again since, the file name can be a new picture's, or no picture's.
-    const retaught = { ...copied, samples: [copied.samples[0]!, { image: 'ref-percent-2.png', text: '5' }] };
-    expect(refreshedDraft(draft, copied, retaught).dropped).toEqual([]);
-    expect(refreshedDraft(draft, copied, { ...copied, samples: copied.samples.slice(0, 1) }).dropped).toEqual([]);
-    expect(refreshedDraft(draft, copied, null).dropped).toEqual([]);
-    expect(refreshedDraft(EMPTY_DRAFT, copied, null)).toBe(EMPTY_DRAFT);
+    expect(refreshedDraft(draft).dropped).toEqual([]);
+    expect(refreshedDraft(EMPTY_DRAFT)).toBe(EMPTY_DRAFT);
   });
 
   test('the newest draft of a saved item is the one finished', () => {

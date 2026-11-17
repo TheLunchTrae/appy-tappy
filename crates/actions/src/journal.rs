@@ -152,10 +152,12 @@ struct Entry<O, M, V> {
 /// position.
 #[derive(Debug)]
 pub struct Actions<O, C: Controls> {
-    controls: C,
     journal: Vec<Entry<O, C::Media, C::Volume>>,
     /// Released changes whose restore failed, oldest first.
     pending: Vec<Pending<C::Media, C::Volume>>,
+    // Fields drop in declaration order. The keys must release their COM
+    // interfaces before the Windows controls uninitialize the apartment.
+    controls: C,
 }
 
 impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {

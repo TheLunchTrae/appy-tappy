@@ -400,6 +400,13 @@ impl<H: Host> Owner<H> {
     /// placed too.
     pub(crate) fn reading(&mut self) -> Result<Option<Reading>, String> {
         let now = self.host.now();
+        if let Some(failure) = self
+            .capture
+            .picked()
+            .and_then(|picked| picked.failure.as_ref())
+        {
+            return Err(failure.error.clone());
+        }
         let Some(Picked {
             check: Some(check),
             latest: Some((latest, _arrived)),
@@ -415,6 +422,13 @@ impl<H: Host> Owner<H> {
     /// How the check reads the newest frame, for the debug details: `None`
     /// while [`Owner::reading`] answers none.
     pub(crate) fn explain_reading(&self) -> Result<Option<ReadingDetails>, String> {
+        if let Some(failure) = self
+            .capture
+            .picked()
+            .and_then(|picked| picked.failure.as_ref())
+        {
+            return Err(failure.error.clone());
+        }
         let Some(Picked {
             check: Some(check),
             latest: Some((latest, arrived)),
@@ -965,6 +979,22 @@ mod tests {
             Ok(vec![fit(6, true), fit(7, false)]),
             "neither shows, so the first listed"
         );
+    }
+
+    #[test]
+    fn a_capture_failure_hides_old_readings_until_another_frame_arrives() {
+        let (mut harness, mut handler, root) = capturing("capture-failed-reading");
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness
+            .ask(|owner| owner.set_check(&trial(STATE)))
+            .expect("check");
+        assert!(harness.ask(Owner::reading).expect("reads").is_some());
+        harness.deliver(&mut handler, Err(io::Error::other("capture failed")));
+        assert!(harness.ask(Owner::reading).is_err());
+        assert!(harness.ask(|owner| owner.explain_reading()).is_err());
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert!(harness.ask(Owner::reading).expect("recovers").is_some());
+        std::fs::remove_dir_all(root).expect("clean up");
     }
 
     #[test]

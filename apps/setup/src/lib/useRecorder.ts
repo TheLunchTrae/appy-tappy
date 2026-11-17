@@ -115,7 +115,7 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
     };
   }, [own]);
 
-  const poll = useCallback(async (): Promise<void> => {
+  const readState = useCallback(async (): Promise<void> => {
     const current = turn.join();
     try {
       const state = await read();
@@ -123,17 +123,12 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
         tell({ kind: 'read', view: state });
       }
     } catch (error: unknown) {
-      tell({ kind: 'readFailed', error: errorText(error) });
+      if (current()) {
+        tell({ kind: 'readFailed', error: errorText(error) });
+      }
     }
   }, [turn, read]);
-  const readState = useCallback(async (): Promise<void> => {
-    try {
-      tell({ kind: 'read', view: await read() });
-    } catch (error: unknown) {
-      tell({ kind: 'readFailed', error: errorText(error) });
-    }
-  }, [read]);
-  useRepeat(poll, RECORDING_PAUSE_MS, keepsReading(known, live));
+  useRepeat(readState, RECORDING_PAUSE_MS, keepsReading(known, live));
 
   const command = useCallback(
     async (work: () => Promise<void>): Promise<boolean> => {
@@ -156,8 +151,9 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
     tell({ kind: 'read', view: shown });
   }, []);
   const forget = useCallback(() => {
+    turn.drop();
     tell({ kind: 'forgot' });
-  }, []);
+  }, [turn]);
   const started = useCallback(
     (recording: number) => {
       own.started(recording);

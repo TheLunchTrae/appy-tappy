@@ -160,7 +160,6 @@ run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 # Cargo tasks, so a copied target/ never holds a build half written.
 [tasks."rust:mutants:diff"]
 description = "Mutation-test changed code; default base prefers origin/main"
-depends = ["ocr:model"]
 wait_for = ["rust:policy", "rust:package"]
 run = """
 set -eu
@@ -202,8 +201,22 @@ fi
 
 git diff --relative "$merge_base" -- > "$diff_file"
 
-if [ ! -s "$diff_file" ]; then
-  echo "No changes relative to $base_ref; nothing to mutate."
+# When this shard selects no mutants, cargo-mutants writes a report without
+# outcomes.json, which verification rejects, so the lane lists the mutants
+# first and stops when there are none. Listing builds nothing.
+selected="$(cargo mutants --list --workspace --all-features --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file")"
+# CI supplies a destination to select work before restoring build output or
+# installing native libraries. A listing failure still fails the task.
+if [ -n "${MUTANTS_SELECTION_FILE:-}" ]; then
+  if [ -n "$selected" ]; then
+    printf 'selected=true\n' >> "$MUTANTS_SELECTION_FILE"
+  else
+    printf 'selected=false\n' >> "$MUTANTS_SELECTION_FILE"
+  fi
+  exit 0
+fi
+if [ -z "$selected" ]; then
+  echo "The diff selects no mutants${MUTANTS_SHARD:+ in shard $MUTANTS_SHARD}; nothing to test."
   exit 0
 fi
 
@@ -214,14 +227,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# When this shard selects no mutants, cargo-mutants writes a report without
-# outcomes.json, which verification rejects, so the lane lists the mutants
-# first and stops when there are none. Listing builds nothing.
-selected="$(cargo mutants --list --workspace --all-features --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file")"
-if [ -z "$selected" ]; then
-  echo "The diff selects no mutants${MUTANTS_SHARD:+ in shard $MUTANTS_SHARD}; nothing to test."
-  exit 0
-fi
+mise run ocr:model
 
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
   run_mutants_task_child cargo test --no-run --workspace --all-features --locked

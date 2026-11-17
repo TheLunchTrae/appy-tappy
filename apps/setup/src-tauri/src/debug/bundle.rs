@@ -13,12 +13,14 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use appytappy_config::names::{click_picture_number, is_app_id, is_own_image_name};
 use appytappy_platform::LocalTime;
 use serde::Deserialize;
 
 use crate::debug::trace_file;
+use crate::drafts::{draft_shot, is_draft_id};
 use crate::stores::Stores;
-use crate::zip_pack::{ZipPack, is_picture};
+use crate::zip_pack::ZipPack;
 
 /// What goes in the bundle beyond the files it always holds.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -90,15 +92,18 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
         bundle.folder(
             "automation pictures",
             &stores.automations.pictures(),
-            is_picture,
+            |name| click_picture_number(name).is_some(),
         )?;
     }
     for app in folders(&locations.apps())? {
         let name = app
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        if !is_app_id(&name) {
+            continue;
+        }
         bundle.folder(&format!("apps/{name}"), &app, |file| {
-            file == "app.json" || (spec.pictures && is_picture(file))
+            file == "app.json" || (spec.pictures && is_own_image_name(file))
         })?;
     }
     // A draft's folder holds its file and, for a value, fix, or reference,
@@ -107,8 +112,11 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
         let name = draft
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        if !is_draft_id(&name) {
+            continue;
+        }
         bundle.folder(&format!("drafts/{name}"), &draft, |file| {
-            file == "draft.json" || (spec.pictures && is_picture(file))
+            file == "draft.json" || (spec.pictures && draft_shot(file).is_some())
         })?;
     }
     for log in LOGS {

@@ -279,7 +279,8 @@ its values read at a size they were not drawn at.
   moves the region. Each of the region's edges is placed and rounded, a
   half away from zero, and its width and height are the distance between
   them, at least 1 pixel, so a region that touches the side it is pinned to
-  still touches it. A region that scales outside the window does not read
+  still touches it. When both edges round onto the far window edge, the
+  single retained pixel lies inside that edge. A region that scales outside the window does not read
   there. Regions are measured from the window's
   [content](#window-content), so a title bar, which keeps its height as the
   window grows, moves nothing. The runtime's log says when a value could not

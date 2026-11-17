@@ -686,12 +686,12 @@ export function withKind(draft: Draft, kind: CheckKind): Draft {
  * for a screenshot of its size. `fits` is null while either size is unknown, such as before the screenshot's pixels
  * arrive, and the draft stays as it is.
  */
-export function onPicture(draft: Draft, shot: number, fits: boolean | null): Draft {
+export function onPicture(draft: Draft, shot: number, fits: boolean | null, editing = false): Draft {
   if (draft.region === null || fits === null) {
     return draft;
   }
   if (fits) {
     return { ...draft, drawnOn: shot };
   }
-  return draft.drawnOn === null ? draft : { ...draft, region: null, drawnOn: null };
+  return editing || draft.drawnOn === null ? draft : { ...draft, region: null, drawnOn: null };
 }

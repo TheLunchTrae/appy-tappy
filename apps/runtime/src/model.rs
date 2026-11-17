@@ -291,6 +291,13 @@ impl Model {
                 process,
                 executable,
             } => {
+                if self
+                    .plan
+                    .get(&app)
+                    .is_some_and(|plan| !plan.runs.window.executable.matches(&executable))
+                {
+                    return Vec::new();
+                }
                 self.attached.insert(
                     app.clone(),
                     Watched {
@@ -350,6 +357,14 @@ impl Model {
             }
         }
         let mut orders: Vec<Order> = changed.into_iter().flat_map(|id| self.stop(id)).collect();
+        // Detection must confirm a process again after its executable pattern
+        // changes. Do not restart against the old attachment in the meantime.
+        self.attached.retain(|app, _| {
+            self.plan
+                .get(app)
+                .zip(plan.get(app))
+                .is_some_and(|(old, new)| old.runs.window.executable == new.runs.window.executable)
+        });
         self.plan = plan;
         let attached: Vec<String> = self.attached.keys().cloned().collect();
         for app in attached {
@@ -603,15 +618,9 @@ impl Model {
 fn stopped(id: SessionId, running: Running) -> Vec<Order> {
     let effects = running.session.stop();
     let name = running.plan.labels.name.clone();
-    let mut orders = vec![Order::StopReading(id, name)];
-    orders.extend(acts(
-        id,
-        &running.plan,
-        &running.watched,
-        effects,
-        None,
-        None,
-    ));
+    // Restore work can run while the owner waits for a reader to close.
+    let mut orders = acts(id, &running.plan, &running.watched, effects, None, None);
+    orders.push(Order::StopReading(id, name));
     orders
 }
 
@@ -772,7 +781,7 @@ mod tests {
         assert_eq!(nowhere, [], "a reading of no value of the plan is dropped");
         model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         let ended = model.apply(exited("a", 7));
-        assert_eq!(kinds(&ended), ["stop 0 A", "undo 0 Pause A"]);
+        assert_eq!(kinds(&ended), ["undo 0 Pause A", "stop 0 A"]);
         assert_eq!(model.active_automations(), Vec::<&str>::new());
     }
 
@@ -939,7 +948,7 @@ mod tests {
         model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         assert_eq!(
             kinds(&model.set_enabled(false)),
-            ["stop 0 A", "undo 0 Pause A"]
+            ["undo 0 Pause A", "stop 0 A"]
         );
         assert!(!model.enabled());
         assert_eq!(model.active_automations(), Vec::<&str>::new());
@@ -960,7 +969,7 @@ mod tests {
         model.sample(SessionId(1), ReaderNumber(0), 0, number(95.0), now);
         let b = plan("B", 50.0);
         let orders = model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &b)]));
-        assert_eq!(kinds(&orders), ["stop 1 B", "undo 1 Pause B", "read 2 B"]);
+        assert_eq!(kinds(&orders), ["undo 1 Pause B", "stop 1 B", "read 2 B"]);
         let orders = model.replan(plans(&[("b", &b)]));
         assert_eq!(
             kinds(&orders),
@@ -969,7 +978,11 @@ mod tests {
         );
         assert_eq!(model.active_automations(), ["Pause B"]);
         let orders = model.replan(plans(&[("a", &a), ("b", &b)]));
-        assert_eq!(kinds(&orders), ["read 3 A"], "a is still attached");
+        assert!(
+            orders.is_empty(),
+            "a must be detected again after it was removed"
+        );
+        assert_eq!(kinds(&model.apply(started("a", 7))), ["read 3 A"]);
         assert_eq!(
             model.active_automations(),
             ["Pause A", "Pause B"],
@@ -1316,6 +1329,42 @@ mod tests {
             kinds(&model.sample(SessionId(0), ReaderNumber(0), 0, number(50.0), now)),
             ["undo 0 Pause renamed"]
         );
+    }
+
+    #[test]
+    fn a_changed_executable_waits_for_detection_even_while_disabled() {
+        for enabled in [true, false] {
+            let mut model = Model::default();
+            model.replan(plans(&[("a", &plan("A", 90.0))]));
+            model.apply(started("a", 7));
+            model.set_enabled(enabled);
+            let mut changed = plan("A", 90.0);
+            Arc::get_mut(&mut changed)
+                .expect("unshared")
+                .runs
+                .window
+                .executable = appytappy_config::window_match::Pattern::new("Other.exe");
+            let orders = model.replan(plans(&[("a", &changed)]));
+            assert!(
+                !orders
+                    .iter()
+                    .any(|order| matches!(order, Order::Read { .. }))
+            );
+            assert_eq!(model.set_enabled(true), []);
+            assert_eq!(model.run_once("pause_a"), Err(Refused::NotRunning));
+            assert!(
+                model.apply(started("a", 7)).is_empty(),
+                "queued old detection"
+            );
+            assert_eq!(
+                kinds(&model.apply(Change::Started {
+                    app: "a".to_owned(),
+                    process: ProcessId::new(8),
+                    executable: "Other.exe".to_owned()
+                })),
+                ["read 1 A"]
+            );
+        }
     }
 
     #[test]

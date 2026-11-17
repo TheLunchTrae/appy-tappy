@@ -71,6 +71,20 @@ fn handle<S: System + ScreenPixels>(session: &Session<S>, line: &str) -> Option<
         ));
     };
     let id = message.get("id");
+    if id.is_some_and(|id| !(id.is_string() || id.is_i64() || id.is_u64())) {
+        return Some(failure(
+            &Value::Null,
+            INVALID_REQUEST,
+            "a request id must be a string or integer",
+        ));
+    }
+    if message.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+        return Some(failure(
+            id.unwrap_or(&Value::Null),
+            INVALID_REQUEST,
+            "jsonrpc must be 2.0",
+        ));
+    }
     let Some(method) = message.get("method").and_then(Value::as_str) else {
         if message.contains_key("result") || message.contains_key("error") {
             return None;
@@ -82,13 +96,6 @@ fn handle<S: System + ScreenPixels>(session: &Session<S>, line: &str) -> Option<
         ));
     };
     let id = id?;
-    if id.is_null() {
-        return Some(failure(
-            id,
-            INVALID_REQUEST,
-            "a request id must not be null",
-        ));
-    }
     let params = message.get("params").unwrap_or(&Value::Null);
     Some(match dispatch(session, method, params) {
         Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
@@ -256,6 +263,23 @@ mod tests {
                 (Value::Null, json!(-32600)),
             ]
         );
+    }
+
+    #[test]
+    fn rejects_invalid_rpc_versions_and_request_ids() {
+        for id in [Value::Null, json!(true), json!([]), json!({}), json!(1.5)] {
+            let request = json!({"jsonrpc": "2.0", "id": id, "method": "ping"});
+            let replies = exchange(&format!("{request}\n"));
+            assert_eq!(replies[0]["error"]["code"], INVALID_REQUEST);
+            assert_eq!(replies[0]["id"], Value::Null);
+        }
+        for version in [Value::Null, json!("1.0"), json!(2)] {
+            let request = json!({"jsonrpc": version, "id": 1, "method": "ping"});
+            let replies = exchange(&format!("{request}\n"));
+            assert_eq!(replies[0]["error"]["code"], INVALID_REQUEST);
+        }
+        let replies = exchange("{\"id\":1,\"method\":\"ping\"}\n");
+        assert_eq!(replies[0]["error"]["code"], INVALID_REQUEST);
     }
 
     #[test]

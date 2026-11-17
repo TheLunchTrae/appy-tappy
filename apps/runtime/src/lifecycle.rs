@@ -122,7 +122,7 @@ pub(crate) enum Change {
 pub(crate) struct Lifecycle {
     watchlist: Watchlist,
     /// The process each running app's session follows, by app ID.
-    running: BTreeMap<String, ProcessId>,
+    running: BTreeMap<String, (ProcessId, String)>,
     /// For each app whose session's process owned one of the app's best
     /// windows, since when it owns none, or `None` while it owns one.
     owned: BTreeMap<String, Option<Instant>>,
@@ -191,12 +191,12 @@ impl Lifecycle {
         let executable = |watchlist: &Watchlist, app: &str| {
             watchlist.0.get(app).map(|window| window.executable.clone())
         };
-        self.running.retain(|app, &mut process| {
+        self.running.retain(|app, (process, _executable)| {
             let kept = executable(&self.watchlist, app) == executable(&watchlist, app);
             if !kept {
                 changes.push(Change::Exited {
                     app: app.clone(),
-                    process,
+                    process: *process,
                 });
             }
             kept
@@ -273,10 +273,17 @@ impl Lifecycle {
                 .iter()
                 .filter(|entry| window.executable.matches(&entry.executable))
                 .collect();
-            let current = self.running.get(app).copied();
-            // The name check catches a process ID that Windows reused.
-            let current =
-                current.filter(|&process| fitting.iter().any(|entry| entry.id == process));
+            let previous = self.running.get(app);
+            // A wildcard can match another executable after Windows reuses
+            // the PID. Compare the executable that actually started too.
+            let current = previous.and_then(|(process, executable)| {
+                fitting
+                    .iter()
+                    .find(|entry| {
+                        entry.id == *process && entry.executable.eq_ignore_ascii_case(executable)
+                    })
+                    .map(|entry| entry.id)
+            });
             let several = fitting.len() > 1;
             let owner = if several {
                 let all = listed.get_or_insert_with(|| {
@@ -302,8 +309,8 @@ impl Lifecycle {
             let follow = owner
                 .or(current)
                 .or_else(|| fitting.iter().map(|entry| entry.id).min());
-            let previous = self.running.get(app).copied();
-            if previous != follow {
+            let previous = previous.map(|(process, _)| *process);
+            if previous != follow || previous != current {
                 if let Some(process) = previous {
                     self.running.remove(app);
                     self.owned.remove(app);
@@ -315,7 +322,8 @@ impl Lifecycle {
                 if let Some(entry) =
                     follow.and_then(|id| fitting.iter().find(|entry| entry.id == id))
                 {
-                    self.running.insert(app.clone(), entry.id);
+                    self.running
+                        .insert(app.clone(), (entry.id, entry.executable.clone()));
                     changes.push(Change::Started {
                         app: app.clone(),
                         process: entry.id,
@@ -614,6 +622,27 @@ mod tests {
         assert_eq!(
             lifecycle.scan_unlisted(Ok(vec![entry(42, "Other.exe")]), now),
             [exited(42)]
+        );
+    }
+
+    #[test]
+    fn a_wildcard_does_not_keep_a_reused_pid_with_another_executable() {
+        let now = Instant::now();
+        let mut lifecycle = Lifecycle::new(watching(&[("a", "*.exe")]), now);
+        lifecycle.scan_unlisted(Ok(vec![entry(42, "First.exe")]), now);
+        assert_eq!(
+            lifecycle.scan_unlisted(Ok(vec![entry(42, "FIRST.EXE")]), now),
+            []
+        );
+        assert_eq!(
+            lifecycle.scan_unlisted(Ok(vec![entry(42, "Second.exe")]), now),
+            [
+                Change::Exited {
+                    app: "a".to_owned(),
+                    process: ProcessId::new(42)
+                },
+                started_as("a", 42, "Second.exe")
+            ]
         );
     }
 

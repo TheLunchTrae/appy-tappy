@@ -148,14 +148,11 @@ export function refreshedEditing(editing: Editing | null, references: readonly R
 }
 
 /**
- * `draft`, kept with the reference editor open on the reference as `copied` has it, going on from the reference as
- * `now` has it saved. The saved pictures it left out are named by file, and a reference saved since can give a new
- * picture a removed one's file name, so they stay left out only while the reference has the very pictures the draft
- * copied.
+ * A resumed draft with sample removals cleared. Filenames and labels cannot prove that a saved picture still has
+ * the pixels the user rejected: another edit or a hand edit can replace them. The user reviews removals again.
  */
-export function refreshedDraft(draft: Draft, copied: ReferenceDef | null, now: ReferenceDef | null): Draft {
-  const same = JSON.stringify(copied?.samples ?? []) === JSON.stringify(now?.samples ?? []);
-  return same || draft.dropped.length === 0 ? draft : { ...draft, dropped: [] };
+export function refreshedDraft(draft: Draft): Draft {
+  return draft.dropped.length === 0 ? draft : { ...draft, dropped: [] };
 }
 
 /**
@@ -176,6 +173,7 @@ export function fixOutdated(def: DraftDef, value: ValueDef): boolean {
     draft.stateNames,
     draft.whole,
     draft.characters,
+    draft.kind === 'state' || draft.kind === 'color' ? draft.tolerance : null,
   ];
   return !sameContent(taken(now), taken(kept));
 }

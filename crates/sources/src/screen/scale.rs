@@ -113,6 +113,13 @@ fn span(
     let first = place(along, i128::from(start), side, new_side, factor)?;
     let end = i128::from(start).checked_add(i128::from(length))?;
     let last = place(along, end, side, new_side, factor)?;
+    // A collapsed span at the far edge keeps the pixel before that edge,
+    // rather than extending one pixel outside the window.
+    let first = if first == last && last == new_side && end <= side {
+        first.checked_sub(1)?
+    } else {
+        first
+    };
     Some((first, last.checked_sub(first)?.max(1)))
 }
 
@@ -311,6 +318,25 @@ mod tests {
             ),
             Some((0, 1))
         );
+    }
+
+    #[test]
+    fn a_thin_region_at_the_far_edges_keeps_its_pixel_inside() {
+        let drawn = Size {
+            width: 100,
+            height: 100,
+        };
+        let small = Size {
+            width: 25,
+            height: 25,
+        };
+        for pin in [PinDef::TopLeft, PinDef::Center, PinDef::BottomRight] {
+            assert_eq!(
+                scaled(region(99, 99, 1, 1), drawn, small, pin),
+                Some(region(24, 24, 1, 1)),
+                "{pin:?}"
+            );
+        }
     }
 
     #[test]

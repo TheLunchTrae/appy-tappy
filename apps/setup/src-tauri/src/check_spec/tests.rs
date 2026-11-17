@@ -1216,6 +1216,15 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
 }
 
 #[test]
+fn replacing_a_dropped_sample_does_not_overwrite_its_committed_picture() {
+    let mut spec = characters(left(), Some(digits_ref()), one(0), Vec::new());
+    spec.dropped = vec![sample_name("digits", 1)];
+    let taught = teach(&spec, session(&[screenshot()], None)).expect("valid replacement");
+    assert_eq!(taught.reference.samples.len(), 1);
+    assert_eq!(taught.pictures[0].0, "ref-digits-2.png");
+}
+
+#[test]
 fn recorded_readings_are_learned_and_saved_after_the_labels() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 4, 2).expect("not empty");

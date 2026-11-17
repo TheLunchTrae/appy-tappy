@@ -253,21 +253,17 @@ export function Capture({
   // file is read, the editor goes on from the reference as it is saved now, which is also what leaving loses
   // nothing of.
   const savedNow = useRef((restored?.screenshots ?? null) === null);
-  // The reference as the draft copied it, which says whether the saved pictures it left out are still the same.
-  const copiedReference = useRef(start.editing?.existing ?? null);
   useEffect(() => {
     if (file === null || savedNow.current) {
       return;
     }
     savedNow.current = true;
-    const copied = copiedReference.current;
-    const now = file.references.find((reference) => reference.id === copied?.id) ?? null;
     setEditing((current) => refreshedEditing(current, file.references));
-    setDraft((current) => refreshedDraft(current, copied, now));
+    setDraft((current) => refreshedDraft(current));
     setStart((began) => ({
       ...began,
       editing: refreshedEditing(began.editing, file.references),
-      draft: refreshedDraft(began.draft, copied, now),
+      draft: refreshedDraft(began.draft),
     }));
   }, [file]);
   const [picking, setPicking] = useState<ColorTarget | null>(null);
@@ -528,7 +524,7 @@ export function Capture({
     }
     // Until the region's size is known, the region stays where it is.
     const fits = regionSize === null ? null : sameSize(regionSize, shot.size);
-    setDraft((current) => onPicture(current, shot.index, fits));
+    setDraft((current) => onPicture(current, shot.index, fits, edited !== null));
   };
   const takeShot = async (): Promise<void> => {
     const shot = await take();

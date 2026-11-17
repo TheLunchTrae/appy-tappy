@@ -177,6 +177,12 @@ crash leaves the lock behind, the error names the directory. Confirm that no
 mutation task is running, then remove it. The lock uses `setsid` and
 process-group signals, so mutation runs on Linux only.
 
+The diff lane accepts `MUTANTS_SELECTION_FILE` for selection alone: it appends
+`selected=true` or `selected=false` there and runs no build or model download.
+The quality workflow uses this before installing native libraries, restoring
+build caches, or building the UI. The selected shards run the same mutation
+lane and verification; an empty shard remains a successful check.
+
 ## Repository settings
 
 `CODEOWNERS` assigns every path to the owner, because source files can carry

@@ -21,8 +21,17 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Fifteen guards drop such stale messages:
+it was about has gone. These guards drop such stale messages:
 
+- **Detected executable.** After a reload changes an executable pattern, the
+  runtime drops the old attachment and refuses a queued start whose executable
+  does not match the current plan. Detection must attach it again.
+- **Capture page lifetime.** A failed screenshot request after its page closes
+  releases no screenshot in the next capture. A state selection is canceled
+  when the check changes kind, so its late answer cannot move another check.
+- **Recording editor lifetime.** Closing the reference editor invalidates
+  pending starts and reads. A late start is stopped by its own ticket; it
+  neither opens review nor starts polling again.
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
   longer runs.
@@ -298,7 +307,14 @@ the rule. Each start is followed by an `Identified` change with the build of
 the executable that runs, which changes no state: the owner only logs it, as
 [Build detection](Architecture.md#build-detection) describes. A new watchlist
 ends the session of each application it drops or whose executable pattern it
-changes, and forgets which process owned its window.
+changes, and forgets which process owned its window. A PID whose executable
+name changes ends its session even when both names fit a wildcard.
+
+#### Open problems
+
+- [Ownership before ambiguity](https://github.com/TheLunchTrae/appy-tappy/issues/493):
+  a process first detected alone has no recorded window ownership when another
+  matching process appears during a window replacement.
 
 ### Per-application run state
 
@@ -326,7 +342,9 @@ stateDiagram-v2
     Detached --> Running: Started, while enabled and planned
     Detached --> Attached: Started, while disabled or not planned
     Attached --> Running: enabled, or a reload plans it
-    Running --> Attached: disabled, or a reload drops it
+    Running --> Attached: disabled
+    Running --> Detached: a reload drops it or changes its executable pattern
+    Attached --> Detached: a reload drops it or changes its executable pattern
     Running --> Running: a reload changes what it runs, so it stops and starts again
     Running --> Running: a reload changes only its names, which it takes as it runs
     Running --> Running: its reader ends, and after a wait the next one starts
@@ -335,12 +353,14 @@ stateDiagram-v2
 ```
 
 - **Running to Attached or Detached.** The engine session is stopped,
-  which releases every rule that restores. The reader is stopped.
+  which releases every rule that restores. Restores are queued before stopping
+  the reader, so a slow capture close does not delay their dispatch.
 - **A reload that changes what it runs.** `replan` compares each plan's
   `Runs`: its window match, its values' checks and its rules, but not the
-  automations' names that each rule's entry carries. When they differ, the
+  automations' names or click targets' display names. When they differ, the
   application stops, which undoes what its automations changed, and starts
-  again in a new session.
+  again in a new session. A changed executable pattern instead drops its
+  attachment and waits for detection, including while automations are disabled.
 - **A reload that changes only names.** When only the plan's names differ, or
   the build its values were checked against, the session keeps running and
   takes the new plan, so the log and the tray use the new names. The reader
@@ -473,6 +493,9 @@ The thread can also panic in any state, which ends it.
   reads a frame sends `Recovered`, which resets both. A frame whose reading
   panicked was not read, so a capture that panics on its first frame waits
   twice as long as the last and logs nothing new.
+- **Names.** The writer retains only each session's application, value, and
+  automation labels for late rows. It does not retain compiled readers or
+  decoded pictures after their session ends.
 - **A new trace.** `Trace` from the owner reaches the thread in any state.
   While it waits or closes a capture, the thread keeps it for its next
   capture, which starts with it; while it captures, it hands it on too. No
@@ -797,6 +820,12 @@ one audio session's volume, the entries form a stack:
 
 The journal lives only in memory, so a forced end, a crash, or an
 end-of-session wait that runs out loses what it had not undone.
+
+#### Open problems
+
+- [Pending action backlog](https://github.com/TheLunchTrae/appy-tappy/issues/492):
+  slow actions can accumulate unbounded work, including runs whose sessions
+  ended. Disabling and quitting can wait behind that work.
 
 ### Tray thread
 
@@ -1934,6 +1963,9 @@ match is awaited, the last one for the same steps stays, and its count says
 that it is updating. When that selection cannot be made, nothing is awaited:
 the tint goes, and the line under the switch says so beside the error.
 
+A failed capture makes both the live reading and its debug explanation fail
+until a new frame arrives; the retained frame cannot count as a current read.
+
 ### Recording
 
 The picked window's `recording` field is `None` or one `Recorder`
@@ -2062,6 +2094,11 @@ stateDiagram-v2
   recording. A save or a try with a box's screenshot, a recording, or a
   compared screenshot of another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
+
+Closing the reference editor stops its recording by ticket even before its
+first state read answers. A start still pending at close stops its returned
+ticket as soon as it answers. Pending state reads and failures are dropped,
+and opening the editor again starts with no recording view.
 
 #### Where a recording is placed
 
@@ -2363,7 +2400,8 @@ stateDiagram-v2
   entering the step shows it (`shownOnStep`), whichever screenshot a later
   step showed. A new screenshot becomes the one the place is on: the region
   moves onto it when it has the size the region is drawn at, and is cleared
-  when it has another (`onPicture` in `apps/setup/src/lib/check.ts`). While
+  when it has another (`onPicture` in `apps/setup/src/lib/check.ts`). An edit
+  keeps its saved region and drawing instead, so a resize loses no edit. While
   either size is unknown, such as a screenshot whose pixels did not arrive,
   the region stays as it is. This step records nothing.
 - **How** is **Characters** for a number that is not a fix: it picks the
@@ -3209,8 +3247,9 @@ stateDiagram-v2
   leaving it clear `dropped` (`toReference`, `fromReference`), and a save
   writes the reference without them and closes the editor. A
   [draft](Setup-app.md#drafts) kept with the editor open keeps them, by
-  picture file name, and resumes with none left out when the reference's
-  saved samples changed since (`refreshedDraft`).
+  picture file name, and resumes with none left out (`refreshedDraft`): a
+  filename and its label cannot prove the pixels have not been replaced.
+  The user reviews removals again before saving.
 
 ### Bar detection
 

@@ -8,6 +8,7 @@ import { withShot } from './looks.ts';
 import type { Picture } from './pixels.ts';
 import type { Size } from './region.ts';
 import { background } from './repeat.ts';
+import { useMounted } from './request.ts';
 
 /**
  * A listed screenshot's thumbnail: on its way, there, or failed to load. A screenshot taken or recorded this session
@@ -153,6 +154,7 @@ export function useScreenshots(restored: readonly DraftShot[] = []): Strip & {
   /** The screenshot's number as the strip shows it, which it keeps when another is removed. */
   readonly position: (index: number) => number;
 } {
+  const mounted = useMounted();
   const [strip, setStrip] = useState<Strip>(() => ({
     shots: restored.map(({ index, recorded }) => ({ index, time: 'Draft', thumb: LOADING, recorded })),
     full: new Map(),
@@ -188,20 +190,26 @@ export function useScreenshots(restored: readonly DraftShot[] = []): Strip & {
   }, []);
   // Fetches the pixels of the screenshot `index` and then lists it. One whose pixels do not arrive is released and
   // never listed, so the strip shows no blank tile for it.
-  const list = useCallback(async (index: number, recorded: boolean): Promise<Picture> => {
-    const { shot, picture } = await arrived(index, recorded, (failed) => {
-      removed.current.add(failed);
-      background(removeScreenshots([failed]));
-    });
-    if (!removed.current.has(index)) {
-      setStrip((current) => ({
-        ...current,
-        shots: withShot(current.shots, shot),
-        full: new Map(current.full).set(index, picture),
-      }));
-    }
-    return picture;
-  }, []);
+  const list = useCallback(
+    async (index: number, recorded: boolean): Promise<Picture> => {
+      const { shot, picture } = await arrived(index, recorded, (failed) => {
+        if (!mounted()) {
+          return;
+        }
+        removed.current.add(failed);
+        background(removeScreenshots([failed]));
+      });
+      if (mounted() && !removed.current.has(index)) {
+        setStrip((current) => ({
+          ...current,
+          shots: withShot(current.shots, shot),
+          full: new Map(current.full).set(index, picture),
+        }));
+      }
+      return picture;
+    },
+    [mounted],
+  );
 
   // A draft's screenshots are this session's again; their pixels load once, and again when a failed one is shown.
   const [first] = useState(restored);

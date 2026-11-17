@@ -612,6 +612,7 @@ test("a new screenshot carries the value's region when it fits, and clears it wh
   const drawn = { ...EMPTY_DRAFT, region, drawnOn: 0 };
   expect(onPicture(drawn, 1, true)).toEqual({ ...drawn, drawnOn: 1 });
   expect(onPicture(drawn, 1, false)).toEqual({ ...drawn, region: null, drawnOn: null });
+  expect(onPicture(drawn, 1, false, true)).toBe(drawn);
   expect(onPicture(EMPTY_DRAFT, 1, true)).toBe(EMPTY_DRAFT);
   // A saved value's region waits, on no screenshot, for one of the size it was drawn at.
   const saved = { ...EMPTY_DRAFT, region };

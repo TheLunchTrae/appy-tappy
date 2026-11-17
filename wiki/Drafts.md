@@ -103,3 +103,8 @@ If a screenshot comes back but its picture doesn't load, its tile says
 **Not loaded. Select to load again.** Select it to try again. A screenshot of
 a window larger than AppyTappy reads isn't kept with its draft, and the
 draft's row says to make the window smaller and take it again.
+
+When you finish a reference draft, review any saved pictures you want to
+remove again. A picture may have been replaced since the draft was saved, so
+saved removals do not carry over. A fix draft cannot finish after its value's
+state or color tolerance changes; draw a fresh fix for the current check.

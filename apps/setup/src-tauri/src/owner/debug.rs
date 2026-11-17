@@ -448,14 +448,21 @@ mod tests {
         fs::write(app.join("app.json"), "{}").expect("app file");
         fs::write(app.join("shown-1.png"), [1, 2]).expect("picture");
         fs::write(app.join("notes.txt"), "mine").expect("another file");
+        fs::write(app.join("private.png"), [9]).expect("unrelated picture");
+        let staging = locations.drafts().join("0000019a.saving");
+        fs::create_dir_all(&staging).expect("staging folder");
+        fs::write(staging.join("draft.json"), "{}").expect("staged file");
+        fs::write(staging.join("shot-0.png"), [9]).expect("staged screenshot");
         let pictures = stores.automations.pictures();
         fs::create_dir_all(&pictures).expect("pictures folder");
         fs::write(pictures.join("click-1.png"), [3]).expect("picture");
+        fs::write(pictures.join("private.png"), [9]).expect("unrelated picture");
         fs::write(pictures.join("click-1.png.tmp"), [3]).expect("half-written picture");
         let draft = locations.drafts().join("0000019a");
         fs::create_dir_all(&draft).expect("draft folder");
         fs::write(draft.join("draft.json"), "{}").expect("draft file");
         fs::write(draft.join("shot-0.png"), [4]).expect("screenshot");
+        fs::write(draft.join("private.png"), [9]).expect("unrelated picture");
         fs::write(draft.join("notes.txt"), "mine").expect("another file");
         fs::create_dir_all(&stores.logs).expect("logs");
         fs::write(stores.logs.join("setup.log"), "pick_window took 1.0 ms\n").expect("log");
@@ -509,9 +516,10 @@ mod tests {
             "a draft's screenshots are pictures: {names:?}"
         );
         assert!(
-            names
-                .iter()
-                .all(|name| !name.contains("notes") && !name.contains("png.tmp")),
+            names.iter().all(|name| !name.contains("notes")
+                && !name.contains("png.tmp")
+                && !name.contains("private")
+                && !name.contains("saving")),
             "only pictures: {names:?}"
         );
         assert!(
