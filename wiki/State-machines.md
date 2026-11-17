@@ -3391,10 +3391,11 @@ in the editor or imported, has no reference kept, since its ID is new. A file
 changed outside the setup app while a reference is kept is not seen until
 then.
 
-A reference edit gives every added sample a picture name different from
-all the pictures its application keeps, including its dropped samples. Pictures are written before the application's
-file is replaced, so a failed save cannot overwrite a sample the saved file
-still names.
+Value saves, redraws, size fixes, and reference edits reserve every picture
+name the application's saved file uses, including samples marked for removal.
+A first drawing uses a numbered set when its usual names belong to another
+saved item. Pictures are written before the application's file is replaced,
+so a failed save cannot overwrite a picture the saved file still names.
 
 A click's picture is written to the `clicks` folder when its target is set
 up, before its automation is saved. Each save of the automations removes the
