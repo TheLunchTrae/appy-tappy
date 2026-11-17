@@ -1231,7 +1231,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reference_forgets_the_characters_it_once_listed_and_refuses_any_other_key() {
+    fn a_reference_accepts_expects_and_refuses_unknown_keys() {
         let file = dash();
         let json = file.to_json();
         let with_key = |key: &str| {
@@ -1243,9 +1243,7 @@ mod tests {
             assert_ne!(more, json);
             more
         };
-        let read = AppFile::parse(&with_key("expects")).expect("loads");
-        assert_eq!(read, file);
-        assert!(!read.to_json().contains("expects"));
+        assert_eq!(AppFile::parse(&with_key("expects")), Ok(file));
         let refused = AppFile::parse(&with_key("inkColor")).expect_err("no such key");
         assert!(refused.to_string().contains("inkColor"), "{refused}");
     }

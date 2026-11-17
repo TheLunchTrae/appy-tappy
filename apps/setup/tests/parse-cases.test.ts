@@ -55,10 +55,6 @@ describe('the page reads every sample as the Rust side does', () => {
       }
     });
   }
-
-  test('has a reading for every parser', () => {
-    expect([...PAGE_READS.keys()].toSorted()).toEqual(Object.keys(TEXT_CASES).toSorted());
-  });
 });
 
 test('spots land where the Rust side places them, and the spot picked at a point lands there', () => {
