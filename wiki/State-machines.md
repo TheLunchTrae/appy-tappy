@@ -2114,8 +2114,7 @@ stateDiagram-v2
   and a new **Record** are refused. Its readings stay for review, so a
   reference can still be saved from them.
 - Starting a recording of looks replaces a recording of readings, as a
-  discard would. The UI offers it only in the value flow, which discards the
-  readings when the reference editor closes.
+  discard would. The UI offers it only in the value flow.
 - A value saves the window size of the screenshot its region was drawn on
   (`drawnOn` in the UI). A number value reads with one of the application's
   references, and saving a reference teaches it from its boxes and the
