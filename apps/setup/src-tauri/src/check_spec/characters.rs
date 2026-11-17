@@ -329,7 +329,7 @@ impl CharactersSpec {
 
     /// The reference these characters teach, saved with the ID `id` and the
     /// name `name`, and what it learned. A saved reference keeps its samples
-    /// and their pictures, and the new ones are numbered after them:
+    /// and their pictures, and the new ones take unused file names:
     /// `ref-{id}-1.png` onward, the labeled screenshots first and then the
     /// recorded readings. `None` for `id` teaches a saved reference under
     /// its own ID, or a new one under a stand-in. `reserved` names every

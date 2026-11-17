@@ -1212,7 +1212,7 @@ fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
 
 #[test]
 fn a_new_sample_skips_a_picture_name_already_taken() {
-    // A file edited by hand left one sample, named as the second.
+    // A hand-edited file left sample 2 while another saved item uses picture 1.
     let gapped = |reference: &ReferenceRef| {
         let mut saved = digits(reference)?;
         let second = sample_name("digits", 2);
@@ -1231,7 +1231,9 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
         recording: None,
         references: &gapped,
     };
-    let taught = teach(&spec, session).expect("valid characters");
+    let taught = spec
+        .teach(session, Some("digits"), "Digits", &["ref-digits-1.png"])
+        .expect("valid characters");
     let names: Vec<&str> = taught
         .pictures
         .iter()
