@@ -150,7 +150,9 @@ even one you chose to replace. It holds:
 
 **Include pictures** adds the pictures your values, references, and click
 actions keep, which [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps)
-lists, and the screenshots your drafts keep. They are off at first, because
+lists, and the screenshots your drafts keep. Other pictures beside the saved
+files and unfinished saves are left out. Pictures of a file that can't be
+read are left out too. They are off at first, because
 they show parts of your applications' windows, and a draft's screenshots show
 whole windows. Even without them, the bundle holds your applications' window titles
 and executable names.

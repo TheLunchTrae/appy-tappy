@@ -35,9 +35,10 @@ automation and pick the value in it.
   window, and what you set up on them: the region, **Stays at**,
   **This content may move**, the check with its colors, states, and
   tolerances, the reference it reads with, the characters a number
-  needs, the labels, the text you added with **Find more like it**, and
-  the [saved pictures](References.md#saved-pictures-it-cant-learn) you
-  removed from a reference.
+  needs, the labels, and the text you added with **Find more like it**.
+  When you reopen a reference draft, review any
+  [saved pictures](References.md#saved-pictures-it-cant-learn) you want to
+  remove. Someone may have replaced a picture under the same name.
   Screenshots that **Record screenshots** kept stay marked as recorded, so a
   [value](Values.md#how-a-value-was-made) or
   [reference](References.md#how-a-reference-was-made) you finish on one of
@@ -92,8 +93,9 @@ fixes, and references, and its own draft of changes. Deleting a value deletes
 its fix drafts. The question before either says so.
 
 A draft whose application can't be read says so and can only be deleted. So
-can a fix draft whose value was changed since, such as to another check, and
-a draft saved by another version of AppyTappy Setup. A draft whose file can't
+can a fix draft whose value was changed since, such as to another check or
+another state or color tolerance, and a draft saved by another version of
+AppyTappy Setup. Draw a fresh fix for the current check. A draft whose file can't
 be read at all shows under the automations on the **Automations** page, and
 can only be deleted too. Until you delete it, AppyTappy keeps every picture
 that clicks look for, because it can't tell which of them that draft uses. If

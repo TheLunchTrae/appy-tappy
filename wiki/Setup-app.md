@@ -267,8 +267,8 @@ This page covers what the user guide leaves out.
   its own.
   The Values page reads each running application's values about
   once a second at the window's size now, with a capture of its own like an
-  overlay's, whether the overlay is on or not, and stops when the page
-  closes (`live_values`, `stop_live_values`). The automation editor's
+  overlay's. Each `live_values` poll lists the applications whose captures
+  it needs. The page sends an empty list when it closes. The automation editor's
   reading follows its window to each size the same way and keeps its watch's
   number, so the editor's poll goes on. **Fix at this size** opens the
   capture locked to the value's application. Its first screenshot whose
@@ -787,12 +787,12 @@ has the states.
 list, which goes with every spec the editor sends (`CharactersSpec.dropped`,
 `ReferenceSettingsSpec.dropped`). The owner leaves those samples out before
 it learns, fits, or judges anything (`SavedReference::without`), and a save
-writes the reference without them; the store then removes the pictures the
-file no longer names. A new sample takes the lowest number no kept sample
-has, so it can take a removed picture's file name, and its picture replaces
-that file. A reference left with no sample is refused, as a new one with no
-label is. The draft keeps `dropped` only while the editor is open on that
-reference: opening and leaving the editor clear it.
+writes the reference without them. New pictures, for references, values,
+redraws, and size fixes, take names no picture in the application's saved
+file has, including samples marked for removal. Writing a picture cannot
+overwrite one the saved file still names if the save fails. After the file
+commits, the store removes the pictures it no longer names. A reference
+needs at least one sample.
 
 Every `CharactersSpec` is taught in the reference's own editor, so a learn
 error on a saved sample there points at the list and names no reference to
@@ -808,10 +808,9 @@ to be refused. The answer marks a sample whose picture is missing
 (`UnlearnedSample.missing`), and the list suggests another text color only
 for a sample that one could help.
 
-A draft resumed with the editor open goes on from the reference as it is
-saved now. When its samples are not the ones the draft copied, the draft's
-`dropped` is cleared (`refreshedDraft` in `lib/captureDraft.ts`): a file
-name it holds could name a picture saved since.
+Resuming a draft opens the reference as it is saved now. The user reviews
+saved-picture removals again because the same file name and label can
+belong to different pixels after another save.
 
 The owner decisions behind this:
 
@@ -1276,12 +1275,13 @@ runs it; the user can turn it off or delete it, and the others keep working.
 Saving an automation, turning one on, and listing them all ask
 `Runnable::new` in `appytappy-sources`, which runs `AutomationDef::compile`,
 builds the value it watches with `saved::build`, and fits each click's picture,
-the same check the runtime runs. An automation's ID is the setup app's own key:
-the runtime does not read it, so an ID that a hand edit made invalid, or gave to
-more than one automation, stops nothing. When the setup app reads the file, it
-gives a new ID, made from the name, to each automation whose ID is invalid or
-held by one before it, the same way each time, so every row can be edited or
-deleted on its own; the next save writes the new IDs. Saving a value reads it
+the same check the runtime runs. Setup and the runtime use each automation's
+ID for **Run once**. When they read the file, both reserve every valid ID
+before assigning a unique ID from the automation's name to each invalid or
+duplicate ID, preserving the first valid occurrence of each ID.
+This happens before filtering disabled or broken automations, so the
+editor and the runtime agree on which rule to run. The next save writes
+the repaired IDs. Saving a value reads it
 back with `saved::build`, from its new pictures and those already saved, as the
 runtime will, and refuses it if the runtime could not read it. A new
 application's anti-cheat class starts as `unknown`, which blocks key press
@@ -1607,7 +1607,7 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
 `settings.json` is true; the runtime ignores that setting. Its commands live in
 `owner/debug.rs` and its file readers in `src-tauri/src/debug/`:
 
-- `debug_overview` asks the running processes whether the runtime runs,
+- `debug_overview` checks whether the runtime runs in this Windows session,
   through `Owner::runtime_runs`, as the main pages' `runtime_runs` does, and
   summarizes the newest `trace-*.csv` in the trace folder. `TraceTail` keeps
   its place in that file, so each poll reads only the rows added since the last

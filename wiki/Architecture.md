@@ -33,7 +33,7 @@ defines the domain terms.
   ┌─────────────────────────────────────────────────────────┐
   │ reload watch ─ reload ──────────┐                       │
   │ lifecycle ─ started, exited ────┤                       │
-  │ readers ─ samples, problems ────┼─► owner thread:       │
+  │ readers ─ frames, problems  ────┼─► owner thread:       │
   │ action thread ─ notes, can run ─┤   model + engine      │
   │ tray ─ enable, disable, quit ───┘           │           │
   │ ◄── actions, undos, readers started, stopped┘           │
@@ -176,8 +176,9 @@ Each thread below is a plain `std::thread`, and each channel is a
   ([Window sizes](Screen-regions.md#window-sizes)). A `Layout` in
   `appytappy-sources::screen` says where each region goes, and copies the one
   rectangle around them instead when that is smaller, such as for values
-  that overlap. It sends a `Sample` only when a value changes, and reads less
-  often while nothing changes. When the window closes or changes size, it
+  that overlap. It sends the changed readings from a frame together, including
+  any value that has stopped reading. It sends nothing for steady readings and
+  reads less often while nothing changes. When the window closes or changes size, it
   sends `Unseen`, and the owner forgets the application's values, so no rule
   acts on a value nobody can see. Each rule stays as it was, run or not,
   until the values read next decide its condition. When the window closes,
@@ -324,7 +325,8 @@ window fits, a session keeps its process, and a new one follows the process
 with the lowest ID. So a second copy of an application starts no second
 session, and it takes over when the first exits or has shown no window
 that fits for that long. A process ID that
-Windows reused for another executable ends the session. An application
+Windows reused for another executable ends the session, even when both
+executable names fit the same wildcard. An application
 relaunched within 5 seconds that gets its old process ID back keeps its session,
 because a snapshot cannot tell the two processes apart. A crashed application is
 the same as one that exits: its windows are destroyed and its process leaves the
@@ -335,7 +337,10 @@ The runtime watches the saved applications that have at least one automation
 that can run, and matches each by its window match's executable pattern, such
 as `Example.exe`, against the file names in the snapshot. A reload changes the
 list at once: an application that is no longer watched detaches, and one that
-is newly watched is found by the next snapshot.
+is newly watched is found by the next snapshot. The model starts a session
+only while the attached executable still matches the plan. A reload that
+changes the executable pattern drops its attachment and waits for detection
+before starting another session, including while automations are disabled.
 
 #### Build detection
 
@@ -370,12 +375,11 @@ started on the other copy.
 A named mutex, `Local\AppyTappy.Runtime`, is the single-instance guard. A
 second copy that finds it logs that and exits at once. The setup app learns
 whether the runtime runs, for the Debug page and for the warning on the
-Automations page and in the automation editor, from the list of running
-processes: the runtime runs while one is called `appytappy-runtime.exe`
-(`Desktop::runtime_runs`). The check opens neither the mutex nor the process,
-so a runtime that starts while the setup app asks still takes the guard. The
-list holds every user's processes, so another user's runtime on the same PC
-counts as running too.
+Automations page and in the automation editor, by listing the processes in
+Setup's Windows session. A process named `appytappy-runtime.exe` in that
+session counts as running (`Desktop::runtime_runs`). Windows supplies the
+names directly, so checking status leaves the single-instance guard free
+for a runtime starting at the same time.
 
 Autostart is the `AppyTappy` value under the user's
 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` key,
@@ -697,6 +701,10 @@ changing.
   detection](#build-detection) describes.
 
 ### Running once
+
+The shared automation file parser gives invalid or repeated IDs distinct,
+valid replacements deterministically. The setup app and runtime address the
+same automation after a hand edit; the next save writes those IDs.
 
 **Run actions now** in the automation editor asks the runtime to run one saved
 automation's actions once, as if its condition had just become true

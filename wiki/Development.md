@@ -56,7 +56,9 @@ application shows a value, such as a number in one spot of its window.
 AppyTappy then reads that value without hardcoding anything per application.
 
 The server talks MCP over standard input and output, so it has no network
-port. Every tool only reads: none sends input.
+port. Every tool only reads: none sends input. Requests use JSON-RPC 2.0
+with a method name and, when present, a string or integer ID. Invalid
+envelopes return an invalid-request error before any tool runs.
 
 ### Tools
 

@@ -21,14 +21,34 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Fifteen guards drop such stale messages:
+it was about has gone. These guards reject stale state and messages:
 
+- **Detected executable.** A reload that changes an executable pattern drops
+  the old attachment. The runtime refuses a queued start whose executable
+  does not match its current plan and waits for detection to attach it again.
+- **Capture page lifetime.** A failed screenshot request after its page closes
+  releases no screenshot in the next capture. A state selection is canceled
+  when the check changes kind, so its late answer cannot move another check.
+- **Recording editor lifetime.** Closing the reference editor invalidates
+  pending commands and reads. A late start is stopped by its own ticket;
+  neither it nor a late stop opens review or starts polling again. One
+  command runs at a time, so two pending resumes cannot stop their shared
+  recording ticket. Starting and finishing a command invalidate pending state
+  reads, so a poll begun during a stop cannot replace its final state.
+- **Screenshot shortcut.** A key press goes only to the capture screen
+  whose shortcut registration still belongs to its active effect
+  (`useScreenshotShortcut`). Cleanup stops accepting key presses before it
+  queues the native unregister.
+- **Values page polls.** `useLiveValues` shows an answer only for the list
+  it requested and while that poll still belongs to the page. A list change
+  or page exit skips unsent polls and cancels the callback of a poll that
+  already reached the owner. The next poll waits for the old one to finish.
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
   longer runs.
 - **Reader numbers.** A session numbers its readers with a `ReaderNumber`,
-  which each reader sends with every value it reads, when its values can no
-  longer be seen, and when it ends. The owner drops each of those unless it
+  which each reader sends with each batch of changed readings, when its values
+  can no longer be seen, and when it ends. The owner drops each of those unless it
   carries the number of the session's newest reader and that reader has not
   ended (`Model::read_by`): what a reader that the session replaced still
   sent, and what the capture of a reader that panicked still read.
@@ -39,8 +59,8 @@ it was about has gone. Fifteen guards drop such stale messages:
   the text reader, or a [window look](#window-look) sends the owner is a
   `Message::Sent` that carries the ticket of the work it is for, and
   `Owner::is_current` drops it unless the work its event is about holds
-  that ticket still: the picked window's capture for a frame or a failure,
-  the watch's running capture for what a watch read, the recording of
+  that ticket still. A frame-ready notification reads the matching preview
+  or watch stream. Other events belong to the recording of
   readings for text or a look, the search for its text, and the named
   application's overlay capture for an overlay's reading. So what a stopped
   or replaced capture still sends is dropped, and so is text for a recording
@@ -206,12 +226,15 @@ stateDiagram-v2
   when the user picked Enable or Disable from the tray, which carries its
   orders too and sets `picked` (see [Reload watch](#reload-watch)), `Reload`
   the saved files, `TraceFailed`, or `Stop`. The owner waits for its next
-  event only until the first of two times (`wake`): when a rule that its
-  cooldown held back is due, and when it reads the saved files again after a
-  read failed. Either time sends it `Due`, whose step rechecks the held rules
-  and, once the retry is due, reads the saved files again. With neither, it
-  waits with no limit. After each step the tray gets a fresh menu if it
-  changed.
+  event until the first deadline from `wake`: a held rule, a reader restart,
+  a retry of the saved files, or the trace's end. When the deadline passes,
+  `OwnerTimer` puts one `Due` after the events already queued. A pending
+  frame can invalidate a held rule, and later events go after the timer.
+  Taking `Due` clears the queued flag. It rechecks the deadlines that
+  had passed when it entered the queue, and a later deadline gets its own
+  turn after the events already waiting then.
+  With no deadline or queued timer, the owner waits with no limit. After
+  each step the tray gets a fresh menu if it changed.
 - **A worker that ended.** Every send to the action thread and to detection
   goes through `Crew::act` and `Crew::detect`. Each of those threads ends
   only after the owner, or when it panics, so a send that fails means it
@@ -300,14 +323,21 @@ the rule. Each start is followed by an `Identified` change with the build of
 the executable that runs, which changes no state: the owner only logs it, as
 [Build detection](Architecture.md#build-detection) describes. A new watchlist
 ends the session of each application it drops or whose executable pattern it
-changes, and forgets which process owned its window.
+changes, and forgets which process owned its window. A PID whose executable
+name changes ends its session even when both names fit a wildcard.
+
+#### Open problems
+
+- [Ownership before ambiguity](https://github.com/TheLunchTrae/appy-tappy/issues/493):
+  a process first detected alone has no recorded window ownership when another
+  matching process appears during a window replacement.
 
 ### Per-application run state
 
 The model (`apps/runtime/src/model.rs`) has no run state type. An application's
 automations run while all of these hold:
 
-- It is in `attached`: detection found its process.
+- It is in `attached` and the reported executable matches the current plan.
 - `enabled` is true: automations are on in the tray. It starts true, or as
   the tray last left it when the settings remember that, as
   [Files and handoff](Architecture.md#files-and-handoff) describes.
@@ -328,7 +358,9 @@ stateDiagram-v2
     Detached --> Running: Started, while enabled and planned
     Detached --> Attached: Started, while disabled or not planned
     Attached --> Running: enabled, or a reload plans it
-    Running --> Attached: disabled, or a reload drops it
+    Running --> Attached: disabled
+    Running --> Detached: a reload drops it or changes its executable pattern
+    Attached --> Detached: a reload drops it or changes its executable pattern
     Running --> Running: a reload changes what it runs, so it stops and starts again
     Running --> Running: a reload changes only its names, which it takes as it runs
     Running --> Running: its reader ends, and after a wait the next one starts
@@ -337,13 +369,15 @@ stateDiagram-v2
 ```
 
 - **Running to Attached or Detached.** The engine session is stopped,
-  which releases every rule that restores. The reader is stopped.
+  which releases every rule that restores. Restores are queued before stopping
+  the reader, so a slow capture close does not delay their dispatch.
 - **A reload that changes what it runs.** `replan` compares each plan's
   `Runs`: its window match, its values' checks and its rules, but not the
-  automations' names that each rule's entry carries. When they differ, the
+  automations' names or click targets' display names. When they differ, the
   application stops, which undoes what its automations changed, and starts
-  again in a new session.
-- **A reload that changes only names.** When only the plan's names differ, or
+  again in a new session. A changed executable pattern instead drops its
+  attachment and waits for detection, including while automations are disabled.
+- **A reload that changes only names.** When only display names change, including a click target's, or
   the build its values were checked against, the session keeps running and
   takes the new plan, so the log and the tray use the new names. The reader
   sends each value and each value's problem by its position, and the owner
@@ -509,7 +543,7 @@ records to, the newest that the reader handed it before the frame).
 ```mermaid
 stateDiagram-v2
     [*] --> Reading
-    Reading --> Reading: frame read, a Sample for each value that changed
+    Reading --> Reading: frame read, one batch of changed or lost readings
     Reading --> Reading: frame error, logged once and counted
     Reading --> Reading: another size, Unseen, and Resizing once for each size
     Reading --> Reading: its own size again, Resizing
@@ -519,8 +553,9 @@ stateDiagram-v2
     Ended --> [*]: the reader closes the capture
 ```
 
-- A `Sample` goes to the owner only when a value reads differently from its
-  last reading.
+- A `Frame` goes to the owner when a value changes, stops reading, or becomes
+  readable again. The batch carries all of those changes from that frame.
+  The owner applies them together before evaluating any rule.
 - A frame error is logged once until another problem or a good frame replaces
   it. A good frame starts the count again. A region that lies outside a window
   of the capture's own size does not count, because a new capture would fail
@@ -559,8 +594,10 @@ stateDiagram-v2
 - A value that does not read at the capture's own size, such as one whose
   scaled region reaches outside the window, says why once and is not
   copied.
-- A value whose check fails on a frame keeps its last reading and says why.
-  The handler keeps every problem it said for the value since the value was
+- A value whose check fails on a frame becomes unknown and the handler says
+  why. The first reading after the failure goes to the owner even if it
+  matches the reading from before the failure. The handler keeps every
+  problem it said for the value since the value was
   last read, and says each once: a good read forgets them. A number's check
   fails one way for each stage of its read, such as a character its
   reference has not learned, whatever the characters are, so a counter that
@@ -718,7 +755,7 @@ stateDiagram-v2
     Held --> Fired: the cooldown ends while the condition still holds, sample or not
     Held --> Armed: the condition is false or unknown
     Fired --> Armed: the condition is false, and a restoring rule is released
-    Fired --> Fired: the condition is unknown, such as after Unseen
+    Fired --> Fired: the condition is unknown after a value or window stops reading
 ```
 
 - **Fired** means `armed` is false. A rule that restores is also `active` until
@@ -726,15 +763,15 @@ stateDiagram-v2
 - **Held** is not a field: it is a rule that is `armed`, whose condition holds
   on the values the session has, and whose cooldown from `last_fired` has not
   passed.
-- In one sample, releases run before fires, so a restore never undoes a change
+- In one frame, releases run before fires, so a restore never undoes a change
   another rule makes on the same value.
 - A session that stops, because the application exited or its automations
   stop running, releases every active rule.
-- The engine runs when a sample of any of the session's values arrives, and
-  at the end of a held rule's cooldown. A value that holds still sends no
-  sample, so `Session::next_due` gives the earliest time a held rule's
-  cooldown ends. The owner wakes then if no event came first, and
-  `Session::recheck` fires each held rule whose cooldown passed.
+- The engine runs once after applying all changes in a frame, and at the end
+  of a held rule's cooldown. A steady frame sends no changes, so
+  `Session::next_due` gives the earliest time a held rule's cooldown ends.
+  The owner's `Due` event rechecks after earlier events, and
+  `Session::recheck` fires each held rule whose condition still holds.
 
 ### Action thread and restore journal
 
@@ -777,7 +814,9 @@ The journal in `crates/actions/src/journal.rs` holds one entry per change that
 a restoring rule made, in the order they were made. For each target, such as
 one audio session's volume, the entries form a stack:
 
-- **Perform, restoring.** The change is pushed with the state before it. If a
+- **Perform, restoring.** A pause holds every target media session, even
+  one that another rule already paused while other sessions still play.
+  The change is pushed with the state before it. If a
   restore of that target is pending, the change takes it over, so its own
   release puts back the state from before the first change.
 - **Perform, not restoring.** Every entry for that target is removed, so no
@@ -794,11 +833,19 @@ one audio session's volume, the entries form a stack:
   journal before its undo runs.
 - **Failed undo.** The change moves to `pending` instead of being dropped. A
   volume restore is tried again until it works, and is dropped only once its
-  audio session is gone. A media restore is tried once more, 2 seconds later
-  (`MEDIA_RETRY`), then given up.
+  audio session is gone. A failed media restore gets one more try 2 seconds after the player
+  reports the failure (`MEDIA_RETRY`).
 
-The journal lives only in memory, so a forced end, a crash, or an
-end-of-session wait that runs out loses what it had not undone.
+The journal and pending restores release their COM session keys before the
+controls leave their COM apartment. The journal lives only in memory, so a
+forced end, a crash, or an end-of-session wait that runs out loses what it
+had not undone.
+
+#### Open problems
+
+- [Pending action backlog](https://github.com/TheLunchTrae/appy-tappy/issues/492):
+  slow actions can accumulate unbounded work, including runs whose sessions
+  ended. Disabling and quitting can wait behind that work.
 
 ### Tray thread
 
@@ -970,6 +1017,9 @@ stateDiagram-v2
   and hands the handle to its frame handler, which records to it from its
   next frame. Two handles are equal when they record the same categories of
   the same trace, so the same settings change nothing.
+- **Names.** The writer retains each session's application, value, and
+  automation labels for late rows. It does not retain compiled readers or
+  decoded pictures after their session ends.
 - **Its time is up.** The owner wakes at the end time (`wake`) and stops the
   trace. The settings still say `on`; the setup app shows the trace stopped,
   and turning it on again sets a new end time.
@@ -1582,7 +1632,7 @@ The Automations page and the automation editor warn while the runtime does
 not run (`apps/setup/src/components/RuntimeWarning.tsx`). `App.tsx` holds
 `runtime`, which the [list reads](#how-to-read-this-page) refresh with the
 saved lists: on the `REFRESH_MS` timer while no screen holds the capture, and after
-each save. The owner answers from the running processes
+each save. The owner lists processes in its own Windows session
 (`Owner::runtime_runs`), the check the Debug page shows too, which opens
 nothing the runtime needs to start.
 
@@ -1603,13 +1653,6 @@ and the next read that works leaves **Unknown** (`runtimeAfter` in
 feed this state: the refresh that follows the save checks the processes
 itself, and a runtime that missed the signal reads the saved files
 when it starts.
-
-#### Open problems
-
-- [#440](https://github.com/TheLunchTrae/appy-tappy/issues/440): the process
-  list holds every signed-in Windows user's processes, so another user's
-  runtime reads as **Runs** and hides the warning while this user's runtime
-  is stopped.
 
 ### Application import
 
@@ -1740,8 +1783,12 @@ stateDiagram-v2
   watches again at once and says nothing. When the watch that follows is
   refused too, with no reading between, the refusal is a failure: the
   editor shows it and tries again each second.
-- **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
-  error, a screenshot is refused, and a recording stops with the error as its
+- The preview and the automation editor's watch each queue one frame.
+  The capture thread waits for room while the owner is busy. Stopping the
+  capture closes the frame receiver before joining the thread. A queued
+  notification carries the capture ticket, so it reaches only its own stream.
+- **Failed** sets `failure`, a `CaptureFailure`. Preview, live readings,
+  and debug details report the error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
 - **Ended** is a failure whose `ended` flag is set, for a `NotConnected`
   error: a closed window, a lost graphics device, or a capture panic. Frames
@@ -1774,7 +1821,13 @@ stateDiagram-v2
   size.
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
-  second click, or when focus leaves **Change shortcut**.
+  second click, or when focus leaves **Change shortcut**. The capture screens
+  share the shortcut registration queue. Leaving the view or starting to
+  choose ends its key handler, then releases any registration that succeeded.
+  The next screen registers only after that cleanup. A refused registration
+  shows the shortcut error and leaves nothing to release. If releasing a
+  shortcut fails, the next registration tries the release again before
+  asking for its shortcut. The old handler stays inactive.
 
 ### Live check
 
@@ -1799,6 +1852,11 @@ Settling at a size where the value reads places it there and forgets
 `unread`. Each new trial places its value at the newest frame's size at
 once, so an edit that the page tries again on a size change reads there
 without waiting for the size to settle.
+A capture failure makes both the live reading and its debug details answer
+that failure, without reading the frame from before it. A good frame clears
+the failure and readings resume; an ended capture stays failed until another
+window is picked.
+
 Its state is `state`, a `CheckState`; `reads`, the reading or the problem
 shown, which is kept outside the capture screen's own state (`liveReads` in
 `apps/setup/src/lib/liveCheck.ts`) so that a new reading renders only the
@@ -2064,6 +2122,17 @@ stateDiagram-v2
   recording. A save or a try with a box's screenshot, a recording, or a
   compared screenshot of another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
+
+Closing the reference editor stops its recording by ticket even before its
+first state read answers. A start still pending at close stops its returned
+ticket as soon as it answers. Pending state reads and failures are dropped,
+and opening the editor again starts with no recording view. A stop awaiting
+its final state becomes stale on close too, and does not open review.
+`useRecorder` permits one start, stop, or discard at a time: repeated
+**Record more** clicks never compete for the same recording ticket. Starting
+and finishing each command invalidates outstanding state reads, including a
+poll started while the command was pending, so it cannot overwrite the
+command's final state.
 
 #### Where a recording is placed
 
@@ -2365,7 +2434,8 @@ stateDiagram-v2
   entering the step shows it (`shownOnStep`), whichever screenshot a later
   step showed. A new screenshot becomes the one the place is on: the region
   moves onto it when it has the size the region is drawn at, and is cleared
-  when it has another (`onPicture` in `apps/setup/src/lib/check.ts`). While
+  when it has another (`onPicture` in `apps/setup/src/lib/check.ts`). An edit
+  keeps its saved region and drawing instead, so a resize loses no edit. While
   either size is unknown, such as a screenshot whose pixels did not arrive,
   the region stays as it is. This step records nothing.
 - **How** is **Characters** for a number that is not a fix: it picks the
@@ -2546,7 +2616,9 @@ stateDiagram-v2
   drawing, which needs no screenshot, so the name, the pin, the check's kind
   and its settings still save. A window that never takes that size never
   leaves this state; the editor points to **Fix at this size** for it.
-- **Placed.** `drawnOn` is the newest screenshot of that size, and the region
+- **Placed.** A screenshot of another size keeps the region and its current
+  `drawnOn`, so returning to its size can continue the edit. `drawnOn` is the
+  newest screenshot of that size, and the region
   shows on every screenshot of that size. The edit is still a `kept` drawing
   while the region equals the saved one.
 - **Moved.** The region differs from the saved one, so the edit is a `drawn`
@@ -3213,9 +3285,9 @@ stateDiagram-v2
 - The samples left out end with the editor: opening it on a reference and
   leaving it clear `dropped` (`toReference`, `fromReference`), and a save
   writes the reference without them and closes the editor. A
-  [draft](Setup-app.md#drafts) kept with the editor open keeps them, by
-  picture file name, and resumes with none left out when the reference's
-  saved samples changed since (`refreshedDraft`).
+  [draft](Setup-app.md#drafts) reopens the saved pictures for review
+  (`restoreSetup`), since even the same file name and label can now refer
+  to different pixels.
 
 ### Bar detection
 
@@ -3284,11 +3356,20 @@ stateDiagram-v2
     Retrying --> Off: the overlay is turned off, or its application is removed
 ```
 
-The Values page keeps a second set of entries, `live`, one for each running
-application whose values it shows, whether its overlay is on or not. They
-move through the same states but have no window: the page's poll opens one,
-and leaving the page turns them all off. Each value's reading carries the
-value's ID, so the page matches a reading to its row by ID.
+The Values page keeps a second set of entries, `live`, for the running
+applications it shows. They move through the same states and have no overlay
+window. The page sends one poll with the application IDs it wants to read.
+The owner stops the captures and clears the retry state for IDs the poll
+leaves out. An empty poll, when the last window closes or the page goes away,
+stops all Values page captures. Each value's reading carries its ID, so the
+page matches it to its row.
+
+The page sends its polls in order, including the final empty poll on
+unmount. A reopened page's first poll follows the old page's final poll.
+While a poll is pending, the page discards its answer if the application
+list changes or the page unmounts, and hides the readings of the earlier
+list. A failed poll for the current list shows its error and the next poll
+tries again.
 
 Each frame means to an entry what `Placed::meaning` says, as it does to the
 runtime's frame handler. At another window size, an entry reads nothing
@@ -3304,9 +3385,8 @@ A save that works for one application closes that application's entry in
 both sets (`Overlays::reopen`, from `Owner::tell`), so its next poll opens
 it from the saved file again. The other applications' entries and captures
 go on as they were. An overlay window that closes drops its entry and the
-size of its card (`Overlays::window_closed`), and closing the app or
-leaving the Values page closes every entry of the set
-(`Overlays::close_all`).
+size of its card (`Overlays::window_closed`). App shutdown closes both
+sets (`Overlays::close_all`).
 
 `overlay::window::sync` opens a window for each overlay that is on and closes
 each that is not. The owner thread runs it through its host: when the main
@@ -3378,6 +3458,12 @@ in the editor or imported, has no reference kept, since its ID is new. A file
 changed outside the setup app while a reference is kept is not seen until
 then.
 
+Value saves, redraws, size fixes, and reference edits reserve every picture
+name the application's saved file uses, including samples marked for removal.
+A first drawing uses a numbered set when its usual names belong to another
+saved item. Pictures are written before the application's file is replaced,
+so a failed save cannot overwrite a picture the saved file still names.
+
 A click's picture is written to the `clicks` folder when its target is set
 up, before its automation is saved. Each save of the automations removes the
 click pictures that neither they nor a draft names, and so does the end of
@@ -3386,12 +3472,20 @@ saved nor kept as a draft leaves no file. While the drafts cannot be listed,
 none is removed.
 [Pictures kept](Setup-app.md#pictures-kept) lists what each folder holds.
 
+A fix draft whose color or state tolerance differs from its saved value is
+outdated, as one whose colors or states differ is: it cannot preview settings
+that saving the fix would discard.
+
 Drafts are files of the setup app alone, in their own folder, and saving or
 deleting one tells no one. Each draft's folder is in one of three states: in
 place, being written beside it in a `.saving` folder, or moved aside to an
 `.old` folder while the new one takes its place. A save that stops between
 them leaves the old draft, or the next listing puts it back, as
 [Drafts](Setup-app.md#drafts) describes.
+
+The debug bundle reads the saved files without recovering drafts or changing
+their staging folders. It chooses pictures from the same bytes it packs for
+each file, so a concurrent save cannot authorize unrelated pictures.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another
