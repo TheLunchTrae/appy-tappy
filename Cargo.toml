@@ -32,7 +32,7 @@ members = ["apps/mcp", "apps/runtime", "apps/setup/src-tauri", "crates/*"]
 
 # Member packages inherit these with `field.workspace = true`.
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.99.1"
 license = "GPL-3.0-only"
@@ -46,11 +46,11 @@ publish = false
 # edit. The workspace's own crates carry the workspace version above, which a
 # minor release bumps here too.
 [workspace.dependencies]
-appytappy-actions = { version = "0.1.0", path = "crates/actions" }
-appytappy-config = { version = "0.1.0", path = "crates/config" }
-appytappy-engine = { version = "0.1.0", path = "crates/engine" }
-appytappy-platform = { version = "0.1.0", path = "crates/platform" }
-appytappy-sources = { version = "0.1.0", path = "crates/sources" }
+appytappy-actions = { version = "0.1.1", path = "crates/actions" }
+appytappy-config = { version = "0.1.1", path = "crates/config" }
+appytappy-engine = { version = "0.1.1", path = "crates/engine" }
+appytappy-platform = { version = "0.1.1", path = "crates/platform" }
+appytappy-sources = { version = "0.1.1", path = "crates/sources" }
 mutants = "0.0.4"
 proptest = "1.12.0"
 serde = { version = "1.0.229", features = ["derive"] }

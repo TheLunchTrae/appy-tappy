@@ -29,6 +29,8 @@ permissions:
 # version. Test builds, and publishing runs off main that prepare stops, queue
 # only behind runs of the same branch.
 concurrency:
+  cancel-in-progress: false
+  queue: max
   group: release-${{ inputs.publish && github.ref == 'refs/heads/main' && 'publish' || github.ref }}
 
 jobs:
