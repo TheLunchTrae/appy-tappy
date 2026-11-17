@@ -329,10 +329,12 @@ impl CharactersSpec {
 
     /// The reference these characters teach, saved with the ID `id` and the
     /// name `name`, and what it learned. A saved reference keeps its samples
-    /// and their pictures, and the new ones are numbered after them:
+    /// and their pictures, and the new ones take unused file names:
     /// `ref-{id}-1.png` onward, the labeled screenshots first and then the
     /// recorded readings. `None` for `id` teaches a saved reference under
-    /// its own ID, or a new one under a stand-in.
+    /// its own ID, or a new one under a stand-in. `reserved` names every
+    /// picture still used by the application's saved file; no new sample
+    /// takes one of those names.
     ///
     /// # Errors
     ///
@@ -345,11 +347,12 @@ impl CharactersSpec {
         session: Session<'_>,
         id: Option<&str>,
         name: &str,
+        reserved: &[&str],
     ) -> Result<Taught, SpecError> {
         if self.reference.is_none() && self.labels.is_empty() && self.recorded.is_empty() {
             return Err(SpecError::NoLabels);
         }
-        let taught = self.learn(session, id, name, &self.recorded)?;
+        let taught = self.learn(session, id, name, &self.recorded, reserved)?;
         if taught.reference.samples.is_empty() {
             return Err(SpecError::NoLabels);
         }
@@ -385,6 +388,7 @@ impl CharactersSpec {
         id: Option<&str>,
         name: &str,
         recorded: &[RecordedLabel],
+        reserved: &[&str],
     ) -> Result<Taught, SpecError> {
         let (region, window_size) = self.drawn(session.screenshots)?;
         self.same_sizes(session, window_size)?;
@@ -415,19 +419,20 @@ impl CharactersSpec {
         };
         let new = self.new_samples(session, region, recorded)?;
         let mut pictures = Vec::new();
-        let mut number = samples.len();
-        for (image, text) in new {
-            // The next number no sample's picture has, even when a file edited
-            // by hand left a gap. Of the next `samples.len() + 1` numbers at
-            // least one is free; past them all is free too.
-            number = (1..=samples.len().saturating_add(1))
-                .map(|step| number.saturating_add(step))
-                .find(|&next| {
-                    let name = sample_name(id, next);
-                    samples.iter().all(|sample| sample.image != name)
-                })
-                .unwrap_or_else(|| number.saturating_add(samples.len()).saturating_add(1));
-            let name = sample_name(id, number);
+        // A dropped sample still belongs to the file on disk until the save commits.
+        let occupied: std::collections::HashSet<_> = samples
+            .iter()
+            .map(|sample| sample.image.as_str())
+            .chain(self.dropped.iter().map(String::as_str))
+            .chain(reserved.iter().copied())
+            .collect();
+        let names = (samples.len().saturating_add(1)..)
+            .take(occupied.len().saturating_add(new.len()))
+            .map(|number| sample_name(id, number))
+            .filter(|name| !occupied.contains(name.as_str()))
+            .take(new.len())
+            .collect::<Vec<_>>();
+        for ((image, text), name) in new.into_iter().zip(names) {
             pictures.push((
                 name.clone(),
                 image.encode_png().map_err(|_encode| SpecError::Picture)?,
@@ -607,7 +612,7 @@ impl CharactersSpec {
         more: &[L],
         image: impl Fn(Region, &L) -> Result<Image, SpecError>,
     ) -> Result<Vec<Option<String>>, SpecError> {
-        let taught = self.learn(session, None, "", &[])?;
+        let taught = self.learn(session, None, "", &[], &[])?;
         let mut reader = taught.reader;
         Ok(more
             .iter()

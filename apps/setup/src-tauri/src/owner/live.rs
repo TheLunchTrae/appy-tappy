@@ -243,7 +243,7 @@ impl<H: Host> Owner<H> {
         self.keep_reference(trial.characters.reference.as_ref());
         let mut found = self.stores()?.app(&trial.app)?;
         let taught = self
-            .with_session(|session| trial.characters.teach(session, None, TAUGHT))
+            .with_session(|session| trial.characters.teach(session, None, TAUGHT, &[]))
             .map_err(|error| error.to_string())?;
         let id = taught.reference.id.clone();
         let characters = expected_characters(&trial.needs);
@@ -276,7 +276,7 @@ impl<H: Host> Owner<H> {
         self.keep_reference(spec.reference.as_ref());
         self.with_session(|session| {
             Ok(ReadingRisks {
-                lookalikes: spec.teach(session, None, TAUGHT)?.reader.lookalikes(),
+                lookalikes: spec.teach(session, None, TAUGHT, &[])?.reader.lookalikes(),
                 hides_tone: spec.hides_a_tone(session)?,
             })
         })
@@ -314,8 +314,8 @@ mod tests {
     use crate::debug::workings::WorkingsView;
     use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
-        BAR, Harness, add_example_app, capturing, characters, harness, harness_with, scratch_store,
-        teaching, trial,
+        BAR, Harness, add_example_app, capturing, characters, frame_image, harness, harness_with,
+        scratch_store, teaching, trial,
     };
     use crate::reading::Reading;
     use crate::stores::SavedApp;
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn the_check_reads_the_live_frame() {
-        let (mut harness, _handler, root) = capturing("live-reads");
+        let (mut harness, mut handler, root) = capturing("live-reads");
         assert_eq!(harness.ask(Owner::reading), Ok(None));
         assert_eq!(harness.ask(|owner| owner.explain_reading()), Ok(None));
         harness
@@ -452,6 +452,38 @@ mod tests {
             ),
             "{details:?}"
         );
+        harness.deliver(&mut handler, Err(std::io::Error::other("frame lost")));
+        assert_eq!(harness.ask(Owner::reading), Err("Frame lost.".to_owned()));
+        assert_eq!(
+            harness.ask(|owner| owner.explain_reading()),
+            Err("Frame lost.".to_owned())
+        );
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(50.0))));
+        assert!(
+            harness
+                .ask(|owner| owner.explain_reading())
+                .expect("recovered")
+                .is_some()
+        );
+        let previous = harness.ask(|owner| owner.capture.picked_ticket().expect("picked").number());
+        harness
+            .ask(|owner| owner.pick_again(7, previous))
+            .expect("starts again");
+        let mut next = harness.handlers.try_recv().expect("new capture").handler;
+        assert_eq!(harness.ask(Owner::reading), Ok(None));
+        assert_eq!(harness.ask(|owner| owner.explain_reading()), Ok(None));
+        harness.deliver(&mut next, Err(std::io::Error::other("first frame lost")));
+        assert_eq!(
+            harness.ask(Owner::reading),
+            Err("First frame lost.".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.explain_reading()),
+            Err("First frame lost.".to_owned())
+        );
+        harness.deliver(&mut next, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(50.0))));
         fs::remove_dir_all(root).expect("clean up");
     }
 

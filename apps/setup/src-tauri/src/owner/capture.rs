@@ -3,11 +3,11 @@
 
 use std::io;
 use std::mem;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::app_file::WindowDef;
-use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image, NextFrame};
+use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, NextFrame};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
 use crate::check_spec;
@@ -60,7 +60,7 @@ pub(super) enum Capture<S> {
 pub(super) struct Picked<S> {
     /// The window's capture, which runs until the slot is stopped, even
     /// once it failed.
-    capture: Running<S>,
+    capture: Running<FrameStream<S, Preview>>,
     /// The newest frame and when it arrived.
     pub(super) latest: Option<(Image, Instant)>,
     /// Why the capture failed, until a good frame arrives.
@@ -114,6 +114,23 @@ impl<S> Capture<S> {
         }
     }
 
+    /// The fake host delivers frames synchronously, so the previous frame
+    /// must have left the queue before the test calls the next handler.
+    #[cfg(test)]
+    pub(super) fn assert_frame_consumed(&self)
+    where
+        S: CaptureSession,
+    {
+        match self {
+            Self::Picked(picked) => assert!(
+                picked.capture.session.frames.try_recv().is_err(),
+                "the previous preview frame is still queued"
+            ),
+            Self::Watching(watching) => watching.assert_frame_consumed(),
+            Self::Idle => {},
+        }
+    }
+
     /// The ticket of the picked window's capture.
     pub(super) fn picked_ticket(&self) -> Option<Ticket> {
         self.picked().map(|picked| picked.capture.ticket)
@@ -137,52 +154,85 @@ impl<S> Capture<S> {
     }
 }
 
-/// A preview capture's event for one frame.
-fn preview_event(frame: io::Result<Frame<'_>>) -> Event {
-    match frame {
-        Ok(frame) => Event::Frame {
-            image: frame.image.clone(),
-            received: frame.received,
-        },
-        Err(error) => Event::CaptureFailed(CaptureFailure {
-            ended: error.kind() == io::ErrorKind::NotConnected,
-            error: error.to_string(),
-        }),
+/// A capture hands over at most one queued frame. Closing the receiver
+/// first wakes a producer waiting for room before we join its thread.
+#[derive(Debug)]
+pub(super) struct FrameStream<S, F> {
+    pub(super) frames: Receiver<F>,
+    session: S,
+}
+
+impl<S: CaptureSession, F> CaptureSession for FrameStream<S, F> {
+    fn close(self) -> io::Result<()> {
+        drop(self.frames);
+        self.session.close()
     }
 }
 
-/// Starts capturing `crop` of `window` on `host` under a new ticket, sending
-/// each frame to `messages` as the event `to_event` makes of it.
-pub(super) fn start<H: Host>(
+type Preview = Result<(Image, Instant), CaptureFailure>;
+
+fn preview_frame(frame: io::Result<Frame<'_>>) -> Preview {
+    frame
+        .map(|frame| (frame.image.clone(), frame.received))
+        .map_err(|error| CaptureFailure {
+            ended: error.kind() == io::ErrorKind::NotConnected,
+            error: error.to_string(),
+        })
+}
+
+/// Starts capturing `crop` of `window` under a new ticket. Only a wake-up
+/// enters the owner's command queue. The frame waits in this stream.
+pub(super) fn start<H: Host, F: Send + 'static>(
     host: &H,
     tickets: &mut Tickets,
     messages: &Sender<Message<H>>,
     (window, crop): (u64, Crop),
     interval: Duration,
-    to_event: fn(io::Result<Frame<'_>>) -> Event,
-) -> Result<Running<H::Session>, String> {
+    to_frame: fn(io::Result<Frame<'_>>) -> F,
+) -> Result<Running<FrameStream<H::Session, F>>, String> {
     let ticket = tickets.next();
     let messages = messages.clone();
+    let (send, frames) = mpsc::sync_channel(1);
     let handler: FrameHandler = Box::new(move |frame| {
-        // The owner stopped when the send fails, and the capture is about
-        // to be stopped too, so the wait does not matter.
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "a failed send means the owner stopped and will close this capture"
-        )]
-        let _ = messages.send(Message::Sent {
-            ticket,
-            event: to_event(frame),
-        });
+        if send.send(to_frame(frame)).is_err()
+            || messages
+                .send(Message::Sent {
+                    ticket,
+                    event: Event::FrameReady,
+                })
+                .is_err()
+        {
+            return NextFrame::Never;
+        }
         NextFrame::After(interval)
     });
     let session = host
         .capture(window, crop, interval, handler)
         .map_err(|error| error.to_string())?;
-    Ok(Running { ticket, session })
+    Ok(Running {
+        ticket,
+        session: FrameStream { frames, session },
+    })
 }
 
 impl<H: Host> Owner<H> {
+    /// Applies the frame waiting in the current capture's stream.
+    pub(super) fn frame_ready(&mut self) {
+        match &self.capture {
+            Capture::Picked(picked) => match picked.capture.session.frames.try_recv() {
+                Ok(Ok((image, received))) => self.frame(image, received),
+                Ok(Err(error)) => self.capture_failed(error),
+                Err(_) => {},
+            },
+            Capture::Watching(watching) => {
+                if let Some(seen) = watching.next_frame() {
+                    self.watch_sent(seen);
+                }
+            },
+            Capture::Idle => {},
+        }
+    }
+
     /// Lists the windows the user can pick.
     pub(crate) fn window_list(&self) -> Result<WindowList, String> {
         let (processes, windows) = self.desktop()?;
@@ -242,7 +292,7 @@ impl<H: Host> Owner<H> {
             &self.messages,
             (window, Crop::Whole),
             PREVIEW_INTERVAL,
-            preview_event,
+            preview_frame,
         )?;
         let number = capture.ticket.number();
         self.capture = Capture::Picked(Box::new(Picked {
@@ -275,7 +325,7 @@ impl<H: Host> Owner<H> {
             &self.messages,
             (window, Crop::Whole),
             PREVIEW_INTERVAL,
-            preview_event,
+            preview_frame,
         )?;
         let number = capture.ticket.number();
         if let Some(picked) = self.capture.picked_mut() {
@@ -401,11 +451,18 @@ impl<H: Host> Owner<H> {
     pub(crate) fn reading(&mut self) -> Result<Option<Reading>, String> {
         let now = self.host.now();
         let Some(Picked {
+            failure,
             check: Some(check),
-            latest: Some((latest, _arrived)),
+            latest,
             ..
         }) = self.capture.picked_mut()
         else {
+            return Ok(None);
+        };
+        if let Some(failure) = failure {
+            return Err(sentence(&failure.error));
+        }
+        let Some((latest, _arrived)) = latest else {
             return Ok(None);
         };
         check.settled(now);
@@ -416,11 +473,18 @@ impl<H: Host> Owner<H> {
     /// while [`Owner::reading`] answers none.
     pub(crate) fn explain_reading(&self) -> Result<Option<ReadingDetails>, String> {
         let Some(Picked {
+            failure,
             check: Some(check),
-            latest: Some((latest, arrived)),
+            latest,
             ..
         }) = self.capture.picked()
         else {
+            return Ok(None);
+        };
+        if let Some(failure) = failure {
+            return Err(sentence(&failure.error));
+        }
+        let Some((latest, arrived)) = latest else {
             return Ok(None);
         };
         let age = self.host.now().saturating_duration_since(*arrived);
@@ -685,7 +749,7 @@ mod tests {
         assert_ne!(again, earlier, "the capture is another one");
         assert!(!harness.ask(|owner| owner.capture_ended()));
         let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
-        harness.deliver(&mut closed, Ok(&frame_image()));
+        harness.deliver_stale(&mut closed);
         assert_eq!(
             harness.ask(preview),
             Ok(None),
@@ -712,12 +776,54 @@ mod tests {
     }
 
     #[test]
+    fn a_busy_owner_bounds_preview_frames_and_releases_the_sender_on_stop() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        let (first, queued) = mpsc::channel();
+        let (done, stopped) = mpsc::channel();
+        let patience = Duration::from_secs(5);
+        let producer = std::thread::spawn(move || {
+            let image = frame_image();
+            let frame = || {
+                Ok(Frame {
+                    window_size: image.size(),
+                    image: &image,
+                    received: Instant::now(),
+                    delay: Duration::ZERO,
+                })
+            };
+            assert_eq!(handler(frame()), NextFrame::After(PREVIEW_INTERVAL));
+            first.send(()).expect("first frame queued");
+            done.send(handler(frame())).expect("test waits for stop");
+        });
+        queued
+            .recv_timeout(patience)
+            .expect("producer queued its first frame");
+        let stale = harness.messages.try_recv().expect("a frame is ready");
+        let mut fresh = harness.pick();
+        assert_eq!(stopped.recv_timeout(patience), Ok(NextFrame::Never));
+        producer.join().expect("producer stopped");
+        // Even a notification already in the owner's inbox cannot consume
+        // the next capture's waiting frame.
+        let image = frame_image();
+        let fresh_message = harness.sent(&mut fresh, Ok((image.size(), &image)), PREVIEW_INTERVAL);
+        assert!(harness.owner.handle(stale).is_continue());
+        assert_eq!(harness.ask(|owner| owner.preview(4)), Ok(None));
+        assert!(harness.owner.handle(fresh_message).is_continue());
+        assert!(
+            harness
+                .ask(|owner| owner.preview(4))
+                .expect("preview")
+                .is_some()
+        );
+    }
+
+    #[test]
     fn frames_from_a_window_the_user_left_are_dropped() {
         let mut harness = harness(false);
         let mut first = harness.pick();
         let _second = harness.pick();
-        harness.deliver(&mut first, Ok(&frame_image()));
-        harness.deliver(&mut first, Err(io::Error::other("closed")));
+        harness.deliver_stale(&mut first);
         let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
         assert_eq!(harness.ask(preview), Ok(None));
     }
@@ -1011,7 +1117,7 @@ mod tests {
         assert_eq!(harness.closed.try_recv(), Ok(7));
         assert_eq!(harness.ask(held), [false; 5]);
         // A frame the stopped capture sends late is not kept either.
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver_stale(&mut handler);
         assert_eq!(harness.ask(held), [false; 5]);
         assert_eq!(
             harness.ask(Owner::screenshot),

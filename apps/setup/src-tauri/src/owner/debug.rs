@@ -170,8 +170,10 @@ mod tests {
     use std::io::{Cursor, Read as _};
 
     use appytappy_config::action::MediaCommand;
-    use appytappy_config::app_file::RegionDef;
-    use appytappy_config::automation_file::{ActionDef, AutomationDef, TargetDef, WhenDef};
+    use appytappy_config::app_file::{OriginDef, ReferenceDef, RegionDef, SampleDef};
+    use appytappy_config::automation_file::{
+        ActionDef, AutomationDef, AutomationsFile, TargetDef, WhenDef,
+    };
     use appytappy_config::rule::Comparison;
     use zip::ZipArchive;
 
@@ -439,22 +441,146 @@ mod tests {
     }
 
     #[test]
+    fn the_bundle_includes_referenced_custom_picture_names() {
+        let (mut harness, root) = with_saved_bar("owner-debug-custom-pictures");
+        let stores = harness.ask(|owner| owner.stores().expect("stores").clone());
+        let mut app = stores.app("example").expect("saved app").file;
+        app.references.push(ReferenceDef {
+            id: "digits".to_owned(),
+            name: "Digits".to_owned(),
+            origin: OriginDef::ByHand,
+            ink: None,
+            tolerance: 40,
+            samples: vec![SampleDef {
+                image: "icon.png".to_owned(),
+                text: "1".to_owned(),
+            }],
+        });
+        stores
+            .apps
+            .save("example", &app, &[("icon.png".to_owned(), vec![1])])
+            .expect("save");
+        let file = AutomationsFile::parse(
+            r#"{
+            "format": 1, "automations": [{
+                "id": "click", "name": "Click", "enabled": true,
+                "when": { "app": "example", "value": "progress_bar", "is": "equals", "target": 1 },
+                "actions": [{ "kind": "click", "app": "example", "button": "left",
+                    "at": { "kind": "picture", "image": "button.png",
+                        "windowSize": { "width": 4, "height": 2 },
+                        "search": { "x": 0, "y": 0, "width": 4, "height": 2 },
+                        "press": { "x": 0, "y": 0 }, "tolerance": 40 }
+                }], "undo": false
+            }]
+        }"#,
+        )
+        .expect("valid automations");
+        stores.automations.save(&file).expect("save automations");
+        let pictures = stores.automations.pictures();
+        fs::create_dir_all(&pictures).expect("pictures folder");
+        fs::write(pictures.join("button.png"), [2]).expect("click picture");
+        fs::write(pictures.join("draft-button.png"), [4]).expect("draft click picture");
+        fs::write(pictures.join("notes.txt"), "mine").expect("not a picture");
+        fs::write(pictures.join("private.png"), [3]).expect("unreferenced picture");
+        fs::write(stores.apps.folder("example").join("private.png"), [3])
+            .expect("unreferenced picture");
+        let draft = stores.locations.drafts().join("0000019a");
+        fs::create_dir_all(&draft).expect("draft folder");
+        fs::write(
+            draft.join("draft.json"),
+            r#"{
+            "kind": "automation", "app": null, "changes": null, "name": "Draft",
+            "missing": [], "pictures": ["draft-button.png", "notes.txt"], "state": {}
+        }"#,
+        )
+        .expect("draft");
+        let bytes = harness
+            .ask(|owner| {
+                owner.debug_bundle(BundleSpec {
+                    pictures: true,
+                    trace: None,
+                })
+            })
+            .and_then(BundleJob::make)
+            .expect("bundle");
+        let (names, _) = unzip(bytes, "about.txt");
+        assert!(names.contains(&"apps/example/icon.png".to_owned()));
+        assert!(names.contains(&"automation pictures/button.png".to_owned()));
+        assert!(names.contains(&"automation pictures/draft-button.png".to_owned()));
+        assert!(
+            names
+                .iter()
+                .all(|name| !name.contains("private") && !name.ends_with("notes.txt"))
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn packing_a_bundle_never_recovers_or_removes_an_in_progress_draft_save() {
+        let (stores, root) = scratch_store("owner-debug-bundle-save");
+        let saving = stores.locations.drafts().join("0000019a.saving");
+        let old = stores.locations.drafts().join("0000019a.old");
+        let mut harness = harness_with(false, Ok(stores));
+        let job = harness
+            .ask(|owner| {
+                owner.debug_bundle(BundleSpec {
+                    pictures: true,
+                    trace: None,
+                })
+            })
+            .unwrap();
+        fs::create_dir_all(&saving).unwrap();
+        fs::create_dir_all(&old).unwrap();
+        fs::write(saving.join("draft.json"), "new draft").unwrap();
+        fs::write(old.join("draft.json"), "old draft").unwrap();
+        job.make().unwrap();
+        assert_eq!(
+            fs::read_to_string(saving.join("draft.json")).unwrap(),
+            "new draft"
+        );
+        assert_eq!(
+            fs::read_to_string(old.join("draft.json")).unwrap(),
+            "old draft"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn the_bundle_holds_the_files_and_the_pictures_and_trace_only_when_asked() {
         let (stores, root) = scratch_store("owner-debug-bundle");
         let locations = stores.locations.clone();
         let app = locations.apps().join("example");
         fs::create_dir_all(&app).expect("app folder");
         fs::write(locations.settings(), "{\"format\": 1}").expect("settings");
-        fs::write(app.join("app.json"), "{}").expect("app file");
+        fs::write(app.join("app.json"), r#"{"format":1,"name":"Example","window":{"title":"Example","class":"Window","executable":"Example.exe","mustMatch":{"title":false,"class":false},"fallback":"none"},"antiCheat":"none","values":[],"references":[{"id":"font","name":"Font","tolerance":40,"samples":[{"image":"shown-1.png","text":"1"}]}]}"#).expect("app file");
+        fs::write(app.join("unrelated.png"), [1]).expect("unrelated picture");
         fs::write(app.join("shown-1.png"), [1, 2]).expect("picture");
         fs::write(app.join("notes.txt"), "mine").expect("another file");
+        let automation = r#"{"format":1,"automations":[{"id":"click","name":"Click","enabled":true,"when":{"app":"example","value":"ready","is":"equals","target":true},"actions":[{"kind":"click","app":"example","button":"left","at":{"kind":"picture","image":"saved-click.png","windowSize":{"width":2,"height":2},"search":{"x":0,"y":0,"width":2,"height":2},"press":{"x":0,"y":0},"tolerance":0}}],"undo":false}]}"#;
+        fs::write(locations.automations(), automation).expect("automations");
         let pictures = stores.automations.pictures();
         fs::create_dir_all(&pictures).expect("pictures folder");
+        fs::write(pictures.join("saved-click.png"), [5]).expect("saved click picture");
         fs::write(pictures.join("click-1.png"), [3]).expect("picture");
         fs::write(pictures.join("click-1.png.tmp"), [3]).expect("half-written picture");
         let draft = locations.drafts().join("0000019a");
         fs::create_dir_all(&draft).expect("draft folder");
-        fs::write(draft.join("draft.json"), "{}").expect("draft file");
+        let automation_draft = locations.drafts().join("0000019b");
+        fs::create_dir_all(&automation_draft).expect("automation draft folder");
+        fs::write(automation_draft.join("draft.json"), r#"{"kind":"automation","name":"Draft","missing":[],"pictures":["click-1.png","notes.txt"],"state":null}"#).expect("automation draft");
+        fs::write(automation_draft.join("shot-0.png"), [1]).expect("unrelated screenshot");
+        let app_draft = locations.drafts().join("0000019c");
+        fs::create_dir_all(&app_draft).expect("application draft folder");
+        fs::write(app_draft.join("draft.json"), r#"{"kind":"application","name":"Draft","missing":[],"pictures":["unrelated.png"],"state":null}"#).expect("application draft");
+        fs::write(app_draft.join("recorded-0.png"), [1]).expect("unrelated screenshot");
+        fs::write(draft.join("draft.json"), r#"{"kind":"value","name":"Draft","missing":[],"pictures":["unrelated.png"],"state":null}"#).expect("draft file");
+        fs::write(draft.join("unrelated.png"), [1]).expect("unrelated screenshot");
+        fs::write(pictures.join("unrelated.png"), [1]).expect("unrelated click");
+        fs::write(pictures.join("notes.txt"), "private").expect("not an image");
+        let staging = locations.drafts().join("0000019a.saving");
+        fs::create_dir_all(&staging).expect("staging folder");
+        fs::write(staging.join("draft.json"), "{}").expect("uncommitted draft");
+        fs::write(staging.join("shot-0.png"), [4]).expect("uncommitted screenshot");
         fs::write(draft.join("shot-0.png"), [4]).expect("screenshot");
         fs::write(draft.join("notes.txt"), "mine").expect("another file");
         fs::create_dir_all(&stores.logs).expect("logs");
@@ -479,8 +605,11 @@ mod tests {
             [
                 "about.txt",
                 "settings.json",
+                "automations.json",
                 "apps/example/app.json",
                 "drafts/0000019a/draft.json",
+                "drafts/0000019b/draft.json",
+                "drafts/0000019c/draft.json",
                 "logs/setup.log"
             ]
         );
@@ -495,9 +624,15 @@ mod tests {
             .and_then(BundleJob::make)
             .expect("bundle");
         let (names, log) = unzip(full, "logs/setup.log");
+        assert!(!names.contains(&"drafts/0000019b/shot-0.png".to_owned()));
+        assert!(!names.contains(&"drafts/0000019c/recorded-0.png".to_owned()));
         assert_eq!(log, "pick_window took 1.0 ms\n");
         assert!(
             names.contains(&"apps/example/shown-1.png".to_owned()),
+            "{names:?}"
+        );
+        assert!(
+            names.contains(&"automation pictures/saved-click.png".to_owned()),
             "{names:?}"
         );
         assert!(
@@ -509,9 +644,10 @@ mod tests {
             "a draft's screenshots are pictures: {names:?}"
         );
         assert!(
-            names
-                .iter()
-                .all(|name| !name.contains("notes") && !name.contains("png.tmp")),
+            names.iter().all(|name| !name.contains("notes")
+                && !name.contains("unrelated")
+                && !name.contains(".saving")
+                && !name.contains("png.tmp")),
             "only pictures: {names:?}"
         );
         assert!(
@@ -529,7 +665,7 @@ mod tests {
             .expect("bundle");
         assert_eq!(
             unzip(outside, "about.txt").0.len(),
-            5,
+            8,
             "only a trace file in the trace folder goes in"
         );
         fs::remove_dir_all(root).expect("clean up");

@@ -231,7 +231,7 @@ impl<H: Host> Owner<H> {
                 }
                 // New pictures never take the name of one still saved, so a
                 // save that fails partway leaves the saved value readable.
-                let number = free_picture_number(&saved.id, saved.screen.images());
+                let number = free_picture_number(&saved.id, file.images().into_iter());
                 let built = check_spec::to_saved_fix(
                     check,
                     self.capture.screenshots(),

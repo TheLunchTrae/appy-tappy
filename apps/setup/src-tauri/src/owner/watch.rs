@@ -28,9 +28,8 @@ use crate::debug::workings::{self, ReadingDetails};
 use crate::reading::{Reading, at_size};
 use crate::ticket::{Running, Ticket};
 
-use super::capture::{self, Capture};
+use super::capture::{self, Capture, FrameStream};
 use super::host::Host;
-use super::messages::Event;
 use super::{Owner, WATCH_INTERVAL};
 
 /// What a watched value reads on the newest frame, for the automation
@@ -85,13 +84,30 @@ pub(super) struct Watching<S> {
 #[derive(Debug)]
 enum WatchCapture<S> {
     /// It runs.
-    Running(Running<S>),
+    Running(Running<FrameStream<S, Result<Seen, String>>>),
     /// It stopped, and why. Nothing starts it again: the editor shows why
     /// and watches the value again.
     Lost(String),
 }
 
 impl<S: CaptureSession> Watching<S> {
+    pub(super) fn next_frame(&self) -> Option<Result<Seen, String>> {
+        match &self.capture {
+            WatchCapture::Running(stream) => stream.session.frames.try_recv().ok(),
+            WatchCapture::Lost(_) => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn assert_frame_consumed(&self) {
+        if let WatchCapture::Running(stream) = &self.capture {
+            assert!(
+                stream.session.frames.try_recv().is_err(),
+                "the previous watch frame is still queued"
+            );
+        }
+    }
+
     /// The ticket of the capture, while it runs.
     pub(super) const fn ticket(&self) -> Option<Ticket> {
         match &self.capture {
@@ -161,8 +177,8 @@ struct Watched {
 
 /// A watch's event for one frame. A window too small for the region is
 /// a frame without pixels, not a stopped capture: the capture goes on.
-fn watch_event(frame: io::Result<Frame<'_>>) -> Event {
-    Event::Watch(match frame {
+fn watch_frame(frame: io::Result<Frame<'_>>) -> Result<Seen, String> {
+    match frame {
         Ok(frame) => Ok(Seen {
             window_size: frame.window_size,
             image: Some(frame.image.clone()),
@@ -173,7 +189,7 @@ fn watch_event(frame: io::Result<Frame<'_>>) -> Event {
                 image: None,
             })
             .ok_or_else(|| error.to_string()),
-    })
+    }
 }
 
 impl<H: Host> Owner<H> {
@@ -213,7 +229,7 @@ impl<H: Host> Owner<H> {
             &self.messages,
             (window, Crop::Layout(Layout::one(at.region))),
             WATCH_INTERVAL,
-            watch_event,
+            watch_frame,
         )?;
         let id = capture.ticket;
         self.capture = Capture::Watching(Box::new(Watching {
@@ -292,7 +308,7 @@ impl<H: Host> Owner<H> {
                         &self.messages,
                         copied,
                         WATCH_INTERVAL,
-                        watch_event,
+                        watch_frame,
                     );
                     watching.capture = match started {
                         Ok(running) => WatchCapture::Running(running),
@@ -730,7 +746,7 @@ mod tests {
         );
         assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
         // A late frame of the old capture is dropped.
-        harness.deliver_at(&mut handler, Ok((WINDOW, &frame_image())), WATCH_INTERVAL);
+        harness.deliver_stale(&mut handler);
         assert!(harness.handlers.try_recv().is_err(), "no capture starts");
         let mut handler = started.handler;
         let region = Image::new(large, [0, 0, 255, 0].repeat(32)).expect("matching length");
@@ -819,7 +835,7 @@ mod tests {
         assert_eq!(harness.ask(watched(watch, None)), lost);
         assert!(harness.handlers.try_recv().is_err(), "no capture starts");
         // What the stopped capture still sends is dropped.
-        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        harness.deliver_stale(&mut handler);
         harness.wait(SETTLE);
         assert_eq!(harness.ask(watched(watch, None)), lost);
         assert!(harness.handlers.try_recv().is_err(), "nor then");
@@ -841,7 +857,7 @@ mod tests {
         };
         assert_eq!(harness.ask(kept), (Ok(None), false));
         // The pick's capture sends a frame late.
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver_stale(&mut handler);
         assert_eq!(harness.ask(kept), (Ok(None), false));
         assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
         std::fs::remove_dir_all(root).expect("clean up");
@@ -876,7 +892,7 @@ mod tests {
         assert!(harness.closed.try_recv().is_err());
         assert_eq!(harness.ask(watched(second, None)), Ok(Live::Waiting));
         // Frames from the first watch's capture are dropped.
-        harness.deliver_at(&mut stale, Err(io::Error::other("closed")), WATCH_INTERVAL);
+        harness.deliver_stale(&mut stale);
         assert_eq!(harness.ask(watched(second, None)), Ok(Live::Waiting));
         harness.deliver_at(&mut handler, Ok((WINDOW, &frame_image())), WATCH_INTERVAL);
         // Picking a window for a new value stops the watch, and a stop of a

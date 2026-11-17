@@ -145,7 +145,7 @@ pub(crate) trait Host: 'static {
     /// Returns the operating system's error.
     fn run_once(&self) -> io::Result<bool>;
 
-    /// Whether the runtime is running, as the list of running processes
+    /// Whether the runtime is running, as the list of processes in this session
     /// tells by its program's name. The check opens neither the runtime nor
     /// its single-instance guard, so a runtime that starts meanwhile still
     /// takes the guard.
@@ -243,24 +243,13 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
     }
 
     fn runtime_runs(&self) -> io::Result<bool> {
-        self.system
-            .processes()
-            .map(|processes| runtime_among(&processes))
+        appytappy_platform::process_runs_in_session(RUNTIME_PROGRAM)
     }
 
     #[mutants::skip] // Opens and closes windows, which needs a running app.
     fn sync_overlay_windows(&self, wanted: &[OverlayWindow]) -> Result<(), String> {
         overlay::window::sync(&self.app, wanted)
     }
-}
-
-/// Whether the runtime's program is among `processes`. Its name is the
-/// runtime's whoever started it, but the list holds every user's
-/// processes, so another user's runtime on the same PC counts too.
-fn runtime_among(processes: &[ProcessEntry]) -> bool {
-    processes
-        .iter()
-        .any(|process| process.executable.eq_ignore_ascii_case(RUNTIME_PROGRAM))
 }
 
 #[cfg(test)]
@@ -281,6 +270,7 @@ mod tests {
         assert!(desktop.processes().is_err());
         assert!(desktop.window_place(7).is_err());
         assert!(desktop.executable_build(ProcessId::new(7)).is_err());
+        #[cfg(not(windows))]
         assert!(desktop.runtime_runs().is_err());
         // Run requests go through the platform's own named event, which
         // works on Windows whatever `system` says.
@@ -314,24 +304,5 @@ mod tests {
                 .starts_with("Example App's window cannot be found: "),
             "a click is placed before it is sent"
         );
-    }
-
-    #[test]
-    fn the_runtime_runs_while_its_program_is_listed() {
-        let process = |executable: &str| ProcessEntry {
-            id: ProcessId::new(7),
-            parent: ProcessId::new(1),
-            executable: executable.to_owned(),
-            threads: 1,
-        };
-        assert!(!runtime_among(&[]));
-        assert!(!runtime_among(&[
-            process("Example.exe"),
-            process("AppyTappy Setup.exe")
-        ]));
-        assert!(runtime_among(&[
-            process("Example.exe"),
-            process("AppyTappy-Runtime.EXE")
-        ]));
     }
 }

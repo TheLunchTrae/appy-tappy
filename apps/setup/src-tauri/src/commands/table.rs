@@ -198,10 +198,9 @@ macro_rules! with_commands {
             commands::save_fix(spec: FixSpec) -> SavedValue;
             /// Removes the saved value's fix at `width` by `height`.
             commands::remove_fix(application: String, value: String, width: u32, height: u32) -> ();
-            /// What the application's values read now, for the Values page; the first call starts reading its window.
-            commands::live_values(application: String) -> OverlayView;
-            /// Stops reading values for the Values page.
-            commands::stop_live_values() -> ();
+            /// What the applications' values read now for the Values page. Stops reading any application not in
+            /// `applications`.
+            commands::live_values(applications: Vec<String>) -> Vec<(String, Result<OverlayView, String>)>;
             commands::delete_value(application: String, value: String) -> ();
             /// Saves a reference, over the one `spec.check.reference` names when it names one.
             commands::save_reference(spec: ReferenceSaveSpec) -> SavedReferenceId;

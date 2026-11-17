@@ -782,24 +782,28 @@ pub(crate) async fn overlay_state(
     .await
 }
 
-/// What `application`'s values read now, for the Values page, whether its
-/// overlay is on or not. The first call starts reading its window.
+/// What the applications' values read now for the Values page. Stops
+/// reading any application not in `applications`.
 #[tauri::command]
 pub(crate) async fn live_values(
     app: AppHandle,
-    application: String,
-) -> Result<OverlayView, String> {
-    try_ask(&app, "live_values", move |owner| {
-        owner.live_values(&application)
-    })
-    .await
-}
-
-/// Stops reading values for the Values page.
-#[tauri::command]
-pub(crate) async fn stop_live_values(app: AppHandle) -> Result<(), String> {
-    ask(&app, "stop_live_values", |owner| {
-        owner.stop_live_values();
+    applications: Vec<String>,
+) -> Result<Vec<(String, Result<OverlayView, String>)>, String> {
+    let sent = Instant::now();
+    run(&app, move |owner| {
+        let views = owner.live_values(applications);
+        let took = sent.elapsed();
+        let mut errors = views
+            .iter()
+            .filter_map(|(_, view)| view.as_ref().err())
+            .peekable();
+        if errors.peek().is_none() {
+            owner.record_command("live_values", took, None);
+        }
+        for error in errors {
+            owner.record_command("live_values", took, Some(error));
+        }
+        views
     })
     .await
 }
