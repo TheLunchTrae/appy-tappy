@@ -153,5 +153,7 @@ actions keep, which [What AppyTappy keeps](Getting-started.md#what-appytappy-kee
 lists, and the screenshots your drafts keep. They are off at first, because
 they show parts of your applications' windows, and a draft's screenshots show
 whole windows. Unrelated picture files and temporary draft folders are left
-out. Even without them, the bundle holds your applications' window titles
-and executable names.
+out. Valid files can name pictures with custom filenames; the bundle keeps
+those too. If a file cannot be read, pictures with AppyTappy's generated
+names still go in for diagnosis. Even without pictures, the bundle holds
+your applications' window titles and executable names.

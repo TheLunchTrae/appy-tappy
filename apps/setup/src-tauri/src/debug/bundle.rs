@@ -13,7 +13,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use appytappy_config::names::{click_picture_number, is_app_id, is_own_image_name};
+use appytappy_config::app_file::AppFile;
+use appytappy_config::names::{click_picture_number, is_app_id, is_image_name, is_own_image_name};
 use appytappy_platform::LocalTime;
 use serde::Deserialize;
 
@@ -89,10 +90,20 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
     bundle.file_if_there("settings.json", &locations.settings())?;
     bundle.file_if_there("automations.json", &locations.automations())?;
     if spec.pictures {
+        // Generated names remain useful when a file is broken. Valid files
+        // can also name pictures the user renamed by hand.
+        let automations = stores.automations.load().ok();
+        let mut images = stores.drafts.pictures().unwrap_or_default();
+        if let Some(file) = &automations {
+            images.extend(file.images().into_iter().map(str::to_owned));
+        }
         bundle.folder(
             "automation pictures",
             &stores.automations.pictures(),
-            |name| click_picture_number(name).is_some(),
+            |name| {
+                click_picture_number(name).is_some()
+                    || (is_image_name(name) && images.iter().any(|image| image == name))
+            },
         )?;
     }
     for app in folders(&locations.apps())? {
@@ -102,8 +113,15 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
         if !is_app_id(&name) {
             continue;
         }
+        let file = if spec.pictures {
+            stores.file(&name).ok().flatten()
+        } else {
+            None
+        };
+        let images = file.as_ref().map_or_else(Vec::new, AppFile::images);
         bundle.folder(&format!("apps/{name}"), &app, |file| {
-            file == "app.json" || (spec.pictures && is_own_image_name(file))
+            file == "app.json"
+                || (spec.pictures && (is_own_image_name(file) || images.contains(&file)))
         })?;
     }
     // A draft's folder holds its file and, for a value, fix, or reference,

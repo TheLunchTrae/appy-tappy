@@ -170,8 +170,10 @@ mod tests {
     use std::io::{Cursor, Read as _};
 
     use appytappy_config::action::MediaCommand;
-    use appytappy_config::app_file::RegionDef;
-    use appytappy_config::automation_file::{ActionDef, AutomationDef, TargetDef, WhenDef};
+    use appytappy_config::app_file::{OriginDef, ReferenceDef, RegionDef, SampleDef};
+    use appytappy_config::automation_file::{
+        ActionDef, AutomationDef, AutomationsFile, TargetDef, WhenDef,
+    };
     use appytappy_config::rule::Comparison;
     use zip::ZipArchive;
 
@@ -435,6 +437,64 @@ mod tests {
                 .ask(|owner| owner.read_log(LogName::Setup)),
             Err("AppyTappy cannot find its files: APPDATA is not set.".to_owned())
         );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_bundle_includes_referenced_custom_picture_names() {
+        let (mut harness, root) = with_saved_bar("owner-debug-custom-pictures");
+        let stores = harness.ask(|owner| owner.stores().expect("stores").clone());
+        let mut app = stores.app("example").expect("saved app").file;
+        app.references.push(ReferenceDef {
+            id: "digits".to_owned(),
+            name: "Digits".to_owned(),
+            origin: OriginDef::ByHand,
+            ink: None,
+            tolerance: 40,
+            samples: vec![SampleDef {
+                image: "icon.png".to_owned(),
+                text: "1".to_owned(),
+            }],
+        });
+        stores
+            .apps
+            .save("example", &app, &[("icon.png".to_owned(), vec![1])])
+            .expect("save");
+        let file = AutomationsFile::parse(
+            r#"{
+            "format": 1, "automations": [{
+                "id": "click", "name": "Click", "enabled": true,
+                "when": { "app": "example", "value": "progress_bar", "is": "equals", "target": 1 },
+                "actions": [{ "kind": "click", "app": "example", "button": "left",
+                    "at": { "kind": "picture", "image": "button.png",
+                        "windowSize": { "width": 4, "height": 2 },
+                        "search": { "x": 0, "y": 0, "width": 4, "height": 2 },
+                        "press": { "x": 0, "y": 0 }, "tolerance": 40 }
+                }], "undo": false
+            }]
+        }"#,
+        )
+        .expect("valid automations");
+        stores.automations.save(&file).expect("save automations");
+        let pictures = stores.automations.pictures();
+        fs::create_dir_all(&pictures).expect("pictures folder");
+        fs::write(pictures.join("button.png"), [2]).expect("click picture");
+        fs::write(pictures.join("private.png"), [3]).expect("unreferenced picture");
+        fs::write(stores.apps.folder("example").join("private.png"), [3])
+            .expect("unreferenced picture");
+        let bytes = harness
+            .ask(|owner| {
+                owner.debug_bundle(BundleSpec {
+                    pictures: true,
+                    trace: None,
+                })
+            })
+            .and_then(BundleJob::make)
+            .expect("bundle");
+        let (names, _) = unzip(bytes, "about.txt");
+        assert!(names.contains(&"apps/example/icon.png".to_owned()));
+        assert!(names.contains(&"automation pictures/button.png".to_owned()));
+        assert!(names.iter().all(|name| !name.contains("private")));
         fs::remove_dir_all(root).expect("clean up");
     }
 

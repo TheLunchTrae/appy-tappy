@@ -273,6 +273,12 @@ mod tests {
             assert_eq!(replies[0]["error"]["code"], INVALID_REQUEST);
             assert_eq!(replies[0]["id"], Value::Null);
         }
+        for id in [json!("request"), json!(-1), json!(u64::MAX)] {
+            let request = json!({"jsonrpc": "2.0", "id": id, "method": "ping"});
+            let replies = exchange(&format!("{request}\n"));
+            assert_eq!(replies[0]["result"], json!({}));
+            assert_eq!(replies[0]["id"], id);
+        }
         for version in [Value::Null, json!("1.0"), json!(2)] {
             let request = json!({"jsonrpc": version, "id": 1, "method": "ping"});
             let replies = exchange(&format!("{request}\n"));

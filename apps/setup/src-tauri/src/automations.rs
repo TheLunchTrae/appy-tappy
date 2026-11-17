@@ -19,7 +19,6 @@ mod uses;
 use appytappy_config::action::KeyChord;
 use appytappy_config::automation_file::{ActionDef, AutomationDef, AutomationsFile};
 use appytappy_config::names::new_automation_id;
-use appytappy_config::signal::SignalName;
 use appytappy_sources::automation::AppReaders;
 use serde::Serialize;
 

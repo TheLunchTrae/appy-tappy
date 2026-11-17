@@ -326,6 +326,20 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn renaming_a_target_keeps_the_plan_but_changing_its_window_does_not() {
+        let mut before = ClickTargets::default();
+        before.add(&[("target", &app_file("Before"))], []);
+        let mut renamed = ClickTargets::default();
+        renamed.add(&[("target", &app_file("After"))], []);
+        assert_eq!(before, renamed);
+        let mut moved = app_file("Before");
+        moved.window.executable = "Other.exe".to_owned();
+        let mut changed = ClickTargets::default();
+        changed.add(&[("target", &moved)], []);
+        assert_ne!(before, changed);
+    }
+
+    #[test]
     fn a_click_is_placed_in_its_application_s_window_and_keeps_how_it_clicks() {
         let click = spot(Corner::BottomRight, 10, 5);
         let targets = targets(std::slice::from_ref(&click));

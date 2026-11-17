@@ -810,11 +810,8 @@ mod tests {
             .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
             .filter(|name| name.starts_with("ref-"))
             .collect();
-        assert_eq!(
-            pictures,
-            std::slice::from_ref(&picture),
-            "the box took its name"
-        );
+        assert_eq!(pictures, ["ref-digits-2.png"]);
+        assert!(!folder.join(&picture).exists(), "the old sample is gone");
         assert_eq!(
             unlearned(&mut harness, Some(gray), &[], SavingKind::Taught),
             []
@@ -841,9 +838,13 @@ mod tests {
             .expect("saves without the second picture");
         assert_eq!(texts(&mut harness), ["2"]);
         assert!(!folder.join(&second).exists());
+        let remaining = saved(&mut harness).samples[0].image.clone();
         assert_eq!(
             harness.ask(|owner| {
-                owner.save_reference_settings(&settings(Some(gray), std::slice::from_ref(&picture)))
+                owner.save_reference_settings(&settings(
+                    Some(gray),
+                    std::slice::from_ref(&remaining),
+                ))
             }),
             Err("Type what at least one box shows, or keep a recorded reading.".to_owned())
         );

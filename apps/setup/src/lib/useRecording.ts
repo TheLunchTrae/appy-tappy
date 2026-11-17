@@ -7,7 +7,6 @@ import { discardRecording, recordedReading, recordingState, startRecording, stop
 import type { Color, Picture } from './pixels.ts';
 import { background } from './repeat.ts';
 import { type CropAsks, type Crops, cropAskFailed, cropsToAsk, NO_CROP_ASKS, NO_CROPS, withCrop } from './review.ts';
-import { useNewest } from './request.ts';
 import { useRecorder } from './useRecorder.ts';
 
 /** Whether the recording's state still changes: it records, or the text reader is still reading a reading. */
@@ -59,20 +58,15 @@ export function useRecording(active = true): {
   /** Forgets the recording and its readings; true once it is gone. */
   readonly discard: () => Promise<boolean>;
 } {
-  const recorder = useRecorder(recordingState, stillRead);
-  const { view, command, show, forget, started, stop: stopOwned } = recorder;
+  const recorder = useRecorder(recordingState, stillRead, active);
+  const { view, command, show, forget, started } = recorder;
   // Each recorded reading's pixels, for the recording they belong to.
   const [crops, setCrops] = useState<Crops>(NO_CROPS);
-  const starts = useNewest();
   useEffect(() => {
     if (!active) {
-      starts.drop();
-      forget();
-      background(stopOwned());
       setCrops(NO_CROPS);
     }
-    return starts.drop;
-  }, [active, starts, forget, stopOwned]);
+  }, [active]);
 
   // Fetches the pixels of each reading that has none yet, once, and again after a pause when the ask fails, up to
   // `CROP_TRIES` asks in all.
@@ -109,8 +103,7 @@ export function useRecording(active = true): {
   // The owner refuses to go on with other settings rather than start over,
   // so kept readings and review edits are never dropped without a discard.
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
-    const current = starts.begin();
-    await command(async () => {
+    await command(async (current) => {
       const { app, pin, region, ink, tolerance, drawnOn, scope, examples } = settings;
       const textColor = ink === null ? {} : { ink };
       const recording = await startRecording(
@@ -132,16 +125,23 @@ export function useRecording(active = true): {
   };
 
   const stop = async (): Promise<boolean> =>
-    command(async () => {
+    command(async (current) => {
       await recorder.stop();
-      show(await recordingState());
+      if (current()) {
+        const stopped = await recordingState();
+        if (current()) {
+          show(stopped);
+        }
+      }
     });
 
   const discard = async (): Promise<boolean> =>
-    command(async () => {
+    command(async (current) => {
       await discardRecording();
-      forget();
-      setCrops(NO_CROPS);
+      if (current()) {
+        forget();
+        setCrops(NO_CROPS);
+      }
     });
 
   return {

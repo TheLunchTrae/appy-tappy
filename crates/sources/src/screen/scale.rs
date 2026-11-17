@@ -336,6 +336,7 @@ mod tests {
                 Some(region(24, 24, 1, 1)),
                 "{pin:?}"
             );
+            assert_eq!(scaled(region(100, 100, 1, 1), drawn, small, pin), None);
         }
     }
 

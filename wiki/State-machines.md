@@ -30,8 +30,10 @@ it was about has gone. These guards drop such stale messages:
   releases no screenshot in the next capture. A state selection is canceled
   when the check changes kind, so its late answer cannot move another check.
 - **Recording editor lifetime.** Closing the reference editor invalidates
-  pending starts and reads. A late start is stopped by its own ticket; it
-  neither opens review nor starts polling again.
+  pending commands and reads. A late start is stopped by its own ticket;
+  neither it nor a late stop opens review or starts polling again. One
+  command runs at a time, so two pending resumes cannot stop their shared
+  recording ticket.
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
   longer runs.
@@ -2098,7 +2100,10 @@ stateDiagram-v2
 Closing the reference editor stops its recording by ticket even before its
 first state read answers. A start still pending at close stops its returned
 ticket as soon as it answers. Pending state reads and failures are dropped,
-and opening the editor again starts with no recording view.
+and opening the editor again starts with no recording view. A stop awaiting
+its final state becomes stale on close too, and does not open review.
+`useRecorder` permits one start, stop, or discard at a time: repeated
+**Record more** clicks never compete for the same recording ticket.
 
 #### Where a recording is placed
 

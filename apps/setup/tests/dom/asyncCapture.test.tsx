@@ -3,7 +3,7 @@ import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 
-import type { SelectionView } from '../../src/lib/bindings.ts';
+import type { RecordingView, SelectionView } from '../../src/lib/bindings.ts';
 import { type Draft, EMPTY_DRAFT, withKind } from '../../src/lib/check.ts';
 import { useRecording } from '../../src/lib/useRecording.ts';
 import { useScreenshots } from '../../src/lib/useScreenshots.ts';
@@ -122,4 +122,85 @@ test('closing the reference editor stops a late recording start without reviving
   expect(started).toBe(false);
   expect(read).toBe(false);
   expect(result.current.view).toBeNull();
+});
+
+test('closing the reference editor cancels a stop waiting for its final state', async () => {
+  const pending = Promise.withResolvers<RecordingView>();
+  let asked = false;
+  mockIPC((command) => {
+    if (command === 'recording_state') {
+      asked = true;
+      return pending.promise;
+    }
+    return undefined;
+  });
+  const { result, rerender } = renderHook(({ active }) => useRecording(active), { initialProps: { active: true } });
+  let stop: Promise<boolean> | undefined;
+  act(() => {
+    stop = result.current.stop();
+  });
+  await waitFor(() => expect(asked).toBe(true));
+  rerender({ active: false });
+  await act(async () => {
+    pending.resolve({
+      id: 7,
+      recording: false,
+      elapsedMs: 0,
+      full: null,
+      problem: null,
+      settings: {
+        region: { x: 0, y: 0, width: 4, height: 2 },
+        windowSize: { width: 4, height: 2 },
+        tolerance: 40,
+        scope: 'place',
+      },
+      readings: [],
+      shapes: [],
+      sizes: [],
+      spots: [],
+      at: { width: 4, height: 2 },
+    });
+    expect(await stop).toBe(false);
+  });
+  expect(result.current.view).toBeNull();
+});
+
+test('repeated Record more clicks share one pending command without stopping its ticket', async () => {
+  const pending = Promise.withResolvers<number>();
+  let requests = 0;
+  let started = 0;
+  const stopped: unknown[] = [];
+  mockIPC((command, args) => {
+    if (command === 'start_recording') {
+      requests += 1;
+      return pending.promise;
+    }
+    if (command === 'stop_recording') {
+      stopped.push(args);
+    }
+    return null;
+  });
+  const { result } = renderHook(() => useRecording());
+  const settings = {
+    app: 'example',
+    region: { x: 0, y: 0, width: 4, height: 2 },
+    ink: null,
+    tolerance: 40,
+    drawnOn: 0,
+    pin: null,
+    scope: 'place' as const,
+    examples: [],
+  };
+  const onStarted = (): void => {
+    started += 1;
+  };
+  await act(async () => {
+    const first = result.current.start(settings, true, onStarted);
+    const second = result.current.start(settings, true, onStarted);
+    pending.resolve(7);
+    await Promise.all([first, second]);
+  });
+  expect(requests).toBe(1);
+  expect(started).toBe(1);
+  expect(stopped).toEqual([]);
 });

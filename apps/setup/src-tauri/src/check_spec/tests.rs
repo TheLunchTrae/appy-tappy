@@ -476,18 +476,19 @@ fn a_saved_sample_the_reference_leaves_out_is_not_learned_or_saved() {
         ..gray.clone()
     };
     let taught = teach(&dropped, session(&shots, None)).expect("learns the box alone");
+    let replacement = sample_name("digits", 2);
     assert_eq!(
         taught.reference.samples,
         [SampleDef {
-            image: picture.clone(),
+            image: replacement.clone(),
             text: "2".to_owned(),
         }],
-        "the box takes the number the sample left"
+        "the box leaves the saved sample's name unused until the new file commits"
     );
     let [(name, png)] = taught.pictures.as_slice() else {
         panic!("one new picture, not {:?}", taught.pictures.len());
     };
-    assert_eq!(name, &picture);
+    assert_eq!(name, &replacement);
     let gray_square = screenshot()
         .crop(Region::new(2, 0, 2, 2).expect("not empty"))
         .expect("inside");
