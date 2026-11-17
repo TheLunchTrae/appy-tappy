@@ -22,17 +22,31 @@ use serde::{Deserialize, Serialize};
 pub struct Pattern {
     /// The pattern as written.
     text: String,
-    /// The pattern's characters, lowercased, as matching compares them.
-    folded: Vec<char>,
+    matcher: Matcher,
+}
+
+/// The forms used by process detection and window matching.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Matcher {
+    Any,
+    Literal(String),
+    Wildcard(Vec<char>),
 }
 
 impl Pattern {
     /// The pattern `text`.
     #[must_use]
     pub fn new(text: &str) -> Self {
+        let matcher = match text {
+            "*" => Matcher::Any,
+            _ if text.contains(['*', '?']) => {
+                Matcher::Wildcard(text.to_lowercase().chars().collect())
+            },
+            _ => Matcher::Literal(text.to_lowercase()),
+        };
         Self {
             text: text.to_owned(),
-            folded: text.to_lowercase().chars().collect(),
+            matcher,
         }
     }
 
@@ -45,8 +59,17 @@ impl Pattern {
     /// Whether `candidate` matches, ignoring case.
     #[must_use]
     pub fn matches(&self, candidate: &str) -> bool {
-        let folded: Vec<char> = candidate.to_lowercase().chars().collect();
-        glob(&self.folded, &folded)
+        match &self.matcher {
+            Matcher::Any => true,
+            // Executables generally have ASCII names. Snapshot scans compare
+            // each name against every watched application.
+            Matcher::Literal(text) if candidate.is_ascii() => text.eq_ignore_ascii_case(candidate),
+            Matcher::Literal(text) => *text == candidate.to_lowercase(),
+            Matcher::Wildcard(pattern) => {
+                let folded: Vec<char> = candidate.to_lowercase().chars().collect();
+                glob(pattern, &folded)
+            },
+        }
     }
 }
 
@@ -219,6 +242,10 @@ mod tests {
         let cases = [
             ("Example App", "Example App", true),
             ("example app", "EXAMPLE APP", true),
+            ("\u{212a}eeper.exe", "keeper.EXE", true),
+            ("keeper.exe", "\u{212a}eeper.EXE", true),
+            ("MÜNCHEN", "München", true),
+            ("?Ü*", "München", true),
             ("Example*", "Example App", true),
             ("*App", "Example App", true),
             ("*amp*", "Example App", true),

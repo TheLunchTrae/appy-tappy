@@ -683,8 +683,8 @@ export function withKind(draft: Draft, kind: CheckKind): Draft {
 /**
  * `draft` once screenshot `shot` is the picture the value's region is set on, as a new screenshot taken while its
  * place is set is. `fits` says the screenshot has the size the region is drawn at, so the region moves onto it; on
- * one of another size a new value or fix is drawn again. An edit keeps its saved drawing until a screenshot fits. `fits` is null while either size is unknown, such as before the screenshot's pixels
- * arrive, and the draft stays as it is.
+ * one of another size a new value or fix is drawn again. An edit keeps its saved drawing until a screenshot fits.
+ * While either size is unknown, `fits` is null and the draft keeps its drawing.
  */
 export function onPicture(draft: Draft, shot: number, fits: boolean | null, flow: CaptureFlow): Draft {
   if (draft.region === null || fits === null) {

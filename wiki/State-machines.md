@@ -25,7 +25,8 @@ it was about has gone. Fifteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
-  longer runs.
+  longer runs. Before starting a session, the model checks that the
+  executable detection reported still matches the current plan.
 - **Reader numbers.** A session numbers its readers with a `ReaderNumber`,
   which each reader sends with every value it reads, when its values can no
   longer be seen, and when it ends. The owner drops each of those unless it
@@ -39,8 +40,8 @@ it was about has gone. Fifteen guards drop such stale messages:
   the text reader, or a [window look](#window-look) sends the owner is a
   `Message::Sent` that carries the ticket of the work it is for, and
   `Owner::is_current` drops it unless the work its event is about holds
-  that ticket still: the picked window's capture for a frame or a failure,
-  the watch's running capture for what a watch read, the recording of
+  that ticket still. A frame-ready notification reads the matching preview
+  or watch stream. Other events belong to the recording of
   readings for text or a look, the search for its text, and the named
   application's overlay capture for an overlay's reading. So what a stopped
   or replaced capture still sends is dropped, and so is text for a recording
@@ -3206,9 +3207,9 @@ stateDiagram-v2
 - The samples left out end with the editor: opening it on a reference and
   leaving it clear `dropped` (`toReference`, `fromReference`), and a save
   writes the reference without them and closes the editor. A
-  [draft](Setup-app.md#drafts) kept with the editor open keeps them, by
-  picture file name, and resumes with none left out when the reference's
-  saved samples changed since (`refreshedDraft`).
+  [draft](Setup-app.md#drafts) reopens the saved pictures for review
+  (`restoreSetup`), since even the same file name and label can now refer
+  to different pixels.
 
 ### Bar detection
 

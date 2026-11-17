@@ -436,7 +436,7 @@ impl<H: Host> Owner<H> {
         let Some(Picked {
             failure,
             check: Some(check),
-            latest: Some((latest, _arrived)),
+            latest,
             ..
         }) = self.capture.picked_mut()
         else {
@@ -445,6 +445,9 @@ impl<H: Host> Owner<H> {
         if let Some(failure) = failure {
             return Err(sentence(&failure.error));
         }
+        let Some((latest, _arrived)) = latest else {
+            return Ok(None);
+        };
         check.settled(now);
         Ok(check.read(latest)?.map(Reading::from))
     }
@@ -455,7 +458,7 @@ impl<H: Host> Owner<H> {
         let Some(Picked {
             failure,
             check: Some(check),
-            latest: Some((latest, arrived)),
+            latest,
             ..
         }) = self.capture.picked()
         else {
@@ -464,6 +467,9 @@ impl<H: Host> Owner<H> {
         if let Some(failure) = failure {
             return Err(sentence(&failure.error));
         }
+        let Some((latest, arrived)) = latest else {
+            return Ok(None);
+        };
         let age = self.host.now().saturating_duration_since(*arrived);
         Ok(check
             .region_of(latest)?

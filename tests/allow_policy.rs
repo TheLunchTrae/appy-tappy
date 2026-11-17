@@ -3083,12 +3083,12 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         );
     }
     // cargo-mutants writes a report without outcomes when a shard selects no
-    // mutants, so the diff lane lists the selected mutants under its lock and
-    // stops when there are none, before it builds anything.
+    // mutants. Read-only selection can finish an empty shard even while
+    // another run owns the report. All build and report work stays locked.
     let steps = [
-        "acquire_mutants_task_lock diff",
         "sh scripts/select-mutants.sh ",
         "if [ -z \"$selected\" ]; then",
+        "acquire_mutants_task_lock diff",
         "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then",
     ];
     let positions: Vec<usize> = steps
@@ -3100,7 +3100,7 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         .collect();
     assert!(
         positions.is_sorted(),
-        "the diff mutation task must, under its lock, list the selected mutants and stop when there are none before it builds"
+        "the diff mutation task must finish empty selections before taking the lock, then build under the lock"
     );
     let Some(mutants_run) = diff
         .lines()

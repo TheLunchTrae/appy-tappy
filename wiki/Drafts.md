@@ -35,9 +35,10 @@ automation and pick the value in it.
   window, and what you set up on them: the region, **Stays at**,
   **This content may move**, the check with its colors, states, and
   tolerances, the reference it reads with, the characters a number
-  needs, the labels, the text you added with **Find more like it**, and
-  the [saved pictures](References.md#saved-pictures-it-cant-learn) you
-  removed from a reference.
+  needs, the labels, and the text you added with **Find more like it**.
+  When you reopen a reference draft, review any
+  [saved pictures](References.md#saved-pictures-it-cant-learn) you want to
+  remove. Someone may have replaced a picture under the same name.
   Screenshots that **Record screenshots** kept stay marked as recorded, so a
   [value](Values.md#how-a-value-was-made) or
   [reference](References.md#how-a-reference-was-made) you finish on one of

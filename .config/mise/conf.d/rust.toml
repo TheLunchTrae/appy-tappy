@@ -170,13 +170,6 @@ export APPYTAPPY_TEXT_READER_MODEL="$PWD/apps/setup/src-tauri/models/text-recogn
 diff_file="$(mktemp)"
 trap 'rm -f "$diff_file"' EXIT
 
-. scripts/mutants-lock.sh
-acquire_mutants_task_lock diff
-trap 'mutants_task_release_lock; rm -f "$diff_file"' EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
 # When this shard selects no mutants, cargo-mutants writes a report without
 # outcomes.json, which verification rejects, so the lane lists the mutants
 # first and stops when there are none. Listing builds nothing.
@@ -185,6 +178,13 @@ if [ -z "$selected" ]; then
   echo "The diff selects no mutants${MUTANTS_SHARD:+ in shard $MUTANTS_SHARD}; nothing to test."
   exit 0
 fi
+
+. scripts/mutants-lock.sh
+acquire_mutants_task_lock diff
+trap 'mutants_task_release_lock; rm -f "$diff_file"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
   run_mutants_task_child cargo test --no-run --workspace --all-features --locked

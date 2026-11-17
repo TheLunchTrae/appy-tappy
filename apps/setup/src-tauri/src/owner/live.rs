@@ -466,6 +466,24 @@ mod tests {
                 .expect("recovered")
                 .is_some()
         );
+        let previous = harness.ask(|owner| owner.capture.picked_ticket().expect("picked").number());
+        harness
+            .ask(|owner| owner.pick_again(7, previous))
+            .expect("starts again");
+        let mut next = harness.handlers.try_recv().expect("new capture").handler;
+        assert_eq!(harness.ask(Owner::reading), Ok(None));
+        assert_eq!(harness.ask(|owner| owner.explain_reading()), Ok(None));
+        harness.deliver(&mut next, Err(std::io::Error::other("first frame lost")));
+        assert_eq!(
+            harness.ask(Owner::reading),
+            Err("First frame lost.".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.explain_reading()),
+            Err("First frame lost.".to_owned())
+        );
+        harness.deliver(&mut next, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(50.0))));
         fs::remove_dir_all(root).expect("clean up");
     }
 

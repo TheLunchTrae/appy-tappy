@@ -458,7 +458,15 @@ mod tests {
         fs::write(pictures.join("click-1.png.tmp"), [3]).expect("half-written picture");
         let draft = locations.drafts().join("0000019a");
         fs::create_dir_all(&draft).expect("draft folder");
-        fs::write(draft.join("draft.json"), r#"{"kind":"value","name":"Draft","missing":[],"pictures":["click-1.png","notes.txt"],"state":null}"#).expect("draft file");
+        let automation_draft = locations.drafts().join("0000019b");
+        fs::create_dir_all(&automation_draft).expect("automation draft folder");
+        fs::write(automation_draft.join("draft.json"), r#"{"kind":"automation","name":"Draft","missing":[],"pictures":["click-1.png","notes.txt"],"state":null}"#).expect("automation draft");
+        fs::write(automation_draft.join("shot-0.png"), [1]).expect("unrelated screenshot");
+        let app_draft = locations.drafts().join("0000019c");
+        fs::create_dir_all(&app_draft).expect("application draft folder");
+        fs::write(app_draft.join("draft.json"), r#"{"kind":"application","name":"Draft","missing":[],"pictures":["unrelated.png"],"state":null}"#).expect("application draft");
+        fs::write(app_draft.join("recorded-0.png"), [1]).expect("unrelated screenshot");
+        fs::write(draft.join("draft.json"), r#"{"kind":"value","name":"Draft","missing":[],"pictures":["unrelated.png"],"state":null}"#).expect("draft file");
         fs::write(draft.join("unrelated.png"), [1]).expect("unrelated screenshot");
         fs::write(pictures.join("unrelated.png"), [1]).expect("unrelated click");
         fs::write(pictures.join("notes.txt"), "private").expect("not an image");
@@ -493,6 +501,8 @@ mod tests {
                 "automations.json",
                 "apps/example/app.json",
                 "drafts/0000019a/draft.json",
+                "drafts/0000019b/draft.json",
+                "drafts/0000019c/draft.json",
                 "logs/setup.log"
             ]
         );
@@ -507,6 +517,8 @@ mod tests {
             .and_then(BundleJob::make)
             .expect("bundle");
         let (names, log) = unzip(full, "logs/setup.log");
+        assert!(!names.contains(&"drafts/0000019b/shot-0.png".to_owned()));
+        assert!(!names.contains(&"drafts/0000019c/recorded-0.png".to_owned()));
         assert_eq!(log, "pick_window took 1.0 ms\n");
         assert!(
             names.contains(&"apps/example/shown-1.png".to_owned()),
@@ -546,7 +558,7 @@ mod tests {
             .expect("bundle");
         assert_eq!(
             unzip(outside, "about.txt").0.len(),
-            6,
+            8,
             "only a trace file in the trace folder goes in"
         );
         fs::remove_dir_all(root).expect("clean up");

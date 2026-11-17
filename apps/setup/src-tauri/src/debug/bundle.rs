@@ -21,7 +21,7 @@ use appytappy_platform::LocalTime;
 use serde::Deserialize;
 
 use crate::debug::trace_file;
-use crate::drafts::{DraftDef, draft_shot, is_draft_id};
+use crate::drafts::{DraftDef, DraftKind, draft_shot, is_draft_id};
 use crate::stores::Stores;
 use crate::zip_pack::ZipPack;
 
@@ -123,8 +123,13 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
         )? && spec.pictures
             && let Ok(saved) = serde_json::from_slice::<DraftDef>(&bytes)
         {
-            clicks.extend(saved.pictures);
-            bundle.folder(&prefix, &draft, |name| draft_shot(name).is_some())?;
+            match saved.kind {
+                DraftKind::Automation => clicks.extend(saved.pictures),
+                DraftKind::Value | DraftKind::Fix | DraftKind::Reference => {
+                    bundle.folder(&prefix, &draft, |name| draft_shot(name).is_some())?;
+                },
+                DraftKind::Application => {},
+            }
         }
     }
     if spec.pictures {

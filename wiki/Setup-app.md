@@ -790,9 +790,7 @@ it learns, fits, or judges anything (`SavedReference::without`), and a save
 writes the reference without them. Each new sample gets a name clear of
 the samples on disk, including those marked for removal. After the file
 commits, the store removes the pictures it no longer names. A reference
-needs at least one sample. A draft keeps its removals while it still refers
-to the same saved samples. Resuming the draft after those samples change
-clears the removals before showing the editor.
+needs at least one sample.
 
 Every `CharactersSpec` is taught in the reference's own editor, so a learn
 error on a saved sample there points at the list and names no reference to
@@ -808,10 +806,9 @@ to be refused. The answer marks a sample whose picture is missing
 (`UnlearnedSample.missing`), and the list suggests another text color only
 for a sample that one could help.
 
-A draft resumed with the editor open goes on from the reference as it is
-saved now. When its samples are not the ones the draft copied, the draft's
-`dropped` is cleared (`refreshedDraft` in `lib/captureDraft.ts`): a file
-name it holds could name a picture saved since.
+Resuming a draft opens the reference as it is saved now. The user reviews
+saved-picture removals again because the same file name and label can
+belong to different pixels after another save.
 
 The owner decisions behind this:
 
@@ -1278,8 +1275,8 @@ Saving an automation, turning one on, and listing them all ask
 builds the value it watches with `saved::build`, and fits each click's picture,
 the same check the runtime runs. Setup and the runtime use each automation's ID for **Run once**. When they
 read the file, both preserve the first valid occurrence of an ID and assign
-a unique ID from the automation's name to a missing, invalid, or duplicate
-one. This happens before filtering disabled or broken automations, so the
+a unique ID from the automation's name to each invalid or duplicate ID.
+This happens before filtering disabled or broken automations, so the
 editor and the runtime agree on which rule to run. The next save writes
 the repaired IDs. Saving a value reads it
 back with `saved::build`, from its new pictures and those already saved, as the

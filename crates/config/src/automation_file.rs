@@ -623,19 +623,15 @@ impl AutomationsFile {
     /// Give each automation a stable ID before either program filters disabled or broken rules.
     /// The first occurrence keeps its ID. The next save writes any repairs.
     fn unique_ids(&mut self) {
-        let mut taken: Vec<String> = self
-            .automations
-            .iter()
-            .map(|automation| automation.id.clone())
-            .collect();
-        let mut seen = std::collections::HashSet::with_capacity(taken.len());
+        let mut ids = crate::names::AutomationIds::default();
+        let mut repair = Vec::new();
         for automation in &mut self.automations {
-            if SignalName::new(&automation.id).is_err() || seen.contains(&automation.id) {
-                let names: Vec<_> = taken.iter().map(String::as_str).collect();
-                automation.id = crate::names::new_automation_id(&automation.name, &names);
-                taken.push(automation.id.clone());
+            if SignalName::new(&automation.id).is_err() || !ids.reserve(&automation.id) {
+                repair.push(automation);
             }
-            seen.insert(automation.id.clone());
+        }
+        for automation in repair {
+            automation.id = ids.assign(&automation.name);
         }
     }
 
@@ -1472,10 +1468,25 @@ mod tests {
         other.enabled = true;
         let mut reserved = first.clone();
         reserved.id = "pause_music_2".to_owned();
-        let raw = file(vec![first, other, reserved]).to_json();
+        let mut also_named = other.clone();
+        also_named.name = "Pause music 3".to_owned();
+        let raw = file(vec![first, other.clone(), reserved, also_named, other]).to_json();
         let read = AutomationsFile::parse(&raw).expect("reads");
-        assert_eq!(read.automations[1].id, "pause_music_3");
-        assert_eq!(read.automations[2].id, "pause_music_2");
+        let ids: Vec<_> = read
+            .automations
+            .iter()
+            .map(|rule| rule.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "pause_music",
+                "pause_music_3",
+                "pause_music_2",
+                "pause_music_3_2",
+                "pause_music_4"
+            ]
+        );
         assert_eq!(
             AutomationsFile::parse(&read.to_json()).expect("reads"),
             read
