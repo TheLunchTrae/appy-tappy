@@ -99,21 +99,6 @@ export function storeSetup(setup: CaptureSetup): StoredSetup {
 }
 
 /**
- * The setup a draft kept, on `current` when its saved reference is already known. Refresh the sample removals
- * against the copied reference before replacing it; with no current file yet, keep the copy until it arrives.
- */
-export function restoreSetup(stored: StoredSetup, current?: ReferenceDef | null): CaptureSetup {
-  const draft = { ...stored.draft, recorded: new Map<number, string>() };
-  return current === undefined || stored.editing === null
-    ? { ...stored, draft }
-    : {
-        ...stored,
-        editing: { ...stored.editing, existing: current },
-        draft: refreshedDraft(draft, stored.editing.existing, current),
-      };
-}
-
-/**
  * What the capture still needs before it can be saved, a sentence each: a name and a region, then the first thing
  * the check asks for. `fixing` says it fixes a saved value, which keeps its name.
  */
@@ -166,6 +151,21 @@ export function refreshedEditing(editing: Editing | null, references: readonly R
 export function refreshedDraft(draft: Draft, copied: ReferenceDef | null, now: ReferenceDef | null): Draft {
   const same = JSON.stringify(copied?.samples ?? []) === JSON.stringify(now?.samples ?? []);
   return same || draft.dropped.length === 0 ? draft : { ...draft, dropped: [] };
+}
+
+/**
+ * The setup a draft kept, on `current` when its saved reference is already known. Refresh the sample removals
+ * against the copied reference before replacing it; with no current file yet, keep the copy until it arrives.
+ */
+export function restoreSetup(stored: StoredSetup, current?: ReferenceDef | null): CaptureSetup {
+  const draft = { ...stored.draft, recorded: new Map<number, string>() };
+  return current === undefined || stored.editing === null
+    ? { ...stored, draft }
+    : {
+        ...stored,
+        editing: { ...stored.editing, existing: current },
+        draft: refreshedDraft(draft, stored.editing.existing, current),
+      };
 }
 
 /**
