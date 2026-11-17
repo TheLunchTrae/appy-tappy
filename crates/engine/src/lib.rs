@@ -106,12 +106,28 @@ impl Session {
         }
     }
 
-    /// Records a new `value` of `signal`, read at `at`.
+    /// Records all changed readings from one frame, read at `at`. A
+    /// missing reading clears the signal without assuming a condition is
+    /// false. No rule sees a mix of old and new values from this frame.
     ///
     /// Releases come before fires, so a restore never undoes a change that
     /// another rule makes on the same value.
-    pub fn sample(&mut self, signal: SignalName, value: Value, at: Instant) -> Vec<Effect> {
-        self.values.insert(signal, value);
+    pub fn sample(
+        &mut self,
+        changes: impl IntoIterator<Item = (SignalName, Option<Value>)>,
+        at: Instant,
+    ) -> Vec<Effect> {
+        let mut changes = changes.into_iter().peekable();
+        if changes.peek().is_none() {
+            return Vec::new();
+        }
+        for (signal, value) in changes {
+            if let Some(value) = value {
+                self.values.insert(signal, value);
+            } else {
+                self.values.remove(&signal);
+            }
+        }
         let mut effects = Vec::new();
         for (index, (rule, state)) in self.rules.iter().zip(&mut self.states).enumerate() {
             // An unknown condition leaves a fired rule as it is, until the
@@ -236,7 +252,9 @@ mod tests {
     fn feed(session: &mut Session, clock: &Clock, from: u64, values: &[f64]) -> Vec<Effect> {
         let mut effects = Vec::new();
         for (offset, value) in (from..).zip(values) {
-            effects.extend(session.sample(name("progress"), number(*value), clock.at(offset)));
+            effects.extend(
+                session.sample([(name("progress"), Some(number(*value)))], clock.at(offset)),
+            );
         }
         effects
     }
@@ -265,6 +283,62 @@ mod tests {
     }
 
     #[test]
+    fn rules_only_see_the_complete_frame() {
+        let clock = Clock::new();
+        let lobby = Condition::compare(name("lobby"), Comparison::Equals, Value::Flag(true))
+            .expect("valid");
+        let both = Condition::all(vec![progress(Comparison::AtLeast, 90.0), lobby]).expect("valid");
+        let rule = Rule::new(both, pause(), Duration::ZERO, Restore::OnRelease).expect("valid");
+        let mut session = Session::new(vec![rule].into());
+        let frame = |lobby, progress| {
+            [
+                (name("lobby"), Some(Value::Flag(lobby))),
+                (name("progress"), Some(number(progress))),
+            ]
+        };
+        assert_eq!(session.sample(frame(false, 95.0), clock.at(1)), []);
+        assert_eq!(session.sample(frame(true, 10.0), clock.at(2)), []);
+        assert_eq!(
+            session.sample(frame(true, 95.0), clock.at(3)),
+            [Effect::Fire(FIRST)]
+        );
+        assert_eq!(
+            session.sample(frame(false, 95.0), clock.at(4)),
+            [Effect::Release(FIRST)]
+        );
+    }
+
+    #[test]
+    fn a_lost_reading_cannot_fire_on_a_stale_value_when_its_cooldown_ends() {
+        let clock = Clock::new();
+        let mut session =
+            Session::new(vec![at_90(Duration::from_millis(10), Restore::OnRelease)].into());
+        assert_eq!(
+            feed(&mut session, &clock, 0, &[95.0, 10.0, 95.0]),
+            [
+                Effect::Fire(FIRST),
+                Effect::Release(FIRST),
+                Effect::Held(FIRST),
+            ]
+        );
+        assert_eq!(session.next_due(), Some(clock.at(10)));
+        assert_eq!(session.sample([], clock.at(3)), [], "there is no update");
+        assert_eq!(session.sample([(name("progress"), None)], clock.at(3)), []);
+        assert_eq!(session.next_due(), None);
+        assert_eq!(session.recheck(clock.at(10)), []);
+        assert_eq!(
+            feed(&mut session, &clock, 11, &[95.0]),
+            [Effect::Fire(FIRST)]
+        );
+        assert_eq!(session.sample([(name("progress"), None)], clock.at(12)), []);
+        assert_eq!(
+            feed(&mut session, &clock, 13, &[10.0]),
+            [Effect::Release(FIRST)],
+            "a restoring action stays in place until its condition is known to be false"
+        );
+    }
+
+    #[test]
     fn forgotten_values_keep_each_rule_as_it_was_until_they_are_read_again() {
         let clock = Clock::new();
         let lobby = Condition::compare(name("lobby"), Comparison::Equals, Value::Flag(true))
@@ -273,7 +347,7 @@ mod tests {
         let rule =
             Rule::new(both, pause(), Duration::from_secs(60), Restore::OnRelease).expect("valid");
         let mut session = Session::new(vec![rule].into());
-        session.sample(name("lobby"), Value::Flag(true), clock.at(1));
+        session.sample([(name("lobby"), Some(Value::Flag(true)))], clock.at(1));
         assert_eq!(
             feed(&mut session, &clock, 2, &[95.0]),
             [Effect::Fire(FIRST)]
@@ -283,7 +357,7 @@ mod tests {
         assert_eq!(feed(&mut session, &clock, 3, &[95.0]), []);
         // Both back and still true: it neither releases nor fires again.
         assert_eq!(
-            session.sample(name("lobby"), Value::Flag(true), clock.at(4)),
+            session.sample([(name("lobby"), Some(Value::Flag(true)))], clock.at(4)),
             []
         );
         session.forget_values();
@@ -303,7 +377,7 @@ mod tests {
             Condition::any(vec![progress(Comparison::AtLeast, 90.0), lobby]).expect("valid");
         let rule = Rule::new(either, pause(), Duration::ZERO, Restore::OnRelease).expect("valid");
         let mut session = Session::new(vec![rule].into());
-        session.sample(name("lobby"), Value::Flag(false), clock.at(1));
+        session.sample([(name("lobby"), Some(Value::Flag(false)))], clock.at(1));
         assert_eq!(
             feed(&mut session, &clock, 2, &[95.0]),
             [Effect::Fire(FIRST)]
@@ -315,7 +389,7 @@ mod tests {
             "the lobby might be true now"
         );
         assert_eq!(
-            session.sample(name("lobby"), Value::Flag(false), clock.at(4)),
+            session.sample([(name("lobby"), Some(Value::Flag(false)))], clock.at(4)),
             [Effect::Release(FIRST)]
         );
     }
@@ -348,11 +422,11 @@ mod tests {
         );
         // The rule stays armed and fires on the first holding value once the cooldown has passed.
         assert_eq!(
-            session.sample(name("progress"), number(90.1), clock.at(10)),
+            session.sample([(name("progress"), Some(number(90.1)))], clock.at(10)),
             [Effect::Held(FIRST)]
         );
         assert_eq!(
-            session.sample(name("progress"), number(90.1), clock.at(11)),
+            session.sample([(name("progress"), Some(number(90.1)))], clock.at(11)),
             [Effect::Fire(FIRST)]
         );
     }
@@ -420,7 +494,7 @@ mod tests {
             Condition::compare(name("status"), Comparison::Equals, state("Paused")).expect("valid");
         let rule = Rule::new(paused, pause(), Duration::ZERO, Restore::OnRelease).expect("valid");
         let mut session = Session::new(vec![rule].into());
-        let mut status = |value, at| session.sample(name("status"), value, clock.at(at));
+        let mut status = |value, at| session.sample([(name("status"), Some(value))], clock.at(at));
         assert_eq!(status(state("Live"), 1), []);
         assert_eq!(status(state("Paused"), 2), [Effect::Fire(FIRST)]);
         assert_eq!(status(state("Paused"), 3), []);

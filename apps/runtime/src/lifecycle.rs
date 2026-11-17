@@ -26,6 +26,7 @@ use std::io;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
+use appytappy_actions::Watched;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
@@ -122,7 +123,7 @@ pub(crate) enum Change {
 pub(crate) struct Lifecycle {
     watchlist: Watchlist,
     /// The process each running app's session follows, by app ID.
-    running: BTreeMap<String, ProcessId>,
+    running: BTreeMap<String, Watched>,
     /// For each app whose session's process owned one of the app's best
     /// windows, since when it owns none, or `None` while it owns one.
     owned: BTreeMap<String, Option<Instant>>,
@@ -191,12 +192,12 @@ impl Lifecycle {
         let executable = |watchlist: &Watchlist, app: &str| {
             watchlist.0.get(app).map(|window| window.executable.clone())
         };
-        self.running.retain(|app, &mut process| {
+        self.running.retain(|app, watched| {
             let kept = executable(&self.watchlist, app) == executable(&watchlist, app);
             if !kept {
                 changes.push(Change::Exited {
                     app: app.clone(),
-                    process,
+                    process: watched.process,
                 });
             }
             kept
@@ -273,10 +274,16 @@ impl Lifecycle {
                 .iter()
                 .filter(|entry| window.executable.matches(&entry.executable))
                 .collect();
-            let current = self.running.get(app).copied();
-            // The name check catches a process ID that Windows reused.
-            let current =
-                current.filter(|&process| fitting.iter().any(|entry| entry.id == process));
+            let previous = self.running.get(app);
+            // A wildcard can match a different executable that reused the PID.
+            let current = previous
+                .filter(|watched| {
+                    fitting.iter().any(|entry| {
+                        entry.id == watched.process
+                            && entry.executable.eq_ignore_ascii_case(&watched.executable)
+                    })
+                })
+                .map(|watched| watched.process);
             let several = fitting.len() > 1;
             let owner = if several {
                 let all = listed.get_or_insert_with(|| {
@@ -302,8 +309,9 @@ impl Lifecycle {
             let follow = owner
                 .or(current)
                 .or_else(|| fitting.iter().map(|entry| entry.id).min());
-            let previous = self.running.get(app).copied();
-            if previous != follow {
+            let previous = previous.map(|watched| watched.process);
+            let replaced = previous.is_some() && current.is_none();
+            if previous != follow || replaced {
                 if let Some(process) = previous {
                     self.running.remove(app);
                     self.owned.remove(app);
@@ -315,7 +323,13 @@ impl Lifecycle {
                 if let Some(entry) =
                     follow.and_then(|id| fitting.iter().find(|entry| entry.id == id))
                 {
-                    self.running.insert(app.clone(), entry.id);
+                    self.running.insert(
+                        app.clone(),
+                        Watched {
+                            process: entry.id,
+                            executable: entry.executable.clone(),
+                        },
+                    );
                     changes.push(Change::Started {
                         app: app.clone(),
                         process: entry.id,
@@ -614,6 +628,21 @@ mod tests {
         assert_eq!(
             lifecycle.scan_unlisted(Ok(vec![entry(42, "Other.exe")]), now),
             [exited(42)]
+        );
+    }
+
+    #[test]
+    fn a_reused_pid_under_a_wildcard_starts_a_fresh_session() {
+        let now = Instant::now();
+        let mut lifecycle = Lifecycle::new(watching(&[(APP, "Example*.exe")]), now);
+        lifecycle.scan_unlisted(Ok(vec![entry(42, "Example.exe")]), now);
+        assert_eq!(
+            lifecycle.scan_unlisted(Ok(vec![entry(42, "ExampleOther.exe")]), now),
+            [exited(42), started_as(APP, 42, "ExampleOther.exe")]
+        );
+        assert_eq!(
+            lifecycle.scan_unlisted(Ok(vec![entry(42, "exampleOTHER.EXE")]), now),
+            []
         );
     }
 

@@ -123,17 +123,16 @@ pub(crate) struct Job {
 /// What a reader reports.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Reading {
-    /// A value read differently from its last read.
-    Sample {
+    /// The changed readings from one frame.
+    Frame {
         /// The session.
         session: SessionId,
         /// Which of the session's readers read it.
         reader: ReaderNumber,
-        /// The value's position among the application's values.
-        position: usize,
-        /// What it read.
-        value: Value,
-        /// When the frame it was read from arrived.
+        /// Changed values by their position in the application. `None`
+        /// means the value stopped reading on this frame.
+        changes: Vec<(usize, Option<Value>)>,
+        /// When the frame arrived.
         at: Instant,
     },
     /// Something keeps the reader from reading. Each problem is sent once
@@ -1175,12 +1174,12 @@ mod tests {
         assert!(
             matches!(
                 &sample,
-                Reading::Sample {
+                Reading::Frame {
                     session: SessionId(3),
                     reader: ReaderNumber(2),
-                    value: Value::Flag(true),
+                    changes,
                     ..
-                }
+                } if changes.as_slice() == [(0, Some(Value::Flag(true)))]
             ),
             "{sample:?}"
         );
@@ -1257,7 +1256,7 @@ mod tests {
         let red = frame_image(2, 2, |_, _| true);
         first(Ok(frame(&red, WINDOW)));
         let sample = readings.recv_timeout(PATIENCE).expect("a sample");
-        assert!(matches!(sample, Reading::Sample { .. }), "{sample:?}");
+        assert!(matches!(sample, Reading::Frame { .. }), "{sample:?}");
         assert!(matches!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::ValueProblem { .. })
@@ -1292,7 +1291,7 @@ mod tests {
         first(Ok(frame(&red, WINDOW)));
         assert!(matches!(
             readings.recv_timeout(PATIENCE),
-            Ok(Reading::Sample { .. })
+            Ok(Reading::Frame { .. })
         ));
         let narrow = Size {
             width: 400,
@@ -1343,6 +1342,10 @@ mod tests {
         );
         let red = frame_image(2, 2, |_, _| true);
         first(Ok(frame(&red, SMALL)));
+        assert!(matches!(
+            readings.recv_timeout(PATIENCE),
+            Ok(Reading::Frame { .. })
+        ));
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::ValueProblem {
@@ -1351,10 +1354,6 @@ mod tests {
                 problem: NOT_DRAWN.to_owned()
             })
         );
-        assert!(matches!(
-            readings.recv_timeout(PATIENCE),
-            Ok(Reading::Sample { .. })
-        ));
         // The system's size is a guess: when frames show another, the
         // capture follows them once, and is not sent back to the guess.
         first(Ok(frame(&red, WINDOW)));
@@ -1371,7 +1370,7 @@ mod tests {
         second(Ok(frame(&red, WINDOW)));
         assert!(matches!(
             readings.recv_timeout(PATIENCE),
-            Ok(Reading::Sample { .. })
+            Ok(Reading::Frame { .. })
         ));
         assert_eq!(
             readings.recv_timeout(PATIENCE),
@@ -1876,7 +1875,7 @@ mod tests {
         let red = frame_image(2, 2, |_, _| true);
         second(Ok(frame(&red, WINDOW)));
         assert!(
-            matches!(readings.recv_timeout(PATIENCE), Ok(Reading::Sample { .. })),
+            matches!(readings.recv_timeout(PATIENCE), Ok(Reading::Frame { .. })),
             "the new capture reads"
         );
         assert!(!desk.asks_soon(), "a capture that reads is kept");
@@ -1935,7 +1934,7 @@ mod tests {
             .filter_map(|_| readings.recv_timeout(PATIENCE).ok())
             .collect();
         assert!(
-            matches!(told.first(), Some(Reading::Sample { .. })),
+            matches!(told.first(), Some(Reading::Frame { .. })),
             "{told:?}"
         );
         assert_eq!(
@@ -1961,7 +1960,7 @@ mod tests {
         let (_, _, mut second) = desk.capture();
         second(Ok(frame(&red, WINDOW)));
         assert!(
-            matches!(readings.recv_timeout(PATIENCE), Ok(Reading::Sample { .. })),
+            matches!(readings.recv_timeout(PATIENCE), Ok(Reading::Frame { .. })),
             "the new capture reads"
         );
         drop((first, second));
@@ -1989,7 +1988,7 @@ mod tests {
         let (_, _, mut first) = desk.capture();
         first(Ok(frame(&black, WINDOW)));
         let sample = readings.recv_timeout(PATIENCE).expect("a sample");
-        assert!(matches!(sample, Tripwire(Reading::Sample { .. })));
+        assert!(matches!(sample, Tripwire(Reading::Frame { .. })));
         first(Ok(frame(&red, WINDOW)));
         let after: Vec<Tripwire> = (0..2)
             .filter_map(|_| readings.recv_timeout(PATIENCE).ok())
@@ -2031,7 +2030,7 @@ mod tests {
         assert!(
             matches!(
                 readings.recv_timeout(PATIENCE),
-                Ok(Tripwire(Reading::Sample { .. }))
+                Ok(Tripwire(Reading::Frame { .. }))
             ),
             "the new capture reads"
         );
