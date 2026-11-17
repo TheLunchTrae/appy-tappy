@@ -99,26 +99,18 @@ export function storeSetup(setup: CaptureSetup): StoredSetup {
 }
 
 /**
- * `draft`, kept with the reference editor open on the reference as `copied` has it, going on from the reference as
- * `now` has it saved. The saved pictures it left out are named by file, and a reference saved since can give a new
- * picture a removed one's file name, so they stay left out only while the reference has the very pictures the draft
- * copied.
+ * The setup a draft kept, as the capture screen holds it again. Saved-picture removals need another review:
+ * a later save can reuse both a picture's name and its label for different pixels.
  */
-export function refreshedDraft(draft: Draft, copied: ReferenceDef | null, now: ReferenceDef | null): Draft {
-  const same = JSON.stringify(copied?.samples ?? []) === JSON.stringify(now?.samples ?? []);
-  return same || draft.dropped.length === 0 ? draft : { ...draft, dropped: [] };
-}
-
-/** The setup a draft kept, as the capture screen holds it again. */
 export function restoreSetup(stored: StoredSetup, reference?: ReferenceDef | null): CaptureSetup {
-  const draft: Draft = { ...stored.draft, recorded: new Map() };
+  const draft: Draft = { ...stored.draft, recorded: new Map(), dropped: [] };
   if (reference === undefined || stored.editing === null) {
     return { ...stored, draft };
   }
   return {
     ...stored,
     editing: { ...stored.editing, existing: reference },
-    draft: refreshedDraft(draft, stored.editing.existing, reference),
+    draft,
   };
 }
 
@@ -181,7 +173,7 @@ export function fixOutdated(def: DraftDef, value: ValueDef): boolean {
     draft.filled,
     draft.empty,
     draft.color,
-    draft.tolerance,
+    draft.kind === 'color' || draft.kind === 'state' ? draft.tolerance : null,
     draft.stateNames,
     draft.whole,
     draft.characters,

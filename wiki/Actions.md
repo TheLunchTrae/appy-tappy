@@ -37,8 +37,9 @@ of its own.
 
 An app can have several sessions at once, such as one per browser tab:
 
-- **Pause** pauses every playing session of the app. When none plays, it
-  changes nothing but still holds them all for restoring (see below).
+- **Pause** pauses every playing session of the app. It holds all the app's
+  sessions for restoring, including those already paused, so another
+  automation's release cannot resume them while this pause holds (see below).
 - **Play** does nothing while one of its sessions plays, and otherwise starts
   the first.
 - **Next** and **previous** go to the first playing session, or else the

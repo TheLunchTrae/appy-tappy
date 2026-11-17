@@ -776,7 +776,9 @@ The journal in `crates/actions/src/journal.rs` holds one entry per change that
 a restoring rule made, in the order they were made. For each target, such as
 one audio session's volume, the entries form a stack:
 
-- **Perform, restoring.** The change is pushed with the state before it. If a
+- **Perform, restoring.** A pause holds every target media session, even
+  one that another rule already paused while other sessions still play.
+  The change is pushed with the state before it. If a
   restore of that target is pending, the change takes it over, so its own
   release puts back the state from before the first change.
 - **Perform, not restoring.** Every entry for that target is removed, so no
@@ -3206,9 +3208,10 @@ stateDiagram-v2
 - The samples left out end with the editor: opening it on a reference and
   leaving it clear `dropped` (`toReference`, `fromReference`), and a save
   writes the reference without them and closes the editor. A
-  [draft](Setup-app.md#drafts) kept with the editor open keeps them, by
-  picture file name, and resumes with none left out when the reference's
-  saved samples changed since (`refreshedDraft`).
+  [draft](Setup-app.md#drafts) resumes with none left out (`restoreSetup`),
+  so the user reviews the current saved pictures again. Later saves can
+  reuse a picture's file name and label for different pixels, so comparing
+  only the saved sample list cannot identify the picture a draft removed.
 
 ### Bar detection
 
