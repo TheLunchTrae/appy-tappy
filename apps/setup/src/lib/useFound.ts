@@ -141,11 +141,12 @@ export function useFound(
   const findCount = view?.finds.length ?? 0;
   useEffect(() => {
     if (searchId === null) {
-      return;
+      return undefined;
     }
-    for (let index = 0; index < findCount; index += 1) {
-      background(
-        foundPicture(searchId, index, CROP_WIDTH).then((picture) => {
+    const cancel = Array.from({ length: findCount }, (_, index) =>
+      ask(
+        () => foundPicture(searchId, index, CROP_WIDTH),
+        (picture) => {
           if (picture === null) {
             return;
           }
@@ -153,9 +154,17 @@ export function useFound(
             const pictures = current.id === searchId ? new Map(current.pictures) : new Map<number, Picture>();
             return { id: searchId, pictures: pictures.set(index, picture) };
           });
-        }),
-      );
-    }
+        },
+        (error) => {
+          console.error(error);
+        },
+      ),
+    );
+    return () => {
+      for (const stop of cancel) {
+        stop();
+      }
+    };
   }, [searchId, findCount]);
 
   const rows = useMemo(
