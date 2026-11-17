@@ -110,10 +110,28 @@ fn span(
     factor: Factor,
 ) -> Option<(i128, i128)> {
     let (side, new_side) = (i128::from(sides.0), i128::from(sides.1));
-    let first = place(along, i128::from(start), side, new_side, factor)?;
-    let end = i128::from(start).checked_add(i128::from(length))?;
-    let last = place(along, end, side, new_side, factor)?;
-    Some((first, last.checked_sub(first)?.max(1)))
+    let start = i128::from(start);
+    let (first, divisor) = position(along, start, side, new_side, factor)?;
+    let (end, _) = position(
+        along,
+        start.checked_add(i128::from(length))?,
+        side,
+        new_side,
+        factor,
+    )?;
+    let first = rounded(first, divisor)?;
+    let last = rounded(end, divisor)?;
+    if first == last {
+        // The ends round together. Keep a pixel the span actually touches,
+        // including the last pixel when it ends exactly at the window edge.
+        let pixel = if end <= last.checked_mul(divisor)? {
+            first.checked_sub(1)?
+        } else {
+            first
+        };
+        return Some((pixel, 1));
+    }
+    Some((first, last.checked_sub(first)?))
 }
 
 /// A scale factor, `new / old`.
@@ -140,25 +158,25 @@ impl Factor {
 }
 
 /// Where an edge at `start` on a side `length` long lies on a side
-/// `new_length` long, kept at its scaled distance from `along`.
-fn place(
+/// `new_length` long, kept at its scaled distance from `along`, as a fraction.
+fn position(
     along: Along,
     start: i128,
     length: i128,
     new_length: i128,
     factor: Factor,
-) -> Option<i128> {
+) -> Option<(i128, i128)> {
     match along {
-        Along::Start => factor.of(start),
+        Along::Start => Some((start.checked_mul(factor.new)?, factor.old)),
         // new_length − (length − start) · f, over the factor's `old`.
-        Along::End => rounded(
+        Along::End => Some((
             new_length
                 .checked_mul(factor.old)?
                 .checked_sub(length.checked_sub(start)?.checked_mul(factor.new)?)?,
             factor.old,
-        ),
+        )),
         // new_length / 2 + (start − length / 2) · f, over twice the `old`.
-        Along::Middle => rounded(
+        Along::Middle => Some((
             new_length.checked_mul(factor.old)?.checked_add(
                 start
                     .checked_mul(2)?
@@ -166,7 +184,7 @@ fn place(
                     .checked_mul(factor.new)?,
             )?,
             factor.old.checked_mul(2)?,
-        ),
+        )),
     }
 }
 
@@ -300,6 +318,11 @@ mod tests {
             scaled(bottom, DRAWN, half, PinDef::BottomLeft),
             Some(region(0, 507, 21, 33))
         );
+        // Both edges round to the far edge, but the corner pixel still fits.
+        assert_eq!(
+            scaled(region(1919, 1079, 1, 1), DRAWN, half, PinDef::BottomRight),
+            Some(region(959, 539, 1, 1))
+        );
         // A span whose edges round together keeps a pixel.
         assert_eq!(
             span(
@@ -311,6 +334,28 @@ mod tests {
             ),
             Some((0, 1))
         );
+    }
+
+    #[test]
+    fn a_collapsed_span_keeps_a_pixel_it_touches() {
+        let drawn = Size {
+            width: 100,
+            height: 100,
+        };
+        let small = Size {
+            width: 25,
+            height: 25,
+        };
+        for pin in [PinDef::TopLeft, PinDef::Center, PinDef::BottomRight] {
+            for (original, expected) in [(2, 0), (4, 1), (99, 24)] {
+                assert_eq!(
+                    scaled(region(original, original, 1, 1), drawn, small, pin),
+                    Some(region(expected, expected, 1, 1)),
+                    "{pin:?}: {original}"
+                );
+            }
+            assert_eq!(scaled(region(100, 100, 1, 1), drawn, small, pin), None);
+        }
     }
 
     #[test]

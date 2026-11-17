@@ -152,10 +152,12 @@ struct Entry<O, M, V> {
 /// position.
 #[derive(Debug)]
 pub struct Actions<O, C: Controls> {
-    controls: C,
     journal: Vec<Entry<O, C::Media, C::Volume>>,
     /// Released changes whose restore failed, oldest first.
     pending: Vec<Pending<C::Media, C::Volume>>,
+    // Fields drop in declaration order. The keys must release their COM
+    // interfaces before the Windows controls uninitialize the apartment.
+    controls: C,
 }
 
 impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
@@ -181,7 +183,8 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
     /// describes.
     ///
     /// A media action on an app picks its sessions here: pause pauses every
-    /// playing session of the app, or holds them all when none plays; play
+    /// playing session of the app and holds every session, including those
+    /// an earlier rule paused; play
     /// starts the first session unless one is already playing; and a skip
     /// goes to the first playing session, or else the first session. A volume action on an app sets every audio
     /// session of its executable.
@@ -306,7 +309,7 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         Ok(())
     }
 
-    /// Undoes what `owner` changed, newest first, and forgets it, at `now`.
+    /// Undoes what `owner` changed, newest first, and forgets it.
     /// A restore that fails is kept pending for [`Actions::retry_restores`].
     /// Undoing a target merges in its pending restore, which a newer rule's
     /// failed release left: the undo puts back this rule's earlier state
@@ -317,7 +320,11 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
     ///
     /// Returns the first [`ActionError`] after trying every entry, because one
     /// failed restore should not keep the others from running.
-    pub fn release(&mut self, owner: O, now: Instant) -> Result<(), ActionError> {
+    pub fn release(
+        &mut self,
+        owner: O,
+        mut now: impl FnMut() -> Instant,
+    ) -> Result<(), ActionError> {
         let mut failure = None;
         while let Some(position) = self.journal.iter().rposition(|entry| entry.owner == owner) {
             let entry = self.journal.remove(position);
@@ -346,9 +353,10 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
             };
             if let Err(error) = self.undo(&change) {
                 failure.get_or_insert(error);
-                let once_at = change
-                    .retried_once()
-                    .then(|| now.checked_add(MEDIA_RETRY).unwrap_or(now));
+                let once_at = change.retried_once().then(|| {
+                    let failed_at = now();
+                    failed_at.checked_add(MEDIA_RETRY).unwrap_or(failed_at)
+                });
                 self.pending.push(Pending { change, once_at });
             }
         }
@@ -477,12 +485,12 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         };
         let first_playing = sessions.iter().position(|session| session.playing);
         match (command, first_playing) {
-            (MediaCommand::Pause | MediaCommand::Play, Some(_)) => {
+            (MediaCommand::Play, Some(_)) => {
                 sessions.retain(|session| session.playing);
             },
-            // Nothing plays, so a pause changes nothing, but it holds every
-            // session so that another rule's release cannot resume one.
-            (MediaCommand::Pause, None) => {},
+            // A pause holds every target, including one an earlier rule
+            // paused, so releasing that rule cannot resume it.
+            (MediaCommand::Pause, _) => {},
             (MediaCommand::Next | MediaCommand::Previous, Some(first)) => {
                 sessions.drain(..first);
                 sessions.truncate(1);
@@ -831,6 +839,42 @@ mod tests {
     }
 
     #[test]
+    fn an_app_pause_holds_sessions_paused_by_an_earlier_rule() {
+        for keeps in [Keeps::ForRelease, Keeps::Permanent] {
+            let mut actions = Actions::new(Fake {
+                sessions: vec![session(1, "Browser", true), session(2, "Browser", true)],
+                current: Some(1),
+                ..Fake::default()
+            });
+            actions
+                .perform(
+                    'a',
+                    &current(MediaCommand::Pause),
+                    Keeps::ForRelease,
+                    &watched(),
+                )
+                .expect("first session paused");
+            let pause_all = media(MediaTarget::App(app("Browser")), MediaCommand::Pause);
+            actions
+                .perform('b', &pause_all, keeps, &watched())
+                .expect("app paused");
+            actions
+                .release('a', Instant::now)
+                .expect("first rule released");
+            assert!(
+                !actions.controls().playing(1),
+                "the later app pause still holds session 1: {keeps:?}"
+            );
+            assert!(!actions.controls().playing(2));
+            actions
+                .release('b', Instant::now)
+                .expect("app rule released");
+            assert_eq!(actions.controls().playing(1), keeps == Keeps::ForRelease);
+            assert_eq!(actions.controls().playing(2), keeps == Keeps::ForRelease);
+        }
+    }
+
+    #[test]
     fn a_pause_is_undone_by_playing_and_a_play_by_pausing() {
         let mut actions = player(true);
         let pause = current(MediaCommand::Pause);
@@ -838,7 +882,7 @@ mod tests {
             .perform('a', &pause, Keeps::ForRelease, &watched())
             .expect("paused");
         assert!(!actions.controls().playing(1));
-        actions.release('a', Instant::now()).expect("resumed");
+        actions.release('a', Instant::now).expect("resumed");
         assert!(actions.controls().playing(1));
 
         let mut actions = player(false);
@@ -847,7 +891,7 @@ mod tests {
             .perform('a', &play, Keeps::ForRelease, &watched())
             .expect("played");
         assert!(actions.controls().playing(1));
-        actions.release('a', Instant::now()).expect("paused");
+        actions.release('a', Instant::now).expect("paused");
         assert!(!actions.controls().playing(1));
         assert_eq!(actions.controls().log, ["Play 1", "Pause 1"]);
     }
@@ -859,9 +903,7 @@ mod tests {
         actions
             .perform('a', &pause, Keeps::ForRelease, &watched())
             .expect("nothing to do");
-        actions
-            .release('a', Instant::now())
-            .expect("nothing to undo");
+        actions.release('a', Instant::now).expect("nothing to undo");
         assert_eq!(actions.controls().log, [] as [String; 0]);
     }
 
@@ -877,11 +919,11 @@ mod tests {
                 .perform('b', &pause, Keeps::ForRelease, &watched())
                 .expect("already paused");
             actions
-                .release(order[0], Instant::now())
+                .release(order[0], Instant::now)
                 .expect("first release");
             assert!(!actions.controls().playing(1), "{order:?}");
             actions
-                .release(order[1], Instant::now())
+                .release(order[1], Instant::now)
                 .expect("last release");
             assert!(actions.controls().playing(1), "{order:?}");
         }
@@ -904,7 +946,7 @@ mod tests {
                 .perform('b', &system(), Keeps::ForRelease, &watched())
                 .expect("set");
             actions
-                .release(order[0], Instant::now())
+                .release(order[0], Instant::now)
                 .expect("first release");
             let held = if order[0] == 'a' { 0 } else { 20 };
             assert_eq!(
@@ -913,7 +955,7 @@ mod tests {
                 "{order:?}"
             );
             actions
-                .release(order[1], Instant::now())
+                .release(order[1], Instant::now)
                 .expect("last release");
             assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
         }
@@ -957,7 +999,7 @@ mod tests {
         actions
             .perform('b', &volume(player, 10), Keeps::ForRelease, &watched())
             .expect("set");
-        actions.release('a', Instant::now()).expect("released");
+        actions.release('a', Instant::now).expect("released");
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
         assert!(actions.controls().playing(1));
         assert_eq!(actions.controls().level("music"), Some(percent(10)));
@@ -974,9 +1016,7 @@ mod tests {
                 &watched(),
             )
             .expect("set");
-        actions
-            .release('a', Instant::now())
-            .expect("nothing to undo");
+        actions.release('a', Instant::now).expect("nothing to undo");
         assert_eq!(actions.controls().log, ["speakers 0.8"]);
     }
 
@@ -993,7 +1033,7 @@ mod tests {
                 )
                 .expect("set");
         }
-        actions.release('a', Instant::now()).expect("released");
+        actions.release('a', Instant::now).expect("released");
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
         assert_eq!(
             actions.controls().log,
@@ -1025,9 +1065,7 @@ mod tests {
                 &watched(),
             )
             .expect("set");
-        actions
-            .release('a', Instant::now())
-            .expect("nothing to undo");
+        actions.release('a', Instant::now).expect("nothing to undo");
         assert_eq!(actions.controls().level("speakers"), Some(percent(50)));
     }
 
@@ -1047,7 +1085,7 @@ mod tests {
             )
             .expect("set");
         assert_eq!(actions.controls().level("speakers"), Some(percent(50)));
-        actions.release('a', Instant::now()).expect("undone");
+        actions.release('a', Instant::now).expect("undone");
         assert_eq!(
             actions.controls().level("speakers"),
             Some(percent(80)),
@@ -1056,9 +1094,7 @@ mod tests {
         actions
             .perform('a', &quiet, Keeps::Untouched, &watched())
             .expect("set");
-        actions
-            .release('a', Instant::now())
-            .expect("nothing to undo");
+        actions.release('a', Instant::now).expect("nothing to undo");
         assert_eq!(
             actions.controls().level("speakers"),
             Some(percent(20)),
@@ -1090,7 +1126,7 @@ mod tests {
             .expect("paused");
         assert_eq!(actions.controls().log, ["Pause 3", "Pause 4"]);
         assert!(actions.controls().playing(1));
-        actions.release('a', Instant::now()).expect("resumed");
+        actions.release('a', Instant::now).expect("resumed");
         assert_eq!(
             actions.controls().log,
             ["Pause 3", "Pause 4", "Play 4", "Play 3"]
@@ -1136,9 +1172,9 @@ mod tests {
         actions
             .perform('b', &pause, Keeps::ForRelease, &watched())
             .expect("already paused");
-        actions.release('a', Instant::now()).expect("released");
+        actions.release('a', Instant::now).expect("released");
         assert!(!actions.controls().playing(2));
-        actions.release('b', Instant::now()).expect("released");
+        actions.release('b', Instant::now).expect("released");
         assert!(actions.controls().playing(2));
         assert!(!actions.controls().playing(1));
         assert_eq!(actions.controls().log, ["Pause 2", "Play 2"]);
@@ -1163,9 +1199,7 @@ mod tests {
         actions
             .perform('a', &previous, Keeps::ForRelease, &watched())
             .expect("skipped");
-        actions
-            .release('a', Instant::now())
-            .expect("nothing to undo");
+        actions.release('a', Instant::now).expect("nothing to undo");
         assert_eq!(actions.controls().log, ["Next 2", "Previous 1"]);
     }
 
@@ -1231,7 +1265,7 @@ mod tests {
         assert_eq!(actions.controls().level("call"), Some(percent(20)));
         assert_eq!(actions.controls().level("ping"), Some(percent(20)));
         assert_eq!(actions.controls().level("music"), Some(percent(70)));
-        actions.release('a', Instant::now()).expect("restored");
+        actions.release('a', Instant::now).expect("restored");
         assert_eq!(actions.controls().level("call"), Some(percent(100)));
         assert_eq!(actions.controls().level("ping"), Some(percent(40)));
     }
@@ -1263,7 +1297,7 @@ mod tests {
             actions.perform('a', &volume(chat, 20), Keeps::ForRelease, &watched()),
             Err(ActionError::Os(_))
         ));
-        actions.release('a', Instant::now()).expect("restored");
+        actions.release('a', Instant::now).expect("restored");
         assert_eq!(actions.controls().level("call"), Some(percent(100)));
     }
 
@@ -1297,13 +1331,13 @@ mod tests {
             .expect("set");
         actions.controls().broken = Some("music");
         assert!(matches!(
-            actions.release('a', Instant::now()),
+            actions.release('a', Instant::now),
             Err(ActionError::Os(_))
         ));
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
         // The rule is released, so releasing it again does nothing.
         actions.controls().broken = None;
-        actions.release('a', Instant::now()).expect("nothing left");
+        actions.release('a', Instant::now).expect("nothing left");
         assert_eq!(actions.controls().level("music"), Some(percent(10)));
     }
 
@@ -1320,7 +1354,10 @@ mod tests {
             )
             .expect("set");
         actions.controls().broken = Some("speakers");
-        assert!(matches!(actions.release('a', now), Err(ActionError::Os(_))));
+        assert!(matches!(
+            actions.release('a', || now),
+            Err(ActionError::Os(_))
+        ));
         assert_eq!(actions.next_retry(), None, "it waits for later actions");
         assert!(actions.has_pending());
         actions
@@ -1357,7 +1394,7 @@ mod tests {
             .expect("set");
         actions.controls().apps.clear();
         actions
-            .release('a', Instant::now())
+            .release('a', Instant::now)
             .expect("nothing left to put back");
         assert!(!actions.has_pending());
     }
@@ -1372,7 +1409,7 @@ mod tests {
             .expect("paused");
         actions.controls().refuse = true;
         assert!(matches!(
-            actions.release('a', start),
+            actions.release('a', || start),
             Err(ActionError::Refused)
         ));
         let due = start + MEDIA_RETRY;
@@ -1397,7 +1434,7 @@ mod tests {
             .perform('a', &pause, Keeps::ForRelease, &watched())
             .expect("paused");
         actions.controls().refuse = true;
-        assert!(actions.release('a', start).is_err());
+        assert!(actions.release('a', || start).is_err());
         actions.controls().refuse = false;
         actions.retry_restores(due).expect("resumed");
         assert!(actions.controls().playing(1));
@@ -1432,9 +1469,9 @@ mod tests {
             )
             .expect("set");
         actions.controls().refuse = true;
-        assert!(actions.release('a', start).is_err());
+        assert!(actions.release('a', || start).is_err());
         let soon = start + Duration::from_millis(10);
-        actions.release('b', soon).expect("volume restored");
+        actions.release('b', || soon).expect("volume restored");
         actions
             .retry_restores(soon)
             .expect("the media restore waits");
@@ -1466,8 +1503,8 @@ mod tests {
         }
         actions.controls().refuse = true;
         actions.controls().broken = Some("speakers");
-        assert!(actions.release('a', start).is_err());
-        assert!(actions.release('b', start).is_err());
+        assert!(actions.release('a', || start).is_err());
+        assert!(actions.release('b', || start).is_err());
         actions.controls().refuse = false;
         assert!(
             matches!(actions.last_try(), Err(ActionError::Os(_))),
@@ -1491,9 +1528,9 @@ mod tests {
                 .expect("set");
         }
         actions.controls().broken = Some("speakers");
-        assert!(actions.release('a', start).is_err());
+        assert!(actions.release('a', || start).is_err());
         actions.controls().broken = None;
-        actions.release('x', start).expect("restored");
+        actions.release('x', || start).expect("restored");
         actions.retry_restores(start).expect("nothing pending");
         assert!(!actions.has_pending());
         assert_eq!(
@@ -1520,9 +1557,9 @@ mod tests {
             )
             .expect("played");
         actions.controls().refuse = true;
-        assert!(actions.release('a', start).is_err());
+        assert!(actions.release('a', || start).is_err());
         actions.controls().refuse = false;
-        actions.release('x', start).expect("resumed");
+        actions.release('x', || start).expect("resumed");
         actions
             .retry_restores(start + MEDIA_RETRY)
             .expect("nothing pending");
@@ -1540,9 +1577,9 @@ mod tests {
                 .expect("set");
         }
         actions.controls().broken = Some("speakers");
-        assert!(actions.release('a', start).is_err());
+        assert!(actions.release('a', || start).is_err());
         actions.controls().broken = None;
-        actions.release('x', start).expect("restored");
+        actions.release('x', || start).expect("restored");
         assert!(!actions.has_pending());
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
 
@@ -1564,9 +1601,9 @@ mod tests {
             )
             .expect("played");
         actions.controls().refuse = true;
-        assert!(actions.release('a', start).is_err());
+        assert!(actions.release('a', || start).is_err());
         actions.controls().refuse = false;
-        actions.release('x', start).expect("paused");
+        actions.release('x', || start).expect("paused");
         assert!(!actions.has_pending());
         assert!(
             !actions.controls().playing(1),
@@ -1585,16 +1622,16 @@ mod tests {
                 .expect("set");
         }
         actions.controls().broken = Some("speakers");
-        assert!(actions.release('a', start).is_err());
+        assert!(actions.release('a', || start).is_err());
         actions.controls().broken = None;
-        actions.release('x', start).expect("handed to y");
+        actions.release('x', || start).expect("handed to y");
         actions.retry_restores(start).expect("restored");
         assert_eq!(
             actions.controls().level("speakers"),
             Some(percent(30)),
             "y still holds the level it set"
         );
-        actions.release('y', start).expect("restored");
+        actions.release('y', || start).expect("restored");
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
     }
 
@@ -1606,7 +1643,7 @@ mod tests {
             .perform('a', &lower(20), Keeps::ForRelease, &watched())
             .expect("set");
         actions.controls().broken = Some("speakers");
-        assert!(actions.release('a', Instant::now()).is_err());
+        assert!(actions.release('a', Instant::now).is_err());
         actions.controls().broken = None;
         actions
             .perform('b', &lower(10), Keeps::ForRelease, &watched())
@@ -1615,7 +1652,7 @@ mod tests {
             .retry_restores(Instant::now())
             .expect("nothing pending");
         assert_eq!(actions.controls().level("speakers"), Some(percent(10)));
-        actions.release('b', Instant::now()).expect("restored");
+        actions.release('b', Instant::now).expect("restored");
         assert_eq!(
             actions.controls().level("speakers"),
             Some(percent(80)),
@@ -1627,7 +1664,7 @@ mod tests {
             .perform('a', &lower(20), Keeps::ForRelease, &watched())
             .expect("set");
         actions.controls().broken = Some("speakers");
-        assert!(actions.release('a', Instant::now()).is_err());
+        assert!(actions.release('a', Instant::now).is_err());
         actions.controls().broken = None;
         actions
             .perform('n', &lower(50), Keeps::Permanent, &watched())
@@ -1658,7 +1695,7 @@ mod tests {
         actions
             .perform('a', &keys, Keeps::ForRelease, &watched())
             .expect("pressed");
-        actions.release('a', Instant::now()).expect("released");
+        actions.release('a', Instant::now).expect("released");
         assert_eq!(
             actions.controls().log,
             [
@@ -1769,7 +1806,7 @@ mod tests {
                 .perform('a', action, Keeps::ForRelease, &watched())
                 .expect("ran");
         }
-        actions.release('a', Instant::now()).expect("released");
+        actions.release('a', Instant::now).expect("released");
         assert_eq!(
             actions.controls().log,
             [

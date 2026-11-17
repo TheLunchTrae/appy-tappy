@@ -33,7 +33,7 @@ mod window_watch;
 
 pub use autostart::{AUTOSTART_VALUE, autostart_enabled, disable_autostart, enable_autostart};
 pub use clock::LocalTime;
-pub use instance::InstanceGuard;
+pub use instance::{InstanceGuard, process_runs_in_session};
 pub use log::{LOG_LIMIT, Log};
 pub use reload::{RELOAD, ReloadRequest, ReloadWatch, request_reload};
 pub use tray::{MenuItem, Tray, TrayEvent, TrayMenu};

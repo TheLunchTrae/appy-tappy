@@ -4,6 +4,15 @@ use std::io;
 
 use crate::host;
 
+/// Whether `executable` runs in this Windows session.
+///
+/// # Errors
+///
+/// Returns the operating system's error when it cannot list this session.
+pub fn process_runs_in_session(executable: &str) -> io::Result<bool> {
+    host::process_runs_in_session(executable)
+}
+
 /// Proof that this is the only running copy of a program in the user's
 /// session. The guard lasts until the value is dropped or the process ends.
 #[derive(Debug)]
