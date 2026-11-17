@@ -1,5 +1,6 @@
 // The check the user is setting up, and when it is complete enough to try.
 
+import type { CaptureFlow } from './captureDraft.ts';
 import {
   type CharactersSpec,
   type CheckDef,
@@ -682,16 +683,15 @@ export function withKind(draft: Draft, kind: CheckKind): Draft {
 /**
  * `draft` once screenshot `shot` is the picture the value's region is set on, as a new screenshot taken while its
  * place is set is. `fits` says the screenshot has the size the region is drawn at, so the region moves onto it; on
- * one of another size it is drawn again, unless it is drawn on no screenshot yet, such as an edited value's waiting
- * for a screenshot of its size. `fits` is null while either size is unknown, such as before the screenshot's pixels
+ * one of another size a new value or fix is drawn again. An edit keeps its saved drawing until a screenshot fits. `fits` is null while either size is unknown, such as before the screenshot's pixels
  * arrive, and the draft stays as it is.
  */
-export function onPicture(draft: Draft, shot: number, fits: boolean | null): Draft {
+export function onPicture(draft: Draft, shot: number, fits: boolean | null, flow: CaptureFlow): Draft {
   if (draft.region === null || fits === null) {
     return draft;
   }
   if (fits) {
     return { ...draft, drawnOn: shot };
   }
-  return draft.drawnOn === null ? draft : { ...draft, region: null, drawnOn: null };
+  return flow === 'edit' || draft.drawnOn === null ? draft : { ...draft, region: null, drawnOn: null };
 }

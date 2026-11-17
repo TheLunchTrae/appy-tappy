@@ -33,12 +33,19 @@ pub(crate) struct ClickTargets {
 }
 
 /// An application a click clicks in.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct Target {
     /// Its name, for the log.
     name: String,
     /// How to find its window.
     window: WindowMatch,
+}
+
+// Reloads compare where a click goes. Its current display name is only used when logging.
+impl PartialEq for Target {
+    fn eq(&self, other: &Self) -> bool {
+        self.window == other.window
+    }
 }
 
 impl ClickTargets {
@@ -316,6 +323,21 @@ pub(crate) mod tests {
         let mut targets = ClickTargets::default();
         targets.add(&[("target", &file)], pictures);
         targets
+    }
+
+    #[test]
+    fn only_a_change_in_where_clicks_land_restarts_a_session() {
+        let mut target = app_file("Player");
+        let targets = |file: &AppFile| {
+            let mut clicks = ClickTargets::default();
+            clicks.add(&[("player", file)], []);
+            clicks
+        };
+        let first = targets(&target);
+        target.name = "Music".to_owned();
+        assert_eq!(targets(&target), first);
+        target.window.executable = "Other.exe".to_owned();
+        assert_ne!(targets(&target), first);
     }
 
     #[test]

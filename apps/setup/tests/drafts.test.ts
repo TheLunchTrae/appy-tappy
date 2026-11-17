@@ -383,6 +383,15 @@ describe('a draft and what it belongs to', () => {
     };
     expect(fixOutdated(asBar, recolored)).toBe(true);
     expect(fixOutdated(asBar, { ...progress, screen: { ...progress.screen, check: bar } })).toBe(false);
+    const color = { kind: 'color' as const, color: bar.filled, tolerance: 8 };
+    const colorFix = fixOf(fixDraft(color));
+    expect(fixOutdated(colorFix, { ...progress, screen: { ...progress.screen, check: color } })).toBe(false);
+    expect(
+      fixOutdated(colorFix, {
+        ...progress,
+        screen: { ...progress.screen, check: { ...color, tolerance: 80 } },
+      }),
+    ).toBe(true);
     // A missing value comes first, and a value draft has nothing to be outdated against.
     expect(captureProblem({ ...asBar, changes: 'gone' }, apps)).toBe('The value it fixes is no longer saved.');
     expect(fixOutdated({ ...asBar, kind: 'value' }, progress)).toBe(false);
@@ -422,6 +431,9 @@ describe('a draft and what it belongs to', () => {
     expect(refreshedDraft(draft, copied, { ...copied, name: 'Renamed', tolerance: 60 })).toBe(draft);
     // Saved again since, the file name can be a new picture's, or no picture's.
     const retaught = { ...copied, samples: [copied.samples[0]!, { image: 'ref-percent-2.png', text: '5' }] };
+    const kept = storeSetup({ ...EMPTY_SETUP, draft, editing: { existing: copied, name: copied.name, needs: [] } });
+    expect(restoreSetup(kept, retaught).draft.dropped).toEqual([]);
+    expect(restoreSetup(kept, copied).draft.dropped).toEqual(draft.dropped);
     expect(refreshedDraft(draft, copied, retaught).dropped).toEqual([]);
     expect(refreshedDraft(draft, copied, { ...copied, samples: copied.samples.slice(0, 1) }).dropped).toEqual([]);
     expect(refreshedDraft(draft, copied, null).dropped).toEqual([]);

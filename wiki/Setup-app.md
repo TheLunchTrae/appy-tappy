@@ -787,12 +787,12 @@ has the states.
 list, which goes with every spec the editor sends (`CharactersSpec.dropped`,
 `ReferenceSettingsSpec.dropped`). The owner leaves those samples out before
 it learns, fits, or judges anything (`SavedReference::without`), and a save
-writes the reference without them; the store then removes the pictures the
-file no longer names. A new sample takes the lowest number no kept sample
-has, so it can take a removed picture's file name, and its picture replaces
-that file. A reference left with no sample is refused, as a new one with no
-label is. The draft keeps `dropped` only while the editor is open on that
-reference: opening and leaving the editor clear it.
+writes the reference without them. Each new sample gets a name clear of
+the samples on disk, including those marked for removal. After the file
+commits, the store removes the pictures it no longer names. A reference
+needs at least one sample. A draft keeps its removals while it still refers
+to the same saved samples. Resuming the draft after those samples change
+clears the removals before showing the editor.
 
 Every `CharactersSpec` is taught in the reference's own editor, so a learn
 error on a saved sample there points at the list and names no reference to
@@ -1276,12 +1276,12 @@ runs it; the user can turn it off or delete it, and the others keep working.
 Saving an automation, turning one on, and listing them all ask
 `Runnable::new` in `appytappy-sources`, which runs `AutomationDef::compile`,
 builds the value it watches with `saved::build`, and fits each click's picture,
-the same check the runtime runs. An automation's ID is the setup app's own key:
-the runtime does not read it, so an ID that a hand edit made invalid, or gave to
-more than one automation, stops nothing. When the setup app reads the file, it
-gives a new ID, made from the name, to each automation whose ID is invalid or
-held by one before it, the same way each time, so every row can be edited or
-deleted on its own; the next save writes the new IDs. Saving a value reads it
+the same check the runtime runs. Setup and the runtime use each automation's ID for **Run once**. When they
+read the file, both preserve the first valid occurrence of an ID and assign
+a unique ID from the automation's name to a missing, invalid, or duplicate
+one. This happens before filtering disabled or broken automations, so the
+editor and the runtime agree on which rule to run. The next save writes
+the repaired IDs. Saving a value reads it
 back with `saved::build`, from its new pictures and those already saved, as the
 runtime will, and refuses it if the runtime could not read it. A new
 application's anti-cheat class starts as `unknown`, which blocks key press
@@ -1607,7 +1607,7 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
 `settings.json` is true; the runtime ignores that setting. Its commands live in
 `owner/debug.rs` and its file readers in `src-tauri/src/debug/`:
 
-- `debug_overview` asks the running processes whether the runtime runs,
+- `debug_overview` checks whether the runtime runs in this Windows session,
   through `Owner::runtime_runs`, as the main pages' `runtime_runs` does, and
   summarizes the newest `trace-*.csv` in the trace folder. `TraceTail` keeps
   its place in that file, so each poll reads only the rows added since the last

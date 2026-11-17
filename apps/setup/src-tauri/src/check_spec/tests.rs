@@ -160,7 +160,7 @@ fn characters(
 
 /// What `spec` teaches a reference saved as `digits`, expecting nothing.
 fn teach(spec: &CharactersSpec, session: Session<'_>) -> Result<Taught, SpecError> {
-    spec.teach(session, Some("digits"), "Digits")
+    spec.teach(session, Some("digits"), "Digits", &[])
 }
 
 /// What saving `spec` on screenshot 0 and reading it back gives: the value
@@ -479,15 +479,15 @@ fn a_saved_sample_the_reference_leaves_out_is_not_learned_or_saved() {
     assert_eq!(
         taught.reference.samples,
         [SampleDef {
-            image: picture.clone(),
+            image: sample_name("digits", 2),
             text: "2".to_owned(),
         }],
-        "the box takes the number the sample left"
+        "the old picture stays readable until the edited reference is saved"
     );
     let [(name, png)] = taught.pictures.as_slice() else {
         panic!("one new picture, not {:?}", taught.pictures.len());
     };
-    assert_eq!(name, &picture);
+    assert_eq!(name, &taught.reference.samples[0].image);
     let gray_square = screenshot()
         .crop(Region::new(2, 0, 2, 2).expect("not empty"))
         .expect("inside");
@@ -1029,7 +1029,12 @@ fn the_ui_describes_checks_in_camel_case_json() {
 fn a_new_reference_names_one_picture_per_label() {
     let spec = characters(left(), None, one(0), Vec::new());
     let taught = spec
-        .teach(session(&[screenshot()], None), Some("digits"), "Digits")
+        .teach(
+            session(&[screenshot()], None),
+            Some("digits"),
+            "Digits",
+            &[],
+        )
         .expect("valid characters");
     assert_eq!(
         taught.reference,
@@ -1159,7 +1164,7 @@ fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
     };
     // Without an ID of its own, it is taught under the saved one's.
     let taught = spec
-        .teach(session(&[screenshot()], None), None, "Red digits")
+        .teach(session(&[screenshot()], None), None, "Red digits", &[])
         .expect("valid characters");
     let reference = taught.reference;
     let images: Vec<&str> = reference
@@ -1205,13 +1210,19 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
         recording: None,
         references: &gapped,
     };
-    let taught = teach(&spec, session).expect("valid characters");
+    let taught = spec
+        .teach(session, Some("digits"), "Digits", &["ref-digits-3.png"])
+        .expect("valid characters");
     let names: Vec<&str> = taught
         .pictures
         .iter()
         .map(|(name, _)| name.as_str())
         .collect();
-    assert_eq!(names, ["ref-digits-3.png"]);
+    assert_eq!(
+        names,
+        ["ref-digits-4.png"],
+        "another saved item owns the third name"
+    );
     assert_eq!(taught.reference.samples.len(), 2);
 }
 

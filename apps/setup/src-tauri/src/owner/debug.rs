@@ -445,16 +445,27 @@ mod tests {
         let app = locations.apps().join("example");
         fs::create_dir_all(&app).expect("app folder");
         fs::write(locations.settings(), "{\"format\": 1}").expect("settings");
-        fs::write(app.join("app.json"), "{}").expect("app file");
+        fs::write(app.join("app.json"), r#"{"format":1,"name":"Example","window":{"title":"Example","class":"Window","executable":"Example.exe","mustMatch":{"title":false,"class":false},"fallback":"none"},"antiCheat":"none","values":[],"references":[{"id":"font","name":"Font","tolerance":40,"samples":[{"image":"shown-1.png","text":"1"}]}]}"#).expect("app file");
+        fs::write(app.join("unrelated.png"), [1]).expect("unrelated picture");
         fs::write(app.join("shown-1.png"), [1, 2]).expect("picture");
         fs::write(app.join("notes.txt"), "mine").expect("another file");
+        let automation = r#"{"format":1,"automations":[{"id":"click","name":"Click","enabled":true,"when":{"app":"example","value":"ready","is":"equals","target":true},"actions":[{"kind":"click","app":"example","button":"left","at":{"kind":"picture","image":"saved-click.png","windowSize":{"width":2,"height":2},"search":{"x":0,"y":0,"width":2,"height":2},"press":{"x":0,"y":0},"tolerance":0}}],"undo":false}]}"#;
+        fs::write(locations.automations(), automation).expect("automations");
         let pictures = stores.automations.pictures();
         fs::create_dir_all(&pictures).expect("pictures folder");
+        fs::write(pictures.join("saved-click.png"), [5]).expect("saved click picture");
         fs::write(pictures.join("click-1.png"), [3]).expect("picture");
         fs::write(pictures.join("click-1.png.tmp"), [3]).expect("half-written picture");
         let draft = locations.drafts().join("0000019a");
         fs::create_dir_all(&draft).expect("draft folder");
-        fs::write(draft.join("draft.json"), "{}").expect("draft file");
+        fs::write(draft.join("draft.json"), r#"{"kind":"value","name":"Draft","missing":[],"pictures":["click-1.png","notes.txt"],"state":null}"#).expect("draft file");
+        fs::write(draft.join("unrelated.png"), [1]).expect("unrelated screenshot");
+        fs::write(pictures.join("unrelated.png"), [1]).expect("unrelated click");
+        fs::write(pictures.join("notes.txt"), "private").expect("not an image");
+        let staging = locations.drafts().join("0000019a.saving");
+        fs::create_dir_all(&staging).expect("staging folder");
+        fs::write(staging.join("draft.json"), "{}").expect("uncommitted draft");
+        fs::write(staging.join("shot-0.png"), [4]).expect("uncommitted screenshot");
         fs::write(draft.join("shot-0.png"), [4]).expect("screenshot");
         fs::write(draft.join("notes.txt"), "mine").expect("another file");
         fs::create_dir_all(&stores.logs).expect("logs");
@@ -479,6 +490,7 @@ mod tests {
             [
                 "about.txt",
                 "settings.json",
+                "automations.json",
                 "apps/example/app.json",
                 "drafts/0000019a/draft.json",
                 "logs/setup.log"
@@ -501,6 +513,10 @@ mod tests {
             "{names:?}"
         );
         assert!(
+            names.contains(&"automation pictures/saved-click.png".to_owned()),
+            "{names:?}"
+        );
+        assert!(
             names.contains(&"automation pictures/click-1.png".to_owned()),
             "{names:?}"
         );
@@ -509,9 +525,10 @@ mod tests {
             "a draft's screenshots are pictures: {names:?}"
         );
         assert!(
-            names
-                .iter()
-                .all(|name| !name.contains("notes") && !name.contains("png.tmp")),
+            names.iter().all(|name| !name.contains("notes")
+                && !name.contains("unrelated")
+                && !name.contains(".saving")
+                && !name.contains("png.tmp")),
             "only pictures: {names:?}"
         );
         assert!(
@@ -529,7 +546,7 @@ mod tests {
             .expect("bundle");
         assert_eq!(
             unzip(outside, "about.txt").0.len(),
-            5,
+            6,
             "only a trace file in the trace folder goes in"
         );
         fs::remove_dir_all(root).expect("clean up");

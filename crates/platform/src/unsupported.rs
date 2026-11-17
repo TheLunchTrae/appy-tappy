@@ -62,6 +62,10 @@ impl Tray {
     }
 }
 
+pub(crate) fn process_runs_in_session(_executable: &str) -> io::Result<bool> {
+    unsupported()
+}
+
 /// An instance guard, which cannot be constructed here.
 #[derive(Debug)]
 pub(crate) struct InstanceGuard(Infallible);
@@ -140,6 +144,7 @@ mod tests {
         let kinds = [
             WindowWatch::start(events).map(drop),
             Tray::start(tray_events, menu).map(drop),
+            crate::process_runs_in_session("runtime.exe").map(drop),
             InstanceGuard::acquire(InstanceGuard::RUNTIME).map(drop),
             ReloadWatch::start(crate::RELOAD, reloads).map(drop),
             crate::request_reload(crate::RELOAD).map(drop),
@@ -149,7 +154,7 @@ mod tests {
             crate::lower_thread_priority(),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 9]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 10]);
         assert_eq!(LocalTime::now(), None);
     }
 }

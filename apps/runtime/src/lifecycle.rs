@@ -26,6 +26,7 @@ use std::io;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
+use appytappy_actions::Watched;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
@@ -122,7 +123,7 @@ pub(crate) enum Change {
 pub(crate) struct Lifecycle {
     watchlist: Watchlist,
     /// The process each running app's session follows, by app ID.
-    running: BTreeMap<String, ProcessId>,
+    running: BTreeMap<String, Watched>,
     /// For each app whose session's process owned one of the app's best
     /// windows, since when it owns none, or `None` while it owns one.
     owned: BTreeMap<String, Option<Instant>>,
@@ -184,19 +185,19 @@ impl Lifecycle {
     }
 
     /// Watches `watchlist` from `now` on. Each running app that it drops, or
-    /// whose executable's pattern it changes, exits; a snapshot is due at once
+    /// whose executable it no longer matches, exits; a snapshot is due at once
     /// to find the apps it adds.
     pub(crate) fn watch(&mut self, watchlist: Watchlist, now: Instant) -> Vec<Change> {
         let mut changes = Vec::new();
-        let executable = |watchlist: &Watchlist, app: &str| {
-            watchlist.0.get(app).map(|window| window.executable.clone())
-        };
-        self.running.retain(|app, &mut process| {
-            let kept = executable(&self.watchlist, app) == executable(&watchlist, app);
+        self.running.retain(|app, watched| {
+            let kept = watchlist
+                .0
+                .get(app)
+                .is_some_and(|window| window.executable.matches(&watched.executable));
             if !kept {
                 changes.push(Change::Exited {
                     app: app.clone(),
-                    process,
+                    process: watched.process,
                 });
             }
             kept
@@ -263,6 +264,10 @@ impl Lifecycle {
         now: Instant,
         changes: &mut Vec<Change>,
     ) {
+        fn identity(entry: &ProcessEntry) -> (ProcessId, &str) {
+            (entry.id, &entry.executable)
+        }
+
         let mut windows = Some(windows);
         // Listed once, on first need. Without the list, detection follows
         // processes alone, and the reader reports why it cannot find the
@@ -273,10 +278,18 @@ impl Lifecycle {
                 .iter()
                 .filter(|entry| window.executable.matches(&entry.executable))
                 .collect();
-            let current = self.running.get(app).copied();
-            // The name check catches a process ID that Windows reused.
-            let current =
-                current.filter(|&process| fitting.iter().any(|entry| entry.id == process));
+            let previous = self
+                .running
+                .get(app)
+                .map(|watched| (watched.process, watched.executable.as_str()));
+            // A wildcard can match both executables when Windows reuses a process ID.
+            let current = previous
+                .filter(|identity_before| {
+                    fitting
+                        .iter()
+                        .any(|entry| identity(entry) == *identity_before)
+                })
+                .map(|(process, _)| process);
             let several = fitting.len() > 1;
             let owner = if several {
                 let all = listed.get_or_insert_with(|| {
@@ -302,20 +315,23 @@ impl Lifecycle {
             let follow = owner
                 .or(current)
                 .or_else(|| fitting.iter().map(|entry| entry.id).min());
-            let previous = self.running.get(app).copied();
-            if previous != follow {
-                if let Some(process) = previous {
-                    self.running.remove(app);
+            let next = follow.and_then(|id| fitting.iter().find(|entry| entry.id == id));
+            if previous != next.map(|entry| identity(entry)) {
+                if let Some(watched) = self.running.remove(app) {
                     self.owned.remove(app);
                     changes.push(Change::Exited {
                         app: app.clone(),
-                        process,
+                        process: watched.process,
                     });
                 }
-                if let Some(entry) =
-                    follow.and_then(|id| fitting.iter().find(|entry| entry.id == id))
-                {
-                    self.running.insert(app.clone(), entry.id);
+                if let Some(entry) = next {
+                    self.running.insert(
+                        app.clone(),
+                        Watched {
+                            process: entry.id,
+                            executable: entry.executable.clone(),
+                        },
+                    );
                     changes.push(Change::Started {
                         app: app.clone(),
                         process: entry.id,
@@ -611,6 +627,12 @@ mod tests {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(example_app(), now);
         lifecycle.scan_unlisted(Ok(vec![entry(42, "Example.exe")]), now);
+        let mut wildcard = Lifecycle::new(watching(&[("example", "Example*.exe")]), now);
+        wildcard.scan_unlisted(Ok(vec![entry(42, "ExampleHelper.exe")]), now);
+        assert_eq!(
+            wildcard.scan_unlisted(Ok(vec![entry(42, "Example.exe")]), now),
+            [exited(42), started(42)]
+        );
         assert_eq!(
             lifecycle.scan_unlisted(Ok(vec![entry(42, "Other.exe")]), now),
             [exited(42)]
@@ -647,7 +669,7 @@ mod tests {
     #[test]
     fn a_new_watchlist_ends_dropped_apps_and_scans_for_new_ones() {
         let now = Instant::now();
-        let both = watching(&[("a", "a.exe"), ("b", "b.exe")]);
+        let both = watching(&[("a", "a*.exe"), ("b", "b.exe")]);
         let mut lifecycle = Lifecycle::new(both, now);
         lifecycle.scan_unlisted(Ok(vec![entry(1, "a.exe"), entry(2, "b.exe")]), now);
         let later_on = later(now, Duration::from_secs(1));

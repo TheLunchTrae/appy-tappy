@@ -554,7 +554,10 @@ impl Model {
         let (Some(watched), Some(plan)) = (self.attached.get(app), self.plan.get(app)) else {
             return Vec::new();
         };
-        if !self.enabled || self.session_of(app).is_some() {
+        if !self.enabled
+            || self.session_of(app).is_some()
+            || !plan.runs.window.executable.matches(&watched.executable)
+        {
             return Vec::new();
         }
         let id = SessionId(self.next);
@@ -975,6 +978,35 @@ mod tests {
             ["Pause A", "Pause B"],
             "listed app by app, whichever started first"
         );
+    }
+
+    #[test]
+    fn a_changed_executable_waits_for_the_matching_process() {
+        use appytappy_config::window_match::Pattern;
+
+        let mut model = Model::default();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.apply(started("a", 7));
+        let mut changed = plan("A", 90.0);
+        Arc::get_mut(&mut changed)
+            .expect("unshared")
+            .runs
+            .window
+            .executable = Pattern::new("New*.exe");
+        assert_eq!(
+            kinds(&model.replan(plans(&[("a", &changed)]))),
+            ["stop 0 A"]
+        );
+        assert_eq!(model.apply(started("a", 7)), []);
+        assert_eq!(model.run_once("pause_a"), Err(Refused::NotRunning));
+        model.apply(exited("a", 7));
+        let found = Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(8),
+            executable: "NewGame.exe".to_owned(),
+        };
+        assert_eq!(kinds(&model.apply(found)), ["read 1 A"]);
+        assert!(model.run_once("pause_a").is_ok());
     }
 
     #[test]

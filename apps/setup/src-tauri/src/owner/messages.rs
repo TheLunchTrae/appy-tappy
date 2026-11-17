@@ -4,15 +4,12 @@
 use std::fmt;
 use std::time::Instant;
 
-use appytappy_sources::screen::Image;
 use tokio::sync::oneshot;
 
 use crate::overlay::{FrameRead, Purpose};
 use crate::recording::{Text, look};
 use crate::ticket::Ticket;
 
-use super::capture::CaptureFailure;
-use super::watch::Seen;
 use super::{Desktop, Host, Owner};
 
 /// Where a request's answer goes.
@@ -85,17 +82,8 @@ pub(crate) enum Message<H: Host = Desktop> {
 /// What a capture or a worker thread tells the owner about its work.
 #[derive(Debug)]
 pub(crate) enum Event {
-    /// The picked window's capture sent a frame.
-    Frame {
-        /// The window's whole frame.
-        image: Image,
-        /// When it arrived.
-        received: Instant,
-    },
-    /// The picked window's capture failed, such as when the window closed.
-    CaptureFailed(CaptureFailure),
-    /// The watch's capture saw a frame, or stopped and why.
-    Watch(Result<Seen, String>),
+    /// The picked window or watched value has a frame waiting in its stream.
+    FrameReady,
     /// The text reader read reading `index` of a recording.
     Recognized {
         /// The reading's index.

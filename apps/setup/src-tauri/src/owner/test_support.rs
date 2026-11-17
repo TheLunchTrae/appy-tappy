@@ -459,10 +459,25 @@ impl Harness {
         assert!(self.owner.handle(message).is_continue());
     }
 
+    /// A callback that outlived its capture stops without sending another frame.
+    pub(super) fn deliver_stale(&self, handler: &mut FrameHandler) {
+        let frame = frame_image();
+        assert_eq!(
+            handler(Ok(Frame {
+                window_size: frame.size(),
+                image: &frame,
+                received: self.owner.host.clock,
+                delay: Duration::ZERO,
+            })),
+            NextFrame::Never
+        );
+        assert!(self.messages.try_recv().is_err());
+    }
+
     /// Runs `handler` on `frame`, which arrives at the time on the owner's
     /// clock, checks the wait it answers, and returns what it sent the
     /// owner.
-    fn sent(
+    pub(super) fn sent(
         &self,
         handler: &mut FrameHandler,
         frame: io::Result<(Size, &Image)>,

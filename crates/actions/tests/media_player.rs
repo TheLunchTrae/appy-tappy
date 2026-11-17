@@ -117,11 +117,11 @@ fn pauses_and_resumes_the_player() {
     let held = actions.perform(2_u8, &pause, Keeps::ForRelease, &watched());
     thread::sleep(SETTLE);
     let while_paused = playing(actions.controls());
-    let first_release = actions.release(1, Instant::now());
+    let first_release = actions.release(1, Instant::now);
     thread::sleep(SETTLE);
     let while_held = playing(actions.controls());
     actions
-        .release(2, Instant::now())
+        .release(2, Instant::now)
         .expect("the player resumes");
     thread::sleep(SETTLE);
     paused.expect("the player pauses");
@@ -153,7 +153,7 @@ fn lowers_and_restores_the_player_volume() {
     let while_lowered = levels(actions.controls());
     thread::sleep(SETTLE);
     actions
-        .release(0, Instant::now())
+        .release(0, Instant::now)
         .expect("the volume goes back");
     lowered.expect("the volume changes");
     let while_lowered = while_lowered.expect("readable");

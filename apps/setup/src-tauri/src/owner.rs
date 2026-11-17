@@ -186,8 +186,10 @@ impl<H: Host> Owner<H> {
     /// replaced, and readings from an overlay capture that closed.
     fn is_current(&self, ticket: Ticket, event: &Event) -> bool {
         let current = match event {
-            Event::Frame { .. } | Event::CaptureFailed(_) => self.capture.picked_ticket(),
-            Event::Watch(_) => self.capture.watching().and_then(Watching::ticket),
+            Event::FrameReady => self
+                .capture
+                .picked_ticket()
+                .or_else(|| self.capture.watching().and_then(Watching::ticket)),
             Event::Recognized { .. } | Event::Looked { .. } => {
                 self.readings().map(|recording| recording.id)
             },
@@ -200,9 +202,7 @@ impl<H: Host> Owner<H> {
     /// Applies `event`, which [`Owner::is_current`] passed.
     fn apply(&mut self, event: Event) {
         match event {
-            Event::Frame { image, received } => self.frame(image, received),
-            Event::CaptureFailed(failure) => self.capture_failed(failure),
-            Event::Watch(seen) => self.watch_sent(seen),
+            Event::FrameReady => self.frame_ready(),
             Event::Recognized { index, text } => {
                 if let Some(recording) = self.readings_mut() {
                     recording.read(index, text);

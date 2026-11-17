@@ -297,15 +297,16 @@ reader reads, and a process that owned one keeps the session for
 the rule. Each start is followed by an `Identified` change with the build of
 the executable that runs, which changes no state: the owner only logs it, as
 [Build detection](Architecture.md#build-detection) describes. A new watchlist
-ends the session of each application it drops or whose executable pattern it
-changes, and forgets which process owned its window.
+retains a session while its executable still fits. If a process ID is
+reused for another executable accepted by the same wildcard, detection
+ends the previous session and starts one for the new executable.
 
 ### Per-application run state
 
 The model (`apps/runtime/src/model.rs`) has no run state type. An application's
 automations run while all of these hold:
 
-- It is in `attached`: detection found its process.
+- It is in `attached` and the reported executable matches the current plan.
 - `enabled` is true: automations are on in the tray. It starts true, or as
   the tray last left it when the settings remember that, as
   [Files and handoff](Architecture.md#files-and-handoff) describes.
@@ -341,7 +342,7 @@ stateDiagram-v2
   automations' names that each rule's entry carries. When they differ, the
   application stops, which undoes what its automations changed, and starts
   again in a new session.
-- **A reload that changes only names.** When only the plan's names differ, or
+- **A reload that changes only names.** When only display names change, including a click target's, or
   the build its values were checked against, the session keeps running and
   takes the new plan, so the log and the tray use the new names. The reader
   sends each value and each value's problem by its position, and the owner
@@ -792,8 +793,8 @@ one audio session's volume, the entries form a stack:
   journal before its undo runs.
 - **Failed undo.** The change moves to `pending` instead of being dropped. A
   volume restore is tried again until it works, and is dropped only once its
-  audio session is gone. A media restore is tried once more, 2 seconds later
-  (`MEDIA_RETRY`), then given up.
+  audio session is gone. A failed media restore gets one more try 2 seconds after the player
+  reports the failure (`MEDIA_RETRY`).
 
 The journal lives only in memory, so a forced end, a crash, or an
 end-of-session wait that runs out loses what it had not undone.
@@ -1580,7 +1581,7 @@ The Automations page and the automation editor warn while the runtime does
 not run (`apps/setup/src/components/RuntimeWarning.tsx`). `App.tsx` holds
 `runtime`, which the [list reads](#how-to-read-this-page) refresh with the
 saved lists: on the `REFRESH_MS` timer while no screen holds the capture, and after
-each save. The owner answers from the running processes
+each save. The owner lists processes in its own Windows session
 (`Owner::runtime_runs`), the check the Debug page shows too, which opens
 nothing the runtime needs to start.
 
@@ -1601,13 +1602,6 @@ and the next read that works leaves **Unknown** (`runtimeAfter` in
 feed this state: the refresh that follows the save checks the processes
 itself, and a runtime that missed the signal reads the saved files
 when it starts.
-
-#### Open problems
-
-- [#440](https://github.com/TheLunchTrae/appy-tappy/issues/440): the process
-  list holds every signed-in Windows user's processes, so another user's
-  runtime reads as **Runs** and hides the warning while this user's runtime
-  is stopped.
 
 ### Application import
 
@@ -1738,8 +1732,12 @@ stateDiagram-v2
   watches again at once and says nothing. When the watch that follows is
   refused too, with no reading between, the refusal is a failure: the
   editor shows it and tries again each second.
-- **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
-  error, a screenshot is refused, and a recording stops with the error as its
+- The preview and the automation editor's watch each queue one frame.
+  The capture thread waits for room while the owner is busy. Stopping the
+  capture closes the frame receiver before joining the thread. A queued
+  notification carries the capture ticket, so it reaches only its own stream.
+- **Failed** sets `failure`, a `CaptureFailure`. Preview, live readings,
+  and debug details report the error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
 - **Ended** is a failure whose `ended` flag is set, for a `NotConnected`
   error: a closed window, a lost graphics device, or a capture panic. Frames

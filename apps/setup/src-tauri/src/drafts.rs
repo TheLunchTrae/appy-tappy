@@ -94,7 +94,7 @@ pub(crate) struct DraftSummary {
 
 /// Whether `id` can name a draft: lowercase letters, digits and dashes, so
 /// it is a plain folder name.
-fn is_draft_id(id: &str) -> bool {
+pub(crate) fn is_draft_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_ID_LEN
         && id
@@ -115,7 +115,7 @@ fn shot_name(shot: DraftShot) -> String {
 
 /// The screenshot a draft keeps as `name`, or `None` for any other file.
 /// Only a name [`shot_name`] gives counts.
-fn draft_shot(name: &str) -> Option<DraftShot> {
+pub(crate) fn draft_shot(name: &str) -> Option<DraftShot> {
     let (recorded, rest) = match name.strip_prefix("recorded-") {
         Some(rest) => (true, rest),
         None => (false, name.strip_prefix("shot-")?),

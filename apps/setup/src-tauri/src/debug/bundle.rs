@@ -9,16 +9,21 @@
 //! applications' windows, a draft's whole screenshots among them, and the
 //! newest trace file.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::Path;
 
+use appytappy_config::app_file::AppFile;
+use appytappy_config::automation_file::AutomationsFile;
+use appytappy_config::names::{is_app_id, is_image_name};
 use appytappy_platform::LocalTime;
 use serde::Deserialize;
 
 use crate::debug::trace_file;
+use crate::drafts::{DraftDef, draft_shot, is_draft_id};
 use crate::stores::Stores;
-use crate::zip_pack::{ZipPack, is_picture};
+use crate::zip_pack::ZipPack;
 
 /// What goes in the bundle beyond the files it always holds.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -85,31 +90,49 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
     )?;
     let locations = &stores.locations;
     bundle.file_if_there("settings.json", &locations.settings())?;
-    bundle.file_if_there("automations.json", &locations.automations())?;
+    let mut clicks = HashSet::new();
+    if let Some(bytes) = config(&mut bundle, "automations.json", &locations.automations())?
+        && spec.pictures
+        && let Some(file) = str::from_utf8(&bytes)
+            .ok()
+            .and_then(|json| AutomationsFile::parse(json).ok())
+    {
+        clicks.extend(file.images().into_iter().map(str::to_owned));
+    }
+    for (name, app) in folders(&locations.apps(), is_app_id)? {
+        let prefix = format!("apps/{name}");
+        if let Some(bytes) = config(
+            &mut bundle,
+            &format!("{prefix}/app.json"),
+            &app.join("app.json"),
+        )? && spec.pictures
+            && let Some(file) = str::from_utf8(&bytes)
+                .ok()
+                .and_then(|json| AppFile::parse(json).ok())
+        {
+            let images: HashSet<_> = file.images().into_iter().collect();
+            bundle.folder(&prefix, &app, |name| images.contains(name))?;
+        }
+    }
+    for (name, draft) in folders(&locations.drafts(), is_draft_id)? {
+        let prefix = format!("drafts/{name}");
+        if let Some(bytes) = config(
+            &mut bundle,
+            &format!("{prefix}/draft.json"),
+            &draft.join("draft.json"),
+        )? && spec.pictures
+            && let Ok(saved) = serde_json::from_slice::<DraftDef>(&bytes)
+        {
+            clicks.extend(saved.pictures);
+            bundle.folder(&prefix, &draft, |name| draft_shot(name).is_some())?;
+        }
+    }
     if spec.pictures {
         bundle.folder(
             "automation pictures",
             &stores.automations.pictures(),
-            is_picture,
+            |name| is_image_name(name) && clicks.contains(name),
         )?;
-    }
-    for app in folders(&locations.apps())? {
-        let name = app
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        bundle.folder(&format!("apps/{name}"), &app, |file| {
-            file == "app.json" || (spec.pictures && is_picture(file))
-        })?;
-    }
-    // A draft's folder holds its file and, for a value, fix, or reference,
-    // its screenshots; the click pictures it names are with the others.
-    for draft in folders(&locations.drafts())? {
-        let name = draft
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        bundle.folder(&format!("drafts/{name}"), &draft, |file| {
-            file == "draft.json" || (spec.pictures && is_picture(file))
-        })?;
     }
     for log in LOGS {
         bundle.file_if_there(&format!("logs/{log}"), &stores.logs.join(log))?;
@@ -124,8 +147,29 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
     bundle.finish()
 }
 
-/// The folders in `parent`, or none when it is not there.
-fn folders(parent: &Path) -> io::Result<Vec<std::path::PathBuf>> {
+/// Packs the raw file even when its contents cannot be parsed. Picture selection
+/// reads these same bytes, so a concurrent save cannot change the list mid-export.
+fn config(bundle: &mut ZipPack, name: &str, path: &Path) -> io::Result<Option<Vec<u8>>> {
+    let bytes = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => fs::read(path),
+        Ok(_) => return Ok(None),
+        Err(error) => Err(error),
+    };
+    match bytes {
+        Ok(bytes) => {
+            bundle.add(name, &bytes)?;
+            Ok(Some(bytes))
+        },
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// The saved item folders in `parent`, or none when it is not there.
+fn folders(
+    parent: &Path,
+    valid: fn(&str) -> bool,
+) -> io::Result<Vec<(String, std::path::PathBuf)>> {
     let entries = match fs::read_dir(parent) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -134,8 +178,11 @@ fn folders(parent: &Path) -> io::Result<Vec<std::path::PathBuf>> {
     let mut found = Vec::new();
     for entry in entries {
         let entry = entry?;
-        if entry.file_type()?.is_dir() {
-            found.push(entry.path());
+        if entry.file_type()?.is_dir()
+            && let Ok(name) = entry.file_name().into_string()
+            && valid(&name)
+        {
+            found.push((name, entry.path()));
         }
     }
     found.sort();
@@ -162,13 +209,28 @@ mod tests {
         // file, and neither is simply missing.
         let file = scratch.join("file.txt");
         fs::write(&file, "x").expect("write");
-        assert_eq!(folders(&missing).expect("missing is fine").len(), 0);
-        assert!(folders(&file).is_err());
+        assert_eq!(
+            folders(&missing, is_app_id).expect("missing is fine").len(),
+            0
+        );
+        assert!(folders(&file, is_app_id).is_err());
         let mut bundle = ZipPack::new();
         bundle
             .file_if_there("a", &missing)
             .expect("missing is fine");
         assert!(bundle.file_if_there("b", &scratch).is_err());
+        assert!(
+            config(&mut bundle, "folder", &scratch)
+                .expect("not a regular file")
+                .is_none()
+        );
+        assert!(
+            config(&mut bundle, "missing", &missing)
+                .expect("missing")
+                .is_none()
+        );
+        #[cfg(unix)]
+        assert!(config(&mut bundle, "inside", &file.join("inside")).is_err());
         // A path under a file cannot be opened, and is not simply missing.
         // Windows reports such a path as missing, so this holds elsewhere.
         #[cfg(unix)]

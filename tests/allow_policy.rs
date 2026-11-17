@@ -3066,6 +3066,8 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         full.contains(" ${MUTANTS_SHARD:+--sharding=round-robin}"),
         "the full mutation task must take its shards round-robin"
     );
+    let selection =
+        fs::read_to_string(root.join("scripts/select-mutants.sh")).expect("selection script");
     for contract in [
         "refs/remotes/origin/main^{commit}",
         "refs/heads/main^{commit}",
@@ -3076,7 +3078,7 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         "git diff --relative \"$merge_base\" --",
     ] {
         assert!(
-            diff.contains(contract),
+            selection.contains(contract),
             "the diff mutation task is missing base-resolution contract {contract}"
         );
     }
@@ -3085,7 +3087,7 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     // stops when there are none, before it builds anything.
     let steps = [
         "acquire_mutants_task_lock diff",
-        "cargo mutants --list ",
+        "sh scripts/select-mutants.sh ",
         "if [ -z \"$selected\" ]; then",
         "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then",
     ];
@@ -3106,7 +3108,7 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     else {
         panic!("the diff mutation task should run cargo-mutants");
     };
-    let Some(mutants_list) = diff
+    let Some(mutants_list) = selection
         .lines()
         .find(|line| line.contains("cargo mutants --list "))
     else {
@@ -3125,10 +3127,10 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
             flag.trim()
         );
     }
-    let untracked_guard = diff
+    let untracked_guard = selection
         .find("git ls-files --others --exclude-standard")
         .expect("the diff mutation task should inspect untracked files");
-    let diff_capture = diff
+    let diff_capture = selection
         .find("git diff --relative \"$merge_base\" --")
         .expect("the diff mutation task should capture the merge-base diff");
     assert!(
