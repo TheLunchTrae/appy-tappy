@@ -479,15 +479,15 @@ fn a_saved_sample_the_reference_leaves_out_is_not_learned_or_saved() {
     assert_eq!(
         taught.reference.samples,
         [SampleDef {
-            image: picture.clone(),
+            image: "ref-digits-2.png".to_owned(),
             text: "2".to_owned(),
         }],
-        "the box takes the number the sample left"
+        "the box keeps clear of the picture the saved file still names"
     );
     let [(name, png)] = taught.pictures.as_slice() else {
         panic!("one new picture, not {:?}", taught.pictures.len());
     };
-    assert_eq!(name, &picture);
+    assert_eq!(name, "ref-digits-2.png");
     let gray_square = screenshot()
         .crop(Region::new(2, 0, 2, 2).expect("not empty"))
         .expect("inside");
