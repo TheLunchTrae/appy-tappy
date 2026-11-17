@@ -170,9 +170,9 @@ version-numbered names.
   such as exhaustive keys checked with `satisfies Record<...>`.
 - Do not add or retain tests whose only claim is that a retired feature is
   absent, such as checking that a removed field or export is gone. Keep
-  negative tests for current contracts, including invalid input rejection,
-  stale-response guards, and data cleanup. When a test mixes these with
-  obsolete assertions, remove only the obsolete assertions.
+  tests for current contracts, including supported input formats, invalid
+  input rejection, stale-response guards, and data cleanup. When a test
+  mixes these with obsolete assertions, remove only the obsolete assertions.
 - A meaningful assertion fails for a concrete production defect and stays
   valid through behavior-preserving refactors. Show that a new or changed
   assertion can fail: for a bug, reproduce it with a failing regression test

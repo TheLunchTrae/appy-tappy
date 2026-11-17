@@ -1231,16 +1231,20 @@ mod tests {
     }
 
     #[test]
-    fn a_reference_refuses_an_unknown_key() {
+    fn a_reference_accepts_expects_and_refuses_unknown_keys() {
         let file = dash();
         let json = file.to_json();
-        let more = json.replacen(
-            "\"samples\": [",
-            "\"inkColor\": \"0123456789%\",\n      \"samples\": [",
-            1,
-        );
-        assert_ne!(more, json);
-        let refused = AppFile::parse(&more).expect_err("no such key");
+        let with_key = |key: &str| {
+            let more = json.replacen(
+                "\"samples\": [",
+                &format!("\"{key}\": \"0123456789%\",\n      \"samples\": ["),
+                1,
+            );
+            assert_ne!(more, json);
+            more
+        };
+        assert_eq!(AppFile::parse(&with_key("expects")), Ok(file));
+        let refused = AppFile::parse(&with_key("inkColor")).expect_err("no such key");
         assert!(refused.to_string().contains("inkColor"), "{refused}");
     }
 
