@@ -70,6 +70,11 @@ fn handle<S: System + ScreenPixels>(session: &Session<S>, line: &str) -> Option<
             "a message must be an object",
         ));
     };
+    let method = message.get("method").and_then(Value::as_str);
+    // Error responses can carry a null ID. They never need another response.
+    if method.is_none() && (message.contains_key("result") || message.contains_key("error")) {
+        return None;
+    }
     let id = message.get("id");
     if id.is_some_and(|id| !(id.is_string() || id.is_i64() || id.is_u64())) {
         return Some(failure(
@@ -85,10 +90,7 @@ fn handle<S: System + ScreenPixels>(session: &Session<S>, line: &str) -> Option<
             "jsonrpc must be 2.0",
         ));
     }
-    let Some(method) = message.get("method").and_then(Value::as_str) else {
-        if message.contains_key("result") || message.contains_key("error") {
-            return None;
-        }
+    let Some(method) = method else {
         return Some(failure(
             id.unwrap_or(&Value::Null),
             INVALID_REQUEST,
@@ -221,6 +223,8 @@ mod tests {
             r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
             "\n\n",
             r#"{"jsonrpc":"2.0","id":"a","result":{}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"#,
             "\n",
             r#"{"jsonrpc":"2.0","id":"b","method":"ping"}"#,
             "\n",
