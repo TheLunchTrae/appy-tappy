@@ -483,6 +483,7 @@ impl Harness {
         frame: io::Result<(Size, &Image)>,
         interval: Duration,
     ) -> Message<FakeHost> {
+        self.owner.capture.assert_frame_consumed();
         let frame = frame.map(|(window_size, image)| Frame {
             window_size,
             image,

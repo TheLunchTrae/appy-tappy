@@ -98,6 +98,16 @@ impl<S: CaptureSession> Watching<S> {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn assert_frame_consumed(&self) {
+        if let WatchCapture::Running(stream) = &self.capture {
+            assert!(
+                stream.session.frames.try_recv().is_err(),
+                "the previous watch frame is still queued"
+            );
+        }
+    }
+
     /// The ticket of the capture, while it runs.
     pub(super) const fn ticket(&self) -> Option<Ticket> {
         match &self.capture {

@@ -114,6 +114,23 @@ impl<S> Capture<S> {
         }
     }
 
+    /// The fake host delivers frames synchronously, so the previous frame
+    /// must have left the queue before the test calls the next handler.
+    #[cfg(test)]
+    pub(super) fn assert_frame_consumed(&self)
+    where
+        S: CaptureSession,
+    {
+        match self {
+            Self::Picked(picked) => assert!(
+                picked.capture.session.frames.try_recv().is_err(),
+                "the previous preview frame is still queued"
+            ),
+            Self::Watching(watching) => watching.assert_frame_consumed(),
+            Self::Idle => {},
+        }
+    }
+
     /// The ticket of the picked window's capture.
     pub(super) fn picked_ticket(&self) -> Option<Ticket> {
         self.picked().map(|picked| picked.capture.ticket)
@@ -763,6 +780,8 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         let (first, queued) = mpsc::channel();
+        let (done, stopped) = mpsc::channel();
+        let patience = Duration::from_secs(5);
         let producer = std::thread::spawn(move || {
             let image = frame_image();
             let frame = || {
@@ -775,12 +794,15 @@ mod tests {
             };
             assert_eq!(handler(frame()), NextFrame::After(PREVIEW_INTERVAL));
             first.send(()).expect("first frame queued");
-            handler(frame())
+            done.send(handler(frame())).expect("test waits for stop");
         });
-        queued.recv().expect("producer queued its first frame");
-        let stale = harness.messages.recv().expect("a frame is ready");
+        queued
+            .recv_timeout(patience)
+            .expect("producer queued its first frame");
+        let stale = harness.messages.try_recv().expect("a frame is ready");
         let mut fresh = harness.pick();
-        assert_eq!(producer.join().expect("producer stopped"), NextFrame::Never);
+        assert_eq!(stopped.recv_timeout(patience), Ok(NextFrame::Never));
+        producer.join().expect("producer stopped");
         // Even a notification already in the owner's inbox cannot consume
         // the next capture's waiting frame.
         let image = frame_image();
