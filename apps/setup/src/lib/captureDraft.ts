@@ -99,6 +99,22 @@ export function storeSetup(setup: CaptureSetup): StoredSetup {
 }
 
 /**
+ * The setup a draft kept, as the capture screen holds it again. Saved-picture removals need another review:
+ * a later save can reuse both a picture's name and its label for different pixels.
+ */
+export function restoreSetup(stored: StoredSetup, reference?: ReferenceDef | null): CaptureSetup {
+  const draft: Draft = { ...stored.draft, recorded: new Map(), dropped: [] };
+  if (reference === undefined || stored.editing === null) {
+    return { ...stored, draft };
+  }
+  return {
+    ...stored,
+    editing: { ...stored.editing, existing: reference },
+    draft,
+  };
+}
+
+/**
  * What the capture still needs before it can be saved, a sentence each: a name and a region, then the first thing
  * the check asks for. `fixing` says it fixes a saved value, which keeps its name.
  */
@@ -143,32 +159,6 @@ export function refreshedEditing(editing: Editing | null, references: readonly R
 }
 
 /**
- * `draft`, kept with the reference editor open on the reference as `copied` has it, going on from the reference as
- * `now` has it saved. The saved pictures it left out are named by file, and a reference saved since can give a new
- * picture a removed one's file name, so they stay left out only while the reference has the very pictures the draft
- * copied.
- */
-export function refreshedDraft(draft: Draft, copied: ReferenceDef | null, now: ReferenceDef | null): Draft {
-  const same = JSON.stringify(copied?.samples ?? []) === JSON.stringify(now?.samples ?? []);
-  return same || draft.dropped.length === 0 ? draft : { ...draft, dropped: [] };
-}
-
-/**
- * The setup a draft kept, on `current` when its saved reference is already known. Refresh the sample removals
- * against the copied reference before replacing it; with no current file yet, keep the copy until it arrives.
- */
-export function restoreSetup(stored: StoredSetup, current?: ReferenceDef | null): CaptureSetup {
-  const draft = { ...stored.draft, recorded: new Map<number, string>() };
-  return current === undefined || stored.editing === null
-    ? { ...stored, draft }
-    : {
-        ...stored,
-        editing: { ...stored.editing, existing: current },
-        draft: refreshedDraft(draft, stored.editing.existing, current),
-      };
-}
-
-/**
  * Whether the fix draft `def` no longer fits `value`: a fix reads its value the way that was first drawn, and the
  * value's check, colors, states, or number settings were changed since the draft copied them.
  */
@@ -183,10 +173,10 @@ export function fixOutdated(def: DraftDef, value: ValueDef): boolean {
     draft.filled,
     draft.empty,
     draft.color,
+    draft.kind === 'color' || draft.kind === 'state' ? draft.tolerance : null,
     draft.stateNames,
     draft.whole,
     draft.characters,
-    draft.kind === 'color' || draft.kind === 'state' ? draft.tolerance : null,
   ];
   return !sameContent(taken(now), taken(kept));
 }

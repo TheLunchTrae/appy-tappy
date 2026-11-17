@@ -3225,9 +3225,10 @@ stateDiagram-v2
 - The samples left out end with the editor: opening it on a reference and
   leaving it clear `dropped` (`toReference`, `fromReference`), and a save
   writes the reference without them and closes the editor. A
-  [draft](Setup-app.md#drafts) kept with the editor open keeps them, by
-  picture file name, and resumes with none left out when the reference's
-  saved samples changed since (`refreshedDraft`).
+  [draft](Setup-app.md#drafts) resumes with none left out (`restoreSetup`),
+  so the user reviews the current saved pictures again. Later saves can
+  reuse a picture's file name and label for different pixels, so comparing
+  only the saved sample list cannot identify the picture a draft removed.
 
 ### Bar detection
 
@@ -3403,10 +3404,6 @@ saved nor kept as a draft leaves no file. While the drafts cannot be listed,
 none is removed.
 [Pictures kept](Setup-app.md#pictures-kept) lists what each folder holds.
 
-Resuming a reference draft keeps the reference it copied until the current
-saved file is read. The saved pictures it chose to leave out stay left out
-only while the saved samples match that copy; otherwise those choices clear,
-so a reused picture name cannot remove a different sample.
 A fix draft whose color or state tolerance differs from its saved value is
 outdated, as one whose colors or states differ is: it cannot preview settings
 that saving the fix would discard.
@@ -3418,10 +3415,9 @@ place, being written beside it in a `.saving` folder, or moved aside to an
 them leaves the old draft, or the next listing puts it back, as
 [Drafts](Setup-app.md#drafts) describes.
 
-The debug bundle takes its draft listing on the owner thread, where draft
-saves and recovery are serialized. Its background packing job receives that
-listing and performs no draft recovery, so it cannot remove staging folders
-that a later save is still writing.
+The debug bundle reads the saved files without recovering drafts or changing
+their staging folders. It chooses pictures from the same bytes it packs for
+each file, so a concurrent save cannot authorize unrelated pictures.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another

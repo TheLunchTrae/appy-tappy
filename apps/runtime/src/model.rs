@@ -983,25 +983,34 @@ mod tests {
     #[test]
     fn renaming_a_click_target_keeps_the_session_and_fired_rule() {
         let mut model = Model::default();
-        let make = |name: &str| {
+        let make = |name: &str, executable: &str| {
             let mut plan = plan("A", 90.0);
             let mut target: appytappy_config::app_file::AppFile = appytappy_config::app_file::AppFile::parse(
                 r#"{"format":1,"name":"Target","window":{"title":"*","class":"*","executable":"Target.exe","mustMatch":{"title":false,"class":false},"fallback":"none"},"sizeChanges":"often","antiCheat":"none","values":[],"references":[]}"#
             ).unwrap();
             name.clone_into(&mut target.name);
+            executable.clone_into(&mut target.window.executable);
             Arc::get_mut(&mut Arc::get_mut(&mut plan).unwrap().runs.clicks)
                 .unwrap()
                 .add(&[("target", &target)], []);
             plan
         };
-        model.replan(plans(&[("a", &make("Target"))]));
+        model.replan(plans(&[("a", &make("Target", "Target.exe"))]));
         model.apply(started("a", 7));
         let now = Instant::now();
         model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
-        assert_eq!(model.replan(plans(&[("a", &make("Renamed"))])), []);
+        assert_eq!(
+            model.replan(plans(&[("a", &make("Renamed", "Target.exe"))])),
+            []
+        );
         assert_eq!(
             kinds(&model.sample(SessionId(0), ReaderNumber(0), 0, number(10.0), now)),
             ["undo 0 Pause A"]
+        );
+        assert_eq!(
+            kinds(&model.replan(plans(&[("a", &make("Renamed", "Other.exe"))]))),
+            ["stop 0 A", "read 1 A"],
+            "a different click window changes what runs"
         );
     }
 

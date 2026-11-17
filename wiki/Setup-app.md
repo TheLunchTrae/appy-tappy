@@ -809,9 +809,9 @@ to be refused. The answer marks a sample whose picture is missing
 for a sample that one could help.
 
 A draft resumed with the editor open goes on from the reference as it is
-saved now. When its samples are not the ones the draft copied, the draft's
-`dropped` is cleared (`refreshedDraft` in `lib/captureDraft.ts`): a file
-name it holds could name a picture saved since.
+saved now, with its `dropped` cleared (`restoreSetup` in `lib/captureDraft.ts`).
+The user reviews those choices again: later saves can reuse a picture's file
+name and label for different pixels.
 
 The owner decisions behind this:
 

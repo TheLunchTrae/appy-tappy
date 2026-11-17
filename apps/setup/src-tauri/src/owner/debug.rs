@@ -122,13 +122,7 @@ impl<H: Host> Owner<H> {
 
     /// The debug bundle `spec` asks for, to make away from this thread.
     pub(crate) fn debug_bundle(&self, spec: BundleSpec) -> Result<BundleJob, String> {
-        let stores = self.debug_stores()?;
-        // Listing recovers interrupted saves, so it stays on the owner
-        // alongside draft writes, never on the background packing thread.
-        let drafts = stores.drafts.list().map_err(|error| {
-            format!("AppyTappy cannot list drafts for the debug bundle: {error}.")
-        })?;
-        Ok(BundleJob::new(stores.clone(), spec, drafts))
+        Ok(BundleJob::new(self.debug_stores()?.clone(), spec))
     }
 
     /// What the runtime copies out of each frame of the saved application
