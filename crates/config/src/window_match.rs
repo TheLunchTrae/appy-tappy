@@ -63,8 +63,10 @@ impl Pattern {
             Matcher::Any => true,
             // Executables generally have ASCII names. Snapshot scans compare
             // each name against every watched application.
-            Matcher::Literal(text) if candidate.is_ascii() => text.eq_ignore_ascii_case(candidate),
-            Matcher::Literal(text) => *text == candidate.to_lowercase(),
+            Matcher::Literal(text) => {
+                text.eq_ignore_ascii_case(candidate)
+                    || (!candidate.is_ascii() && *text == candidate.to_lowercase())
+            },
             Matcher::Wildcard(pattern) => {
                 let folded: Vec<char> = candidate.to_lowercase().chars().collect();
                 glob(pattern, &folded)
@@ -245,6 +247,7 @@ mod tests {
             ("\u{212a}eeper.exe", "keeper.EXE", true),
             ("keeper.exe", "\u{212a}eeper.EXE", true),
             ("MÜNCHEN", "München", true),
+            ("MÜNCHEN", "Zürich", false),
             ("?Ü*", "München", true),
             ("Example*", "Example App", true),
             ("*App", "Example App", true),
