@@ -479,9 +479,21 @@ mod tests {
         let pictures = stores.automations.pictures();
         fs::create_dir_all(&pictures).expect("pictures folder");
         fs::write(pictures.join("button.png"), [2]).expect("click picture");
+        fs::write(pictures.join("draft-button.png"), [4]).expect("draft click picture");
+        fs::write(pictures.join("notes.txt"), "mine").expect("not a picture");
         fs::write(pictures.join("private.png"), [3]).expect("unreferenced picture");
         fs::write(stores.apps.folder("example").join("private.png"), [3])
             .expect("unreferenced picture");
+        let draft = stores.locations.drafts().join("0000019a");
+        fs::create_dir_all(&draft).expect("draft folder");
+        fs::write(
+            draft.join("draft.json"),
+            r#"{
+            "kind": "automation", "app": null, "changes": null, "name": "Draft",
+            "missing": [], "pictures": ["draft-button.png", "notes.txt"], "state": {}
+        }"#,
+        )
+        .expect("draft");
         let bytes = harness
             .ask(|owner| {
                 owner.debug_bundle(BundleSpec {
@@ -494,7 +506,12 @@ mod tests {
         let (names, _) = unzip(bytes, "about.txt");
         assert!(names.contains(&"apps/example/icon.png".to_owned()));
         assert!(names.contains(&"automation pictures/button.png".to_owned()));
-        assert!(names.iter().all(|name| !name.contains("private")));
+        assert!(names.contains(&"automation pictures/draft-button.png".to_owned()));
+        assert!(
+            names
+                .iter()
+                .all(|name| !name.contains("private") && !name.ends_with("notes.txt"))
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -513,6 +530,9 @@ mod tests {
         fs::create_dir_all(&staging).expect("staging folder");
         fs::write(staging.join("draft.json"), "{}").expect("staged file");
         fs::write(staging.join("shot-0.png"), [9]).expect("staged screenshot");
+        let app_staging = locations.apps().join("example.saving");
+        fs::create_dir_all(&app_staging).expect("app staging folder");
+        fs::write(app_staging.join("app.json"), "{}").expect("staged app");
         let pictures = stores.automations.pictures();
         fs::create_dir_all(&pictures).expect("pictures folder");
         fs::write(pictures.join("click-1.png"), [3]).expect("picture");
@@ -562,6 +582,14 @@ mod tests {
             .and_then(BundleJob::make)
             .expect("bundle");
         let (names, log) = unzip(full, "logs/setup.log");
+        assert_eq!(
+            fs::read(staging.join("draft.json")).expect("staging stays"),
+            b"{}"
+        );
+        assert_eq!(
+            fs::read(staging.join("shot-0.png")).expect("staging stays"),
+            [9]
+        );
         assert_eq!(log, "pick_window took 1.0 ms\n");
         assert!(
             names.contains(&"apps/example/shown-1.png".to_owned()),

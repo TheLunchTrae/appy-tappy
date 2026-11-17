@@ -19,7 +19,7 @@ use appytappy_platform::LocalTime;
 use serde::Deserialize;
 
 use crate::debug::trace_file;
-use crate::drafts::{draft_shot, is_draft_id};
+use crate::drafts::{DraftDef, draft_shot, is_draft_id};
 use crate::stores::Stores;
 use crate::zip_pack::ZipPack;
 
@@ -89,23 +89,6 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
     let locations = &stores.locations;
     bundle.file_if_there("settings.json", &locations.settings())?;
     bundle.file_if_there("automations.json", &locations.automations())?;
-    if spec.pictures {
-        // Generated names remain useful when a file is broken. Valid files
-        // can also name pictures the user renamed by hand.
-        let automations = stores.automations.load().ok();
-        let mut images = stores.drafts.pictures().unwrap_or_default();
-        if let Some(file) = &automations {
-            images.extend(file.images().into_iter().map(str::to_owned));
-        }
-        bundle.folder(
-            "automation pictures",
-            &stores.automations.pictures(),
-            |name| {
-                click_picture_number(name).is_some()
-                    || (is_image_name(name) && images.iter().any(|image| image == name))
-            },
-        )?;
-    }
     for app in folders(&locations.apps())? {
         let name = app
             .file_name()
@@ -126,6 +109,7 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
     }
     // A draft's folder holds its file and, for a value, fix, or reference,
     // its screenshots; the click pictures it names are with the others.
+    let mut click_images = Vec::new();
     for draft in folders(&locations.drafts())? {
         let name = draft
             .file_name()
@@ -136,6 +120,29 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
         bundle.folder(&format!("drafts/{name}"), &draft, |file| {
             file == "draft.json" || (spec.pictures && draft_shot(file).is_some())
         })?;
+        // DraftStore::list repairs interrupted saves. This worker only
+        // reads: the owner may currently be writing a draft's staging folder.
+        if spec.pictures
+            && let Ok(json) = fs::read_to_string(draft.join("draft.json"))
+            && let Ok(saved) = serde_json::from_str::<DraftDef>(&json)
+        {
+            click_images.extend(saved.pictures);
+        }
+    }
+    if spec.pictures {
+        // Generated names remain useful when a file is broken. Valid files
+        // can also name pictures the user renamed by hand.
+        if let Ok(file) = stores.automations.load() {
+            click_images.extend(file.images().into_iter().map(str::to_owned));
+        }
+        bundle.folder(
+            "automation pictures",
+            &stores.automations.pictures(),
+            |name| {
+                click_picture_number(name).is_some()
+                    || (is_image_name(name) && click_images.iter().any(|image| image == name))
+            },
+        )?;
     }
     for log in LOGS {
         bundle.file_if_there(&format!("logs/{log}"), &stores.logs.join(log))?;
