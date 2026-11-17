@@ -789,8 +789,21 @@ pub(crate) async fn live_values(
     app: AppHandle,
     applications: Vec<String>,
 ) -> Result<Vec<(String, Result<OverlayView, String>)>, String> {
-    ask(&app, "live_values", move |owner| {
-        owner.live_values(applications)
+    let sent = Instant::now();
+    run(&app, move |owner| {
+        let views = owner.live_values(applications);
+        let took = sent.elapsed();
+        let mut errors = views
+            .iter()
+            .filter_map(|(_, view)| view.as_ref().err())
+            .peekable();
+        if errors.peek().is_none() {
+            owner.record_command("live_values", took, None);
+        }
+        for error in errors {
+            owner.record_command("live_values", took, Some(error));
+        }
+        views
     })
     .await
 }

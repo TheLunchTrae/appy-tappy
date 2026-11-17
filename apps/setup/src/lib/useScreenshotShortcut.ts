@@ -9,6 +9,19 @@ import { ask } from './request.ts';
 import { shortcutLabel } from './shortcut.ts';
 import { useShortcutChoice } from './useShortcutChoice.ts';
 
+interface Registration {
+  readonly shortcut: string;
+}
+
+let registered: Registration | null = null;
+
+async function release(registration: Registration): Promise<void> {
+  if (registered === registration) {
+    await unregister(registration.shortcut);
+    registered = null;
+  }
+}
+
 // The native registration belongs to the app, including when one capture
 // screen has unmounted and another is registering the same keys.
 let shortcutQueue = Promise.resolve();
@@ -45,7 +58,7 @@ export function useScreenshotShortcut(onPress: (() => Promise<unknown>) | null):
       return undefined;
     }
     let active = true;
-    let registered = false;
+    const registration = { shortcut };
     const pressed = (event: ShortcutEvent): void => {
       if (active && event.state === 'Pressed' && latest.current !== null) {
         background(latest.current());
@@ -54,9 +67,12 @@ export function useScreenshotShortcut(onPress: (() => Promise<unknown>) | null):
     const cancel = ask(
       () =>
         inOrder(async () => {
+          if (active && registered !== null) {
+            await release(registered);
+          }
           if (active) {
             await register(shortcut, pressed);
-            registered = true;
+            registered = registration;
           }
         }),
       () => {
@@ -69,13 +85,7 @@ export function useScreenshotShortcut(onPress: (() => Promise<unknown>) | null):
     return () => {
       active = false;
       cancel();
-      background(
-        inOrder(async () => {
-          if (registered) {
-            await unregister(shortcut);
-          }
-        }),
-      );
+      background(inOrder(async () => release(registration)));
     };
   }, [shortcut, choosing, takes]);
 

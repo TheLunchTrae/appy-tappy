@@ -38,8 +38,8 @@ it was about has gone. These guards drop stale messages:
   queues the native unregister.
 - **Values page polls.** `useLiveValues` shows an answer only for the list
   it requested and while that poll still belongs to the page. A list change
-  or page exit cancels the callback with `ask`, and the next poll goes to the
-  owner after the old one finishes.
+  or page exit skips unsent polls and cancels the callback of a poll that
+  already reached the owner. The next poll waits for the old one to finish.
 - **Tickets.** The setup app's owner thread hands each capture, each
   recording, of readings or of looks, and each search for text like a
   reference's box a new `Ticket` from one counter, `Tickets`
@@ -212,12 +212,15 @@ stateDiagram-v2
   when the user picked Enable or Disable from the tray, which carries its
   orders too and sets `picked` (see [Reload watch](#reload-watch)), `Reload`
   the saved files, `TraceFailed`, or `Stop`. The owner waits for its next
-  event only until the first of two times (`wake`): when a rule that its
-  cooldown held back is due, and when it reads the saved files again after a
-  read failed. Either time sends it `Due`, whose step rechecks the held rules
-  and, once the retry is due, reads the saved files again. With neither, it
-  waits with no limit. After each step the tray gets a fresh menu if it
-  changed.
+  event until the first deadline from `wake`: a held rule, a reader restart,
+  a retry of the saved files, or the trace's end. When the deadline passes,
+  `OwnerTimer` puts one `Due` after the events already queued. A pending
+  frame can invalidate a held rule, and later events go after the timer.
+  Taking `Due` clears the queued flag. It rechecks the deadlines that
+  had passed when it entered the queue, and a later deadline gets its own
+  turn after the events already waiting then.
+  With no deadline or queued timer, the owner waits with no limit. After
+  each step the tray gets a fresh menu if it changed.
 - **A worker that ended.** Every send to the action thread and to detection
   goes through `Crew::act` and `Crew::detect`. Each of those threads ends
   only after the owner, or when it panics, so a send that fails means it
@@ -741,9 +744,9 @@ stateDiagram-v2
   stop running, releases every active rule.
 - The engine runs once after applying all changes in a frame, and at the end
   of a held rule's cooldown. A steady frame sends no changes, so
-  `Session::next_due` gives the earliest time a held rule's
-  cooldown ends. The owner wakes then if no event came first, and
-  `Session::recheck` fires each held rule whose cooldown passed.
+  `Session::next_due` gives the earliest time a held rule's cooldown ends.
+  The owner's `Due` event rechecks after earlier events, and
+  `Session::recheck` fires each held rule whose condition still holds.
 
 ### Action thread and restore journal
 
@@ -1787,8 +1790,9 @@ stateDiagram-v2
   share the shortcut registration queue. Leaving the view or starting to
   choose ends its key handler, then releases any registration that succeeded.
   The next screen registers only after that cleanup. A refused registration
-  shows the shortcut error and leaves nothing to release. Choosing another
-  shortcut or returning to the capture view tries again.
+  shows the shortcut error and leaves nothing to release. If releasing a
+  shortcut fails, the next registration tries the release again before
+  asking for its shortcut. The old handler stays inactive.
 
 ### Live check
 
@@ -3324,9 +3328,8 @@ A save that works for one application closes that application's entry in
 both sets (`Overlays::reopen`, from `Owner::tell`), so its next poll opens
 it from the saved file again. The other applications' entries and captures
 go on as they were. An overlay window that closes drops its entry and the
-size of its card (`Overlays::window_closed`), and closing the app or
-leaving the Values page closes every entry of the set
-(`Overlays::close_all`).
+size of its card (`Overlays::window_closed`). App shutdown closes both
+sets (`Overlays::close_all`).
 
 `overlay::window::sync` opens a window for each overlay that is on and closes
 each that is not. The owner thread runs it through its host: when the main

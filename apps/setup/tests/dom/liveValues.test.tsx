@@ -108,6 +108,7 @@ test('a new Values page waits for the old page to release its pending captures',
   await waitFor(() => {
     expect(calls).toEqual([['player']]);
   });
+  before.rerender(<Page apps={[{ ...app, id: 'other' }]} />);
   before.unmount();
   render(<Page apps={[app]} />);
   await act(async () => {

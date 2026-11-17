@@ -267,8 +267,8 @@ This page covers what the user guide leaves out.
   its own.
   The Values page reads each running application's values about
   once a second at the window's size now, with a capture of its own like an
-  overlay's, whether the overlay is on or not, and stops when the page
-  closes (`live_values`, `stop_live_values`). The automation editor's
+  overlay's. Each `live_values` poll lists the applications whose captures
+  it needs. The page sends an empty list when it closes. The automation editor's
   reading follows its window to each size the same way and keeps its watch's
   number, so the editor's poll goes on. **Fix at this size** opens the
   capture locked to the value's application. Its first screenshot whose

@@ -19,8 +19,8 @@ const NO_LIVE: ReadonlyMap<string, LiveApp> = new Map();
 // any reads from a reopened page. Native commands can otherwise overtake it.
 let reading: Promise<unknown> = Promise.resolve();
 
-function pollLiveValues(applications: readonly string[]): ReturnType<typeof liveValues> {
-  const requested = reading.then(async () => liveValues(applications));
+function pollLiveValues(applications: readonly string[], current = (): boolean => true): ReturnType<typeof liveValues> {
+  const requested = reading.then(async () => (current() ? liveValues(applications) : []));
   reading = requested.catch(() => undefined);
   return requested;
 }
@@ -42,6 +42,7 @@ export function useLiveValues(apps: readonly AppSummary[] | null): ReadonlyMap<s
   } | null>(null);
 
   useEffect(() => {
+    let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let cancel: () => void;
     const poll = (): void => {
@@ -52,7 +53,7 @@ export function useLiveValues(apps: readonly AppSummary[] | null): ReadonlyMap<s
         }
       };
       cancel = ask(
-        async () => pollLiveValues(wanted),
+        async () => pollLiveValues(wanted, () => active),
         (results) => {
           show(
             new Map(
@@ -71,6 +72,7 @@ export function useLiveValues(apps: readonly AppSummary[] | null): ReadonlyMap<s
     };
     poll();
     return () => {
+      active = false;
       cancel();
       clearTimeout(timer);
     };

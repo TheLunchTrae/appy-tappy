@@ -618,11 +618,7 @@ mod tests {
             harness.ask(overlay_state),
             Err("The overlay for Example App is off.".to_owned())
         );
-        assert!(
-            harness
-                .ask(|owner| owner.live_values(Vec::new()))
-                .is_empty()
-        );
+        assert_eq!(harness.ask(|owner| owner.live_values(Vec::new())), []);
         assert_eq!(harness.closed.try_recv(), Ok(7), "the page stopped reading");
         std::fs::remove_dir_all(root).expect("clean up");
     }

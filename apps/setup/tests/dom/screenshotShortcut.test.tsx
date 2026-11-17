@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { Channel } from '@tauri-apps/api/core';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import type { ShortcutEvent } from '@tauri-apps/plugin-global-shortcut';
@@ -70,4 +70,37 @@ test('a refused screenshot shortcut leaves no registration for cleanup', async (
     hook.unmount();
   });
   expect(commands).toEqual(['plugin:global-shortcut|register']);
+});
+
+test('a failed shortcut release is retried before the next registration', async () => {
+  const consoleError = spyOn(console, 'error').mockImplementation(() => undefined);
+  const commands: string[] = [];
+  mockIPC((command) => {
+    commands.push(command);
+    if (commands.length === 2) {
+      throw new Error('Native release failed');
+    }
+    return undefined;
+  });
+  try {
+    const before = renderHook(() => useScreenshotShortcut(async () => {}));
+    await waitFor(() => {
+      expect(commands).toEqual(['plugin:global-shortcut|register']);
+    });
+    await act(async () => {
+      before.unmount();
+    });
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    renderHook(() => useScreenshotShortcut(async () => {}));
+    await waitFor(() => {
+      expect(commands).toEqual([
+        'plugin:global-shortcut|register',
+        'plugin:global-shortcut|unregister',
+        'plugin:global-shortcut|unregister',
+        'plugin:global-shortcut|register',
+      ]);
+    });
+  } finally {
+    consoleError.mockRestore();
+  }
 });

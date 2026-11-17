@@ -72,17 +72,17 @@ changes what the application runs. It applies every change from the same
 captured frame before evaluating the rules, so the rules see one set of
 readings. The evaluation uses the frame's time to decide which rules to
 release, fire, or hold back during their cooldown. Releases come first,
-then fires, each in rule
-order, so a restore never undoes a change that another rule makes for the same
-value. A held rule runs nothing; the runtime trace records it
+then fires, each in rule order, so a restore never undoes a change that
+another rule makes for the same value. A held rule runs nothing; the runtime trace records it
 ([Trace](Trace.md)).
 
 A value that holds still sends no new sample, so a rule that its cooldown held
 back could wait forever. A session therefore reports when the next such rule
 is due (`Session::next_due`): the time its cooldown ends, for a rule that is
-armed and whose condition holds on the values recorded. The owner thread waits
-for its next event until then at most, and if none comes, checks those rules
-again at that time (`Session::recheck`).
+armed and whose condition holds on the values recorded. If the owner thread
+is idle, it checks those rules at the deadline (`Session::recheck`). If it
+is busy when the deadline passes, it rechecks after the events already in its
+queue, so an unreadable or changed value can invalidate the condition first.
 
 A session stops when the application exits, when automations are turned off,
 or when a reload changes what the application runs. Stopping releases every

@@ -52,10 +52,10 @@ enum Event {
     Actions(ActionReport),
     /// The trace writer stopped, because it could not write.
     Trace(TraceReport),
-    /// An automation that its cooldown held back is due, the trace's time
-    /// is up, or the saved files are to be read again, and no event came
-    /// before.
-    Due,
+    /// Wake up to recheck held automations, the trace's end time, or
+    /// a retry of reading the saved files. The time limits the deadlines
+    /// checked by this message to those due when it joined the queue.
+    Due(Instant),
 }
 
 impl Event {
@@ -70,7 +70,7 @@ impl Event {
             Self::Reading(_) => "reader",
             Self::Actions(_) => "actions",
             Self::Trace(_) => "trace",
-            Self::Due => "due",
+            Self::Due(_) => "due",
         }
     }
 
@@ -436,9 +436,10 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         crew.set_trace(trace, log);
     }
     carry(first.orders, &mut crew, log);
+    let mut timer = OwnerTimer::default();
     loop {
         let due = wake(model.next_due(), reloads.retry, crew.tracing.until());
-        let Some(event) = next(&events, due) else {
+        let Some(event) = timer.next(&events, &crew.events, due) else {
             break;
         };
         // Off, the trace reads no clock here.
@@ -573,22 +574,40 @@ fn controls(system: &Arc<HostSystem>) -> io::Result<appytappy_actions::HostContr
     }))
 }
 
-/// Waits for the next event, or, when an automation is `due`, until then at
-/// most. Returns `None` once nobody can send another event.
-fn next(events: &Receiver<Event>, due: Option<Instant>) -> Option<Event> {
-    let Some(due) = due else {
-        return events.recv().ok();
-    };
-    // A due time that passed goes first, so a busy channel cannot hold back
-    // an automation that is due.
-    let now = Instant::now();
-    if due <= now {
-        return Some(Event::Due);
-    }
-    match events.recv_timeout(due.saturating_duration_since(now)) {
-        Ok(event) => Some(event),
-        Err(RecvTimeoutError::Timeout) => Some(Event::Due),
-        Err(RecvTimeoutError::Disconnected) => None,
+/// The owner's wake-up, which can have one expired timer in the event queue.
+#[derive(Debug, Default)]
+struct OwnerTimer {
+    queued: bool,
+}
+
+impl OwnerTimer {
+    /// Waits at most until `due` if the queue is idle. If the deadline
+    /// passes, one `Due` goes behind messages already waiting. They can
+    /// invalidate a held rule, and messages arriving afterward cannot keep
+    /// the timer from running.
+    fn next(
+        &mut self,
+        events: &Receiver<Event>,
+        sender: &Sender<Event>,
+        due: Option<Instant>,
+    ) -> Option<Event> {
+        if let (false, Some(due)) = (self.queued, due) {
+            match due.saturating_duration_since(Instant::now()) {
+                Duration::ZERO => {},
+                wait => match events.recv_timeout(wait) {
+                    Ok(event) => return Some(event),
+                    Err(RecvTimeoutError::Timeout) => {},
+                    Err(RecvTimeoutError::Disconnected) => return None,
+                },
+            }
+            sender.send(Event::Due(Instant::now())).ok()?;
+            self.queued = true;
+        }
+        let event = events.recv().ok();
+        if matches!(event, Some(Event::Due(_))) {
+            self.queued = false;
+        }
+        event
     }
 }
 
@@ -1227,7 +1246,7 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
             note(log, &message);
             Step::TraceFailed(id)
         },
-        Event::Due => Step::Carry(model.recheck(Instant::now())),
+        Event::Due(at) => Step::Carry(model.recheck(at)),
     }
 }
 
@@ -1393,30 +1412,126 @@ mod tests {
     }
 
     #[test]
-    fn the_owner_wakes_when_an_automation_is_due() {
+    fn the_owner_wakes_at_a_deadline_on_an_idle_queue() {
         let (sender, events) = mpsc::channel();
-        let passed = Instant::now();
-        let later = passed
-            .checked_add(Duration::from_secs(60))
-            .expect("a test time fits in an Instant");
+        let mut timer = OwnerTimer::default();
+        let due = Instant::now()
+            .checked_add(Duration::from_millis(10))
+            .expect("a time to wake");
+        assert!(
+            matches!(timer.next(&events, &sender, Some(due)), Some(Event::Due(when)) if when >= due)
+        );
+    }
+
+    #[test]
+    fn an_expired_timer_waits_for_pending_events_and_goes_before_later_ones() {
+        let (sender, events) = mpsc::channel();
+        let mut timer = OwnerTimer::default();
+        let expired = Some(Instant::now());
+        sender.send(Event::Reload).expect("send before the timer");
         assert!(matches!(
-            next(&events, passed.checked_add(Duration::from_millis(10))),
-            Some(Event::Due)
+            timer.next(&events, &sender, expired),
+            Some(Event::Reload)
         ));
-        sender.send(Event::Reload).expect("send");
-        assert!(
-            matches!(next(&events, Some(passed)), Some(Event::Due)),
-            "a due time that passed goes before a waiting event"
+        sender
+            .send(Event::DetectionEnded)
+            .expect("send after the timer");
+        assert!(matches!(
+            timer.next(&events, &sender, expired),
+            Some(Event::Due(_))
+        ));
+        let later = Instant::now().checked_add(Duration::from_secs(60));
+        assert!(matches!(
+            timer.next(&events, &sender, later),
+            Some(Event::DetectionEnded)
+        ));
+        assert!(matches!(
+            timer.next(&events, &sender, expired),
+            Some(Event::Due(_))
+        ));
+    }
+
+    fn with_held_rule(start: Instant) -> Model {
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "a".to_owned(),
+            plan::examples::plan_with_cooldown("Example App", Duration::from_secs(1)),
+        )]));
+        model.apply(Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
+        for progress in [95.0, 10.0, 95.0] {
+            model.frame(
+                SessionId(0),
+                ReaderNumber(0),
+                [(0, Some(plan::examples::number(progress)))],
+                start,
+            );
+        }
+        model
+    }
+
+    #[test]
+    fn a_queued_unreadable_frame_invalidates_a_held_rule_before_its_timer_runs() {
+        let mut scratch = Scratch::new("unreadable-before-due");
+        let start = Instant::now()
+            .checked_sub(Duration::from_secs(2))
+            .expect("a time before the cooldown");
+        let mut model = with_held_rule(start);
+        let due = model.next_due().expect("the rule is held");
+        let (sender, events) = mpsc::channel();
+        sender
+            .send(Event::from(Reading::Frame {
+                session: SessionId(0),
+                reader: ReaderNumber(0),
+                changes: vec![(0, None)],
+                at: start,
+            }))
+            .expect("queue the unreadable frame");
+        let mut timer = OwnerTimer::default();
+        let enabled = EnabledStore::new(scratch.folder.join("enabled.txt"));
+        let event = timer.next(&events, &sender, Some(due)).expect("the frame");
+        assert_eq!(
+            handle(&mut model, &mut scratch.log, &enabled, event),
+            Step::Carry(Vec::new())
         );
-        assert!(
-            matches!(next(&events, Some(later)), Some(Event::Reload)),
-            "an event goes before a due time still to come"
+        sender
+            .send(Event::Reload)
+            .expect("an event after the timer");
+        let event = timer
+            .next(&events, &sender, None)
+            .expect("the queued timer");
+        assert!(matches!(event, Event::Due(_)));
+        assert_eq!(
+            handle(&mut model, &mut scratch.log, &enabled, event),
+            Step::Carry(Vec::new())
         );
-        sender.send(Event::DetectionEnded).expect("send");
-        assert!(matches!(next(&events, None), Some(Event::DetectionEnded)));
-        drop(sender);
-        assert!(next(&events, Some(later)).is_none());
-        assert!(next(&events, None).is_none());
+        assert_eq!(model.next_due(), None, "the reading is unknown");
+    }
+
+    #[test]
+    fn a_timer_checks_only_deadlines_that_passed_when_it_joined_the_queue() {
+        let mut scratch = Scratch::new("later-deadline");
+        let start = Instant::now()
+            .checked_sub(Duration::from_secs(2))
+            .expect("a time before the cooldown");
+        let mut model = with_held_rule(start);
+        let due = model.next_due().expect("the rule is held");
+        let enabled = EnabledStore::new(scratch.folder.join("enabled.txt"));
+
+        assert_eq!(
+            handle(&mut model, &mut scratch.log, &enabled, Event::Due(start)),
+            Step::Carry(Vec::new()),
+            "a marker queued before this rule was due must not run it"
+        );
+        assert_eq!(model.next_due(), Some(due));
+        assert!(
+            matches!(handle(&mut model, &mut scratch.log, &enabled, Event::Due(due)),
+                Step::Carry(orders) if matches!(orders.as_slice(), [Order::Run { .. }])),
+            "a marker queued after the deadline can run the rule"
+        );
     }
 
     #[test]
@@ -2370,7 +2485,8 @@ mod tests {
             problem: "cannot read".to_owned(),
         });
         assert_eq!((problem.kind(), problem.cause()), ("reader", None));
-        assert_eq!((Event::Due.kind(), Event::Due.cause()), ("due", None));
+        let due = Event::Due(at);
+        assert_eq!((due.kind(), due.cause()), ("due", None));
     }
 
     #[test]
@@ -2387,7 +2503,7 @@ mod tests {
                 at,
             }),
         );
-        receive(&mut trace, &Event::Due);
+        receive(&mut trace, &Event::Due(at));
         let sent = crate::trace::sent(&entries);
         let [received] = sent.as_slice() else {
             panic!("one record for the sample: {sent:?}");
