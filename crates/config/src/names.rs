@@ -143,17 +143,45 @@ pub fn new_reference_id(name: &str, taken: &[&str]) -> String {
     free_id(reference_id(name), '_', MAX_REFERENCE_ID_LEN, taken)
 }
 
+/// The automation IDs reserved in a file, and the next suffix to try for
+/// each repeated name. Repairs on reload share this allocator.
+#[derive(Debug, Default)]
+pub(crate) struct AutomationIds {
+    taken: std::collections::HashSet<String>,
+    next: std::collections::HashMap<String, usize>,
+}
+
+impl AutomationIds {
+    /// Reserves an existing ID. Returns whether this is its first occurrence.
+    pub(crate) fn reserve(&mut self, id: &str) -> bool {
+        self.taken.insert(id.to_owned())
+    }
+
+    /// Gives `name` its first available ID, reserving it for subsequent rows.
+    pub(crate) fn assign(&mut self, name: &str) -> String {
+        let base = id_from_name(name, "automation", MAX_AUTOMATION_ID_LEN);
+        if self.reserve(&base) {
+            return base;
+        }
+        let number = self.next.entry(base.clone()).or_insert(2_usize);
+        loop {
+            let id = format!("{base}_{number}");
+            *number = number.saturating_add(1);
+            if self.taken.insert(id.clone()) {
+                return id;
+            }
+        }
+    }
+}
+
 /// An automation ID made from a name the user typed that `taken` does not
 /// hold yet, such as `pause_music` from `Pause music`, or `pause_music_2`
 /// when that is taken.
 #[must_use]
 pub fn new_automation_id(name: &str, taken: &[&str]) -> String {
-    free_id(
-        id_from_name(name, "automation", MAX_AUTOMATION_ID_LEN),
-        '_',
-        MAX_SIGNAL_NAME_LEN,
-        taken,
-    )
+    let mut ids = AutomationIds::default();
+    ids.taken.extend(taken.iter().copied().map(str::to_owned));
+    ids.assign(name)
 }
 
 /// How many bytes [`free_id`] keeps free for a separator and a number.

@@ -33,12 +33,19 @@ pub(crate) struct ClickTargets {
 }
 
 /// An application a click clicks in.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct Target {
     /// Its name, for the log.
     name: String,
     /// How to find its window.
     window: WindowMatch,
+}
+
+// Display names do not change where a click lands or restart a session.
+impl PartialEq for Target {
+    fn eq(&self, other: &Self) -> bool {
+        self.window == other.window
+    }
 }
 
 impl ClickTargets {

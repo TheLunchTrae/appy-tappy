@@ -12,6 +12,7 @@ use crate::drafts::DraftKind;
 use crate::stores::SavedApp;
 
 use super::apps::checked_now;
+use super::fixes::free_picture_number;
 use super::host::Host;
 use super::{Changed, Edit, Owner};
 
@@ -72,9 +73,25 @@ impl<H: Host> Owner<H> {
                 .map(|value| value.id.as_str())
                 .collect();
             let id = new_value_id(name, &taken);
-            let saved =
+            let mut saved =
                 check_spec::to_saved(&spec.check, owner.capture.screenshots(), &spec.app, &id)
                     .map_err(|error| error.to_string())?;
+            let images = found.file.images();
+            if saved
+                .pictures
+                .iter()
+                .any(|(name, _)| images.contains(&name.as_str()))
+            {
+                let number = free_picture_number(&id, images.into_iter());
+                saved = check_spec::to_saved_fix(
+                    &spec.check,
+                    owner.capture.screenshots(),
+                    &spec.app,
+                    &id,
+                    Some(number),
+                )
+                .map_err(|error| error.to_string())?;
+            }
             check_spec::expected_within_limit(&saved.check, None)
                 .map_err(|error| error.to_string())?;
             let screen = ScreenDef {

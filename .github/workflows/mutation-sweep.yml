@@ -48,6 +48,7 @@ jobs:
           install: true
           install_args: rust github:sourcefrog/cargo-mutants bun
           cache: true
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Install the webview build libraries
         run: |
           sudo apt-get update

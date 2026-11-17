@@ -15,7 +15,7 @@ use appytappy_sources::screen::check::CheckError;
 use appytappy_sources::screen::saved::Unread;
 use appytappy_sources::screen::{Frame, FrameMeaning, NextFrame, Placed, Size};
 
-use super::{Control, Job, RESTART_AFTER, Reading, Recovery};
+use super::{Control, Job, RESTART_AFTER, Reading, Recovery, send};
 use crate::model::{ReaderNumber, SessionId};
 use crate::plan::AppPlan;
 use crate::trace::{Record, Trace, What};
@@ -278,35 +278,83 @@ impl<E: From<Reading>> FrameReader<E> {
                 problems: None,
             });
         }
-        let mut changed = false;
+        let mut changes = Vec::new();
+        let mut problems = Vec::new();
         // The clock is read only when each reading is traced.
         let timed = self.trace.wants(TraceCategory::Readings);
         let session = self.session;
         for position in 0..self.plan.runs.values.len() {
             let started = timed.then(Instant::now);
-            let read = self.read(position, frame);
-            if let (Some(started), Some(Ok(value))) = (started, &read) {
-                let took = started.elapsed();
-                self.trace.record(What::Read, |record| Record {
-                    session: Some(session),
-                    item: Some(position),
-                    value: Some(value.clone()),
-                    took: Some(took),
-                    cause: Some(frame.received),
-                    ..record
-                });
-            }
-            match read {
-                Some(Ok(reading)) => changed |= self.record(position, reading, frame),
-                Some(Err(problem)) => self.report(position, &problem),
-                None => {},
+            let reading = match self.read(position, frame) {
+                Some(Ok(value)) => {
+                    if let Some(said) = self.problems.get_mut(position) {
+                        said.clear();
+                    }
+                    if let Some(started) = started {
+                        let took = started.elapsed();
+                        self.trace.record(What::Read, |record| Record {
+                            session: Some(session),
+                            item: Some(position),
+                            value: Some(value.clone()),
+                            took: Some(took),
+                            cause: Some(frame.received),
+                            ..record
+                        });
+                    }
+                    Some(value)
+                },
+                Some(Err(problem)) => {
+                    if let Some(problem) = self.new_problem(position, &problem) {
+                        problems.push((position, problem));
+                    }
+                    None
+                },
+                None => None,
+            };
+            if let Some(last) = self.last.get_mut(position)
+                && *last != reading
+            {
+                last.clone_from(&reading);
+                if let Some(value) = &reading {
+                    self.trace.record(What::Changed, |record| Record {
+                        session: Some(session),
+                        item: Some(position),
+                        value: Some(value.clone()),
+                        cause: Some(frame.received),
+                        ..record
+                    });
+                }
+                changes.push((position, reading));
             }
         }
-        self.schedule.after_read(if changed {
-            Activity::Changed
-        } else {
+        let activity = if changes.is_empty() {
             Activity::Steady
-        })
+        } else {
+            send(
+                &self.events,
+                Reading::Frame {
+                    session,
+                    reader: self.reader,
+                    changes,
+                    at: frame.received,
+                },
+            );
+            // A panic before the send leaves only earlier frames for Unseen
+            // to clear.
+            self.seen = true;
+            Activity::Changed
+        };
+        for (value, problem) in problems {
+            send(
+                &self.events,
+                Reading::ValueProblem {
+                    session,
+                    value,
+                    problem,
+                },
+            );
+        }
+        self.schedule.after_read(activity)
     }
 
     /// Notes whether the reader started this capture again after the last
@@ -356,70 +404,19 @@ impl<E: From<Reading>> FrameReader<E> {
         }))
     }
 
-    /// Keeps a good reading and sends it when it changed; returns whether it
-    /// did.
-    fn record(&mut self, position: usize, reading: Value, frame: &Frame<'_>) -> bool {
-        if let Some(said) = self.problems.get_mut(position) {
-            said.clear();
-        }
-        let Some(last) = self.last.get_mut(position) else {
-            return false;
-        };
-        if last.as_ref() == Some(&reading) {
-            return false;
-        }
-        *last = Some(reading.clone());
-        let session = self.session;
-        self.trace.record(What::Changed, |record| Record {
-            session: Some(session),
-            item: Some(position),
-            value: Some(reading.clone()),
-            cause: Some(frame.received),
-            ..record
-        });
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "a failed send means the owner stopped this session"
-        )]
-        let _ = self.events.send(E::from(Reading::Sample {
-            session: self.session,
-            reader: self.reader,
-            position,
-            value: reading,
-            at: frame.received,
-        }));
-        // Only once it was sent, so a panic that kept it from going leaves
-        // nothing to say `Unseen` for.
-        self.seen = true;
-        true
-    }
-
-    /// Sends a value's problem unless it was sent since the value was last
-    /// read. A check's problem is the way it fails, not what the region
-    /// shows, so a number that stays unreadable while it counts is said
-    /// once, and so is each of two problems a region flickers between.
-    fn report(&mut self, position: usize, problem: &Unreadable) {
-        let Some(said) = self.problems.get_mut(position) else {
-            return;
-        };
+    /// A value's next problem, unless it was already reported since the
+    /// value last read. The reason identifies how the check fails, so
+    /// changing pixels alone do not repeat the message.
+    fn new_problem(&mut self, position: usize, problem: &Unreadable) -> Option<String> {
+        let said = self.problems.get_mut(position)?;
         let (kind, check) = match problem {
             Unreadable::NotRead(unread) => (not_read(*unread), None),
             Unreadable::Check { error, drawn } => {
                 (unreadable(&error.stage(), *drawn), Some((error, *drawn)))
             },
         };
-        if let Some(kind) = newly(said, kind) {
-            let problem = check.map_or(kind, |(error, drawn)| unreadable(error, drawn));
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "a failed send means the owner stopped this session"
-            )]
-            let _ = self.events.send(E::from(Reading::ValueProblem {
-                session: self.session,
-                value: position,
-                problem,
-            }));
-        }
+        let kind = newly(said, kind)?;
+        Some(check.map_or(kind, |(error, drawn)| unreadable(error, drawn)))
     }
 
     /// Says once that the values it read can no longer be seen.
@@ -521,19 +518,16 @@ mod tests {
         (frames, retrace)
     }
 
-    /// Each value sent, by its position.
+    /// The new values sent, by their position.
     fn flags(readings: &Receiver<Reading>) -> Vec<(usize, Value)> {
         readings
             .try_iter()
             .filter_map(|reading| match reading {
-                Reading::Sample {
-                    position, value, ..
-                } => Some((position, value)),
-                Reading::Problem { .. }
-                | Reading::ValueProblem { .. }
-                | Reading::Unseen { .. }
-                | Reading::Ended { .. } => None,
+                Reading::Frame { changes, .. } => Some(changes),
+                _ => None,
             })
+            .flatten()
+            .filter_map(|(position, value)| Some((position, value?)))
             .collect()
     }
 
@@ -545,7 +539,7 @@ mod tests {
                 Reading::ValueProblem { value, problem, .. } => {
                     Some(format!("value {value} {problem}"))
                 },
-                Reading::Sample { .. } | Reading::Unseen { .. } | Reading::Ended { .. } => None,
+                Reading::Frame { .. } | Reading::Unseen { .. } | Reading::Ended { .. } => None,
             })
             .collect()
     }
@@ -579,10 +573,10 @@ mod tests {
             NextFrame::After(wait),
             "a change reads again soon"
         );
-        assert_eq!(
-            flags(&readings),
-            [(0, Value::Flag(true)), (1, Value::Flag(false))]
-        );
+        let first = readings.try_recv().expect("one frame");
+        assert!(matches!(first, Reading::Frame { changes, .. }
+                if changes == [(0, Some(Value::Flag(true))), (1, Some(Value::Flag(false)))]),);
+        assert_eq!(readings.try_recv(), Err(TryRecvError::Empty));
         let steady = frames.handle(Ok(frame(&left_red, WINDOW)));
         assert!(
             matches!(steady, NextFrame::After(steady) if steady > wait),
@@ -1072,7 +1066,17 @@ mod tests {
             [(0, Value::Number(Number::new(1.0).expect("finite")))]
         );
         frames.handle(Ok(frame(&none, WINDOW)));
+        let lost = readings.try_recv().expect("the value stopped reading");
+        assert!(matches!(lost, Reading::Frame { changes, .. } if changes == [(0, None)]));
         assert_eq!(problems(&readings), [no_ink]);
+        frames.handle(Ok(frame(&none, WINDOW)));
+        assert_eq!(readings.try_recv(), Err(TryRecvError::Empty));
+        frames.handle(Ok(frame(&one, WINDOW)));
+        assert_eq!(
+            flags(&readings),
+            [(0, Value::Number(Number::new(1.0).expect("finite")))],
+            "the same number must be sent after an unreadable frame"
+        );
     }
 
     #[test]

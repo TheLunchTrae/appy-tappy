@@ -161,7 +161,10 @@ impl<H: Host> Owner<H> {
             );
             named_apart(file, &id, name)?;
             let taught = owner
-                .with_session(|session| spec.characters.teach(session, Some(&id), name))
+                .with_session(|session| {
+                    spec.characters
+                        .teach(session, Some(&id), name, &file.images())
+                })
                 .map_err(|error| error.to_string())?;
             match file.references.iter_mut().find(|saved| saved.id == id) {
                 Some(saved) => *saved = taught.reference,
@@ -810,11 +813,12 @@ mod tests {
             .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
             .filter(|name| name.starts_with("ref-"))
             .collect();
-        assert_eq!(
-            pictures,
-            std::slice::from_ref(&picture),
-            "the box took its name"
+        let replacement = saved(&mut harness).samples[0].image.clone();
+        assert_ne!(
+            replacement, picture,
+            "a dropped file survives until the edit commits"
         );
+        assert_eq!(pictures, std::slice::from_ref(&replacement));
         assert_eq!(
             unlearned(&mut harness, Some(gray), &[], SavingKind::Taught),
             []
@@ -843,7 +847,10 @@ mod tests {
         assert!(!folder.join(&second).exists());
         assert_eq!(
             harness.ask(|owner| {
-                owner.save_reference_settings(&settings(Some(gray), std::slice::from_ref(&picture)))
+                owner.save_reference_settings(&settings(
+                    Some(gray),
+                    std::slice::from_ref(&replacement),
+                ))
             }),
             Err("Type what at least one box shows, or keep a recorded reading.".to_owned())
         );

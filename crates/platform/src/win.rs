@@ -26,7 +26,7 @@ mod window_watch;
 
 pub(crate) use autostart::{autostart_enabled, disable_autostart, enable_autostart};
 pub(crate) use clock::local_time;
-pub(crate) use instance::InstanceGuard;
+pub(crate) use instance::{InstanceGuard, process_runs_in_session};
 pub(crate) use reload::{ReloadWatch, request_reload};
 pub(crate) use tray::Tray;
 pub(crate) use window_watch::WindowWatch;

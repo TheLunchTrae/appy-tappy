@@ -78,7 +78,7 @@ impl<H: Host> Owner<H> {
                 ));
             }
             same_kind(&value.screen.check, &spec.check)?;
-            let number = free_picture_number(&value.id, value.screen.images());
+            let number = free_picture_number(&value.id, file.images().into_iter());
             let saved = check_spec::to_saved_fix(
                 &spec.check,
                 owner.capture.screenshots(),
@@ -220,8 +220,8 @@ fn same_kind(check: &CheckDef, spec: &CheckSpec) -> Result<(), String> {
     }
 }
 
-/// The smallest number from 1 that none of `images`, the value `id`'s
-/// pictures, is named with, so the pictures of a new fix, or of a drawing
+/// The smallest number from 1 that none of the application's `images`
+/// uses for the value `id`, so the pictures of a new fix, or of a drawing
 /// whose states are taken again, never overwrite those still saved, the
 /// ones they replace included.
 pub(super) fn free_picture_number<'file>(

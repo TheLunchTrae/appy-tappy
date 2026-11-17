@@ -171,7 +171,7 @@ pub(crate) fn run<C, S, E>(
                     cause,
                     ..record
                 });
-                let done = worker.job(job, screen, Instant::now());
+                let done = worker.job(job, screen, Instant::now);
                 trace.record(What::Done, |record| Record {
                     session: Some(session),
                     item: Some(rule.0),
@@ -237,8 +237,13 @@ where
     /// They come after the job, so a pending restore of a target the job
     /// changes is taken over by the job instead of being sent just before
     /// it.
-    fn job<S: System + Capture>(&mut self, job: Job, screen: &S, now: Instant) -> Done {
-        let mut notes = self.make_again(now);
+    fn job<S: System + Capture>(
+        &mut self,
+        job: Job,
+        screen: &S,
+        mut now: impl FnMut() -> Instant,
+    ) -> Done {
+        let mut notes = self.make_again(now());
         let actions = match &mut self.actions {
             Ok(actions) => actions,
             Err(missing) => {
@@ -288,7 +293,7 @@ where
             },
             Job::Undo {
                 owner, automation, ..
-            } => match actions.release(owner, now) {
+            } => match actions.release(owner, &mut now) {
                 Ok(()) => false,
                 Err(error) => {
                     notes.push(format!(
@@ -298,7 +303,7 @@ where
                 },
             },
         };
-        notes.extend(given_up(actions.retry_restores(now)));
+        notes.extend(given_up(actions.retry_restores(now())));
         Done { notes, failed }
     }
 
@@ -811,20 +816,22 @@ mod tests {
             (6, &not_run[..]),
         ] {
             assert_eq!(
-                worker.job(fire(pause()), &Unsupported, at(seconds)).notes,
+                worker
+                    .job(fire(pause()), &Unsupported, || at(seconds))
+                    .notes,
                 expected,
                 "at {seconds}s"
             );
         }
         assert_eq!(
-            worker.job(release(), &Unsupported, at(6)).notes,
+            worker.job(release(), &Unsupported, || at(6)).notes,
             Vec::<String>::new(),
             "nothing to undo"
         );
         assert_eq!(worker.retry_in(at(6)), Some(Duration::from_secs(1)));
         assert_eq!(worker.retry(at(6)), Vec::<String>::new(), "not due yet");
         assert_eq!(
-            worker.job(fire(pause()), &Unsupported, at(7)).notes,
+            worker.job(fire(pause()), &Unsupported, || at(7)).notes,
             ["actions can run now"],
             "the fourth try works, at 1 + 2 + 4 seconds"
         );
@@ -887,29 +894,34 @@ mod tests {
         let (mut worker, notes) = Worker::start(once(player), start);
         assert_eq!(notes, Vec::<String>::new());
         assert_eq!(
-            worker.job(fire(pause()), &Unsupported, start).notes,
+            worker.job(fire(pause()), &Unsupported, || start).notes,
             Vec::<String>::new()
         );
+        // A blocked player takes longer to refuse than the entire retry delay.
+        let failed_at = start + MEDIA_RETRY + Duration::from_secs(1);
+        let mut times = std::iter::once(start).chain(std::iter::repeat(failed_at));
         assert_eq!(
-            worker.job(release(), &Unsupported, start).notes,
+            worker
+                .job(release(), &Unsupported, || times.next().expect("clock"))
+                .notes,
             [
                 "Pause near the end: undoing failed, so it is tried again: the media session did not take the command"
             ]
         );
-        assert_eq!(worker.retry_in(start), Some(MEDIA_RETRY));
-        let soon = start + Duration::from_millis(500);
+        assert_eq!(worker.retry_in(failed_at), Some(MEDIA_RETRY));
+        let soon = failed_at + Duration::from_millis(500);
         assert_eq!(
             worker.retry_in(soon),
             Some(MEDIA_RETRY.saturating_sub(Duration::from_millis(500)))
         );
         assert_eq!(worker.retry(soon), Vec::<String>::new(), "not due yet");
         assert_eq!(
-            worker.retry(start + MEDIA_RETRY),
+            worker.retry(failed_at + MEDIA_RETRY),
             [
                 "a media restore failed again, so it is given up: the media session did not take the command"
             ]
         );
-        assert_eq!(worker.retry_in(start + MEDIA_RETRY), None);
+        assert_eq!(worker.retry_in(failed_at + MEDIA_RETRY), None);
         assert_eq!(
             sent.try_iter().collect::<Vec<_>>(),
             [MediaCommand::Pause, MediaCommand::Play, MediaCommand::Play]
@@ -929,7 +941,7 @@ mod tests {
             target: VolumeTarget::System,
             level: percent(0),
         }]);
-        worker.job(fire(pause()), &Unsupported, start);
+        worker.job(fire(pause()), &Unsupported, || start);
         worker.job(
             Job::Run {
                 owner: other,
@@ -944,10 +956,10 @@ mod tests {
                 cause: None,
             },
             &Unsupported,
-            start,
+            || start,
         );
         assert_eq!(
-            worker.job(release(), &Unsupported, start).notes.len(),
+            worker.job(release(), &Unsupported, || start).notes.len(),
             1,
             "the play is refused"
         );
@@ -958,7 +970,7 @@ mod tests {
             cause: None,
         };
         assert_eq!(
-            worker.job(undo_other, &Unsupported, soon).notes,
+            worker.job(undo_other, &Unsupported, || soon).notes,
             Vec::<String>::new()
         );
         assert_eq!(
@@ -982,15 +994,15 @@ mod tests {
         player.refusals = 1;
         let start = Instant::now();
         let (mut worker, _notes) = Worker::start(once(player), start);
-        worker.job(fire(pause()), &Unsupported, start);
+        worker.job(fire(pause()), &Unsupported, || start);
         assert_eq!(
-            worker.job(release(), &Unsupported, start).notes.len(),
+            worker.job(release(), &Unsupported, || start).notes.len(),
             1,
             "the play is refused"
         );
         let due = start + MEDIA_RETRY;
         assert_eq!(
-            worker.job(fire(pause()), &Unsupported, due).notes,
+            worker.job(fire(pause()), &Unsupported, || due).notes,
             Vec::<String>::new()
         );
         assert_eq!(
@@ -1000,7 +1012,7 @@ mod tests {
         );
         assert_eq!(worker.retry_in(due), None, "the job took the restore over");
         assert_eq!(
-            worker.job(release(), &Unsupported, due).notes,
+            worker.job(release(), &Unsupported, || due).notes,
             Vec::<String>::new()
         );
         assert_eq!(sent.try_iter().collect::<Vec<_>>(), [MediaCommand::Play]);
@@ -1058,7 +1070,7 @@ mod tests {
         if let Job::Run { clicks, .. } = &mut job {
             *clicks = Arc::new(targets);
         }
-        let done = worker.job(job, &crate::click::tests::Screen::new(), Instant::now());
+        let done = worker.job(job, &crate::click::tests::Screen::new(), Instant::now);
         assert_eq!(
             done.notes,
             [format!(
@@ -1093,7 +1105,7 @@ mod tests {
         let (mut worker, _notes) = Worker::start(once(OnePlayer::new(commands)), Instant::now());
         let steps = Box::new([Action::Click(posted_click()), pause()[0].clone()]);
         assert_eq!(
-            worker.job(fire(steps), &Unsupported, Instant::now()).notes,
+            worker.job(fire(steps), &Unsupported, Instant::now).notes,
             [format!(
                 "{AUTOMATION}: action 1 failed: the application target it clicks in was not loaded"
             )],
@@ -1123,13 +1135,13 @@ mod tests {
             }])
         };
         assert_eq!(
-            worker.job(fire(mute()), &Unsupported, Instant::now()).notes,
+            worker.job(fire(mute()), &Unsupported, Instant::now).notes,
             Vec::<String>::new()
         );
         controls(&mut worker).unplugged = true;
         assert_eq!(
             worker
-                .job(release(), &Unsupported, Instant::now())
+                .job(release(), &Unsupported, Instant::now)
                 .notes
                 .len(),
             1,
@@ -1149,7 +1161,7 @@ mod tests {
             cause: None,
         };
         assert_eq!(
-            worker.job(next, &Unsupported, Instant::now()).notes,
+            worker.job(next, &Unsupported, Instant::now).notes,
             Vec::<String>::new()
         );
         assert_eq!(

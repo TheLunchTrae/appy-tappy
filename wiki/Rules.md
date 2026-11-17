@@ -30,11 +30,11 @@ A condition tests the application's current signal values:
 A comparison on a signal with no value yet, or with a value of the other
 type, does not hold. A signal with no value is also unknown: an all group with
 an unknown condition and no false one is unknown, and so is an any group with
-an unknown condition and no true one. The runtime forgets an application's
-values when it can no longer see them, and a rule that fired is released only
-once its condition is known to be false, so values that are out of sight
-neither release nor fire it. Rules have no scripting: conditions are the only
-logic.
+an unknown condition and no true one. A check that stops reading makes its
+value unknown until it reads again. The runtime forgets all of an application's
+values when it loses sight of its window. A rule can fire only when its condition
+is known to hold, and a rule that fired is released only once its condition
+is known to be false.
 
 ## Firing
 
@@ -68,19 +68,21 @@ The engine evaluates rules on new values, and on a timer only for the end of a
 cooldown. The runtime's owner thread keeps one session per application whose
 automations run. A session starts with every rule armed and no signal values,
 when the application starts, when automations are turned on, or when a reload
-changes what the application runs. It takes each new signal value with the
-time it was read, and returns effects: release a rule, fire it, or report that
-its cooldown held it back. Releases come first, then fires, each in rule
-order, so a restore never undoes a change that another rule makes for the same
-value. A held rule runs nothing; the runtime trace records it
+changes what the application runs. It applies every change from the same
+captured frame before evaluating the rules, so the rules see one set of
+readings. The evaluation uses the frame's time to decide which rules to
+release, fire, or hold back during their cooldown. Releases come first,
+then fires, each in rule order, so a restore never undoes a change that
+another rule makes for the same value. A held rule runs nothing; the runtime trace records it
 ([Trace](Trace.md)).
 
 A value that holds still sends no new sample, so a rule that its cooldown held
 back could wait forever. A session therefore reports when the next such rule
 is due (`Session::next_due`): the time its cooldown ends, for a rule that is
-armed and whose condition holds on the values recorded. The owner thread waits
-for its next event until then at most, and if none comes, checks those rules
-again at that time (`Session::recheck`).
+armed and whose condition holds on the values recorded. If the owner thread
+is idle, it checks those rules at the deadline (`Session::recheck`). If it
+is busy when the deadline passes, it rechecks after the events already in its
+queue, so an unreadable or changed value can invalidate the condition first.
 
 A session stops when the application exits, when automations are turned off,
 or when a reload changes what the application runs. Stopping releases every

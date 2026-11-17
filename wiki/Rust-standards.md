@@ -100,8 +100,8 @@ or build dependencies.
 
 `rust:mutants` mutates the whole workspace. `rust:mutants:diff` mutates code
 changed since the merge base with `MUTANTS_BASE_REF`, which defaults to
-`origin/main`, then local `main`, so it needs full Git history. Untracked files
-fail the lane; stage them with `git add -N`. A diff that selects no mutants
+`origin/main`, then local `main`. The checkout must contain the merge base.
+Untracked files fail the lane; stage them with `git add -N`. A diff that selects no mutants
 passes.
 
 `rust:standards:check` runs the diff lane, so the gate finishes in minutes
@@ -110,10 +110,12 @@ the gate, and the `mutants` jobs split the lane: with `MUTANTS_SHARD` set to
 `k/n`, either lane tests only the kth of n shards of the selected mutants, so
 together the jobs test every one. A stack of pull requests that lands on main
 as one squash pushes a diff as large as the whole stack, and the shards keep
-that run within each job's time limit. CI diffs against the base that
-`.github/workflows/quality.yml` sets for each event: a pull request diffs
-against its base branch and a push to main against the previous tip, which
-with squash merges is exactly the merged pull request or stack.
+that run within each job's time limit. Each shard lists its selected mutants
+before installing the webview libraries, restoring the build and model caches,
+or building the setup UI. An empty shard finishes after listing. On a pull
+request, CI compares the tested merge commit with its first parent. On a
+push to main, CI compares with the previous tip, which covers the whole
+merged pull request or stack.
 
 The **Mutation sweep** workflow, `.github/workflows/mutation-sweep.yml`, runs
 `rust:mutants` over the whole workspace in shards. Only a manual run starts it,
@@ -159,8 +161,9 @@ mutated package catches the same mutants is still to be measured.
 
 cargo-mutants leaves ignored files out of its copy of the tree, and the setup
 app's [text reader model](Setup-app.md#the-text-reader) is one. Both lanes
-depend on `ocr:model` and set `APPYTAPPY_TEXT_READER_MODEL` to the downloaded
-file, so the test that reads with the model finds it from the copy.
+run `ocr:model` and set `APPYTAPPY_TEXT_READER_MODEL` to the downloaded
+file, so the test that reads with the model finds it from the copy. The diff
+lane downloads the model only after selecting work and taking the run lock.
 
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. Every
@@ -176,6 +179,11 @@ verification, so a second run fails instead of replacing the report. If a
 crash leaves the lock behind, the error names the directory. Confirm that no
 mutation task is running, then remove it. The lock uses `setsid` and
 process-group signals, so mutation runs on Linux only.
+
+`scripts/select-mutants.sh` writes the diff to its path argument and lists
+its selected mutants without building or downloading the text model. Both
+the diff lane and the quality workflow use it. A selection failure fails the
+check; an empty selection succeeds without acquiring the run lock.
 
 ## Repository settings
 

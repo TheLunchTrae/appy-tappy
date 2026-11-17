@@ -1,7 +1,6 @@
 //! A trace record as a CSV row.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use appytappy_config::signal::Value;
@@ -10,6 +9,29 @@ use appytappy_platform::LocalTime;
 use super::{Detail, Record, What};
 use crate::model::SessionId;
 use crate::plan::AppPlan;
+
+/// The labels a session's late trace records need, without its decoded pictures.
+#[derive(Debug)]
+pub(super) struct Names {
+    app: String,
+    values: Vec<String>,
+    automations: Vec<String>,
+}
+
+impl Names {
+    pub(super) fn of(plan: &AppPlan) -> Self {
+        Self {
+            app: plan.labels.name.clone(),
+            values: plan.labels.values.clone(),
+            automations: plan
+                .runs
+                .rules
+                .iter()
+                .map(|rule| rule.automation.clone())
+                .collect(),
+        }
+    }
+}
 
 /// The row that starts a trace: the local time and the runtime's version.
 pub(super) fn start_row(local: Option<LocalTime>) -> String {
@@ -36,13 +58,9 @@ pub(super) fn dropped_row(record: &Record, started: Instant) -> String {
 
 /// `record` as a CSV row, with times in nanoseconds since the trace
 /// started.
-pub(super) fn row(
-    record: &Record,
-    started: Instant,
-    names: &BTreeMap<SessionId, Arc<AppPlan>>,
-) -> String {
+pub(super) fn row(record: &Record, started: Instant, names: &BTreeMap<SessionId, Names>) -> String {
     let plan = record.session.and_then(|session| names.get(&session));
-    let app = plan.map_or("", |plan| plan.labels.name.as_str());
+    let app = plan.map_or("", |plan| plan.app.as_str());
     let item = plan
         .zip(record.item)
         .and_then(|(plan, item)| item_name(plan, record.what, item))
@@ -80,16 +98,11 @@ pub(super) fn row(
 }
 
 /// The name of the value or automation at `item` in `plan`.
-fn item_name(plan: &AppPlan, what: What, item: usize) -> Option<&str> {
+fn item_name(plan: &Names, what: What, item: usize) -> Option<&str> {
     match what {
-        What::Read | What::Changed | What::Received => {
-            plan.labels.values.get(item).map(String::as_str)
-        },
+        What::Read | What::Changed | What::Received => plan.values.get(item).map(String::as_str),
         What::Fired | What::Held | What::Released | What::Queued | What::Started | What::Done => {
-            plan.runs
-                .rules
-                .get(item)
-                .map(|rule| rule.automation.as_str())
+            plan.automations.get(item).map(String::as_str)
         },
         What::Handled | What::Snapshot | What::Reading | What::Stopped | What::Reloaded => None,
     }

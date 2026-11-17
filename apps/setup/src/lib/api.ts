@@ -500,14 +500,12 @@ export async function removeFix(application: string, value: string, width: numbe
   await invoke('remove_fix', { application, value, width, height });
 }
 
-/** What the application's values read now, for the Values page; the first call starts reading its window. */
-export async function liveValues(application: string): Promise<OverlayView> {
-  return invoke<OverlayView>('live_values', { application });
-}
-
-/** Stops reading values for the Values page. */
-export async function stopLiveValues(): Promise<void> {
-  await invoke('stop_live_values');
+/**
+ * What the applications' values read now for the Values page. Stops reading any application not in
+ * `applications`.
+ */
+export async function liveValues(applications: ReadonlyArray<string>): Promise<ReadonlyArray<[string, { Ok : OverlayView } | { Err : string }]>> {
+  return invoke<ReadonlyArray<[string, { Ok : OverlayView } | { Err : string }]>>('live_values', { applications });
 }
 
 export async function deleteValue(application: string, value: string): Promise<void> {

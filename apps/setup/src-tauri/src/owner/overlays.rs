@@ -1,6 +1,8 @@
 //! The overlays: which windows show one, turning one on or off, what each
 //! shows, and where the user put its panels.
 
+use std::collections::BTreeSet;
+
 use appytappy_config::app_file::{OverlayDef, OverlayModeDef, PanelDef};
 
 use crate::overlay::{self, Card, OverlayView, OverlayWindow, Place, Places};
@@ -95,24 +97,30 @@ impl<H: Host> Owner<H> {
         }
     }
 
-    /// What the values of the application `app` read now, for the Values
-    /// page, whether its overlay is on or not. The first call starts a
-    /// capture of its window, which [`Owner::stop_live_values`] stops.
-    pub(crate) fn live_values(&mut self, app: &str) -> Result<OverlayView, String> {
-        let stores = known(&self.stores);
-        self.live
-            .view(&self.host, (&self.messages, &mut self.tickets), app, || {
-                stores?.app(app)
-            })
-    }
-
-    /// Stops reading every application's values for the Values page.
-    pub(crate) fn stop_live_values(&mut self) {
+    /// Reads the Values page's applications and closes captures for any
+    /// it no longer shows. An empty list stops every Values page capture.
+    pub(crate) fn live_values(
+        &mut self,
+        applications: Vec<String>,
+    ) -> Vec<(String, Result<OverlayView, String>)> {
+        let apps: BTreeSet<_> = applications.into_iter().collect();
         #[expect(
             clippy::let_underscore_must_use,
-            reason = "the Values page no longer shows the readings, so nothing shows the error"
+            reason = "the Values page no longer shows the excluded apps, so nothing shows their close errors"
         )]
-        let _ = self.live.close_all();
+        let _ = self.live.retain_apps(&apps);
+        let stores = &self.stores;
+        apps.into_iter()
+            .map(|app| {
+                let view = self.live.view(
+                    &self.host,
+                    (&self.messages, &mut self.tickets),
+                    &app,
+                    || known(stores)?.app(&app),
+                );
+                (app, view)
+            })
+            .collect()
     }
 
     pub(super) fn overlay_view(&mut self, app: &str) -> Result<OverlayView, String> {
@@ -552,7 +560,14 @@ mod tests {
     #[test]
     fn the_values_page_reads_values_scaled_to_the_windows_size_with_the_overlay_off() {
         let (mut harness, root) = with_saved_bar("overlay-live");
-        let live = |owner: &mut Owner<FakeHost>| owner.live_values("example");
+        let live = |owner: &mut Owner<FakeHost>| {
+            owner
+                .live_values(vec!["example".to_owned()])
+                .into_iter()
+                .next()
+                .expect("one result")
+                .1
+        };
         assert!(harness.ask(live).is_ok(), "the overlay is off");
         let started = harness.handlers.try_recv().expect("capture started");
         let mut handler = started.handler;
@@ -603,7 +618,7 @@ mod tests {
             harness.ask(overlay_state),
             Err("The overlay for Example App is off.".to_owned())
         );
-        harness.ask(Owner::stop_live_values);
+        assert_eq!(harness.ask(|owner| owner.live_values(Vec::new())), []);
         assert_eq!(harness.closed.try_recv(), Ok(7), "the page stopped reading");
         std::fs::remove_dir_all(root).expect("clean up");
     }

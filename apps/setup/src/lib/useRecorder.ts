@@ -1,6 +1,6 @@
 // What the capture screen's two recordings share: the recording's state kept current, its errors, and its commands.
 
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import { errorText, stopRecording } from './api.ts';
 import { background, useRepeat } from './repeat.ts';
@@ -28,10 +28,11 @@ export interface Recorder<View> {
   /** Shows no recording and no failed read, once a discard forgot it. */
   readonly forget: () => void;
   /**
-   * Runs a start, stop, or discard, and answers whether it worked. It makes the state reads sent before it stale,
-   * and its failure is the command error, which its success clears.
+   * Runs a start, stop, or discard, and answers whether it worked and still belongs to the editor. Only one runs
+   * at a time, since resuming a recording reuses its ticket. It makes state reads stale when it starts and ends,
+   * and its failure is the command error, which its success clears. Work checks `current` after awaits before showing its answer.
    */
-  readonly command: (work: () => Promise<void>) => Promise<boolean>;
+  readonly command: (work: (current: () => boolean) => Promise<void>) => Promise<boolean>;
   /**
    * Hears that a start answered `recording`, the recording's number, which the component then stops by. Its state
    * is read until a read answers.
@@ -94,7 +95,11 @@ export function keepsReading<View>(known: Known<View>, live: (view: View) => boo
  * its start answered (`ownTicket`), so the stop never stops a recording that took its place. Both must stay the same
  * functions.
  */
-export function useRecorder<View>(read: () => Promise<View | null>, live: (view: View) => boolean): Recorder<View> {
+export function useRecorder<View>(
+  read: () => Promise<View | null>,
+  live: (view: View) => boolean,
+  active = true,
+): Recorder<View> {
   const [known, tell] = useReducer(learn<View>, NOTHING_KNOWN);
   const { view } = known;
   // Each error clears only when what set it next succeeds: a start, stop or discard, or reading the recording's
@@ -102,6 +107,8 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
   const [commandError, setCommandError] = useState<string | null>(null);
   // Each start, stop, and discard makes the polls sent before it stale.
   const turn = useNewest();
+  const commands = useNewest();
+  const pending = useRef(false);
   const [own] = useState(() =>
     ownTicket((recording) => {
       background(stopRecording(recording));
@@ -109,13 +116,23 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
   );
 
   useEffect(() => {
-    own.enter();
+    if (active) {
+      own.enter();
+    } else {
+      tell({ kind: 'forgot' });
+      setCommandError(null);
+    }
     return () => {
+      commands.drop();
+      turn.drop();
       own.leave();
     };
-  }, [own]);
+  }, [active, own, commands, turn]);
 
-  const poll = useCallback(async (): Promise<void> => {
+  const readState = useCallback(async (): Promise<void> => {
+    if (!own.shows()) {
+      return;
+    }
     const current = turn.join();
     try {
       const state = await read();
@@ -123,31 +140,39 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
         tell({ kind: 'read', view: state });
       }
     } catch (error: unknown) {
-      tell({ kind: 'readFailed', error: errorText(error) });
+      if (current()) {
+        tell({ kind: 'readFailed', error: errorText(error) });
+      }
     }
-  }, [turn, read]);
-  const readState = useCallback(async (): Promise<void> => {
-    try {
-      tell({ kind: 'read', view: await read() });
-    } catch (error: unknown) {
-      tell({ kind: 'readFailed', error: errorText(error) });
-    }
-  }, [read]);
-  useRepeat(poll, RECORDING_PAUSE_MS, keepsReading(known, live));
+  }, [turn, read, own]);
+  useRepeat(readState, RECORDING_PAUSE_MS, keepsReading(known, live));
 
   const command = useCallback(
-    async (work: () => Promise<void>): Promise<boolean> => {
-      turn.drop();
-      try {
-        await work();
-        setCommandError(null);
-        return true;
-      } catch (error: unknown) {
-        setCommandError(errorText(error));
+    async (work: (current: () => boolean) => Promise<void>): Promise<boolean> => {
+      if (pending.current || !own.shows()) {
         return false;
       }
+      pending.current = true;
+      turn.drop();
+      const current = commands.begin();
+      try {
+        await work(current);
+        if (current()) {
+          setCommandError(null);
+        }
+        return current();
+      } catch (error: unknown) {
+        if (current()) {
+          setCommandError(errorText(error));
+        }
+        return false;
+      } finally {
+        // A poll begun while the command ran must not overwrite its final state.
+        turn.drop();
+        pending.current = false;
+      }
     },
-    [turn],
+    [turn, commands, own],
   );
   const clearCommandError = useCallback(() => {
     setCommandError(null);
@@ -156,8 +181,9 @@ export function useRecorder<View>(read: () => Promise<View | null>, live: (view:
     tell({ kind: 'read', view: shown });
   }, []);
   const forget = useCallback(() => {
+    turn.drop();
     tell({ kind: 'forgot' });
-  }, []);
+  }, [turn]);
   const started = useCallback(
     (recording: number) => {
       own.started(recording);

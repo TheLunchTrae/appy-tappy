@@ -186,8 +186,10 @@ impl<H: Host> Owner<H> {
     /// replaced, and readings from an overlay capture that closed.
     fn is_current(&self, ticket: Ticket, event: &Event) -> bool {
         let current = match event {
-            Event::Frame { .. } | Event::CaptureFailed(_) => self.capture.picked_ticket(),
-            Event::Watch(_) => self.capture.watching().and_then(Watching::ticket),
+            Event::FrameReady => self
+                .capture
+                .picked_ticket()
+                .or_else(|| self.capture.watching().and_then(Watching::ticket)),
             Event::Recognized { .. } | Event::Looked { .. } => {
                 self.readings().map(|recording| recording.id)
             },
@@ -200,9 +202,7 @@ impl<H: Host> Owner<H> {
     /// Applies `event`, which [`Owner::is_current`] passed.
     fn apply(&mut self, event: Event) {
         match event {
-            Event::Frame { image, received } => self.frame(image, received),
-            Event::CaptureFailed(failure) => self.capture_failed(failure),
-            Event::Watch(seen) => self.watch_sent(seen),
+            Event::FrameReady => self.frame_ready(),
             Event::Recognized { index, text } => {
                 if let Some(recording) = self.readings_mut() {
                     recording.read(index, text);
@@ -644,12 +644,22 @@ mod tests {
     fn a_change_to_the_values_restarts_only_that_applications_values_page_readings() {
         let (mut harness, root) = with_saved_bar("changed-live");
         add_other_bar(&mut harness);
-        for app in ["example", "example-2"] {
-            harness
-                .ask(|owner| owner.live_values(app))
-                .expect("the Values page reads");
-            harness.handlers.try_recv().expect("its capture started");
-        }
+        let apps = ["example", "example-2"].map(str::to_owned);
+        harness.ask(|owner| {
+            let views = owner.live_values(apps.to_vec());
+            assert_eq!(views.len(), 2);
+            for (_, view) in views {
+                view.expect("the Values page reads");
+            }
+        });
+        harness
+            .handlers
+            .try_recv()
+            .expect("the first capture started");
+        harness
+            .handlers
+            .try_recv()
+            .expect("the second capture started");
         let other = harness.owner.live.ticket("example-2");
         assert!(other.is_some(), "reads");
         harness.closed.try_iter().for_each(drop);
@@ -674,6 +684,33 @@ mod tests {
             other,
             "the other application's readings go on"
         );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn values_page_polls_close_a_departed_apps_capture_and_keep_the_rest() {
+        let (mut harness, root) = with_saved_bar("departed-live");
+        add_other_bar(&mut harness);
+        harness.ask(|owner| owner.live_values(vec!["example".to_owned(), "example-2".to_owned()]));
+        let first = harness.owner.live.ticket("example").expect("reads");
+        let other = harness.owner.live.ticket("example-2").expect("reads");
+        let surviving = harness.ask(|owner| owner.live_values(vec!["example-2".to_owned()]));
+        let [(app, Ok(_))] = surviving.as_slice() else {
+            panic!("only the surviving application reads: {surviving:?}");
+        };
+        assert_eq!(app, "example-2");
+        assert_eq!(harness.closed.try_recv(), Ok(7), "one capture closes");
+        assert!(harness.closed.try_recv().is_err());
+        assert_eq!(harness.owner.live.ticket("example"), None);
+        assert_eq!(harness.owner.live.ticket("example-2"), Some(other));
+
+        harness.ask(|owner| owner.live_values(vec!["example".to_owned(), "example-2".to_owned()]));
+        let reopened = harness.owner.live.ticket("example").expect("reads again");
+        assert_ne!(
+            reopened, first,
+            "readings from the closed capture are stale"
+        );
+        assert_eq!(harness.owner.live.ticket("example-2"), Some(other));
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

@@ -102,13 +102,14 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
   handle that gets through carries the count, so the file says how many were
   lost. The writer runs at the lowest thread priority, so it takes only time
   that nothing else wants, and flushes what it wrote about once a second. It
-  turns each session and position into names from the plans the owner gives
-  it, so names are looked up only there. The owner hands it those plans, and
+  turns each session and position into names from label snapshots the owner gives
+  it, so names are looked up only there. Compiled readers and decoded pictures
+  are not retained by the writer. The owner hands it those labels, and
   tells it to stop, over a second channel with no limit, so the owner never
   waits for the writer, even when its buffer is full. The writer takes them
-  before each record, and a session's plan is sent before its reader starts
+  before each record, and a session's labels are sent before its reader starts
   or gets the trace, so every row of the session is named. After each
-  settings read, the owner hands it each running session's newest plan, so
+  settings read, the owner hands it each running session's newest labels, so
   a rename shows in the trace without starting the reader over, and a new
   trace knows the sessions that ran before it started.
 - **Files.** Once a trace starts, and at each new part, the writer deletes the

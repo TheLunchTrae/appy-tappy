@@ -102,6 +102,89 @@ fn exists(folder: &Path, picture: &str) -> bool {
 }
 
 #[test]
+fn state_picture_writes_preserve_names_owned_by_other_saved_items() {
+    use crate::owner::EditSpec;
+    use crate::owner::edits::EditDrawing;
+    use appytappy_config::app_file::{CheckDef, PinDef, StateDef};
+
+    let (mut harness, _handler, root) = with_saved_state("state-picture-ownership");
+    let stores = harness.owner.stores().unwrap().clone();
+    let mut file = saved_file(&harness);
+    let mut other = file.values[0].clone();
+    other.id = "other".to_owned();
+    other.name = "Other".to_owned();
+    let names = [
+        "new_value-1.png",
+        "new_value-1-1.png",
+        "icon_visible-1-1.png",
+    ];
+    other.screen.check = CheckDef::State {
+        states: names
+            .iter()
+            .enumerate()
+            .map(|(index, image)| StateDef {
+                name: format!("Owned {index}"),
+                image: (*image).to_owned(),
+            })
+            .collect(),
+        tolerance: 0,
+    };
+    file.values.push(other);
+    let png = Image::new(
+        Size {
+            width: 2,
+            height: 2,
+        },
+        [40, 40, 40, 255].repeat(4),
+    )
+    .unwrap()
+    .encode_png()
+    .unwrap();
+    let pictures = names.map(|name| (name.to_owned(), png.clone()));
+    stores
+        .apps
+        .save("example", &file, &pictures)
+        .expect("valid hand-edited picture names");
+    let unchanged = || {
+        for name in names {
+            assert_eq!(
+                std::fs::read(stores.apps.folder("example").join(name)).unwrap(),
+                png,
+                "another item still owns {name}"
+            );
+        }
+    };
+    harness
+        .ask(|owner| owner.save(&spec("example", "New value", STATE)))
+        .unwrap();
+    unchanged();
+    harness
+        .ask(|owner| owner.save_fix(&state_fix("Shown")))
+        .unwrap();
+    unchanged();
+    harness
+        .ask(|owner| {
+            owner.edit_value(
+                &EditSpec {
+                    app: "example".to_owned(),
+                    value: "icon_visible".to_owned(),
+                    value_name: "Icon visible".to_owned(),
+                    pin: PinDef::TopLeft,
+                    reading_area: false,
+                    drawing: EditDrawing::Drawn {
+                        screenshot: 0,
+                        check: serde_json::from_str(STATE).unwrap(),
+                    },
+                },
+                &[],
+            )
+        })
+        .unwrap();
+    unchanged();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn a_fix_saves_its_own_pictures_replaces_the_one_at_its_size_and_can_be_removed() {
     let (mut harness, _handler, root) = with_saved_state("fix-state");
     let saved = harness.ask(|owner| owner.save_fix(&state_fix("Shown")));

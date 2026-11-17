@@ -160,7 +160,6 @@ run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 # Cargo tasks, so a copied target/ never holds a build half written.
 [tasks."rust:mutants:diff"]
 description = "Mutation-test changed code; default base prefers origin/main"
-depends = ["ocr:model"]
 wait_for = ["rust:policy", "rust:package"]
 run = """
 set -eu
@@ -170,40 +169,12 @@ export APPYTAPPY_TEXT_READER_MODEL="$PWD/apps/setup/src-tauri/models/text-recogn
 diff_file="$(mktemp)"
 trap 'rm -f "$diff_file"' EXIT
 
-if [ -n "${MUTANTS_BASE_REF:-}" ]; then
-  base_ref="$MUTANTS_BASE_REF"
-  if ! base_commit="$(git rev-parse --verify --quiet "$base_ref^{commit}")"; then
-    echo "Cannot resolve explicit MUTANTS_BASE_REF '$base_ref'." >&2
-    exit 1
-  fi
-elif base_commit="$(git rev-parse --verify --quiet 'refs/remotes/origin/main^{commit}')"; then
-  base_ref="origin/main"
-elif base_commit="$(git rev-parse --verify --quiet 'refs/heads/main^{commit}')"; then
-  base_ref="main"
-else
-  echo "Cannot resolve default base refs/remotes/origin/main or refs/heads/main." >&2
-  exit 1
-fi
-
-if ! merge_base="$(git merge-base HEAD "$base_commit")"; then
-  echo "Cannot compute a merge base with $base_ref. Fetch full history with git fetch --unshallow or git fetch origin main." >&2
-  exit 1
-fi
-if ! untracked_files="$(git ls-files --others --exclude-standard)"; then
-  echo "Cannot inspect untracked files before mutation diff testing." >&2
-  exit 1
-fi
-if [ -n "$untracked_files" ]; then
-  echo "Mutation diff testing cannot include these untracked files:" >&2
-  printf '%s\n' "$untracked_files" >&2
-  echo "Stage them, or run git add -N <path> for each file so the diff becomes reviewable." >&2
-  exit 1
-fi
-
-git diff --relative "$merge_base" -- > "$diff_file"
-
-if [ ! -s "$diff_file" ]; then
-  echo "No changes relative to $base_ref; nothing to mutate."
+# When this shard selects no mutants, cargo-mutants writes a report without
+# outcomes.json, which verification rejects, so the lane lists the mutants
+# first and stops when there are none. Listing builds nothing.
+selected="$(sh scripts/select-mutants.sh "$diff_file")"
+if [ -z "$selected" ]; then
+  echo "The diff selects no mutants${MUTANTS_SHARD:+ in shard $MUTANTS_SHARD}; nothing to test."
   exit 0
 fi
 
@@ -214,14 +185,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# When this shard selects no mutants, cargo-mutants writes a report without
-# outcomes.json, which verification rejects, so the lane lists the mutants
-# first and stops when there are none. Listing builds nothing.
-selected="$(cargo mutants --list --workspace --all-features --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file")"
-if [ -z "$selected" ]; then
-  echo "The diff selects no mutants${MUTANTS_SHARD:+ in shard $MUTANTS_SHARD}; nothing to test."
-  exit 0
-fi
+run_mutants_task_child mise run ocr:model
 
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
   run_mutants_task_child cargo test --no-run --workspace --all-features --locked

@@ -613,10 +613,26 @@ impl AutomationsFile {
     /// Returns an [`AutomationsError`] naming the problem: JSON that does not
     /// fit the format, or another format version.
     pub fn parse(json: &str) -> Result<Self, AutomationsError> {
-        let file: Self = serde_json::from_str(json)
+        let mut file: Self = serde_json::from_str(json)
             .map_err(|error| AutomationsError::Json(error.to_string()))?;
         file.check()?;
+        file.unique_ids();
         Ok(file)
+    }
+
+    /// Give each automation a stable ID before either program filters disabled or broken rules.
+    /// The first occurrence keeps its ID. The next save writes any repairs.
+    fn unique_ids(&mut self) {
+        let mut ids = crate::names::AutomationIds::default();
+        let mut repair = Vec::new();
+        for automation in &mut self.automations {
+            if SignalName::new(&automation.id).is_err() || !ids.reserve(&automation.id) {
+                repair.push(automation);
+            }
+        }
+        for automation in repair {
+            automation.id = ids.assign(&automation.name);
+        }
     }
 
     /// The file as pretty JSON, ending with a newline.
@@ -880,6 +896,36 @@ mod tests {
         assert!(json.contains("\"kind\": \"volume\""));
         assert_eq!(AutomationsFile::parse(&json), Ok(written));
         assert_eq!(AutomationsFile::default(), file(Vec::new()));
+    }
+
+    #[test]
+    fn parsing_repairs_ids_for_every_reader_without_taking_a_later_id() {
+        let mut duplicate = pause_music();
+        duplicate.name = "Lower volume".to_owned();
+        let mut reserved = pause_music();
+        reserved.id = "lower_volume".to_owned();
+        let mut invalid = pause_music();
+        invalid.id = "not an id".to_owned();
+        invalid.name = "Skip ahead".to_owned();
+        let json = file(vec![pause_music(), duplicate, reserved, invalid]).to_json();
+        let parsed = AutomationsFile::parse(&json).expect("loads");
+        assert_eq!(
+            parsed
+                .automations
+                .iter()
+                .map(|automation| automation.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "pause_music",
+                "lower_volume_2",
+                "lower_volume",
+                "skip_ahead"
+            ]
+        );
+        assert_eq!(
+            AutomationsFile::parse(&parsed.to_json()).expect("reloads"),
+            parsed
+        );
     }
 
     #[test]
@@ -1445,6 +1491,39 @@ mod tests {
     }
 
     #[test]
+    fn parsed_ids_identify_the_same_rule_before_and_after_filtering() {
+        let mut first = pause_music();
+        first.enabled = false;
+        let mut other = first.clone();
+        other.enabled = true;
+        let mut reserved = first.clone();
+        reserved.id = "pause_music_2".to_owned();
+        let mut also_named = other.clone();
+        also_named.name = "Pause music 3".to_owned();
+        let raw = file(vec![first, other.clone(), reserved, also_named, other]).to_json();
+        let read = AutomationsFile::parse(&raw).expect("reads");
+        let ids: Vec<_> = read
+            .automations
+            .iter()
+            .map(|rule| rule.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "pause_music",
+                "pause_music_3",
+                "pause_music_2",
+                "pause_music_3_2",
+                "pause_music_4"
+            ]
+        );
+        assert_eq!(
+            AutomationsFile::parse(&read.to_json()).expect("reads"),
+            read
+        );
+    }
+
+    #[test]
     fn a_file_names_the_automation_that_breaks_a_rule() {
         let other_format = AutomationsFile {
             format: 2,
@@ -1457,8 +1536,7 @@ mod tests {
                 .contains("reads format 1")
         );
 
-        // The runtime never reads an automation's ID, so a hand edit that
-        // breaks it or repeats it stops nothing.
+        // A rule compiles independently of the ID the file reader assigns it.
         let mut bad_id = pause_music();
         bad_id.id = "Pause music".to_owned();
         assert_eq!(check(&bad_id), Ok(()));
