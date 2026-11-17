@@ -77,6 +77,7 @@ import {
   type Editing,
   type Step,
   captureMissing,
+  refreshedDraft,
   refreshedEditing,
   restoreSetup,
   regionOnStage,
@@ -248,15 +249,21 @@ export function Capture({
   // file is read, the editor goes on from the reference as it is saved now, which is also what leaving loses
   // nothing of.
   const savedNow = useRef((restored?.screenshots ?? null) === null);
+  // The reference as the draft copied it, which says whether the saved pictures it left out are still the same.
+  const copiedReference = useRef(start.editing?.existing ?? null);
   useEffect(() => {
     if (file === null || savedNow.current) {
       return;
     }
     savedNow.current = true;
+    const copied = copiedReference.current;
+    const now = file.references.find((reference) => reference.id === copied?.id) ?? null;
     setEditing((current) => refreshedEditing(current, file.references));
+    setDraft((current) => refreshedDraft(current, copied, now));
     setStart((began) => ({
       ...began,
       editing: refreshedEditing(began.editing, file.references),
+      draft: refreshedDraft(began.draft, copied, now),
     }));
   }, [file]);
   const [picking, setPicking] = useState<ColorTarget | null>(null);

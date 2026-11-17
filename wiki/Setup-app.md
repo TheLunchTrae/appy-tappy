@@ -790,9 +790,9 @@ it learns, fits, or judges anything (`SavedReference::without`), and a save
 writes the reference without them. Each new sample gets a name clear of
 the samples on disk, including those marked for removal. After the file
 commits, the store removes the pictures it no longer names. A reference
-needs at least one sample. Resuming a saved draft clears its removals before
-showing the editor, so the user reviews the current pictures again. Different
-pictures can have the same file names and labels after later saves.
+needs at least one sample. A draft keeps its removals while it still refers
+to the same saved samples. Resuming the draft after those samples change
+clears the removals before showing the editor.
 
 Every `CharactersSpec` is taught in the reference's own editor, so a learn
 error on a saved sample there points at the list and names no reference to

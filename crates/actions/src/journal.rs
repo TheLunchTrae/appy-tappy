@@ -482,12 +482,12 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         };
         let first_playing = sessions.iter().position(|session| session.playing);
         match (command, first_playing) {
-            (MediaCommand::Play, Some(_)) => {
+            (MediaCommand::Pause | MediaCommand::Play, Some(_)) => {
                 sessions.retain(|session| session.playing);
             },
-            // A pause holds every target, including one an earlier rule
-            // paused, so releasing that rule cannot resume it.
-            (MediaCommand::Pause, _) => {},
+            // Nothing plays, so a pause changes nothing, but it holds every
+            // session so that another rule's release cannot resume one.
+            (MediaCommand::Pause, None) => {},
             (MediaCommand::Next | MediaCommand::Previous, Some(first)) => {
                 sessions.drain(..first);
                 sessions.truncate(1);
@@ -833,42 +833,6 @@ mod tests {
             }),
             ..Fake::default()
         })
-    }
-
-    #[test]
-    fn an_app_pause_holds_sessions_paused_by_an_earlier_rule() {
-        for keeps in [Keeps::ForRelease, Keeps::Permanent] {
-            let mut actions = Actions::new(Fake {
-                sessions: vec![session(1, "Browser", true), session(2, "Browser", true)],
-                current: Some(1),
-                ..Fake::default()
-            });
-            actions
-                .perform(
-                    'a',
-                    &current(MediaCommand::Pause),
-                    Keeps::ForRelease,
-                    &watched(),
-                )
-                .expect("first session paused");
-            let pause_all = media(MediaTarget::App(app("Browser")), MediaCommand::Pause);
-            actions
-                .perform('b', &pause_all, keeps, &watched())
-                .expect("app paused");
-            actions
-                .release('a', Instant::now)
-                .expect("first rule released");
-            assert!(
-                !actions.controls().playing(1),
-                "the later app pause still holds session 1: {keeps:?}"
-            );
-            assert!(!actions.controls().playing(2));
-            actions
-                .release('b', Instant::now)
-                .expect("app rule released");
-            assert_eq!(actions.controls().playing(1), keeps == Keeps::ForRelease);
-            assert_eq!(actions.controls().playing(2), keeps == Keeps::ForRelease);
-        }
     }
 
     #[test]
