@@ -7,8 +7,7 @@ idiomatic_version_file_enable_tools = ["rust"]
 "aqua:EmbarkStudios/cargo-deny" = "0.20"
 "github:bnjbvr/cargo-machete" = "0.9"
 "github:nextest-rs/nextest" = { version = "0.9", version_prefix = "cargo-nextest-" }
-# cargo-mutants publishes no arm64 macOS binary, and the mutation lanes need
-# Linux anyway.
+# cargo-mutants publishes no arm64 macOS binary.
 "github:sourcefrog/cargo-mutants" = { version = "27", os = ["linux", "windows"] }
 
 [tasks."rust:lock"]
@@ -91,10 +90,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/footprint.ps1 -Runti
 # Both lanes test two mutants at once: each mutant's build waits on its linker
 # most of the time, so a second build uses the idle cores.
 #
-# cargo-mutants locks mutants.out while it runs, so a second run in the same
-# tree waits, and it moves an old report to mutants.out.old before it writes
-# a new one. scripts/check-mutants.sh then applies the project's own rules to
-# the report.
+# cargo-mutants moves an old report to mutants.out.old before it writes a new
+# one, and scripts/check-mutants.sh then applies the project's own rules to
+# the report. cargo-mutants' lock on mutants.out does not cover that check, so
+# never run two mutation lanes in one tree at once.
 #
 # cargo-mutants leaves ignored files out of its copy too, and the text reader
 # model is one, so both lanes point the setup app's tests at the one

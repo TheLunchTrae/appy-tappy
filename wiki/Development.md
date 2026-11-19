@@ -17,7 +17,7 @@ mise run standards:check
 ```
 
 [Platform](https://github.com/TheLunchTrae/appy-tappy/blob/main/AGENTS.md#platform)
-says which tasks run on Windows and which need Linux, and that mise runs from
+says which tasks CI proves on Windows and on Linux, and that mise runs from
 Git Bash on Windows.
 
 ## Setup UI tests

@@ -217,7 +217,7 @@ fn gate_clippy_reports_exactly_the_marked_probe_diagnostics() {
         "{PROBE_INPUT} must mark a diagnostic inside its #[cfg(test)] module, so the proof fails if the wall stops covering test code"
     );
 
-    // Inside target/, source scans, packaging, and mutation never see the
+    // Inside target/, source scans and mutation never see the
     // probe, while rustup and Cargo still resolve this project's toolchain and
     // configuration. Its own target directory keeps it off the shared build
     // lock. Clippy reads the gate's clippy.toml at the project root.

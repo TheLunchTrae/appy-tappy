@@ -6,12 +6,28 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// A report's folder, which this process alone writes and which is removed
+/// with the value. cargo-mutants runs two copies of a test binary at once,
+/// so a folder shared between processes would let one test delete
+/// another's report.
+struct Report(PathBuf);
+
+impl Drop for Report {
+    fn drop(&mut self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "removing a report is best-effort cleanup; a failure leaves only a folder under target/"
+        )]
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A report with the outcome lists `lists`, as list name and its lines, and
-/// one unviable mutant's log, `log`, in a fresh folder named `name`.
-fn report(name: &str, lists: &[(&str, &str)], log: Option<&str>) -> io::Result<PathBuf> {
+/// one unviable mutant's log, `log`, in a fresh folder named for `name`.
+fn report(name: &str, lists: &[(&str, &str)], log: Option<&str>) -> io::Result<Report> {
     let folder = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("mutation-check")
-        .join(name);
+        .join(format!("{name}-{}", std::process::id()));
     match fs::remove_dir_all(&folder) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
         _ => {},
@@ -24,15 +40,15 @@ fn report(name: &str, lists: &[(&str, &str)], log: Option<&str>) -> io::Result<P
     if let Some(log) = log {
         fs::write(folder.join("log/src__lib.rs_line_2_col_22.log"), log)?;
     }
-    Ok(folder)
+    Ok(Report(folder))
 }
 
 /// Whether the check passes `report` from the lane `mode`.
-fn passes(mode: &str, report: &Path) -> io::Result<bool> {
+fn passes(mode: &str, report: &Report) -> io::Result<bool> {
     let output = Command::new("sh")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/check-mutants.sh"))
         .arg(mode)
-        .arg(report)
+        .arg(&report.0)
         .output()?;
     Ok(output.status.success())
 }
@@ -60,6 +76,20 @@ fn a_full_run_must_test_a_mutant_that_builds() -> io::Result<()> {
         None,
     )?;
     assert!(passes("full", &caught)?);
+    let timed_out = report(
+        "full-timeout",
+        &[
+            ("caught", ""),
+            ("missed", ""),
+            ("timeout", MUTANT),
+            ("unviable", ""),
+        ],
+        None,
+    )?;
+    assert!(
+        passes("full", &timed_out)?,
+        "a mutant that timed out was tested"
+    );
     let empty = report(
         "full-empty",
         &[

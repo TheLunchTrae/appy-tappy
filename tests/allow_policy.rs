@@ -2033,18 +2033,47 @@ fn project_root() -> PathBuf {
         .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from)
 }
 
-/// An empty folder for the fixture project `name`, which the next run of
-/// the same test replaces.
-fn policy_fixture_root(name: &str) -> io::Result<PathBuf> {
+/// A fixture project's folder, which this process alone writes and which is
+/// removed with the value. cargo-mutants runs two copies of a test binary
+/// at once, so a folder shared between processes would let one test delete
+/// another's files.
+struct Fixture(PathBuf);
+
+impl std::ops::Deref for Fixture {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for Fixture {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "removing a fixture is best-effort cleanup; a failure leaves only a folder under target/"
+        )]
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// An empty folder for the fixture project `name`.
+fn policy_fixture_root(name: &str) -> io::Result<Fixture> {
     let root = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("allow-policy")
-        .join(name);
+        .join(format!("{name}-{}", std::process::id()));
     match fs::remove_dir_all(&root) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
         _ => {},
     }
     fs::create_dir_all(&root)?;
-    Ok(root)
+    Ok(Fixture(root))
 }
 
 /// Whether `violation` names the project file at `path`, a `/`-separated

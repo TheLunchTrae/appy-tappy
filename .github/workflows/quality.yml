@@ -78,7 +78,7 @@ jobs:
       - name: Drop build output the cache leaves out
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
         shell: bash
-        run: rm -rf target/doc target/lint-wall-probe
+        run: rm -rf target/doc target/lint-wall-probe target/tmp
       - name: Save the Rust build cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -234,7 +234,7 @@ jobs:
       - name: Drop build output the cache leaves out
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
         shell: bash
-        run: rm -rf target/doc target/lint-wall-probe
+        run: rm -rf target/doc target/lint-wall-probe target/tmp
       - name: Save the Rust build cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

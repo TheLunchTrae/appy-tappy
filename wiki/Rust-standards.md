@@ -56,7 +56,10 @@ approval. A single site inside an application uses a reasoned `#[expect]`.
 `tests/allow_policy.rs` checks that every package, the root included,
 inherits the lint wall and keeps Cargo's conventional target layout, so the
 scan knows every crate root. It walks the tree, follows no symlink and reports
-any it finds, parses every first-party Rust source, and rejects:
+any it finds, and skips `.git`, `node_modules`, any folder that holds a
+`CACHEDIR.TAG` as every Cargo build folder does, and `target`, `vendor`,
+`mutants.out`, and `mutants.out.old` beside a manifest. It parses every other
+Rust source, and rejects:
 
 - `#[allow]` in any form, including `cfg_attr`-nested, raw `r#allow`, and
   attributes inside macro bodies;
@@ -165,9 +168,11 @@ run `ocr:model` and set `APPYTAPPY_TEXT_READER_MODEL` to the downloaded
 file, so the test that reads with the model finds it from the copy. The diff
 lane downloads the model only after selecting work.
 
-cargo-mutants owns `mutants.out/`: it locks the directory while it runs, so a
-second run in the same tree waits for the first, and it moves the previous
-report to `mutants.out.old/` before it writes a new one. It fails the run for
+cargo-mutants owns `mutants.out/`: it moves the previous report to
+`mutants.out.old/` before it writes a new one. Its lock on the directory lasts
+only while it runs, not through the check that follows, so a second lane in
+the same tree can replace the report that the first is about to check. Run
+one mutation lane at a time in a tree; CI runs one on each runner. It fails the run for
 a surviving mutant, a timeout, or a failed baseline. `scripts/check-mutants.sh`
 then checks the two rules that are the project's own, and
 `tests/mutation_check.rs` tests it. A full report must test at least one
