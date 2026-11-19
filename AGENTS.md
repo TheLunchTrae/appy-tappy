@@ -28,7 +28,7 @@ AppyTappy ships for Windows only. CI runs these jobs from
 `.github/workflows/quality.yml`: `quality` runs `mise run standards:check:base`,
 the gate without the mutation lane, on Linux, and the `mutants` jobs run
 `rust:mutants:diff` in shards on Linux; together they are the gate.
-`windows` runs `rust:lint`, `rust:doc`, and `rust:test:members` on Windows, and
+`windows` runs `rust:lint`, `rust:doc`, and `rust:test` on Windows, and
 also `rust:bench` on pushes to main and manual runs. `footprint` runs
 `rust:footprint` on Windows. `quality`, `windows`, and `footprint` restore a
 Rust build cache that only pushes to main save, once for each set of
@@ -50,11 +50,9 @@ final check before a release, not a gate.
   Windows, so a file task that is not `sh` names its interpreter with a
   `# MISE shell` line, as `hygiene` does.
 
-- `rust:policy` and the mutation tasks need `setsid`, which Windows and macOS
-  lack, so `standards:check` runs on Linux: in CI or WSL. The root package's
-  policy tests compare POSIX paths, so `rust:test` runs on Linux or macOS. On
-  Windows, run `rust:fmt`, `rust:lint`, `rust:doc`, `rust:test:members`,
-  `rust:footprint`, and the `md:` tasks.
+- CI runs `standards:check` on Linux. On Windows, CI proves `rust:lint`,
+  `rust:doc`, `rust:test`, and `rust:footprint`; run those, `rust:fmt`, and
+  the `md:` tasks there.
 - `mise lock` records every platform in `lockfile_platforms`; commit
   `.config/mise/mise.lock` after a tool change.
 
@@ -339,8 +337,8 @@ outside test targets, and expectations of a panic lint such as
 silence too much;
 `tests/allow_policy.rs` rejects them.
 Stale expectations fail the lint gate. Lint levels come only from
-`[workspace.lints]` and reasoned expectations; `rust:policy` rejects inherited
-compiler flags and Cargo configuration that lower them.
+`[workspace.lints]` and reasoned expectations; do not lower them with
+compiler flags or Cargo configuration.
 
 For a justified panic assertion, use `expect` with a message naming the
 invariant. Clippy's test exemptions cover `#[test]` functions and items under
@@ -392,8 +390,7 @@ workspace on demand, before a release.
 `.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
 approval, because the Linux gate compiles them out.
 Read [mutation operation](wiki/Rust-standards.md#mutation-testing)
-before changing report paths, mutation selection, or transaction handling.
-Confirm no run is active before clearing a stale lock.
+before changing report paths or mutation selection.
 
 ### Dependencies and review
 

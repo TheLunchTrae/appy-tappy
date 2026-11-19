@@ -17,7 +17,7 @@ cargo-mutants from their GitHub release binaries. cargo-mutants publishes
 x86_64 binaries only, so mise skips it on macOS.
 
 Cargo tasks share one build-directory lock, so the gate runs Clippy, the
-documentation build, the tests, and the package check in a fixed order.
+documentation build, and the tests in a fixed order.
 `rust:policy` runs beside them. The mutation lane waits for all of them, then
 cargo-mutants builds in its own copy of the tree.
 
@@ -37,7 +37,9 @@ Panic-class lints, the print macros, and the shared-state types that
 overflow checks.
 
 An exception is a per-site `#[expect(lint, reason = "...")]`, which fails once
-the lint stops firing. `#[allow]` is rejected everywhere.
+the lint stops firing. `#[allow]` is rejected everywhere: `Cargo.toml` forbids
+`allow_attributes` and `allow_attributes_without_reason`, so the compiler also
+rejects an attempt to expect or allow either one away.
 
 ## Ownership boundary
 
@@ -51,41 +53,42 @@ approval. A single site inside an application uses a reasoned `#[expect]`.
 
 ## Source policy scan
 
-`tests/allow_policy.rs` checks that every workspace package, the root included,
-inherits the lint wall. It parses every first-party Rust source and rejects:
+`tests/allow_policy.rs` checks that every package, the root included,
+inherits the lint wall and keeps Cargo's conventional target layout, so the
+scan knows every crate root. It walks the tree, follows no symlink and reports
+any it finds, and skips `.git`, `node_modules`, any folder that holds a
+`CACHEDIR.TAG` as every Cargo build folder does, and `target`, `vendor`,
+`mutants.out`, and `mutants.out.old` beside a manifest. It parses every other
+Rust source, and rejects:
 
 - `#[allow]` in any form, including `cfg_attr`-nested, raw `r#allow`, and
   attributes inside macro bodies;
-- `#[expect]` that names more than one lint, a lint group, or an
-  allow-attribute lint;
+- `#[expect]` that names more than one lint or a lint group, as the pinned
+  toolchain's `-W help` lists them;
 - crate-level `#![expect]` outside test roots;
 - outside test code, panic-lint expectations that cover a module, `impl`, or
   `trait`, and calls to `assert!`, `assert_eq!`, and `assert_ne!`.
 
 Test code is a Cargo test target, an item under a `cfg` that requires `test`,
 or a function with a `test` attribute. The scan follows the module tree from
-each target root through `mod` declarations and literal `include!` inputs, and
-follows in-project symlinks.
+each target root through `mod` declarations and literal `include!` inputs.
 
 The scan cannot see macro output. A macro that builds an `allow` from split or
 generated tokens is a prohibited bypass that review must catch. Non-literal
 `include!` and custom `#[path]` modules fail, because the scan cannot prove
-their inputs. Every input must stay inside the project root. The scan compares
-POSIX paths, so it runs on Linux or macOS, not Windows.
+their inputs. Every input must stay inside the project root.
 
 ## Lint-wall proof
 
-`rust:policy` proves that the wall fires. `tests/lint_wall.rs` replays the
-`rust:lint` command over `policy-fixtures/lint-wall.rs.in` in a scratch package
-that takes the workspace's lints, edition, and `rust-version`. Each
-`//~ ERROR <code>` comment marks a diagnostic that line must report; a missing
-or unexpected diagnostic fails the task. The proof also fails on these routes
-that could lower lint levels without the probe noticing: extra keys or
-arguments on `rust:lint`; `-A`, `--allow`, `--force-warn`, `--cap-lints`,
-unstable `-Z`, or `@file` flags in the Clippy arguments, `RUSTFLAGS`-style
-variables, or Cargo config `rustflags`; a forced `CLIPPY_ARGS`; or a
-`CLIPPY_CONF_DIR` outside the project. Change the probe and the test's list of codes together with the
-wall.
+`rust:policy` proves that the wall fires. `tests/lint_wall.rs` runs Clippy
+with warnings denied over `policy-fixtures/lint-wall.rs.in` in a scratch
+package that takes the workspace's lints, edition, and `rust-version`, and the
+project's `clippy.toml`. Each `//~ ERROR <code>` comment marks a diagnostic
+that line must report; a missing or unexpected diagnostic fails the task. The
+probe defends what nothing else checks: that the `clippy.toml` entries
+resolve, which a typo would make silent, and that the wall covers
+`#[cfg(test)]` code. Change the probe and the test's list of codes together
+with the wall.
 
 ## Dependencies
 
@@ -163,27 +166,26 @@ cargo-mutants leaves ignored files out of its copy of the tree, and the setup
 app's [text reader model](Setup-app.md#the-text-reader) is one. Both lanes
 run `ocr:model` and set `APPYTAPPY_TEXT_READER_MODEL` to the downloaded
 file, so the test that reads with the model finds it from the copy. The diff
-lane downloads the model only after selecting work and taking the run lock.
+lane downloads the model only after selecting work.
 
-`rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
-`mutants.out/` and validate its JSON, so stale evidence cannot pass. Every
-report needs exactly one successful baseline. A full report in which every
-mutant is unviable fails. A diff report may hold only unviable mutants, as a
+cargo-mutants owns `mutants.out/`: it moves the previous report to
+`mutants.out.old/` before it writes a new one. Its lock on the directory lasts
+only while it runs, not through the check that follows, so a second lane in
+the same tree can replace the report that the first is about to check. Run
+one mutation lane at a time in a tree; CI runs one on each runner. cargo-mutants fails the run for
+a surviving mutant, a timeout, or a failed baseline. `scripts/check-mutants.sh`
+then checks the two rules that are the project's own, and
+`tests/mutation_check.rs` tests it. A full report must test at least one
+mutant that builds. A diff report may hold only unviable mutants, as a
 shard of a small change can, but only when each mutant's log shows a compiler
 error in the mutated file: a broken build directory, or a build killed for
 memory or disk, also leaves every mutant unviable. A surviving mutant is a
 review finding.
 
-Both lanes hold `target/standards-mutants.lock` through the run and its
-verification, so a second run fails instead of replacing the report. If a
-crash leaves the lock behind, the error names the directory. Confirm that no
-mutation task is running, then remove it. The lock uses `setsid` and
-process-group signals, so mutation runs on Linux only.
-
 `scripts/select-mutants.sh` writes the diff to its path argument and lists
 its selected mutants without building or downloading the text model. Both
 the diff lane and the quality workflow use it. A selection failure fails the
-check; an empty selection succeeds without acquiring the run lock.
+check; an empty selection succeeds without building anything.
 
 ## Repository settings
 
