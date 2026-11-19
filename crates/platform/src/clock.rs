@@ -2,9 +2,9 @@
 
 use std::fmt;
 
-use crate::host;
-
 /// A wall-clock time in the user's time zone, to the second.
+///
+/// [`LocalTime::now`] reads the current time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalTime {
     /// The year, such as 2026.
@@ -19,17 +19,6 @@ pub struct LocalTime {
     pub minute: u16,
     /// The second.
     pub second: u16,
-}
-
-impl LocalTime {
-    /// The current local time, or `None` where AppyTappy does not run.
-    // Off Windows this body already returns `None`, so the mutation testing
-    // there cannot tell a mutant from it.
-    #[mutants::skip]
-    #[must_use]
-    pub fn now() -> Option<Self> {
-        host::local_time()
-    }
 }
 
 impl fmt::Display for LocalTime {

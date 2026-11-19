@@ -235,11 +235,11 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
             clippy::let_underscore_must_use,
             reason = "the save already happened, and a runtime that missed the signal reads it when it starts; the main pages ask whether it runs"
         )]
-        let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
+        let _ = appytappy_platform::request_reload();
     }
 
     fn run_once(&self) -> io::Result<bool> {
-        appytappy_platform::request_reload(appytappy_platform::RELOAD)
+        appytappy_platform::request_reload()
     }
 
     fn runtime_runs(&self) -> io::Result<bool> {

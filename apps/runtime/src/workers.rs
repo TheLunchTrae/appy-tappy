@@ -4,6 +4,7 @@
 pub(crate) mod act;
 pub(crate) mod reader;
 
+use std::any::Any;
 use std::io;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc::Sender;
@@ -40,14 +41,33 @@ pub(crate) fn join(thread: JoinHandle<()>) -> io::Result<()> {
     thread.join().map_err(|payload| {
         io::Error::other(format!(
             "the {name} thread panicked: {}",
-            appytappy_platform::panic_reason(payload.as_ref())
+            panic_reason(payload.as_ref())
         ))
     })
+}
+
+/// The message a panicking thread left, for the error that reports it.
+pub(crate) fn panic_reason(payload: &(dyn Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("an unknown reason")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panic_reason_is_its_message() {
+        let fixed: Box<dyn Any + Send> = Box::new("fixed");
+        let formatted: Box<dyn Any + Send> = Box::new(format!("formatted {}", 1));
+        let other: Box<dyn Any + Send> = Box::new(1_u8);
+        let reasons =
+            [fixed, formatted, other].map(|payload| panic_reason(payload.as_ref()).to_owned());
+        assert_eq!(reasons, ["fixed", "formatted 1", "an unknown reason"]);
+    }
 
     #[test]
     fn a_thread_that_panics_is_an_error_that_names_it() {

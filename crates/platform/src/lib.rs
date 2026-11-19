@@ -1,17 +1,19 @@
-//! The runtime's Windows host services: the window events that drive app
-//! detection, the tray icon and its menu, the single-instance guard, the
-//! reload requests the setup app sends, autostart at sign-in, the local
-//! clock, a background thread's priority, and showing the setup app's overlay windows without the focus.
+//! The Windows host services that the runtime and the setup app use: the
+//! window events that drive app detection, the tray icon and its menu, the
+//! single-instance guard, the reload requests the setup app sends, autostart
+//! at sign-in, the local clock, a background thread's priority, and showing
+//! the setup app's overlay windows without the focus.
 //!
 //! Each service turns Windows API calls into a typed value or an error and
 //! makes no decisions of its own. The Windows adapter lives in `win`; other
-//! platforms get services that fail with [`io::ErrorKind::Unsupported`], so
-//! the portable code that uses them still builds and tests there.
+//! platforms get services that fail with [`std::io::ErrorKind::Unsupported`], so
+//! the portable code that uses them still builds and tests there. Both
+//! adapters define the same items, which this crate exports under one name
+//! each.
 //!
 //! See `wiki/Architecture.md` for this crate's boundaries.
 
 use std::any::Any;
-use std::io;
 
 #[cfg(not(windows))]
 mod unsupported;
@@ -25,48 +27,40 @@ use win as host;
 
 mod autostart;
 mod clock;
-mod instance;
 mod log;
-mod reload;
 mod tray;
-mod window_watch;
 
-pub use autostart::{AUTOSTART_VALUE, autostart_enabled, disable_autostart, enable_autostart};
+pub use autostart::{autostart_enabled, disable_autostart, enable_autostart};
 pub use clock::LocalTime;
-pub use instance::{InstanceGuard, process_runs_in_session};
+pub use host::{
+    InstanceGuard, ReloadWatch, Tray, WindowWatch, lower_thread_priority, process_runs_in_session,
+    request_reload, show_without_focus,
+};
 pub use log::{LOG_LIMIT, Log};
-pub use reload::{RELOAD, ReloadRequest, ReloadWatch, request_reload};
-pub use tray::{MenuItem, Tray, TrayEvent, TrayMenu};
-pub use window_watch::{WindowEvent, WindowWatch};
+pub use tray::{MenuItem, TrayEvent, TrayMenu};
 
-/// Shows the window with the handle `window` without activating it.
-///
-/// The window the user is typing in keeps the keyboard, and the window
-/// stays where it is. The setup app shows its overlay windows this way,
-/// since the window library it uses activates a window it shows.
-///
-/// # Errors
-///
-/// Returns the operating system's error, such as for a handle that names
-/// no window.
-pub fn show_without_focus(window: usize) -> io::Result<()> {
-    host::show_without_focus(window)
+/// A change to the set of windows on the desktop, which [`WindowWatch`]
+/// reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowEvent {
+    /// A top-level window was created.
+    Created,
+    /// A window was destroyed. Windows cannot tell whether a destroyed
+    /// window was top-level, so this covers child windows too.
+    Destroyed,
 }
 
-/// Lowers the calling thread's priority as far as it goes, for work that
-/// must never take time from the rest of the program, such as writing the
-/// runtime trace.
-///
-/// # Errors
-///
-/// Returns the operating system's error.
-pub fn lower_thread_priority() -> io::Result<()> {
-    host::lower_thread_priority()
-}
+/// A request to read the saved files again, which [`ReloadWatch`] reports
+/// after each [`request_reload`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReloadRequest;
 
 /// The message a panicking thread left, for the error that reports it.
-#[must_use]
-pub fn panic_reason(payload: &(dyn Any + Send)) -> &str {
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "only the Windows adapter runs threads of its own")
+)]
+pub(crate) fn panic_reason(payload: &(dyn Any + Send)) -> &str {
     payload
         .downcast_ref::<&str>()
         .copied()

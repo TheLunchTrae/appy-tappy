@@ -1,11 +1,8 @@
 //! The tray icon, its tooltip, and its right-click menu.
 
-use std::io;
 use std::num::NonZeroU16;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
-
-use crate::host;
 
 /// The tray icon's tooltip and right-click menu. The caller decides what
 /// they say; the tray only shows them.
@@ -53,65 +50,13 @@ pub enum TrayEvent {
     Picked(NonZeroU16),
     /// Windows asked the program to close, as `taskkill` without `/F`, an
     /// installer that replaces the program, or signing out does. When the
-    /// session ends, the tray holds it until [`Tray::stop`], for at most 10
-    /// seconds and only as long as Windows waits, so the owner stops the
-    /// tray only once it has undone what it changed.
+    /// session ends, the tray holds it until [`Tray::stop`](crate::Tray::stop),
+    /// for at most 10 seconds and only as long as Windows waits, so the owner
+    /// stops the tray only once it has undone what it changed.
     CloseRequested,
-    /// The tray stopped before [`Tray::stop`] for this reason, and its icon
-    /// is gone.
+    /// The tray stopped before [`Tray::stop`](crate::Tray::stop) for this
+    /// reason, and its icon is gone.
     Ended(String),
-}
-
-/// The tray icon, with its own thread and hidden window.
-///
-/// Right-clicking the icon opens the menu, and each [`TrayEvent`] goes to
-/// the sender given to [`Tray::start`]. When Explorer restarts, the icon
-/// comes back.
-#[derive(Debug)]
-pub struct Tray(host::Tray);
-
-impl Tray {
-    /// Starts the tray thread and returns once its window exists.
-    ///
-    /// The icon may appear later: when Explorer is not running yet, as at
-    /// sign-in, the icon is added when the taskbar starts.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error when the thread or the window
-    /// cannot start.
-    pub fn start<E>(events: Sender<E>, menu: TrayMenu) -> io::Result<Self>
-    where
-        E: From<TrayEvent> + Send + 'static,
-    {
-        host::Tray::start(events, menu).map(Self)
-    }
-
-    /// Replaces the tooltip and the menu. A menu that is open keeps what it
-    /// showed; the next one shows the new items.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the tray thread has ended.
-    // Off Windows no tray exists, so no test there can reach this body; the
-    // Windows adapter's tests call it.
-    #[mutants::skip]
-    pub fn show(&self, menu: TrayMenu) -> io::Result<()> {
-        self.0.show(menu)
-    }
-
-    /// Lets the end of the session go on if the tray holds it, then
-    /// removes the icon, ends the thread, and waits for it.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error that ended the tray's message loop, if any.
-    // Off Windows no tray exists, so no test there can reach this body; the
-    // Windows adapter's tests call it.
-    #[mutants::skip]
-    pub fn stop(self) -> io::Result<()> {
-        self.0.stop()
-    }
 }
 
 /// A menu label as Windows should show it: a lone `&` would underline the

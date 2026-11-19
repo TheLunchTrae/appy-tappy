@@ -1,5 +1,6 @@
 //! The host services of a platform AppyTappy does not support: every call
-//! fails with [`io::ErrorKind::Unsupported`].
+//! fails with [`io::ErrorKind::Unsupported`], and no service value can be
+//! made. The Windows adapter in `win` documents what each one does there.
 
 #![forbid(unsafe_code)]
 
@@ -17,86 +18,136 @@ fn unsupported<T>() -> io::Result<T> {
     ))
 }
 
-/// A window watch, which cannot be constructed here.
+/// The window event watch, which cannot start here.
 #[derive(Debug)]
-pub(crate) struct WindowWatch(Infallible);
+pub struct WindowWatch(Infallible);
 
 impl WindowWatch {
-    pub(crate) fn start<E>(_events: Sender<E>) -> io::Result<Self>
+    /// Fails, since there are no window events to watch here.
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`io::ErrorKind::Unsupported`].
+    pub fn start<E>(_events: Sender<E>) -> io::Result<Self>
     where
         E: From<WindowEvent> + Send + 'static,
     {
         unsupported()
     }
 
+    /// Never runs, since no watch exists here.
+    ///
+    /// # Errors
+    ///
+    /// None, since it never runs.
     // `WindowWatch` holds `Infallible`, so no value exists and this body
     // never runs. No test can call it, so mutating it cannot be caught.
     #[mutants::skip]
-    pub(crate) fn stop(self) -> io::Result<()> {
+    pub fn stop(self) -> io::Result<()> {
         match self.0 {}
     }
 }
 
-/// A tray icon, which cannot be constructed here.
+/// The tray icon, which cannot start here.
 #[derive(Debug)]
-pub(crate) struct Tray(Infallible);
+pub struct Tray(Infallible);
 
 impl Tray {
-    pub(crate) fn start<E>(_events: Sender<E>, _menu: TrayMenu) -> io::Result<Self>
+    /// Fails, since there is no tray here.
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`io::ErrorKind::Unsupported`].
+    pub fn start<E>(_events: Sender<E>, _menu: TrayMenu) -> io::Result<Self>
     where
         E: From<TrayEvent> + Send + 'static,
     {
         unsupported()
     }
 
+    /// Never runs, since no tray exists here.
+    ///
+    /// # Errors
+    ///
+    /// None, since it never runs.
     // `Tray` holds `Infallible`, so no value exists and this body never runs.
     #[mutants::skip]
-    pub(crate) fn show(&self, _menu: TrayMenu) -> io::Result<()> {
+    pub fn show(&self, _menu: TrayMenu) -> io::Result<()> {
         match self.0 {}
     }
 
+    /// Never runs, since no tray exists here.
+    ///
+    /// # Errors
+    ///
+    /// None, since it never runs.
     // `Tray` holds `Infallible`, so no value exists and this body never runs.
     #[mutants::skip]
-    pub(crate) fn stop(self) -> io::Result<()> {
+    pub fn stop(self) -> io::Result<()> {
         match self.0 {}
     }
 }
 
-pub(crate) fn process_runs_in_session(_executable: &str) -> io::Result<bool> {
+/// Fails, since there are no sessions to list here.
+///
+/// # Errors
+///
+/// Always returns [`io::ErrorKind::Unsupported`].
+pub fn process_runs_in_session(_executable: &str) -> io::Result<bool> {
     unsupported()
 }
 
-/// An instance guard, which cannot be constructed here.
+/// The runtime's single-instance guard, which cannot be taken here.
 #[derive(Debug)]
-pub(crate) struct InstanceGuard(Infallible);
+pub struct InstanceGuard(Infallible);
 
 impl InstanceGuard {
-    pub(crate) fn acquire(_name: &str) -> io::Result<Option<Self>> {
+    /// Fails, since the runtime does not run here.
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`io::ErrorKind::Unsupported`].
+    pub fn acquire() -> io::Result<Option<Self>> {
         unsupported()
     }
 }
 
-/// A reload watch, which cannot be constructed here.
+/// The reload request watch, which cannot start here.
 #[derive(Debug)]
-pub(crate) struct ReloadWatch(Infallible);
+pub struct ReloadWatch(Infallible);
 
 impl ReloadWatch {
-    pub(crate) fn start<E>(_name: &str, _events: Sender<E>) -> io::Result<Self>
+    /// Fails, since the runtime does not run here.
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`io::ErrorKind::Unsupported`].
+    pub fn start<E>(_events: Sender<E>) -> io::Result<Self>
     where
         E: From<ReloadRequest> + Send + 'static,
     {
         unsupported()
     }
 
+    /// Never runs, since no watch exists here.
+    ///
+    /// # Errors
+    ///
+    /// None, since it never runs.
     // `ReloadWatch` holds `Infallible`, so no value exists and this body
     // never runs.
     #[mutants::skip]
-    pub(crate) fn stop(self) -> io::Result<()> {
+    pub fn stop(self) -> io::Result<()> {
         match self.0 {}
     }
 }
 
-pub(crate) fn request_reload(_name: &str) -> io::Result<bool> {
+/// Fails, since the runtime does not run here.
+///
+/// # Errors
+///
+/// Always returns [`io::ErrorKind::Unsupported`].
+pub fn request_reload() -> io::Result<bool> {
     unsupported()
 }
 
@@ -112,23 +163,36 @@ pub(crate) fn autostart_enabled(_value: &str) -> io::Result<bool> {
     unsupported()
 }
 
-pub(crate) fn show_without_focus(_window: usize) -> io::Result<()> {
+/// Fails, since there are no windows to show here.
+///
+/// # Errors
+///
+/// Always returns [`io::ErrorKind::Unsupported`].
+pub fn show_without_focus(_window: usize) -> io::Result<()> {
     unsupported()
 }
 
-pub(crate) fn lower_thread_priority() -> io::Result<()> {
+/// Fails, since the runtime does not run here.
+///
+/// # Errors
+///
+/// Always returns [`io::ErrorKind::Unsupported`].
+pub fn lower_thread_priority() -> io::Result<()> {
     unsupported()
 }
 
-pub(crate) const fn local_time() -> Option<LocalTime> {
-    None
+impl LocalTime {
+    /// `None`, since AppyTappy does not run here.
+    #[must_use]
+    pub fn now() -> Option<Self> {
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::sync::mpsc;
-
-    use crate::{InstanceGuard, ReloadWatch, Tray, WindowWatch};
 
     use super::*;
 
@@ -145,12 +209,12 @@ mod tests {
             WindowWatch::start(events).map(drop),
             Tray::start(tray_events, menu).map(drop),
             crate::process_runs_in_session("runtime.exe").map(drop),
-            InstanceGuard::acquire(InstanceGuard::RUNTIME).map(drop),
-            ReloadWatch::start(crate::RELOAD, reloads).map(drop),
-            crate::request_reload(crate::RELOAD).map(drop),
-            crate::enable_autostart("test", OsStr::new("runtime.exe")),
-            crate::disable_autostart("test"),
-            crate::autostart_enabled("test").map(drop),
+            InstanceGuard::acquire().map(drop),
+            ReloadWatch::start(reloads).map(drop),
+            crate::request_reload().map(drop),
+            crate::enable_autostart(Path::new("runtime.exe")),
+            crate::disable_autostart(),
+            crate::autostart_enabled().map(drop),
             crate::lower_thread_priority(),
         ]
         .map(|result| result.expect_err("unsupported").kind());

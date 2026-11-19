@@ -91,9 +91,13 @@ const TRAY_CLASS: PCWSTR = w!("AppyTappy.Tray");
 /// The icon's number among the tray window's icons.
 const ICON_ID: u32 = 1;
 
-/// The tray icon's thread and hidden window.
+/// The tray icon, with its own thread and hidden window.
+///
+/// Right-clicking the icon opens the menu, and each [`TrayEvent`] goes to
+/// the sender given to [`Tray::start`]. When Explorer restarts, the icon
+/// comes back.
 #[derive(Debug)]
-pub(crate) struct Tray {
+pub struct Tray {
     /// The window's handle as an address, because a handle may not cross
     /// threads but posting to it from any thread is safe.
     window: usize,
@@ -105,7 +109,16 @@ pub(crate) struct Tray {
 }
 
 impl Tray {
-    pub(crate) fn start<E>(events: Sender<E>, menu: TrayMenu) -> io::Result<Self>
+    /// Starts the tray thread and returns once its window exists.
+    ///
+    /// The icon may appear later: when Explorer is not running yet, as at
+    /// sign-in, the icon is added when the taskbar starts.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error when the thread or the window
+    /// cannot start.
+    pub fn start<E>(events: Sender<E>, menu: TrayMenu) -> io::Result<Self>
     where
         E: From<TrayEvent> + Send + 'static,
     {
@@ -139,14 +152,26 @@ impl Tray {
         })
     }
 
-    pub(crate) fn show(&self, menu: TrayMenu) -> io::Result<()> {
+    /// Replaces the tooltip and the menu. A menu that is open keeps what it
+    /// showed; the next one shows the new items.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the tray thread has ended.
+    pub fn show(&self, menu: TrayMenu) -> io::Result<()> {
         self.menus
             .send(menu)
             .map_err(|_closed| io::Error::other("the tray thread has ended"))?;
         post(self.window, MENU_CHANGED)
     }
 
-    pub(crate) fn stop(self) -> io::Result<()> {
+    /// Lets the end of the session go on if the tray holds it, then
+    /// removes the icon, ends the thread, and waits for it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error that ended the tray's message loop, if any.
+    pub fn stop(self) -> io::Result<()> {
         let Self {
             window,
             done,

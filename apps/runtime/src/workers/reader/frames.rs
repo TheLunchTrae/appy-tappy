@@ -188,7 +188,7 @@ impl<E: From<Reading>> FrameReader<E> {
                 next
             },
             Err(payload) => {
-                let reason = appytappy_platform::panic_reason(payload.as_ref()).to_owned();
+                let reason = crate::workers::panic_reason(payload.as_ref()).to_owned();
                 self.unseen();
                 self.tell(Control::Panicked(reason));
                 NextFrame::Never

@@ -30,15 +30,25 @@ const CREATED: u32 = WM_APP;
 /// The thread message the callback posts for a destroyed window.
 const DESTROYED: u32 = WM_APP + 1;
 
-/// The window event hook's thread.
+/// A thread that reports [`WindowEvent`]s for every process on the desktop.
+///
+/// The hook it installs never opens a process, so it is safe for every
+/// anti-cheat class. Its thread ends when [`WindowWatch::stop`] runs, or
+/// when the next event arrives after the receiver was dropped.
 #[derive(Debug)]
-pub(crate) struct WindowWatch {
+pub struct WindowWatch {
     thread_id: u32,
     thread: JoinHandle<io::Result<()>>,
 }
 
 impl WindowWatch {
-    pub(crate) fn start<E>(events: Sender<E>) -> io::Result<Self>
+    /// Installs the hook on a new thread and returns once it is in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error when the thread or the hook
+    /// cannot start.
+    pub fn start<E>(events: Sender<E>) -> io::Result<Self>
     where
         E: From<WindowEvent> + Send + 'static,
     {
@@ -50,7 +60,12 @@ impl WindowWatch {
         Ok(Self { thread_id, thread })
     }
 
-    pub(crate) fn stop(self) -> io::Result<()> {
+    /// Removes the hook, ends the thread, and waits for it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error that ended the thread's message loop, if any.
+    pub fn stop(self) -> io::Result<()> {
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: the call takes a thread ID and two integers, and posting to a
         // thread that has already ended fails without effect.

@@ -17,9 +17,7 @@ use appytappy_config::settings_file::{ReadInterval, SettingsFile, TraceCategory}
 use appytappy_config::store::{
     AppStore, AutomationStore, EnabledStore, RunOnceStore, SettingsStore,
 };
-use appytappy_platform::{
-    Log, RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, TrayMenu, WindowWatch,
-};
+use appytappy_platform::{Log, ReloadRequest, ReloadWatch, Tray, TrayEvent, TrayMenu, WindowWatch};
 use appytappy_sources::HostSystem;
 use appytappy_sources::system::{System, shows};
 
@@ -370,7 +368,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         .inspect_err(|error| note(log, &format!("no tray icon: {error}")))
         .ok();
     // Without the reload event the runtime still runs what it read at start.
-    let reload = ReloadWatch::start(RELOAD, sender.clone())
+    let reload = ReloadWatch::start(sender.clone())
         .inspect_err(|error| {
             note(
                 log,
