@@ -93,6 +93,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
+use crate::controls::{OneOpen, named_sessions, set_or_find_again};
 use crate::{
     Controls, Executables, Input, MediaSession, MouseButton, MouseMessage, Press, Retrying, Stroke,
     Volume, pack,
@@ -365,17 +366,16 @@ impl Controls for WindowsControls {
         // SAFETY: the call takes no arguments and returns a string the caller owns.
         let device_id = take_string(unsafe { device.GetId() }?)?;
         let executables = (self.executables.0)()?;
-        let mut volumes = Vec::new();
+        let mut created = Vec::new();
         for (id, details) in sessions(&device)? {
             #[expect(unsafe_code, reason = "a COM call")]
             // SAFETY: the call takes no arguments. For a session that spans several
             // processes it still succeeds and names the process that created it.
             let process = unsafe { details.GetProcessId() }?;
-            let process = ProcessId::new(process);
-            let Some((_, executable)) = executables.iter().find(|(listed, _)| *listed == process)
-            else {
-                continue;
-            };
+            created.push((ProcessId::new(process), (id, details)));
+        }
+        let mut volumes = Vec::new();
+        for (executable, (id, details)) in named_sessions(created, &executables) {
             let control: ISimpleAudioVolume = details.cast()?;
             #[expect(unsafe_code, reason = "a COM call")]
             // SAFETY: the call takes no arguments.
@@ -384,23 +384,17 @@ impl Controls for WindowsControls {
                 id,
                 control: VolumeControl::Session(control, device_id.clone()),
             };
-            volumes.push((executable.clone(), Volume { key, level }));
+            volumes.push((executable, Volume { key, level }));
         }
         Ok(volumes)
     }
 
     fn set_volume(&mut self, control: &VolumeKey, level: VolumeLevel) -> io::Result<bool> {
-        // An interface whose device went away keeps failing even after the
-        // device returns, so a failure finds the control again by its ID.
-        let Err(error) = set_level(&control.control, level) else {
-            return Ok(true);
-        };
-        match self.find_again(control) {
-            Ok(Some(found)) => set_level(&found, level).map(|()| true),
-            Ok(None) => Ok(false),
-            // The device is still missing, so the first error says why.
-            Err(_missing) => Err(error),
-        }
+        set_or_find_again(
+            &control.control,
+            |found| set_level(found, level),
+            || self.find_again(control),
+        )
     }
 
     fn open(&mut self, target: &OpenTarget) -> io::Result<()> {
@@ -728,9 +722,8 @@ impl Input for WindowsInput {
 #[derive(Debug, Default)]
 struct Opener {
     /// The thread of an open that timed out, which may still be waiting on
-    /// the shell. An open that answered in time leaves none, so the next open
-    /// right after it runs.
-    waiting: Option<JoinHandle<()>>,
+    /// the shell.
+    waiting: OneOpen<JoinHandle<()>>,
 }
 
 impl Opener {
@@ -739,14 +732,7 @@ impl Opener {
     /// still running, so a target that never answers leaves one waiting
     /// thread.
     fn open(&mut self, target: &OpenTarget) -> io::Result<()> {
-        if let Some(last) = self.waiting.take() {
-            if !last.is_finished() {
-                self.waiting = Some(last);
-                return Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "the last program, file, or link is still opening, so this one was skipped",
-                ));
-            }
+        if let Some(last) = self.waiting.start(JoinHandle::is_finished)? {
             wait_out(last);
         }
         let file = wide(target.as_str().encode_utf16());
@@ -769,7 +755,7 @@ impl Opener {
             Err(RecvTimeoutError::Timeout) => {
                 // Not joined: it finishes on its own, and its answer goes
                 // nowhere.
-                self.waiting = Some(thread);
+                self.waiting.timed_out(thread);
                 Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     format!(

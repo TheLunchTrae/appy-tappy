@@ -198,21 +198,6 @@ struct Closing<'a> {
     done: &'a Receiver<()>,
 }
 
-/// Tells the owner thread that the session ends and waits, at most
-/// [`END_SESSION_WAIT`], until it is done, so Windows does not end the
-/// process while the owner thread undoes what the automations changed.
-fn hold_end_of_session(closing: &Closing<'_>) {
-    if (closing.close)() {
-        // Every outcome, the owner thread's word included, ends the wait; it
-        // never sends, it only drops the sender.
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "a disconnect is the owner thread's word and a timeout the bound; both end the wait the same way"
-        )]
-        let _ = closing.done.recv_timeout(END_SESSION_WAIT);
-    }
-}
-
 /// Gives Windows the reason the runtime may hold the end of the session.
 fn give_reason(window: HWND) {
     #[expect(unsafe_code, reason = "a Win32 call")]
@@ -320,12 +305,9 @@ fn run_tray<E: From<TrayEvent>>(
         {
             return Ok(TrayExit::OwnerGone);
         }
-        let mut changed = false;
-        while let Ok(next) = updates.try_recv() {
+        // Only the newest of the menus that came in meanwhile matters.
+        if let Some(next) = updates.try_iter().last() {
             menu = next;
-            changed = true;
-        }
-        if changed {
             icon.show(&menu.tooltip);
         }
     }
@@ -581,7 +563,9 @@ extern "system" fn on_tray_message(
         // end the process once this returns; zero means it was called off.
         WM_ENDSESSION => {
             if wparam.0 != 0 {
-                with_closing(window, hold_end_of_session);
+                with_closing(window, |closing| {
+                    crate::tray::hold_end_of_session(closing.close, closing.done, END_SESSION_WAIT);
+                });
             }
             take_reason_back(window);
             return LRESULT(0);

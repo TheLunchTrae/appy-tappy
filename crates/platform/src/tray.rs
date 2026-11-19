@@ -2,7 +2,8 @@
 
 use std::io;
 use std::num::NonZeroU16;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
+use std::time::Duration;
 
 use crate::host;
 
@@ -145,9 +146,72 @@ pub(crate) fn tooltip_units(text: &str) -> Vec<u16> {
     units
 }
 
+/// Holds the end of the session: sends the owner thread the close request
+/// with `close`, which answers whether anyone received it, and then waits
+/// at most `wait` until `done` disconnects, which the owner thread does
+/// once it has undone what the automations changed. With nobody to receive
+/// the request, nothing would disconnect `done`, so it does not wait.
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "only the Windows adapter hears the session end")
+)]
+pub(crate) fn hold_end_of_session(
+    close: impl FnOnce() -> bool,
+    done: &Receiver<()>,
+    wait: Duration,
+) {
+    if close() {
+        // Every outcome, the owner thread's word included, ends the wait; it
+        // never sends, it only drops the sender.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a disconnect is the owner thread's word and a timeout the bound; both end the wait the same way"
+        )]
+        let _ = done.recv_timeout(wait);
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+    use std::time::Instant;
+
     use super::*;
+
+    #[test]
+    fn the_end_of_the_session_waits_only_for_an_owner_that_heard_it() {
+        let long = Duration::from_secs(60);
+        let (_kept, done) = mpsc::channel();
+        let start = Instant::now();
+        hold_end_of_session(|| false, &done, long);
+        assert!(start.elapsed() < long, "nobody heard it, so nothing waits");
+
+        let (finished, done) = mpsc::channel::<()>();
+        drop(finished);
+        let mut heard = false;
+        hold_end_of_session(
+            || {
+                heard = true;
+                true
+            },
+            &done,
+            long,
+        );
+        assert!(heard, "the close request is sent");
+        assert!(
+            start.elapsed() < long,
+            "the owner's disconnect ends the wait"
+        );
+
+        let (_kept, done) = mpsc::channel();
+        let short = Duration::from_millis(20);
+        let held = Instant::now();
+        hold_end_of_session(|| true, &done, short);
+        assert!(
+            held.elapsed() >= short,
+            "an owner that heard it is waited for"
+        );
+    }
 
     #[test]
     fn menu_labels_show_ampersands_and_tabs_literally() {
