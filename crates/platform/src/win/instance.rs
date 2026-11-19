@@ -10,7 +10,12 @@ use windows::Win32::System::RemoteDesktop::{
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::core::{HSTRING, PWSTR};
 
-pub(crate) fn process_runs_in_session(executable: &str) -> io::Result<bool> {
+/// Whether `executable` runs in this Windows session.
+///
+/// # Errors
+///
+/// Returns the operating system's error when it cannot list this session.
+pub fn process_runs_in_session(executable: &str) -> io::Result<bool> {
     let mut session = 0;
     #[expect(unsafe_code, reason = "a Win32 call")]
     // SAFETY: the PID is this process's and the output lives through the call.
@@ -54,12 +59,28 @@ pub(crate) fn process_runs_in_session(executable: &str) -> io::Result<bool> {
     Ok(found)
 }
 
-/// A named mutex that marks the one running copy.
+/// The name of the runtime's guard.
+const RUNTIME: &str = r"Local\AppyTappy.Runtime";
+
+/// Proof that this is the only running runtime in the user's session: a
+/// named mutex that lasts until the value is dropped or the process ends.
 #[derive(Debug)]
-pub(crate) struct InstanceGuard(HANDLE);
+pub struct InstanceGuard(HANDLE);
 
 impl InstanceGuard {
-    pub(crate) fn acquire(name: &str) -> io::Result<Option<Self>> {
+    /// Takes the runtime's guard, or returns `None` when another runtime
+    /// has it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    pub fn acquire() -> io::Result<Option<Self>> {
+        Self::acquire_named(RUNTIME)
+    }
+
+    /// Takes the guard called `name`, or returns `None` when another holder
+    /// has it.
+    fn acquire_named(name: &str) -> io::Result<Option<Self>> {
         let name = HSTRING::from(name);
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `name` is a null-terminated wide string that outlives the call, and
@@ -110,11 +131,19 @@ mod tests {
     #[test]
     fn a_second_guard_with_the_same_name_is_refused_until_the_first_drops() {
         let name = format!(r"Local\AppyTappy.Test.{}", process::id());
-        let first = InstanceGuard::acquire(&name)
+        let first = InstanceGuard::acquire_named(&name)
             .expect("acquire")
             .expect("first guard");
-        assert!(InstanceGuard::acquire(&name).expect("acquire").is_none());
+        assert!(
+            InstanceGuard::acquire_named(&name)
+                .expect("acquire")
+                .is_none()
+        );
         drop(first);
-        assert!(InstanceGuard::acquire(&name).expect("acquire").is_some());
+        assert!(
+            InstanceGuard::acquire_named(&name)
+                .expect("acquire")
+                .is_some()
+        );
     }
 }

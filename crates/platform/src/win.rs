@@ -25,11 +25,10 @@ mod tray;
 mod window_watch;
 
 pub(crate) use autostart::{autostart_enabled, disable_autostart, enable_autostart};
-pub(crate) use clock::local_time;
-pub(crate) use instance::{InstanceGuard, process_runs_in_session};
-pub(crate) use reload::{ReloadWatch, request_reload};
-pub(crate) use tray::Tray;
-pub(crate) use window_watch::WindowWatch;
+pub use instance::{InstanceGuard, process_runs_in_session};
+pub use reload::{ReloadWatch, request_reload};
+pub use tray::Tray;
+pub use window_watch::WindowWatch;
 
 /// Waits for a new thread to report that it started and returns what it
 /// sent. When it could not start, waits for it to end and returns why.
@@ -66,7 +65,17 @@ fn join(thread: JoinHandle<io::Result<()>>, name: &str) -> io::Result<()> {
     })
 }
 
-pub(crate) fn show_without_focus(window: usize) -> io::Result<()> {
+/// Shows the window with the handle `window` without activating it.
+///
+/// The window the user is typing in keeps the keyboard, and the window
+/// stays where it is. The setup app shows its overlay windows this way,
+/// since the window library it uses activates a window it shows.
+///
+/// # Errors
+///
+/// Returns the operating system's error, such as for a handle that names
+/// no window.
+pub fn show_without_focus(window: usize) -> io::Result<()> {
     let window = HWND(ptr::without_provenance_mut(window));
     #[expect(unsafe_code, reason = "a Win32 call")]
     // SAFETY: the call takes any handle by value and fails for one that names
@@ -85,7 +94,14 @@ pub(crate) fn show_without_focus(window: usize) -> io::Result<()> {
     .map_err(io::Error::from)
 }
 
-pub(crate) fn lower_thread_priority() -> io::Result<()> {
+/// Lowers the calling thread's priority as far as it goes, for work that
+/// must never take time from the rest of the program, such as writing the
+/// runtime trace.
+///
+/// # Errors
+///
+/// Returns the operating system's error.
+pub fn lower_thread_priority() -> io::Result<()> {
     #[expect(unsafe_code, reason = "a Win32 call")]
     // SAFETY: the pseudo handle of the current thread is always valid, and the
     // priority is one of the documented levels.

@@ -74,19 +74,19 @@ crates/
   engine/        appytappy-engine: the rule evaluator
   sources/       appytappy-sources: Windows source primitives, and whether an automation can run
   actions/       appytappy-actions: Windows actions
-  platform/      appytappy-platform: the runtime's Windows host services
+  platform/      appytappy-platform: Windows host services for the runtime and the setup app
 ```
 
-| Crate                | Platform | Depends on                                                | Used by        |
-| -------------------- | -------- | --------------------------------------------------------- | -------------- |
-| `appytappy-config`   | any      | `serde`, `serde_json`, `ts-rs` (`ts` feature)             | setup, runtime |
-| `appytappy-engine`   | any      | `config`                                                  | setup, runtime |
-| `appytappy-sources`  | Windows  | `config`, `windows`                                       | setup, runtime |
-| `appytappy-actions`  | Windows  | `config`, `windows`                                       | setup, runtime |
-| `appytappy-platform` | Windows  | `windows`                                                 | runtime        |
-| `appytappy-mcp`      | Windows  | `config`, `sources`, `serde`, `serde_json`                | —              |
-| `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform`      | —              |
-| setup app            | Windows  | `config`, `sources`, `actions`, `tauri`, `tokio`, `serde` | —              |
+| Crate                | Platform | Depends on                                                            | Used by        |
+| -------------------- | -------- | --------------------------------------------------------------------- | -------------- |
+| `appytappy-config`   | any      | `serde`, `serde_json`, `ts-rs` (`ts` feature)                         | setup, runtime |
+| `appytappy-engine`   | any      | `config`                                                              | setup, runtime |
+| `appytappy-sources`  | Windows  | `config`, `windows`                                                   | setup, runtime |
+| `appytappy-actions`  | Windows  | `config`, `windows`                                                   | setup, runtime |
+| `appytappy-platform` | Windows  | `windows`                                                             | setup, runtime |
+| `appytappy-mcp`      | Windows  | `config`, `sources`, `serde`, `serde_json`                            | —              |
+| `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform`                  | —              |
+| setup app            | Windows  | `config`, `sources`, `actions`, `platform`, `tauri`, `tokio`, `serde` | —              |
 
 The table leaves out dev-dependencies, such as `sources` for the actions
 crate's manual media player test. Each crate's owning issue adds its code and

@@ -69,7 +69,7 @@ fn main() -> ExitCode {
 /// Runs in the background unless another copy already does, in which case
 /// it notes that and exits at once.
 fn run(log: &mut Log) -> io::Result<()> {
-    let guard = InstanceGuard::acquire(InstanceGuard::RUNTIME);
+    let guard = InstanceGuard::acquire();
     let _instance = match guard {
         Ok(Some(instance)) => instance,
         Ok(None) => {

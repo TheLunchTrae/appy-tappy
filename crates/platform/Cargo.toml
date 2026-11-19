@@ -1,6 +1,6 @@
 [package]
 name = "appytappy-platform"
-description = "The runtime's Windows host services: window events, the tray icon, single-instance guard, autostart, and the local clock."
+description = "Windows host services for the runtime and the setup app: window events, the tray icon, the single-instance guard, reload requests, autostart, logs, and the local clock."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

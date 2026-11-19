@@ -7,13 +7,11 @@
 //! uninstaller removes, so the page reads and changes it there.
 
 use std::env;
-use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use appytappy_config::settings_file::SettingsFile;
-use appytappy_platform::AUTOSTART_VALUE;
 use serde::Serialize;
 
 use crate::stores::Stores;
@@ -63,7 +61,7 @@ pub(crate) fn save(stores: &Stores, settings: &SettingsFile) -> Result<(), Strin
 /// Whether Windows starts the runtime when the user signs in.
 #[mutants::skip] // Reads the registry, checked by hand on Windows.
 pub(crate) fn starts_with_windows() -> Result<bool, String> {
-    appytappy_platform::autostart_enabled(AUTOSTART_VALUE)
+    appytappy_platform::autostart_enabled()
         .map_err(|error| format!("AppyTappy cannot tell whether it starts with Windows: {error}."))
 }
 
@@ -74,10 +72,10 @@ pub(crate) fn set_starts_with_windows(on: bool) -> Result<(), String> {
     let changed = if on {
         env::current_exe().and_then(|setup| {
             let runtime = runtime_beside(&setup)?;
-            appytappy_platform::enable_autostart(AUTOSTART_VALUE, &command(&runtime))
+            appytappy_platform::enable_autostart(&runtime)
         })
     } else {
-        appytappy_platform::disable_autostart(AUTOSTART_VALUE)
+        appytappy_platform::disable_autostart()
     };
     changed.map_err(|error| {
         format!("AppyTappy cannot change whether it starts with Windows: {error}.")
@@ -129,16 +127,6 @@ fn runtime_beside(setup: &Path) -> io::Result<PathBuf> {
             format!("{RUNTIME_PROGRAM} is not beside AppyTappy Setup"),
         ))
     }
-}
-
-/// The command line Windows runs at sign-in: the program, quoted because a
-/// path with spaces would otherwise run its first word. The runtime writes
-/// the same command with `--autostart on`.
-fn command(runtime: &Path) -> OsString {
-    let mut command = OsString::from("\"");
-    command.push(runtime);
-    command.push("\"");
-    command
 }
 
 #[cfg(test)]
@@ -218,15 +206,5 @@ mod tests {
             folder.join(RUNTIME_PROGRAM)
         );
         fs::remove_dir_all(folder).expect("clean up");
-    }
-
-    #[test]
-    fn the_sign_in_command_quotes_the_runtime() {
-        assert_eq!(
-            command(Path::new(
-                "C:/Program Files/AppyTappy/appytappy-runtime.exe"
-            )),
-            OsString::from(r#""C:/Program Files/AppyTappy/appytappy-runtime.exe""#)
-        );
     }
 }

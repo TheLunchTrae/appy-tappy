@@ -76,9 +76,18 @@ impl Drop for Event {
     }
 }
 
-/// The thread that waits for reload requests.
+/// The name of the event the runtime waits on for reload requests. The
+/// setup app sets it after each save that changes what the runtime runs, so
+/// the runtime reads the saved files again.
+const RELOAD: &str = r"Local\AppyTappy.Reload";
+
+/// A thread that sends a [`ReloadRequest`] each time another program calls
+/// [`request_reload`].
+///
+/// Requests that arrive while one waits to be sent become one request. It
+/// never polls: the thread sleeps until a request or [`ReloadWatch::stop`].
 #[derive(Debug)]
-pub(crate) struct ReloadWatch {
+pub struct ReloadWatch {
     thread: Option<JoinHandle<io::Result<()>>>,
     /// Ends the thread's wait. The thread waits on its own handle to the
     /// same event, so this one can close without waiting for the thread.
@@ -86,7 +95,21 @@ pub(crate) struct ReloadWatch {
 }
 
 impl ReloadWatch {
-    pub(crate) fn start<E>(name: &str, events: Sender<E>) -> io::Result<Self>
+    /// Starts waiting for reload requests and returns once the thread waits.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error when the thread or its event
+    /// cannot start.
+    pub fn start<E>(events: Sender<E>) -> io::Result<Self>
+    where
+        E: From<ReloadRequest> + Send + 'static,
+    {
+        Self::start_named(RELOAD, events)
+    }
+
+    /// Starts waiting for requests to the event `name`.
+    fn start_named<E>(name: &str, events: Sender<E>) -> io::Result<Self>
     where
         E: From<ReloadRequest> + Send + 'static,
     {
@@ -106,7 +129,12 @@ impl ReloadWatch {
         })
     }
 
-    pub(crate) fn stop(mut self) -> io::Result<()> {
+    /// Ends the thread and waits for it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error that ended the thread's wait, if any.
+    pub fn stop(mut self) -> io::Result<()> {
         let Some(thread) = self.thread.take() else {
             return Ok(());
         };
@@ -171,7 +199,18 @@ fn watch_reload<E: From<ReloadRequest>>(
     }
 }
 
-pub(crate) fn request_reload(name: &str) -> io::Result<bool> {
+/// Asks the runtime to read the saved files again. Returns whether a
+/// [`ReloadWatch`] was waiting; when none is, nothing happens.
+///
+/// # Errors
+///
+/// Returns the operating system's error.
+pub fn request_reload() -> io::Result<bool> {
+    request_named(RELOAD)
+}
+
+/// Sets the event `name` that a [`ReloadWatch`] waits on, if one does.
+fn request_named(name: &str) -> io::Result<bool> {
     #[expect(unsafe_code, reason = "a Win32 call")]
     // SAFETY: the name is a null-terminated wide string that outlives the call.
     let opened = unsafe { OpenEventW(EVENT_MODIFY_STATE, false, &HSTRING::from(name)) };
@@ -192,29 +231,29 @@ mod tests {
     #[test]
     fn a_reload_request_reaches_the_watch_and_stops_with_it() {
         let name = format!(r"Local\AppyTappy.Test.Reload.{}", process::id());
-        assert!(!request_reload(&name).expect("ask"), "nobody waits yet");
+        assert!(!request_named(&name).expect("ask"), "nobody waits yet");
         let (sender, requests) = mpsc::channel::<ReloadRequest>();
-        let watch = ReloadWatch::start(&name, sender).expect("start");
-        assert!(request_reload(&name).expect("ask"), "the watch waits");
+        let watch = ReloadWatch::start_named(&name, sender).expect("start");
+        assert!(request_named(&name).expect("ask"), "the watch waits");
         assert_eq!(
             requests.recv_timeout(Duration::from_secs(10)),
             Ok(ReloadRequest)
         );
         watch.stop().expect("stop");
-        assert!(!request_reload(&name).expect("ask"), "the event is gone");
+        assert!(!request_named(&name).expect("ask"), "the event is gone");
     }
 
     #[test]
     fn a_dropped_reload_watch_ends_its_thread_without_waiting_for_it() {
         let name = format!(r"Local\AppyTappy.Test.Dropped.{}", process::id());
         let (sender, requests) = mpsc::channel::<ReloadRequest>();
-        let watch = ReloadWatch::start(&name, sender).expect("start");
+        let watch = ReloadWatch::start_named(&name, sender).expect("start");
         drop(watch);
         // The thread drops its sender when it ends.
         assert_eq!(
             requests.recv_timeout(Duration::from_secs(10)),
             Err(mpsc::RecvTimeoutError::Disconnected)
         );
-        assert!(!request_reload(&name).expect("ask"), "the event is gone");
+        assert!(!request_named(&name).expect("ask"), "the event is gone");
     }
 }
