@@ -11,9 +11,9 @@
 //! cannot run, so the tray can show it, and makes them again after a wait
 //! that grows with each failure, or when an automation fires after that
 //! wait. It tells the owner again once actions can run. A restore that
-//! fails is tried again: a media restore once, after a short wait, and a
-//! volume restore after each later job and every few seconds until it
-//! works. When the jobs stop, every restore still pending gets a last try.
+//! fails is tried again when the journal says it is due, and after each
+//! later job. When the jobs stop, every restore still pending gets a last
+//! try.
 //!
 //! A click is placed on the screen here, just before it clicks, because
 //! where it lands depends on where its target's window is now. A click sent
@@ -25,7 +25,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use appytappy_actions::{ActionError, Actions, Backoff, Controls, Keeps, PlacedClick, Watched};
+use appytappy_actions::{
+    ActionError, Actions, Controls, Keeps, Performable, PlacedClick, Retrying, Watched,
+};
 use appytappy_config::action::Action;
 use appytappy_config::click::{Click, ClickDelivery};
 use appytappy_sources::screen::Capture;
@@ -34,9 +36,6 @@ use appytappy_sources::system::System;
 use crate::click::{self, ClickTargets};
 use crate::model::Owner;
 use crate::trace::{Detail, Record, Trace, What};
-
-/// How often a failed volume restore is tried again while no job comes.
-const VOLUME_RETRY: Duration = Duration::from_secs(10);
 
 /// What the owner asks the action thread to do.
 #[derive(Debug, Clone, PartialEq)]
@@ -199,15 +198,7 @@ struct Worker<C: Controls, F> {
     /// Makes the controls.
     make: F,
     /// The journal, or why the controls are missing.
-    actions: Result<Actions<Owner, C>, Missing>,
-}
-
-/// Why the controls are missing, and when to make them again.
-struct Missing {
-    /// The last error making them.
-    error: String,
-    /// When to make them again.
-    backoff: Backoff,
+    actions: Retrying<Actions<Owner, C>>,
 }
 
 impl<C, F> Worker<C, F>
@@ -217,18 +208,17 @@ where
 {
     /// Makes the controls, and says so in the log when they cannot be made.
     fn start(mut make: F, now: Instant) -> (Self, Vec<String>) {
-        let (actions, notes) = match make() {
-            Ok(controls) => (Ok(Actions::new(controls)), Vec::new()),
-            Err(error) => (
-                Err(Missing {
-                    error: error.to_string(),
-                    backoff: Backoff::new(now),
-                }),
-                vec![format!(
+        let actions = Retrying::new(make().map(Actions::new), now);
+        let notes = actions
+            .get()
+            .err()
+            .map(|error| {
+                format!(
                     "actions cannot run yet, so the controls are made again, waiting longer after each failure: {error}"
-                )],
-            ),
-        };
+                )
+            })
+            .into_iter()
+            .collect();
         (Self { make, actions }, notes)
     }
 
@@ -244,16 +234,15 @@ where
         mut now: impl FnMut() -> Instant,
     ) -> Done {
         let mut notes = self.make_again(now());
-        let actions = match &mut self.actions {
+        let actions = match self.actions.get_mut() {
             Ok(actions) => actions,
-            Err(missing) => {
+            Err(error) => {
                 // A job that comes while the controls are missing changes
                 // nothing, so an undo has nothing to put back.
                 let failed = matches!(job, Job::Run { .. });
                 if let Job::Run { automation, .. } = job {
                     notes.push(format!(
-                        "{automation}: its actions did not run, because the controls cannot be made: {}",
-                        missing.error
+                        "{automation}: its actions did not run, because the controls cannot be made: {error}"
                     ));
                 }
                 return Done { notes, failed };
@@ -271,11 +260,9 @@ where
             } => {
                 let mut failed = false;
                 for (step, number) in steps.iter().zip(1_usize..) {
-                    let ran = match step {
-                        Action::Click(wanted) => {
-                            click_now(actions, screen, wanted, &clicks, &watched)
-                        },
-                        step => actions
+                    let ran = match Performable::try_from(step) {
+                        Err(wanted) => click_now(actions, screen, wanted, &clicks, &watched),
+                        Ok(step) => actions
                             .perform(owner, step, keeps, &watched)
                             .map(|()| None)
                             .map_err(|error| error.to_string()),
@@ -308,15 +295,15 @@ where
     }
 
     /// Whether the controls are made, so actions can run.
-    const fn can_run(&self) -> bool {
-        self.actions.is_ok()
+    fn can_run(&self) -> bool {
+        self.actions.get().is_ok()
     }
 
     /// When no job came in time: makes the controls again if they are
     /// missing and their wait is over, or tries the pending restores that
     /// are due at `now`.
     fn retry(&mut self, now: Instant) -> Vec<String> {
-        match &mut self.actions {
+        match self.actions.get_mut() {
             Ok(actions) => given_up(actions.retry_restores(now)).into_iter().collect(),
             Err(_) => self.make_again(now),
         }
@@ -324,7 +311,7 @@ where
 
     /// Gives each pending restore a last try, when no job will come.
     fn finish(&mut self) -> Vec<String> {
-        let Ok(actions) = &mut self.actions else {
+        let Ok(actions) = self.actions.get_mut() else {
             return Vec::new();
         };
         actions
@@ -338,34 +325,20 @@ where
     /// How long to wait at `now` for a job before [`Worker::retry`], or
     /// `None` to wait for one however long it takes.
     fn retry_in(&self, now: Instant) -> Option<Duration> {
-        let actions = match &self.actions {
-            Ok(actions) => actions,
-            Err(missing) => return Some(missing.backoff.retry_at().saturating_duration_since(now)),
+        let due = match self.actions.get() {
+            Ok(actions) => actions.next_retry(),
+            Err(_) => self.actions.retry_at(),
         };
-        match actions.next_retry() {
-            Some(due) => Some(due.saturating_duration_since(now)),
-            None => actions.has_pending().then_some(VOLUME_RETRY),
-        }
+        due.map(|due| due.saturating_duration_since(now))
     }
 
     /// Makes the controls again if they are missing and their wait is over.
     fn make_again(&mut self, now: Instant) -> Vec<String> {
-        let Err(missing) = &mut self.actions else {
-            return Vec::new();
-        };
-        if !missing.backoff.is_over(now) {
-            return Vec::new();
-        }
-        match (self.make)() {
-            Ok(controls) => {
-                self.actions = Ok(Actions::new(controls));
-                vec!["actions can run now".to_owned()]
-            },
-            Err(error) => {
-                missing.error = error.to_string();
-                missing.backoff.failed_again(now);
-                Vec::new()
-            },
+        let make = &mut self.make;
+        if self.actions.make_again(now, || make().map(Actions::new)) {
+            vec!["actions can run now".to_owned()]
+        } else {
+            Vec::new()
         }
     }
 }
@@ -381,7 +354,7 @@ fn click_now<C: Controls, S: System + Capture>(
     watched: &Watched,
 ) -> Result<Option<String>, String> {
     let placed = click::place(screen, wanted, clicks)?;
-    appytappy_actions::click(actions.controls().input(), &placed, watched)
+    appytappy_actions::click(actions.input(), &placed, watched)
         .map(|()| sent(&placed))
         .map_err(|error| error.to_string())
 }
@@ -416,7 +389,8 @@ mod tests {
     use std::time::Duration;
 
     use appytappy_actions::{
-        Input, MEDIA_RETRY, MediaSession, MouseEvent, MouseMessage, Press, Stroke, Volume,
+        Input, MEDIA_RETRY, MediaSession, MouseEvent, MouseMessage, Press, Stroke, VOLUME_RETRY,
+        Volume,
     };
     use appytappy_config::action::{
         MediaCommand, MediaTarget, Modifier, OpenTarget, VolumeLevel, VolumeTarget,
@@ -1115,7 +1089,7 @@ mod tests {
 
     /// The controls of a worker that made them.
     fn controls<F>(worker: &mut Worker<OnePlayer, F>) -> &mut OnePlayer {
-        let Ok(actions) = &mut worker.actions else {
+        let Ok(actions) = worker.actions.get_mut() else {
             panic!("the controls were made");
         };
         actions.controls()
@@ -1140,10 +1114,7 @@ mod tests {
         );
         controls(&mut worker).unplugged = true;
         assert_eq!(
-            worker
-                .job(release(), &Unsupported, Instant::now)
-                .notes
-                .len(),
+            worker.job(release(), &Unsupported, || now).notes.len(),
             1,
             "the failed undo is logged"
         );

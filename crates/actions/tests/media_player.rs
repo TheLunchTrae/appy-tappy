@@ -20,7 +20,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use appytappy_actions::win::{MediaKey, WindowsControls};
-use appytappy_actions::{Actions, Controls, Keeps, Watched};
+use appytappy_actions::{Actions, Controls, Keeps, Performable, Watched};
 use appytappy_config::action::{
     Action, AppName, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
 };
@@ -113,8 +113,18 @@ fn pauses_and_resumes_the_player() {
         target: MediaTarget::App(player().expect("APPYTAPPY_TEST_PLAYER names the player")),
         command: MediaCommand::Pause,
     };
-    let paused = actions.perform(1_u8, &pause, Keeps::ForRelease, &watched());
-    let held = actions.perform(2_u8, &pause, Keeps::ForRelease, &watched());
+    let paused = actions.perform(
+        1_u8,
+        Performable::try_from(&pause).expect("not a click"),
+        Keeps::ForRelease,
+        &watched(),
+    );
+    let held = actions.perform(
+        2_u8,
+        Performable::try_from(&pause).expect("not a click"),
+        Keeps::ForRelease,
+        &watched(),
+    );
     thread::sleep(SETTLE);
     let while_paused = playing(actions.controls());
     let first_release = actions.release(1, Instant::now);
@@ -149,7 +159,12 @@ fn lowers_and_restores_the_player_volume() {
         target: VolumeTarget::App(player().expect("APPYTAPPY_TEST_PLAYER names the player")),
         level: VolumeLevel::from_percent(20).expect("at most 100"),
     };
-    let lowered = actions.perform(0_u8, &lower, Keeps::ForRelease, &watched());
+    let lowered = actions.perform(
+        0_u8,
+        Performable::try_from(&lower).expect("not a click"),
+        Keeps::ForRelease,
+        &watched(),
+    );
     let while_lowered = levels(actions.controls());
     thread::sleep(SETTLE);
     actions

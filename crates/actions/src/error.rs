@@ -70,9 +70,6 @@ pub enum ActionError {
     /// messages to the named application's window: its program runs with
     /// more rights than AppyTappy, as one started as administrator does.
     MessageBlocked(String),
-    /// A click reached the journal without a place: the runtime places
-    /// clicks and runs them through [`crate::click`].
-    Unplaced,
     /// The click landed, but the window that was in front did not get the
     /// focus back.
     FocusNotReturned,
@@ -138,7 +135,6 @@ impl fmt::Display for ActionError {
                 "the click was not sent, because Windows blocks messages to {target}, which runs \
                  with more rights than AppyTappy, as a program started as administrator does"
             ),
-            Self::Unplaced => formatter.write_str("the click was not placed on the screen"),
             Self::FocusNotReturned => formatter.write_str(
                 "the click landed, but Windows did not give the focus back to the window that was in front",
             ),
@@ -167,7 +163,6 @@ impl Error for ActionError {
             | Self::WindowDisabled(_)
             | Self::TooSlow(_)
             | Self::MessageBlocked(_)
-            | Self::Unplaced
             | Self::FocusNotReturned => None,
         }
     }
@@ -234,7 +229,6 @@ mod tests {
                 ActionError::MessageBlocked("Target App".to_owned()),
                 "blocks messages to Target App",
             ),
-            (ActionError::Unplaced, "not placed"),
         ] {
             assert!(error.to_string().contains(words), "{error}");
             assert!(error.source().is_none());

@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use appytappy_config::action::{Key, KeyChord, Modifier};
 
-/// One key that a key press moves, as [`strokes`] orders them.
+use crate::{ActionError, Input, Watched};
+
+/// One key that a key press moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stroke {
     /// A modifier goes down (`true`) or up.
@@ -26,7 +28,7 @@ impl Stroke {
 
 /// How long a key press holds its keys down, so an application that checks
 /// the keyboard once a frame still sees them.
-pub const HOLD: Duration = Duration::from_millis(40);
+pub(crate) const HOLD: Duration = Duration::from_millis(40);
 
 /// The keys pressing `keys` moves down, then the keys it moves up.
 ///
@@ -35,7 +37,7 @@ pub const HOLD: Duration = Duration::from_millis(40);
 /// modifier in `held`, which the user is holding already, is left alone, so
 /// it stays down for them afterwards.
 #[must_use]
-pub fn strokes(keys: &KeyChord, held: &[Modifier]) -> (Vec<Stroke>, Vec<Stroke>) {
+pub(crate) fn strokes(keys: &KeyChord, held: &[Modifier]) -> (Vec<Stroke>, Vec<Stroke>) {
     let modifiers: Vec<Modifier> = keys
         .modifiers()
         .into_iter()
@@ -55,6 +57,60 @@ pub fn strokes(keys: &KeyChord, held: &[Modifier]) -> (Vec<Stroke>, Vec<Stroke>)
         )
         .collect();
     (down, up)
+}
+
+/// Presses `keys` into `watched`'s window, if it has the keyboard focus.
+/// Every key that went down goes up again, even when Windows drops some.
+pub(crate) fn press<I: Input>(
+    input: &mut I,
+    keys: &KeyChord,
+    watched: &Watched,
+) -> Result<(), ActionError> {
+    if input.focused_process()? != Some(watched.process) {
+        return Err(ActionError::NotInFront(watched.executable.clone()));
+    }
+    let held = input.held_modifiers()?;
+    let (down, up) = strokes(keys, &held);
+    let sent = input.send_strokes(&down)?;
+    if sent < down.len() {
+        let pressed = down.get(..sent).unwrap_or_default();
+        if !pressed.is_empty() {
+            let release: Vec<Stroke> = pressed
+                .iter()
+                .rev()
+                .map(|stroke| stroke.reversed())
+                .collect();
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the press already failed, and its error says why"
+            )]
+            let _ = input.send_strokes(&release);
+        }
+        return Err(ActionError::KeysDropped {
+            sent,
+            of: down.len(),
+        });
+    }
+    input.hold(HOLD);
+    // A key left down would stay down for the user, so whatever did not
+    // come up gets one more try, whether Windows dropped it or failed.
+    let (sent, failed) = match input.send_strokes(&up) {
+        Ok(sent) => (sent, None),
+        Err(error) => (0, Some(error)),
+    };
+    if sent < up.len() {
+        let rest = up.get(sent..).unwrap_or_default();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the release already failed, and its error says why"
+        )]
+        let _ = input.send_strokes(rest);
+        return Err(failed.map_or(
+            ActionError::KeysDropped { sent, of: up.len() },
+            ActionError::Os,
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
