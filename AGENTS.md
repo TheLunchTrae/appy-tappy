@@ -28,7 +28,7 @@ AppyTappy ships for Windows only. CI runs these jobs from
 `.github/workflows/quality.yml`: `quality` runs `mise run standards:check:base`,
 the gate without the mutation lane, on Linux, and the `mutants` jobs run
 `rust:mutants:diff` in shards on Linux; together they are the gate.
-`windows` runs `rust:lint`, `rust:doc`, and `rust:test:members` on Windows, and
+`windows` runs `rust:lint`, `rust:doc`, and `rust:test` on Windows, and
 also `rust:bench` on pushes to main and manual runs. `footprint` runs
 `rust:footprint` on Windows. `quality`, `windows`, and `footprint` restore a
 Rust build cache that only pushes to main save, once for each set of
@@ -50,10 +50,9 @@ final check before a release, not a gate.
   Windows, so a file task that is not `sh` names its interpreter with a
   `# MISE shell` line, as `hygiene` does.
 
-- The root package's policy tests compare POSIX paths, so `rust:test`, and
-  with it `standards:check`, runs on Linux or macOS: in CI or WSL. On
-  Windows, run `rust:fmt`, `rust:lint`, `rust:doc`, `rust:test:members`,
-  `rust:footprint`, and the `md:` tasks.
+- CI runs `standards:check` on Linux. On Windows, CI proves `rust:lint`,
+  `rust:doc`, `rust:test`, and `rust:footprint`; run those, `rust:fmt`, and
+  the `md:` tasks there.
 - `mise lock` records every platform in `lockfile_platforms`; commit
   `.config/mise/mise.lock` after a tool change.
 

@@ -13,14 +13,13 @@ publish.workspace = true
 [dev-dependencies]
 # The policy tests tokenize Rust syntax, including attributes inside macro
 # bodies, without mistaking comments or literals for code, and read the JSON
-# that Cargo and mise write.
+# diagnostics Clippy writes.
 proc-macro2 = "1.0.107"
 serde.workspace = true
 serde_json.workspace = true
 syn = { version = "3.0.9", features = ["full"] }
-# The policy tests read Cargo manifests, Cargo configuration, and the mise task
-# fragment. Cargo permits explicit target source paths with arbitrary
-# extensions, so the source scan parses manifests to see those compiler inputs.
+# The policy tests read Cargo manifests: the lint wall each package inherits,
+# and any custom target path, which the source scan rejects.
 toml = "1.1.8"
 
 # The lint wall lives at workspace scope so growth cannot silently shed it:

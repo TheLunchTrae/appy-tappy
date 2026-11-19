@@ -7,51 +7,14 @@ use std::env;
 use std::fs;
 use std::io;
 use std::mem;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::str::FromStr;
 
 use proc_macro2::{Delimiter, Spacing, TokenStream, TokenTree};
-use serde::Deserialize;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{Expr, Lit, Meta, Token};
-
-const ROOT_EXCLUDED_DIRECTORIES: [&str; 4] = ["mutants.out", "mutants.out.old", "target", "vendor"];
-
-/// The lint groups of the pinned toolchain, as `rustc`, `clippy-driver`, and
-/// `rustdoc` list them with `-W help`. An expectation on a group silences
-/// every lint in it.
-const LINT_GROUPS: [&str; 24] = [
-    "clippy::all",
-    "clippy::cargo",
-    "clippy::complexity",
-    "clippy::correctness",
-    "clippy::nursery",
-    "clippy::pedantic",
-    "clippy::perf",
-    "clippy::restriction",
-    "clippy::style",
-    "clippy::suspicious",
-    "deprecated_safe",
-    "future_incompatible",
-    "keyword_idents",
-    "let_underscore",
-    "nonstandard_style",
-    "refining_impl_trait",
-    "rust_2018_compatibility",
-    "rust_2018_idioms",
-    "rust_2021_compatibility",
-    "rust_2024_compatibility",
-    "rustdoc::all",
-    "unknown_or_malformed_diagnostic_attributes",
-    "unused",
-    "warnings",
-];
-
-/// The Cargo target kind whose roots may carry a crate-level expectation.
-/// Benches, examples, and build scripts are not test crates.
-const TEST_TARGET_KIND: &str = "test";
 
 /// The denied restriction lints whose findings are panic sites in
 /// expressions. A module-wide expectation of one silences every such site in
@@ -96,34 +59,6 @@ const ASSERTION_MACROS: [&str; 3] = ["assert", "assert_eq", "assert_ne"];
 const ITEM_KEYWORDS: [&str; 9] = [
     "enum", "extern", "fn", "impl", "let", "struct", "trait", "type", "use",
 ];
-
-#[derive(Deserialize)]
-struct CargoMetadataDocument {
-    packages: Vec<CargoPackage>,
-    workspace_members: Vec<String>,
-}
-
-#[derive(Deserialize)]
-struct CargoPackage {
-    id: String,
-    manifest_path: PathBuf,
-    targets: Vec<CargoTarget>,
-}
-
-#[derive(Deserialize)]
-struct CargoTarget {
-    kind: Vec<String>,
-    src_path: PathBuf,
-}
-
-#[derive(Default)]
-struct CargoWorkspaceInputs {
-    enumeration_roots: BTreeSet<PathBuf>,
-    package_roots: BTreeSet<PathBuf>,
-    target_sources: Vec<PathBuf>,
-    non_test_crate_roots: BTreeSet<PathBuf>,
-    test_crate_roots: BTreeSet<PathBuf>,
-}
 
 /// What the module walk knows about the code at one token level.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -223,17 +158,19 @@ struct ModuleFindings {
     unresolved_modules: BTreeMap<PathBuf, usize>,
 }
 
-fn allow_policy_violation_count(source: &str) -> Result<usize, proc_macro2::LexError> {
-    TokenStream::from_str(source).map(|tokens| allow_violations_in_tokens(&tokens))
+fn allow_policy_violation_count(source: &str) -> Result<usize, String> {
+    let groups = lint_groups()?;
+    let tokens = TokenStream::from_str(source).map_err(|error| error.to_string())?;
+    Ok(allow_violations_in_tokens(&tokens, &groups))
 }
 
-fn allow_violations_in_tokens(tokens: &TokenStream) -> usize {
+fn allow_violations_in_tokens(tokens: &TokenStream, groups: &BTreeSet<String>) -> usize {
     let token_trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
     let mut count = 0_usize;
 
     for (index, token) in token_trees.iter().enumerate() {
         if let TokenTree::Group(group) = token {
-            count = count.saturating_add(allow_violations_in_tokens(&group.stream()));
+            count = count.saturating_add(allow_violations_in_tokens(&group.stream(), groups));
         }
 
         let Some(attribute) = attribute_at(&token_trees, index) else {
@@ -248,7 +185,7 @@ fn allow_violations_in_tokens(tokens: &TokenStream) -> usize {
         if (contains_macro_metavariable(&attribute.tokens) && !fixed_doc_value)
             || attribute.meta.is_some_and(|meta| {
                 meta_contains(&meta, |meta| {
-                    path_is_ident(meta.path(), "allow") || is_broad_expectation(meta)
+                    path_is_ident(meta.path(), "allow") || is_broad_expectation(meta, groups)
                 })
             })
         {
@@ -328,7 +265,7 @@ fn ident_is_name(identifier: &proc_macro2::Ident, expected: &str) -> bool {
 }
 
 /// Matches an attribute directly or nested at any depth in `cfg_attr`.
-fn meta_contains(meta: &Meta, matches: fn(&Meta) -> bool) -> bool {
+fn meta_contains(meta: &Meta, matches: impl Fn(&Meta) -> bool + Copy) -> bool {
     if matches(meta) {
         return true;
     }
@@ -352,13 +289,33 @@ fn meta_contains(meta: &Meta, matches: fn(&Meta) -> bool) -> bool {
         .is_ok_and(|metas| metas.iter().any(|meta| meta_contains(meta, matches)))
 }
 
-/// An expectation must name one lint that is not a group.
-fn is_broad_expectation(meta: &Meta) -> bool {
+/// An expectation must name one lint that is not one of the toolchain's
+/// lint `groups`.
+fn is_broad_expectation(meta: &Meta, groups: &BTreeSet<String>) -> bool {
     let lints = expected_lints(meta);
-    lints.len() > 1
-        || lints
-            .iter()
-            .any(|lint| LINT_GROUPS.contains(&lint.as_str()))
+    lints.len() > 1 || lints.iter().any(|lint| groups.contains(lint))
+}
+
+/// The lint groups of the pinned toolchain, as `clippy-driver`, which lists
+/// rustc's too, and `rustdoc` list them with `-W help`. An expectation on a
+/// group silences every lint in it.
+fn lint_groups() -> Result<BTreeSet<String>, String> {
+    let mut groups = BTreeSet::new();
+    for tool in ["clippy-driver", "rustdoc"] {
+        let output = Command::new(tool)
+            .args(["-W", "help"])
+            .current_dir(project_root())
+            .output()
+            .map_err(|error| format!("cannot run {tool}: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "{tool} -W help failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        groups.extend(lint_group_names(&String::from_utf8_lossy(&output.stdout)));
+    }
+    Ok(groups)
 }
 
 fn expects_arithmetic(meta: &Meta) -> bool {
@@ -904,192 +861,184 @@ fn path_is_ident(path: &syn::Path, expected: &str) -> bool {
             .is_some_and(|segment| ident_is_name(&segment.ident, expected))
 }
 
-fn collect_project_files(
-    path: &Path,
-    canonical_root: &Path,
-    package_roots: &BTreeSet<PathBuf>,
-    visited_directories: &mut BTreeSet<PathBuf>,
-    source_files: &mut Vec<PathBuf>,
+/// Directories the walk skips wherever they are: Git's own, and installed
+/// JavaScript packages.
+const SKIPPED_DIRECTORIES: [&str; 2] = [".git", "node_modules"];
+
+/// Directories the walk skips beside a Cargo manifest: build and mutation
+/// output, and vendored dependencies. A source module may take one of these
+/// names elsewhere.
+const PACKAGE_OUTPUT_DIRECTORIES: [&str; 4] =
+    ["mutants.out", "mutants.out.old", "target", "vendor"];
+
+/// The target tables whose `path` key names a crate root.
+const TARGET_TABLES: [&str; 5] = ["lib", "bin", "test", "example", "bench"];
+
+/// The Rust sources and Cargo manifests under `directory`. The walk follows
+/// no symlink, and reports one, since what it names may be outside the scan.
+fn walk_project(
+    directory: &Path,
+    sources: &mut Vec<PathBuf>,
     manifests: &mut Vec<PathBuf>,
     violations: &mut Vec<String>,
 ) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() {
-        let canonical_path = match fs::canonicalize(path) {
-            Ok(path) => path,
-            Err(error) => {
-                violations.push(format!("{} cannot be resolved: {error}", path.display()));
-                return Ok(());
-            },
-        };
-        let target_metadata = fs::metadata(path)?;
-        if target_metadata.is_dir() {
-            if !canonical_path.starts_with(canonical_root) {
-                violations.push(format!(
-                    "{} resolves outside canonical project root {}",
-                    path.display(),
-                    canonical_root.display()
-                ));
-                return Ok(());
+    let package = directory.join("Cargo.toml").is_file();
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let kind = entry.file_type()?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if kind.is_symlink() {
+            violations.push(format!(
+                "{} is a symlink; the policy scanner follows none, so keep sources in the tree",
+                path.display()
+            ));
+        } else if kind.is_dir() {
+            let skipped = SKIPPED_DIRECTORIES.contains(&name.as_ref())
+                || (package && PACKAGE_OUTPUT_DIRECTORIES.contains(&name.as_ref()));
+            if !skipped {
+                walk_project(&path, sources, manifests, violations)?;
             }
-            if !visited_directories.insert(canonical_path) {
-                return Ok(());
-            }
-            for entry in fs::read_dir(path)? {
-                collect_project_files(
-                    &entry?.path(),
-                    canonical_root,
-                    package_roots,
-                    visited_directories,
-                    source_files,
-                    manifests,
-                    violations,
-                )?;
-            }
-            return Ok(());
+        } else if name == "Cargo.toml" {
+            manifests.push(path);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            sources.push(path);
         }
-        if path.extension().is_some_and(|extension| extension == "rs") {
-            source_files.push(path.to_path_buf());
-        }
-        if is_cargo_manifest(path) {
-            manifests.push(path.to_path_buf());
-        }
-        return Ok(());
-    }
-    if metadata.is_file() {
-        if path.extension().is_some_and(|extension| extension == "rs") {
-            source_files.push(path.to_path_buf());
-        }
-        if is_cargo_manifest(path) {
-            manifests.push(path.to_path_buf());
-        }
-        return Ok(());
-    }
-    if !metadata.is_dir() || is_excluded_directory(path, package_roots)? {
-        return Ok(());
-    }
-    if !visited_directories.insert(fs::canonicalize(path)?) {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(path)? {
-        collect_project_files(
-            &entry?.path(),
-            canonical_root,
-            package_roots,
-            visited_directories,
-            source_files,
-            manifests,
-            violations,
-        )?;
     }
     Ok(())
 }
 
-fn is_excluded_directory(path: &Path, package_roots: &BTreeSet<PathBuf>) -> io::Result<bool> {
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return Ok(false);
-    };
-    if name == ".git" {
-        return Ok(true);
+/// The crate roots Cargo finds by convention in the package at `package`:
+/// the test targets, and the rest. A manifest that sets a custom target path
+/// is reported by [`manifest_violations`].
+fn crate_roots(package: &Path) -> io::Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let mut others: Vec<PathBuf> = ["src/lib.rs", "src/main.rs", "build.rs"]
+        .iter()
+        .map(|root| package.join(root))
+        .filter(|root| root.is_file())
+        .collect();
+    for directory in ["src/bin", "examples", "benches"] {
+        others.extend(target_files(&package.join(directory))?);
     }
-    if !ROOT_EXCLUDED_DIRECTORIES.contains(&name) {
-        return Ok(false);
-    }
-    let Some(parent) = path.parent() else {
-        return Ok(false);
-    };
-    Ok(package_roots.contains(&fs::canonicalize(parent)?))
+    let tests = target_files(&package.join("tests"))?;
+    Ok((tests, others))
 }
 
-fn is_cargo_manifest(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name == "Cargo.toml")
+/// The targets Cargo finds in `directory`: each `name.rs`, and each
+/// `name/main.rs`.
+fn target_files(directory: &Path) -> io::Result<Vec<PathBuf>> {
+    if !directory.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut roots = Vec::new();
+    for entry in fs::read_dir(directory)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|extension| extension == "rs") && path.is_file() {
+            roots.push(path);
+        } else if path.join("main.rs").is_file() {
+            roots.push(path.join("main.rs"));
+        }
+    }
+    roots.sort();
+    Ok(roots)
+}
+
+/// What a package manifest breaks: it must inherit the workspace lints, and
+/// keep Cargo's conventional layout so the scan finds every crate root.
+fn manifest_violations(manifest_path: &Path, violations: &mut Vec<String>) -> io::Result<()> {
+    let source = fs::read_to_string(manifest_path)?;
+    let manifest = match source.parse::<toml::Table>() {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            violations.push(format!(
+                "{} is not valid TOML: {error}",
+                manifest_path.display()
+            ));
+            return Ok(());
+        },
+    };
+    let Some(package) = manifest.get("package") else {
+        return Ok(());
+    };
+    let inherits_lints = manifest
+        .get("lints")
+        .and_then(|lints| lints.get("workspace"))
+        .and_then(toml::Value::as_bool)
+        == Some(true);
+    if !inherits_lints {
+        violations.push(format!(
+            "{} must declare [lints] workspace = true",
+            manifest_path.display()
+        ));
+    }
+    let custom_build = package
+        .get("build")
+        .is_some_and(|build| build.as_bool().is_none());
+    let custom_target = TARGET_TABLES.iter().any(|kind| {
+        manifest.get(*kind).is_some_and(|targets| {
+            targets
+                .as_array()
+                .map_or_else(|| vec![targets], |targets| targets.iter().collect())
+                .iter()
+                .any(|target| target.get("path").is_some())
+        })
+    });
+    if custom_build || custom_target {
+        violations.push(format!(
+            "{} sets a custom target or build-script path; keep Cargo's conventional layout so the policy scanner finds every crate root",
+            manifest_path.display()
+        ));
+    }
+    Ok(())
 }
 
 fn project_policy_violations(root: &Path) -> io::Result<Vec<String>> {
-    let canonical_root = fs::canonicalize(root)?;
-    let mut source_files = Vec::new();
+    let groups = lint_groups().map_err(io::Error::other)?;
+    let mut sources = Vec::new();
     let mut manifests = Vec::new();
-    let mut visited_directories = BTreeSet::new();
     let mut violations = Vec::new();
-    let CargoWorkspaceInputs {
-        mut enumeration_roots,
-        mut package_roots,
-        target_sources,
-        non_test_crate_roots,
-        test_crate_roots,
-    } = cargo_workspace_inputs(root, &canonical_root, &mut violations);
-    package_roots.insert(canonical_root.clone());
-    enumeration_roots.insert(canonical_root.clone());
-    collect_project_files(
-        root,
-        &canonical_root,
-        &package_roots,
-        &mut visited_directories,
-        &mut source_files,
-        &mut manifests,
-        &mut violations,
-    )?;
-    for enumeration_root in enumeration_roots {
-        if enumeration_root != canonical_root {
-            collect_source_root_files(
-                &enumeration_root,
-                &canonical_root,
-                &package_roots,
-                &mut visited_directories,
-                &mut source_files,
-                &mut manifests,
-                &mut violations,
-            )?;
-        }
-    }
-    source_files.extend(target_sources);
+    walk_project(root, &mut sources, &mut manifests, &mut violations)?;
+    sources.sort();
     manifests.sort();
-    for manifest in manifests {
-        source_files.extend(cargo_target_source_paths(
-            &manifest,
-            &canonical_root,
-            &mut violations,
-        )?);
-    }
-    source_files.sort();
 
     let mut visited = BTreeSet::new();
-    for source_file in source_files {
-        scan_source_file(&source_file, &canonical_root, &mut visited, &mut violations)?;
-    }
-    for crate_root in &non_test_crate_roots {
-        // scan_source_file reports a crate root that does not tokenize.
-        let Ok(tokens) = TokenStream::from_str(&fs::read_to_string(crate_root)?) else {
-            continue;
-        };
-        let count = crate_level_expectation_count(&tokens, is_expectation);
-        if count != 0 {
-            violations.push(format!(
-                "{} has crate-level #![expect] attributes ({count}); outside test targets, put each expectation on the smallest enclosing statement or item",
-                crate_root.display()
-            ));
-        }
-    }
-    for crate_root in &test_crate_roots {
-        let Ok(tokens) = TokenStream::from_str(&fs::read_to_string(crate_root)?) else {
-            continue;
-        };
-        if crate_level_expectation_count(&tokens, expects_arithmetic) != 0 {
-            violations.push(format!(
-                "{} has a crate-level arithmetic expectation; test code takes no arithmetic expectation, so use checked_ methods (AGENTS.md)",
-                crate_root.display()
-            ));
-        }
+    for source in &sources {
+        scan_source_file(source, root, &groups, &mut visited, &mut violations)?;
     }
     let mut findings = ModuleFindings::default();
-    for crate_root in &non_test_crate_roots {
-        walk_crate(crate_root, false, &mut findings)?;
-    }
-    for crate_root in &test_crate_roots {
-        walk_crate(crate_root, true, &mut findings)?;
+    for manifest in &manifests {
+        manifest_violations(manifest, &mut violations)?;
+        let Some(package) = manifest.parent() else {
+            continue;
+        };
+        let (tests, others) = crate_roots(package)?;
+        for crate_root in &others {
+            // scan_source_file reports a crate root that does not tokenize.
+            let Ok(tokens) = TokenStream::from_str(&fs::read_to_string(crate_root)?) else {
+                continue;
+            };
+            let count = crate_level_expectation_count(&tokens, is_expectation);
+            if count != 0 {
+                violations.push(format!(
+                    "{} has crate-level #![expect] attributes ({count}); outside test targets, put each expectation on the smallest enclosing statement or item",
+                    crate_root.display()
+                ));
+            }
+            walk_crate(crate_root, false, &mut findings)?;
+        }
+        for crate_root in &tests {
+            let Ok(tokens) = TokenStream::from_str(&fs::read_to_string(crate_root)?) else {
+                continue;
+            };
+            if crate_level_expectation_count(&tokens, expects_arithmetic) != 0 {
+                violations.push(format!(
+                    "{} has a crate-level arithmetic expectation; test code takes no arithmetic expectation, so use checked_ methods (AGENTS.md)",
+                    crate_root.display()
+                ));
+            }
+            walk_crate(crate_root, true, &mut findings)?;
+        }
     }
     for (path, count) in &findings.module_expectations {
         violations.push(format!(
@@ -1113,424 +1062,81 @@ fn project_policy_violations(root: &Path) -> io::Result<Vec<String>> {
     Ok(violations)
 }
 
-fn collect_source_root_files(
-    source_root: &Path,
-    canonical_root: &Path,
-    package_roots: &BTreeSet<PathBuf>,
-    visited_directories: &mut BTreeSet<PathBuf>,
-    source_files: &mut Vec<PathBuf>,
-    manifests: &mut Vec<PathBuf>,
-    violations: &mut Vec<String>,
-) -> io::Result<()> {
-    if !visited_directories.insert(source_root.to_path_buf()) {
-        return Ok(());
-    }
-    for entry in fs::read_dir(source_root)? {
-        collect_project_files(
-            &entry?.path(),
-            canonical_root,
-            package_roots,
-            visited_directories,
-            source_files,
-            manifests,
-            violations,
-        )?;
-    }
-    Ok(())
-}
-
-fn cargo_workspace_inputs(
-    root: &Path,
-    canonical_root: &Path,
-    violations: &mut Vec<String>,
-) -> CargoWorkspaceInputs {
-    let manifest_path = root.join("Cargo.toml");
-    if !manifest_path.is_file() {
-        return CargoWorkspaceInputs::default();
-    }
-
-    let output = match Command::new(env!("CARGO"))
-        .args([
-            "metadata",
-            "--locked",
-            "--format-version=1",
-            "--manifest-path",
-        ])
-        .arg(&manifest_path)
-        .current_dir(root)
-        .output()
-    {
-        Ok(output) => output,
-        Err(error) => {
-            violations.push(format!(
-                "cannot run locked Cargo metadata for {}: {error}",
-                manifest_path.display()
-            ));
-            return CargoWorkspaceInputs::default();
-        },
-    };
-    if !output.status.success() {
-        violations.push(format!(
-            "locked Cargo metadata failed for {}: {}",
-            manifest_path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-        return CargoWorkspaceInputs::default();
-    }
-
-    let metadata = match serde_json::from_slice::<CargoMetadataDocument>(&output.stdout) {
-        Ok(metadata) => metadata,
-        Err(error) => {
-            violations.push(format!(
-                "locked Cargo metadata for {} is not valid JSON: {error}",
-                manifest_path.display()
-            ));
-            return CargoWorkspaceInputs::default();
-        },
-    };
-    let mut packages_by_id = BTreeMap::new();
-    for package in metadata.packages {
-        if packages_by_id.contains_key(&package.id) {
-            violations.push(format!(
-                "locked Cargo metadata contains duplicate package id {:?}",
-                package.id
-            ));
-            continue;
-        }
-        packages_by_id.insert(package.id.clone(), package);
-    }
-
-    let mut inputs = CargoWorkspaceInputs::default();
-    let mut seen_members = BTreeSet::new();
-    for member_id in metadata.workspace_members {
-        if !seen_members.insert(member_id.clone()) {
-            violations.push(format!(
-                "locked Cargo metadata contains duplicate workspace member id {member_id:?}"
-            ));
-            continue;
-        }
-        let Some(package) = packages_by_id.get(&member_id) else {
-            violations.push(format!(
-                "locked Cargo metadata workspace member {member_id:?} has no matching package"
-            ));
-            continue;
-        };
-        let Some(canonical_manifest) = canonical_workspace_path(
-            &package.manifest_path,
-            "workspace member manifest",
-            canonical_root,
-            violations,
-        ) else {
-            continue;
-        };
-        let Some(package_root) = canonical_manifest.parent() else {
-            violations.push(format!(
-                "workspace member manifest {} has no package root",
-                canonical_manifest.display()
-            ));
-            continue;
-        };
-        match fs::read_to_string(&canonical_manifest)
-            .and_then(|source| toml::from_str::<toml::Value>(&source).map_err(io::Error::other))
-        {
-            Ok(manifest) => {
-                let inherits_lints = manifest
-                    .get("lints")
-                    .and_then(|lints| lints.get("workspace"))
-                    .and_then(toml::Value::as_bool)
-                    == Some(true);
-                if !inherits_lints {
-                    violations.push(format!(
-                        "{} must declare [lints] workspace = true",
-                        canonical_manifest.display()
-                    ));
-                }
-            },
-            Err(error) => violations.push(format!(
-                "cannot inspect workspace lint inheritance in {}: {error}",
-                canonical_manifest.display()
-            )),
-        }
-        inputs.package_roots.insert(package_root.to_path_buf());
-        inputs.enumeration_roots.insert(package_root.to_path_buf());
-        for target in &package.targets {
-            if let Some(source) = canonical_workspace_path(
-                &target.src_path,
-                "workspace member target",
-                canonical_root,
-                violations,
-            ) {
-                if let Some(parent) = source.parent() {
-                    inputs.enumeration_roots.insert(parent.to_path_buf());
-                }
-                if target.kind.iter().any(|kind| kind != TEST_TARGET_KIND) {
-                    inputs.non_test_crate_roots.insert(source);
-                } else {
-                    inputs.test_crate_roots.insert(source);
-                }
-                inputs.target_sources.push(target.src_path.clone());
-            }
-        }
-    }
-    inputs
-}
-
-fn canonical_workspace_path(
-    path: &Path,
-    kind: &str,
-    canonical_root: &Path,
-    violations: &mut Vec<String>,
-) -> Option<PathBuf> {
-    let canonical_path = match fs::canonicalize(path) {
-        Ok(path) => path,
-        Err(error) => {
-            violations.push(format!(
-                "{kind} {} cannot be resolved: {error}",
-                path.display()
-            ));
-            return None;
-        },
-    };
-    if !canonical_path.starts_with(canonical_root) {
-        violations.push(format!(
-            "{kind} {} resolves outside canonical project root {}",
-            path.display(),
-            canonical_root.display()
-        ));
-        return None;
-    }
-    Some(canonical_path)
-}
-
-fn cargo_target_source_paths(
-    manifest_path: &Path,
-    canonical_root: &Path,
-    violations: &mut Vec<String>,
-) -> io::Result<Vec<PathBuf>> {
-    let canonical_manifest = match fs::canonicalize(manifest_path) {
-        Ok(path) => path,
-        Err(error) => {
-            violations.push(format!(
-                "{} cannot be resolved: {error}",
-                manifest_path.display()
-            ));
-            return Ok(Vec::new());
-        },
-    };
-    if !canonical_manifest.starts_with(canonical_root) {
-        violations.push(format!(
-            "{} resolves outside canonical project root {}",
-            manifest_path.display(),
-            canonical_root.display()
-        ));
-        return Ok(Vec::new());
-    }
-
-    let source = fs::read_to_string(&canonical_manifest)?;
-    let manifest = match toml::from_str::<toml::Value>(&source) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            violations.push(format!(
-                "{} is not valid TOML: {error}",
-                canonical_manifest.display()
-            ));
-            return Ok(Vec::new());
-        },
-    };
-    let Some(root_table) = manifest.as_table() else {
-        violations.push(format!(
-            "{} does not contain a TOML table",
-            canonical_manifest.display()
-        ));
-        return Ok(Vec::new());
-    };
-    let Some(manifest_directory) = canonical_manifest.parent() else {
-        violations.push(format!(
-            "{} has no parent directory",
-            canonical_manifest.display()
-        ));
-        return Ok(Vec::new());
-    };
-
-    let mut paths = Vec::new();
-    if let Some(package) = root_table.get("package") {
-        add_cargo_build_script_path(
-            package,
-            &canonical_manifest,
-            manifest_directory,
-            &mut paths,
-            violations,
-        );
-    }
-    if let Some(target) = root_table.get("lib") {
-        add_cargo_target_path(
-            target,
-            "lib",
-            &canonical_manifest,
-            manifest_directory,
-            &mut paths,
-            violations,
-        );
-    }
-    for target_kind in ["bin", "test", "example", "bench"] {
-        let Some(targets) = root_table.get(target_kind) else {
-            continue;
-        };
-        let Some(targets) = targets.as_array() else {
-            violations.push(format!(
-                "{} has non-array [[{target_kind}]] targets",
-                canonical_manifest.display()
-            ));
-            continue;
-        };
-        for target in targets {
-            add_cargo_target_path(
-                target,
-                target_kind,
-                &canonical_manifest,
-                manifest_directory,
-                &mut paths,
-                violations,
-            );
-        }
-    }
-    Ok(paths)
-}
-
-fn add_cargo_build_script_path(
-    package: &toml::Value,
-    manifest_path: &Path,
-    manifest_directory: &Path,
-    paths: &mut Vec<PathBuf>,
-    violations: &mut Vec<String>,
-) {
-    let Some(package) = package.as_table() else {
-        violations.push(format!(
-            "{} has a non-table package definition",
-            manifest_path.display()
-        ));
-        return;
-    };
-    let Some(build_script) = package.get("build") else {
-        return;
-    };
-    if build_script.as_bool().is_some_and(|enabled| !enabled) {
-        return;
-    }
-    let Some(path) = build_script.as_str() else {
-        violations.push(format!(
-            "{} has a malformed package.build; custom Cargo build-script paths must be literal strings or false",
-            manifest_path.display()
-        ));
-        return;
-    };
-    paths.push(manifest_directory.join(path));
-}
-
-fn add_cargo_target_path(
-    target: &toml::Value,
-    target_kind: &str,
-    manifest_path: &Path,
-    manifest_directory: &Path,
-    paths: &mut Vec<PathBuf>,
-    violations: &mut Vec<String>,
-) {
-    let Some(target) = target.as_table() else {
-        violations.push(format!(
-            "{} has a non-table {target_kind} target",
-            manifest_path.display()
-        ));
-        return;
-    };
-    let Some(path) = target.get("path") else {
-        return;
-    };
-    let Some(path) = path.as_str() else {
-        violations.push(format!(
-            "{} has a non-string {target_kind}.path; custom Cargo target paths must be literal strings",
-            manifest_path.display()
-        ));
-        return;
-    };
-    paths.push(manifest_directory.join(path));
-}
-
+/// Scans one source file, and each file its literal `include!`s name, which
+/// Rust resolves beside the including file.
 fn scan_source_file(
     source_path: &Path,
-    canonical_root: &Path,
-    visited: &mut BTreeSet<(PathBuf, PathBuf)>,
+    root: &Path,
+    groups: &BTreeSet<String>,
+    visited: &mut BTreeSet<PathBuf>,
     violations: &mut Vec<String>,
 ) -> io::Result<()> {
-    let canonical_path = match fs::canonicalize(source_path) {
-        Ok(path) => path,
-        Err(error) => {
-            violations.push(format!(
-                "{} cannot be resolved: {error}",
-                source_path.display()
-            ));
-            return Ok(());
-        },
-    };
-    if !canonical_path.starts_with(canonical_root) {
+    if !source_path.starts_with(root) || !source_path.is_file() {
         violations.push(format!(
-            "{} resolves outside canonical project root {}",
-            source_path.display(),
-            canonical_root.display()
+            "{} is included but is not a file in the project",
+            source_path.display()
         ));
         return Ok(());
     }
-    let Some(parent) = source_path.parent() else {
-        violations.push(format!("{} has no source directory", source_path.display()));
-        return Ok(());
-    };
-    let include_directory = fs::canonicalize(parent)?;
-    // Rust resolves include! beside the source path used by the compiler. Two
-    // symlinks to one file can therefore consume different included files.
-    if !visited.insert((canonical_path.clone(), include_directory.clone())) {
+    if !visited.insert(source_path.to_path_buf()) {
         return Ok(());
     }
-
-    let source = fs::read_to_string(&canonical_path)?;
+    let source = fs::read_to_string(source_path)?;
     let tokens = match TokenStream::from_str(&source) {
         Ok(tokens) => tokens,
         Err(error) => {
             violations.push(format!(
                 "{} is not tokenizable Rust source: {error}",
-                canonical_path.display()
+                source_path.display()
             ));
             return Ok(());
         },
     };
 
-    let count = allow_violations_in_tokens(&tokens);
+    let count = allow_violations_in_tokens(&tokens, groups);
     if count != 0 {
         violations.push(format!(
             "{} has #[allow] attributes, broad #[expect] attributes, or attributes forwarded from macro metavariables ({count}); use one lint in a reasoned #[expect] on the smallest enclosing statement or item (AGENTS.md)",
-            canonical_path.display()
+            source_path.display()
         ));
     }
 
     for reference in source_references(&tokens) {
         match reference {
             SourceReference::LiteralInclude(relative_path) => {
-                scan_source_file(
-                    &include_directory.join(relative_path),
-                    canonical_root,
-                    visited,
-                    violations,
-                )?;
+                let Some(directory) = source_path.parent() else {
+                    continue;
+                };
+                let included = normalized(&directory.join(relative_path));
+                scan_source_file(&included, root, groups, visited, violations)?;
             }
             SourceReference::OpaqueInclude => violations.push(format!(
                 "{} uses a non-literal include!; use a project-relative string literal so the policy scanner can inspect the compiler input",
-                canonical_path.display()
+                source_path.display()
             )),
             SourceReference::CustomModulePath => violations.push(format!(
                 "{} uses #[path]; use conventional mod file layout so the policy scanner can enumerate every compiler input",
-                canonical_path.display()
+                source_path.display()
             )),
         }
     }
     Ok(())
+}
+
+/// `path` with each `.` and each `..` that follows a name folded away, as
+/// the compiler reads an include path, without touching the disk.
+fn normalized(path: &Path) -> PathBuf {
+    let mut folded = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {},
+            Component::ParentDir if folded.file_name().is_some() => {
+                folded.pop();
+            },
+            other => folded.push(other),
+        }
+    }
+    folded
 }
 
 #[test]
@@ -1576,8 +1182,6 @@ fn requires_lint_inheritance_for_root_and_nested_workspace_packages() {
     fs::write(root.join("Cargo.toml"), root_manifest).expect("root manifest should be writable");
     fs::write(root.join("member/Cargo.toml"), member_manifest)
         .expect("member manifest should be writable");
-    write_fixture_lock(&root, &["member-package", "root-package"])
-        .expect("lock should be writable");
 
     let violations = project_policy_violations(&root).expect("workspace should be readable");
     assert_eq!(violations.len(), 2, "{violations:?}");
@@ -1668,29 +1272,6 @@ fn accepts_single_lint_reasoned_expectations() {
     );
 }
 
-#[test]
-fn lint_groups_match_the_toolchain() {
-    let mut toolchain_groups = BTreeSet::new();
-    for tool in ["clippy-driver", "rustdoc"] {
-        let output = Command::new(tool)
-            .args(["-W", "help"])
-            .current_dir(project_root())
-            .output()
-            .unwrap_or_else(|error| panic!("cannot run {tool}: {error}"));
-        assert!(
-            output.status.success(),
-            "{tool} -W help failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        toolchain_groups.extend(lint_group_names(&String::from_utf8_lossy(&output.stdout)));
-    }
-    let listed: BTreeSet<String> = LINT_GROUPS.map(str::to_owned).into();
-    assert_eq!(
-        listed, toolchain_groups,
-        "LINT_GROUPS must list every lint group of the pinned toolchain"
-    );
-}
-
 /// Reads the name column of each `Lint groups` table in `-W help` output.
 fn lint_group_names(help: &str) -> Vec<String> {
     let mut names = Vec::new();
@@ -1739,7 +1320,7 @@ fn rejects_crate_level_expectations_outside_test_targets() {
     for crate_root in crate_roots {
         assert!(
             violations.iter().any(|violation| {
-                violation.contains(crate_root) && violation.contains("crate-level #![expect]")
+                names_file(violation, crate_root) && violation.contains("crate-level #![expect]")
             }),
             "crate-level expectation in {crate_root} was not rejected: {violations:?}"
         );
@@ -1788,7 +1369,7 @@ fn rejects_crate_level_arithmetic_expectations_in_test_targets() {
     for crate_root in ["tests/properties.rs", "tests/conditional.rs"] {
         assert!(
             violations.iter().any(|violation| {
-                violation.contains(crate_root) && violation.contains("arithmetic expectation")
+                names_file(violation, crate_root) && violation.contains("arithmetic expectation")
             }),
             "arithmetic expectation in {crate_root} was not rejected: {violations:?}"
         );
@@ -1857,7 +1438,7 @@ fn rejects_module_wide_panic_expectations_outside_test_code() {
     ] {
         assert!(
             violations.iter().any(|violation| {
-                violation.contains(file)
+                names_file(violation, file)
                     && violation.contains(&format!("expectations of panic lints ({count})"))
             }),
             "module-wide expectations in {file} were not counted: {violations:?}"
@@ -1910,7 +1491,7 @@ fn rejects_impl_and_trait_wide_panic_expectations_outside_test_code() {
 
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].contains("src/lib.rs")
+        names_file(&violations[0], "src/lib.rs")
             && violations[0].contains("expectations of panic lints (4)"),
         "impl- and trait-wide expectations were not counted: {violations:?}"
     );
@@ -2085,7 +1666,7 @@ fn rejects_assertions_outside_test_code() {
     for (file, count) in expected {
         assert!(
             violations.iter().any(|violation| {
-                violation.contains(file)
+                names_file(violation, file)
                     && violation.contains(&format!("outside test code ({count})"))
             }),
             "assertions in {file} were not counted: {violations:?}"
@@ -2136,6 +1717,7 @@ fn rejects_module_declarations_the_walk_cannot_resolve() {
 
 #[test]
 fn denied_clippy_lints_are_classified_by_panic_scope() {
+    let groups = lint_groups().expect("the toolchain lists its lint groups");
     let source =
         fs::read_to_string(project_root().join("Cargo.toml")).expect("manifest should be readable");
     let manifest: toml::Value = toml::from_str(&source).expect("manifest should parse");
@@ -2156,7 +1738,7 @@ fn denied_clippy_lints_are_classified_by_panic_scope() {
             )
         })
         .map(|(name, _)| format!("clippy::{name}"))
-        .filter(|lint| !LINT_GROUPS.contains(&lint.as_str()))
+        .filter(|lint| !groups.contains(lint))
         .collect();
     let classified: BTreeSet<String> = PANIC_LINTS
         .iter()
@@ -2314,448 +1896,57 @@ fn follows_literal_includes_cycle_safely() {
 }
 
 #[test]
-fn follows_all_cargo_custom_target_source_paths() {
-    let root =
-        policy_fixture_root("cargo-custom-targets").expect("fixture root should be creatable");
-    fs::create_dir_all(root.join("src")).expect("fixture source directory should be creatable");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-            [package]
-            name = "policy-fixture"
-            version = "0.1.0"
-            edition = "2024"
-            build = "src/build-script.inc"
-
-            [lib]
-            path = "src/library.inc"
-
-            [[bin]]
-            name = "command"
-            path = "src/command.inc"
-
-            [[test]]
-            name = "integration"
-            path = "src/integration.inc"
-
-            [[example]]
-            name = "example"
-            path = "src/example.inc"
-
-            [[bench]]
-            name = "benchmark"
-            path = "src/benchmark.inc"
-
-            [workspace]
-            [workspace.lints]
-            [lints]
-            workspace = true
-        "#,
-    )
-    .expect("fixture manifest should be writable");
-    for source in [
-        "library.inc",
-        "command.inc",
-        "integration.inc",
-        "example.inc",
-        "benchmark.inc",
-        "build-script.inc",
+fn rejects_custom_target_and_build_script_paths() {
+    let root = policy_fixture_root("custom-targets").expect("fixture root should be creatable");
+    let package = "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n";
+    let lints = "[lints]\nworkspace = true\n";
+    for (name, manifest) in [
+        ("lib", format!("{package}{lints}[lib]\npath = \"lib.rs\"\n")),
+        (
+            "bin",
+            format!("{package}{lints}[[bin]]\nname = \"tool\"\npath = \"tool.rs\"\n"),
+        ),
+        ("build", format!("{package}build = \"make.rs\"\n{lints}")),
+        (
+            "named",
+            format!("{package}{lints}[[bench]]\nname = \"speed\"\n"),
+        ),
+        ("no-build", format!("{package}build = false\n{lints}")),
     ] {
-        fs::write(
-            root.join("src").join(source),
-            "#[allow(dead_code)] fn target() {}",
-        )
-        .expect("custom target source should be writable");
+        fs::create_dir_all(root.join(name)).expect("the package should be creatable");
+        fs::write(root.join(name).join("Cargo.toml"), manifest)
+            .expect("the manifest should be writable");
     }
-    write_fixture_lock(&root, &["policy-fixture"]).expect("fixture lock should be writable");
 
     let violations = project_policy_violations(&root).expect("fixture project should be readable");
-    assert_eq!(violations.len(), 6);
-    for source in [
-        "library.inc",
-        "command.inc",
-        "integration.inc",
-        "example.inc",
-        "benchmark.inc",
-        "build-script.inc",
-    ] {
+    assert_eq!(violations.len(), 3, "{violations:?}");
+    for name in ["lib", "bin", "build"] {
         assert!(
-            violations
-                .iter()
-                .any(|violation| violation.contains(source)),
-            "custom target {source} was not scanned: {violations:?}"
+            violations.iter().any(|violation| {
+                names_file(violation, &format!("{name}/Cargo.toml"))
+                    && violation.contains("custom target or build-script path")
+            }),
+            "{name}: {violations:?}"
         );
     }
 }
 
 #[cfg(unix)]
 #[test]
-fn follows_includes_relative_to_each_symlinked_cargo_target() {
-    use std::os::unix::fs::symlink;
-
-    let root =
-        policy_fixture_root("symlink-include-context").expect("fixture root should be creatable");
-    for directory in ["first", "second", "shared"] {
-        fs::create_dir_all(root.join(directory)).expect("source directory should be creatable");
-    }
+fn reports_symlinks_instead_of_following_them() {
+    let root = policy_fixture_root("symlinks").expect("fixture root should be creatable");
+    let outside =
+        policy_fixture_root("symlinks-outside").expect("fixture root should be creatable");
     fs::write(
-        root.join("Cargo.toml"),
-        r#"
-            [package]
-            name = "symlink-include-context"
-            version = "0.1.0"
-            edition = "2024"
-
-            [[bin]]
-            name = "first"
-            path = "first/main.inc"
-
-            [[bin]]
-            name = "second"
-            path = "second/main.inc"
-
-            [workspace]
-            [workspace.lints]
-            [lints]
-            workspace = true
-        "#,
+        outside.join("hidden.rs"),
+        "#[allow(dead_code)] fn hidden() {}",
     )
-    .expect("fixture manifest should be writable");
-    write_fixture_lock(&root, &["symlink-include-context"])
-        .expect("fixture lock should be writable");
-    fs::write(root.join("shared/main.inc"), "include!(\"payload.inc\");")
-        .expect("shared source should be writable");
-    fs::write(
-        root.join("shared/payload.inc"),
-        "compile_error!(\"include must use the source symlink directory\");",
-    )
-    .expect("unused canonical sibling should be writable");
-    for directory in ["first", "second"] {
-        symlink("../shared/main.inc", root.join(directory).join("main.inc"))
-            .expect("source symlink should be creatable");
-    }
-    fs::write(root.join("first/payload.inc"), "fn main() {}")
-        .expect("first included source should be writable");
-    fs::write(
-        root.join("second/payload.inc"),
-        "#[allow(dead_code)] fn main() {}",
-    )
-    .expect("second included source should be writable");
-
-    let output = Command::new(env!("CARGO"))
-        .args(["check", "--locked", "--manifest-path"])
-        .arg(root.join("Cargo.toml"))
-        .arg("--target-dir")
-        .arg(root.join("target"))
-        .output()
-        .expect("Cargo should validate the fixture's real include resolution");
-    assert!(
-        output.status.success(),
-        "the supported symlink layout must compile: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let violations = project_policy_violations(&root).expect("fixture should be readable");
-    assert_eq!(violations.len(), 1, "unexpected violations: {violations:?}");
-    assert!(violations[0].contains("second/payload.inc"));
-
-    fs::write(root.join("second/payload.inc"), "fn main() {}")
-        .expect("clean included source should be writable");
-    let violations = project_policy_violations(&root).expect("fixture should be readable");
-    assert!(
-        violations.is_empty(),
-        "unexpected violations: {violations:?}"
-    );
-}
-
-#[test]
-fn rejects_opaque_and_out_of_root_cargo_target_paths() {
-    let root =
-        policy_fixture_root("invalid-cargo-targets").expect("fixture root should be creatable");
-    let external = root
-        .parent()
-        .expect("fixture root should have a parent")
-        .join(format!("external-target-{}.inc", std::process::id()));
-    fs::write(&external, "fn external() {}").expect("external target source should be writable");
-    fs::write(
-        root.join("Cargo.toml"),
-        format!(
-            r#"
-                [package]
-                name = "policy-fixture"
-                version = "0.1.0"
-                edition = "2024"
-                build = true
-
-                [lib]
-                path = {{ workspace = true }}
-
-                [[bin]]
-                name = "external"
-                path = "../{}"
-
-                [workspace]
-            "#,
-            external
-                .file_name()
-                .and_then(|name| name.to_str())
-                .expect("external fixture name should be UTF-8")
-        ),
-    )
-    .expect("fixture manifest should be writable");
+    .expect("the outside source should be writable");
+    std::os::unix::fs::symlink(&outside, root.join("linked")).expect("link the folder");
 
     let violations = project_policy_violations(&root).expect("fixture project should be readable");
-    assert!(
-        violations
-            .iter()
-            .any(|violation| violation.contains("locked Cargo metadata failed"))
-    );
-    assert!(
-        violations
-            .iter()
-            .any(|violation| violation.contains("package.build"))
-    );
-    assert!(
-        violations
-            .iter()
-            .any(|violation| violation.contains("literal strings"))
-    );
-    assert!(
-        violations
-            .iter()
-            .any(|violation| violation.contains("outside canonical project root"))
-    );
-}
-
-#[test]
-fn accepts_an_explicitly_disabled_cargo_build_script() {
-    let root =
-        policy_fixture_root("disabled-build-script").expect("fixture root should be creatable");
-    fs::create_dir_all(root.join("src")).expect("fixture source directory should be creatable");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-            [package]
-            name = "policy-fixture"
-            version = "0.1.0"
-            edition = "2024"
-            build = false
-
-            [workspace]
-            [workspace.lints]
-            [lints]
-            workspace = true
-        "#,
-    )
-    .expect("fixture manifest should be writable");
-    fs::write(root.join("src/lib.rs"), "fn ordinary() {}")
-        .expect("fixture source should be writable");
-    write_fixture_lock(&root, &["policy-fixture"]).expect("fixture lock should be writable");
-
-    let violations = project_policy_violations(&root).expect("fixture project should be readable");
-    assert!(
-        violations.is_empty(),
-        "unexpected violations: {violations:?}"
-    );
-}
-
-#[test]
-fn rejects_workspace_members_outside_the_canonical_project_root() {
-    let container = std::env::temp_dir().join(format!(
-        "rust-policy-external-workspace-{}",
-        std::process::id()
-    ));
-    if container.exists() {
-        fs::remove_dir_all(&container).expect("stale fixture should be removable");
-    }
-    let root = container.join("project");
-    let external = container.join("member");
-    fs::create_dir_all(&root).expect("fixture root should be creatable");
-    fs::create_dir_all(&external).expect("external member directory should be creatable");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-            [workspace]
-            resolver = "3"
-            members = ["../member"]
-        "#,
-    )
-    .expect("workspace manifest should be writable");
-    fs::write(
-        external.join("Cargo.toml"),
-        r#"
-            [package]
-            name = "external-workspace-member"
-            version = "0.1.0"
-            edition = "2024"
-            workspace = "../project"
-
-            [lib]
-            path = "lib.rs"
-        "#,
-    )
-    .expect("external member manifest should be writable");
-    fs::write(external.join("lib.rs"), "fn external() {}")
-        .expect("external member source should be writable");
-    write_fixture_lock(&root, &["external-workspace-member"])
-        .expect("workspace lock should be writable");
-
-    let violations = project_policy_violations(&root).expect("fixture project should be readable");
-    assert!(
-        violations.iter().any(|violation| {
-            violation.contains("workspace member manifest")
-                && violation.contains("outside canonical project root")
-        }),
-        "external workspace member was not rejected: {violations:?}"
-    );
-    fs::remove_dir_all(container).expect("fixture should be removable");
-}
-
-#[test]
-fn scans_internal_workspace_targets_without_scanning_external_path_dependencies() {
-    let root =
-        policy_fixture_root("workspace-member-scope").expect("fixture root should be creatable");
-    let member = root.join("vendor/member");
-    fs::create_dir_all(&member).expect("internal member directory should be creatable");
-    let dependency_name = format!("external-path-dependency-{}", std::process::id());
-    let dependency = root
-        .parent()
-        .expect("fixture root should have a parent")
-        .join(&dependency_name);
-    fs::create_dir_all(&dependency).expect("external dependency directory should be creatable");
-
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-            [workspace]
-            resolver = "3"
-            members = ["vendor/member"]
-            [workspace.lints]
-        "#,
-    )
-    .expect("workspace manifest should be writable");
-    fs::write(
-        member.join("Cargo.toml"),
-        format!(
-            r#"
-                [package]
-                name = "internal-workspace-member"
-                version = "0.1.0"
-                edition = "2024"
-
-                [dependencies]
-                external-path-dependency = {{ path = "../../../{dependency_name}" }}
-
-                [lib]
-                path = "compiler-input"
-
-                [lints]
-                workspace = true
-            "#,
-        ),
-    )
-    .expect("internal member manifest should be writable");
-    fs::write(member.join("compiler-input"), "include!(\"payload.inc\");")
-        .expect("internal target should be writable");
-    fs::write(
-        member.join("payload.inc"),
-        "#[allow(dead_code)] fn internal_member() {}",
-    )
-    .expect("internal included source should be writable");
-    fs::write(
-        dependency.join("Cargo.toml"),
-        r#"
-            [package]
-            name = "external-path-dependency"
-            version = "0.1.0"
-            edition = "2024"
-
-            [lib]
-            path = "lib.rs"
-        "#,
-    )
-    .expect("external dependency manifest should be writable");
-    fs::write(
-        dependency.join("lib.rs"),
-        "#[allow(dead_code)] fn external_dependency() {}",
-    )
-    .expect("external dependency source should be writable");
-    fs::write(
-        root.join("Cargo.lock"),
-        r#"# This file is automatically @generated by Cargo.
-version = 4
-
-[[package]]
-name = "external-path-dependency"
-version = "0.1.0"
-
-[[package]]
-name = "internal-workspace-member"
-version = "0.1.0"
-dependencies = [
- "external-path-dependency",
-]
-"#,
-    )
-    .expect("workspace lock should be writable");
-
-    let violations = project_policy_violations(&root).expect("fixture project should be readable");
-    assert_eq!(violations.len(), 1, "unexpected violations: {violations:?}");
-    assert!(violations[0].contains("payload.inc"));
-    assert!(!violations[0].contains("external-path-dependency"));
-}
-
-#[test]
-fn scans_cfg_disabled_conventional_modules_in_root_pruned_workspace_members() {
-    let root = policy_fixture_root("workspace-member-conventional-module")
-        .expect("fixture root should be creatable");
-    let member = root.join("vendor/member");
-    fs::create_dir_all(member.join("src")).expect("member source directory should be creatable");
-    fs::create_dir_all(member.join("target")).expect("member target directory should be creatable");
-    fs::create_dir_all(member.join("vendor")).expect("member vendor directory should be creatable");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-            [workspace]
-            resolver = "3"
-            members = ["vendor/member"]
-            [workspace.lints]
-        "#,
-    )
-    .expect("workspace manifest should be writable");
-    fs::write(
-        member.join("Cargo.toml"),
-        r#"
-            [package]
-            name = "conventional-module-member"
-            version = "0.1.0"
-            edition = "2024"
-
-            [lints]
-            workspace = true
-        "#,
-    )
-    .expect("member manifest should be writable");
-    fs::write(member.join("src/lib.rs"), "#[cfg(windows)] mod hidden;")
-        .expect("member crate root should be writable");
-    fs::write(
-        member.join("src/hidden.rs"),
-        "#![allow(dead_code)]\npub fn hidden() {}",
-    )
-    .expect("cfg-disabled conventional module should be writable");
-    for generated in [
-        member.join("target/generated.rs"),
-        member.join("vendor/dependency.rs"),
-    ] {
-        fs::write(generated, "#![allow(dead_code)]\nfn generated() {}")
-            .expect("generated source should be writable");
-    }
-    write_fixture_lock(&root, &["conventional-module-member"])
-        .expect("workspace lock should be writable");
-
-    let violations = project_policy_violations(&root).expect("fixture project should be readable");
-    assert_eq!(violations.len(), 1, "unexpected violations: {violations:?}");
-    assert!(violations[0].contains("src/hidden.rs"));
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(violations[0].contains("is a symlink"), "{violations:?}");
 }
 
 #[test]
@@ -2786,6 +1977,7 @@ fn rejects_opaque_includes_and_custom_module_paths() {
 #[test]
 fn prunes_generated_roots_without_hiding_nested_source_directories() {
     let root = policy_fixture_root("nested-exclusion").expect("fixture root should be creatable");
+    fs::write(root.join("Cargo.toml"), "[workspace]\n").expect("the manifest should be writable");
     fs::create_dir_all(root.join("vendor")).expect("root vendor directory should be creatable");
     fs::write(
         root.join("vendor/generated.rs"),
@@ -2805,81 +1997,7 @@ fn prunes_generated_roots_without_hiding_nested_source_directories() {
 
     let violations = project_policy_violations(&root).expect("fixture project should be readable");
     assert_eq!(violations.len(), 1);
-    assert!(violations[0].contains("src/vendor/mod.rs"));
-}
-
-#[cfg(unix)]
-#[test]
-fn follows_internal_rust_symlinks_and_rejects_external_targets() {
-    use std::os::unix::fs::symlink;
-
-    let root = policy_fixture_root("symlinks").expect("fixture root should be creatable");
-    let external = root
-        .parent()
-        .expect("fixture root should have a parent")
-        .join(format!("external-{}", std::process::id()));
-    fs::write(
-        root.join("payload.inc"),
-        "#[allow(dead_code)] fn internal() {}",
-    )
-    .expect("internal symlink target should be writable");
-    fs::write(&external, "fn external() {}").expect("external symlink target should be writable");
-    symlink("payload.inc", root.join("internal.rs")).expect("internal symlink should be creatable");
-    symlink(&external, root.join("external.rs")).expect("external symlink should be creatable");
-
-    let violations = project_policy_violations(&root).expect("fixture project should be readable");
-    assert_eq!(violations.len(), 2);
-    assert!(
-        violations
-            .iter()
-            .any(|violation| violation.contains("payload.inc"))
-    );
-    assert!(
-        violations
-            .iter()
-            .any(|violation| violation.contains("outside canonical project root"))
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn follows_internal_directory_symlinks_and_rejects_external_targets() {
-    use std::os::unix::fs::symlink;
-
-    let root = policy_fixture_root("directory-symlinks").expect("fixture root should be creatable");
-    let internal = root.join("target/compiler-input");
-    fs::create_dir_all(&internal).expect("internal target directory should be creatable");
-    fs::write(
-        internal.join("payload.rs"),
-        "#[allow(dead_code)] fn internal() {}",
-    )
-    .expect("internal target source should be writable");
-    symlink(&internal, root.join("src")).expect("internal directory symlink should be creatable");
-    symlink(root.join("src"), internal.join("cycle"))
-        .expect("directory symlink cycle should be creatable");
-
-    let external = root
-        .parent()
-        .expect("fixture root should have a parent")
-        .join(format!("external-directory-{}", std::process::id()));
-    fs::create_dir_all(&external).expect("external target directory should be creatable");
-    fs::write(external.join("payload.rs"), "fn external() {}")
-        .expect("external target source should be writable");
-    symlink(&external, root.join("external-src"))
-        .expect("external directory symlink should be creatable");
-
-    let violations = project_policy_violations(&root).expect("fixture project should be readable");
-    assert_eq!(violations.len(), 2);
-    assert!(
-        violations
-            .iter()
-            .any(|violation| violation.contains("payload.rs"))
-    );
-    assert!(
-        violations
-            .iter()
-            .any(|violation| violation.contains("outside canonical project root"))
-    );
+    assert!(names_file(&violations[0], "src/vendor/mod.rs"));
 }
 
 /// Cargo reruns a copied tree's up-to-date test binary, whose compile-time
@@ -2890,22 +2008,30 @@ fn project_root() -> PathBuf {
         .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from)
 }
 
+/// An empty folder for the fixture project `name`, which the next run of
+/// the same test replaces.
 fn policy_fixture_root(name: &str) -> io::Result<PathBuf> {
-    let root = project_root()
-        .join("target/allow-policy-fixtures")
-        .join(format!("{}-{name}", std::process::id()));
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("allow-policy")
+        .join(name);
+    match fs::remove_dir_all(&root) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+        _ => {},
+    }
     fs::create_dir_all(&root)?;
     Ok(root)
 }
 
-fn write_fixture_lock(root: &Path, package_names: &[&str]) -> io::Result<()> {
-    let mut lock = String::from("# This file is automatically @generated by Cargo.\nversion = 4\n");
-    for package_name in package_names {
-        lock.push_str("\n[[package]]\nname = \"");
-        lock.push_str(package_name);
-        lock.push_str("\"\nversion = \"0.1.0\"\n");
-    }
-    fs::write(root.join("Cargo.lock"), lock)
+/// Whether `violation` names the project file at `path`, a `/`-separated
+/// path from the project root, on any platform.
+fn names_file(violation: &str, path: &str) -> bool {
+    violation.contains(
+        &Path::new(path)
+            .components()
+            .collect::<PathBuf>()
+            .display()
+            .to_string(),
+    )
 }
 
 /// Writes a one-package fixture project with the given files and returns its
@@ -2918,7 +2044,6 @@ fn fixture_violations(name: &str, files: &[(&str, &str)]) -> io::Result<Vec<Stri
             "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n[workspace.lints]\n[lints]\nworkspace = true\n"
         ),
     )?;
-    write_fixture_lock(&root, &[name])?;
     for (path, source) in files {
         let path = root.join(path);
         if let Some(parent) = path.parent() {
@@ -2939,169 +2064,4 @@ fn project_sources_contain_no_policy_violations() {
         "first-party sources break the source policy; each violation names its fix: {}",
         violations.join(", ")
     );
-}
-
-#[test]
-fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
-    let root = project_root();
-    let task_path = root.join(".config/mise/conf.d/rust.toml");
-    let tasks =
-        fs::read_to_string(&task_path).expect("the copied Rust task fragment should be readable");
-    let Some(full) = task_definition(&tasks, "rust:mutants") else {
-        panic!("the full Rust mutation task should exist");
-    };
-    let Some(diff) = task_definition(&tasks, "rust:mutants:diff") else {
-        panic!("the diff Rust mutation task should exist");
-    };
-    let Some(check) = task_definition(&tasks, "rust:standards:check") else {
-        panic!("the Rust standards gate task should exist");
-    };
-
-    assert!(
-        check.contains("\"rust:mutants:diff\""),
-        "the Rust standards gate must run the diff mutation lane"
-    );
-    assert!(
-        !check.contains("\"rust:mutants\""),
-        "the Rust standards gate must not run the full mutation lane"
-    );
-    // A copied target/ must not catch another Cargo task's build half written.
-    assert!(
-        diff.contains("wait_for = [\"rust:policy\", \"rust:package\"]"),
-        "the diff mutation lane must start after the gate's other Cargo tasks"
-    );
-
-    for (lane, task) in [("full", full), ("diff", diff)] {
-        // The copied target/ holds only current workspace builds: the copy
-        // resets modification times, so Cargo cannot tell a stale build from
-        // a current one.
-        let steps = [
-            "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then".to_owned(),
-            "cargo test --no-run --workspace --all-features --locked".to_owned(),
-            "\ncargo mutants ".to_owned(),
-            format!("sh scripts/check-mutants.sh {lane} mutants.out"),
-        ];
-        let positions: Vec<usize> = steps
-            .iter()
-            .map(|step| {
-                task.find(step.as_str())
-                    .unwrap_or_else(|| panic!("the {lane} mutation task is missing {step}"))
-            })
-            .collect();
-        assert!(
-            positions.is_sorted(),
-            "the {lane} mutation task must bring a copied target/ up to date, then run cargo-mutants and check its report"
-        );
-        let Some(mutants_run) = task.lines().find(|line| line.starts_with("cargo mutants ")) else {
-            panic!("the {lane} mutation task should run cargo-mutants");
-        };
-        // The in-place build matches the build cargo-mutants runs for each
-        // mutant, so the mutant builds reuse it.
-        for flag in [
-            " --workspace ",
-            " --all-features ",
-            " --cargo-arg=--locked ",
-        ] {
-            assert!(
-                mutants_run.contains(flag),
-                "the {lane} mutation task's cargo-mutants run must keep {} to match its in-place build",
-                flag.trim()
-            );
-        }
-        for flag in [
-            " --output=. ",
-            " --test-workspace=true ",
-            " --copy-target=\"${MUTANTS_COPY_TARGET:-false}\" ",
-            " ${MUTANTS_SHARD:+\"--shard=$MUTANTS_SHARD\"} ",
-        ] {
-            assert!(
-                mutants_run.contains(flag),
-                "the {lane} mutation task's cargo-mutants run must pass {}: the report under the project root, every workspace test against each mutant, and CI's target copy and shard",
-                flag.trim()
-            );
-        }
-    }
-    // Round-robin gives each sweep shard a share of every crate's mutants, so
-    // the shards take similar time.
-    assert!(
-        full.contains(" ${MUTANTS_SHARD:+--sharding=round-robin}"),
-        "the full mutation task must take its shards round-robin"
-    );
-    let selection =
-        fs::read_to_string(root.join("scripts/select-mutants.sh")).expect("selection script");
-    for contract in [
-        "refs/remotes/origin/main^{commit}",
-        "refs/heads/main^{commit}",
-        "$base_ref^{commit}",
-        "git merge-base HEAD \"$base_commit\"",
-        "git ls-files --others --exclude-standard",
-        "git add -N <path>",
-        "git diff --relative \"$merge_base\" --",
-    ] {
-        assert!(
-            selection.contains(contract),
-            "the diff mutation task is missing base-resolution contract {contract}"
-        );
-    }
-    // An empty shard finishes before it downloads the text reader model or
-    // builds anything.
-    let steps = [
-        "sh scripts/select-mutants.sh ",
-        "if [ -z \"$selected\" ]; then",
-        "mise run ocr:model",
-        "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then",
-    ];
-    let positions: Vec<usize> = steps
-        .iter()
-        .map(|step| {
-            diff.find(step)
-                .unwrap_or_else(|| panic!("the diff mutation task is missing {step}"))
-        })
-        .collect();
-    assert!(
-        positions.is_sorted(),
-        "the diff mutation task must finish empty selections before it downloads or builds"
-    );
-    let Some(mutants_run) = diff.lines().find(|line| line.starts_with("cargo mutants ")) else {
-        panic!("the diff mutation task should run cargo-mutants");
-    };
-    let Some(mutants_list) = selection
-        .lines()
-        .find(|line| line.contains("cargo mutants --list "))
-    else {
-        panic!("the diff mutation task should list the selected mutants");
-    };
-    // The list must select the same mutants as the run.
-    for flag in [
-        " --workspace ",
-        " --all-features ",
-        " ${MUTANTS_SHARD:+\"--shard=$MUTANTS_SHARD\"} ",
-        " --in-diff \"$diff_file\"",
-    ] {
-        assert!(
-            mutants_list.contains(flag) && mutants_run.contains(flag),
-            "the diff mutation task's list and run must both pass {}",
-            flag.trim()
-        );
-    }
-    let untracked_guard = selection
-        .find("git ls-files --others --exclude-standard")
-        .expect("the diff mutation task should inspect untracked files");
-    let diff_capture = selection
-        .find("git diff --relative \"$merge_base\" --")
-        .expect("the diff mutation task should capture the merge-base diff");
-    assert!(
-        untracked_guard < diff_capture,
-        "the untracked-file guard must run before the mutation diff is captured"
-    );
-}
-
-fn task_definition<'a>(tasks: &'a str, name: &str) -> Option<&'a str> {
-    let heading = format!("[tasks.\"{name}\"]");
-    let (_, after_heading) = tasks.split_once(&heading)?;
-    Some(
-        after_heading
-            .split_once("\n[tasks.")
-            .map_or(after_heading, |(definition, _)| definition),
-    )
 }

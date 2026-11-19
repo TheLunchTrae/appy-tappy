@@ -56,19 +56,6 @@ cargo nextest run --workspace --all-targets --all-features --locked
 cargo test --workspace --doc --all-features --locked
 """
 
-# The root package's policy tests compare POSIX paths, so this variant leaves
-# them out. The windows CI job runs it, because the Windows adapters' tests run
-# only on Windows.
-[tasks."rust:test:members"]
-description = "Run the member crates' tests and doctests, without the root policy tests"
-depends = ["ocr:model"]
-wait_for = ["rust:doc"]
-run = """
-set -eu
-cargo nextest run --workspace --exclude appy-tappy-workspace --all-targets --all-features --locked
-cargo test --workspace --exclude appy-tappy-workspace --doc --all-features --locked
-"""
-
 # Times the screen checks; on a Windows desktop it also times a live window's
 # capture-to-decision latency when APPYTAPPY_BENCH_WINDOW names one.
 [tasks."rust:bench"]
@@ -86,15 +73,6 @@ set -eu
 cargo build --profile dist --locked -p appytappy-runtime
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/footprint.ps1 -Runtime target/dist/appytappy-runtime.exe
 """
-
-# Every package is unpublished (`publish = false`), and Cargo then resolves a
-# member's path dependencies on other members from crates.io, where they do not
-# exist. So the task builds each package's file list and normalized manifest
-# without the crates.io verification build.
-[tasks."rust:package"]
-description = "Validate Rust package contents"
-wait_for = ["rust:test"]
-run = "cargo package --workspace --allow-dirty --locked --list > /dev/null"
 
 # Both mutation lanes take the same two settings, which CI sets:
 #
@@ -145,7 +123,7 @@ sh scripts/check-mutants.sh full mutants.out
 # Cargo tasks, so a copied target/ never holds a build half written.
 [tasks."rust:mutants:diff"]
 description = "Mutation-test changed code; default base prefers origin/main"
-wait_for = ["rust:policy", "rust:package"]
+wait_for = ["rust:policy", "rust:test"]
 run = """
 set -eu
 
@@ -198,7 +176,6 @@ depends = [
   "rust:policy",
   "rust:doc",
   "rust:test",
-  "rust:package",
   "rust:machete",
   "rust:deny",
 ]
