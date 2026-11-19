@@ -722,8 +722,7 @@ impl Input for WindowsInput {
 #[derive(Debug, Default)]
 struct Opener {
     /// The thread of an open that timed out, which may still be waiting on
-    /// the shell. An open that answered in time leaves none, so the next open
-    /// right after it runs.
+    /// the shell.
     waiting: OneOpen<JoinHandle<()>>,
 }
 

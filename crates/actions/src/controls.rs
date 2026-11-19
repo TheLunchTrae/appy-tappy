@@ -303,6 +303,10 @@ mod tests {
         assert!(set_or_find_again(&2, fails, || panic!("not needed")).unwrap());
         assert!(set_or_find_again(&1, fails, || Ok(Some(2))).unwrap());
         assert!(
+            set_or_find_again(&1, fails, || Ok(Some(1))).is_err(),
+            "the control found again is set, and its failure is reported"
+        );
+        assert!(
             !set_or_find_again(&1, fails, || Ok(None)).unwrap(),
             "gone for good"
         );

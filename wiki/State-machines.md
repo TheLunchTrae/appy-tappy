@@ -851,6 +851,19 @@ had not undone.
   slow actions can accumulate unbounded work, including runs whose sessions
   ended. Disabling and quitting can wait behind that work.
 
+### Opener
+
+The Windows controls open a program, file, or link on a thread of its own and
+wait at most 2 seconds for the shell to answer. `OneOpen` in
+`crates/actions/src/controls.rs` holds which open may still be running.
+
+- **Idle.** No open is waiting. An open starts; one that answers in time, or
+  whose thread stops, is joined and leaves the opener idle.
+- **Waiting.** An open timed out, and its thread may still wait on the shell.
+  Each new open is skipped with a `WouldBlock` error, which the action logs.
+  The first open after that thread finishes joins it and starts, so a target
+  that never answers leaves one waiting thread rather than one for each try.
+
 ### Tray thread
 
 The tray thread (`crates/platform/src/win/tray.rs`) runs a message loop. Its
