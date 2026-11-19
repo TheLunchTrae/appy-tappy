@@ -13,7 +13,7 @@ publish.workspace = true
 [dev-dependencies]
 # The policy tests tokenize Rust syntax, including attributes inside macro
 # bodies, without mistaking comments or literals for code, and read the JSON
-# that Cargo, mise, and cargo-mutants write.
+# that Cargo and mise write.
 proc-macro2 = "1.0.107"
 serde.workspace = true
 serde_json.workspace = true

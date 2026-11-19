@@ -50,9 +50,8 @@ final check before a release, not a gate.
   Windows, so a file task that is not `sh` names its interpreter with a
   `# MISE shell` line, as `hygiene` does.
 
-- `rust:policy` and the mutation tasks need `setsid`, which Windows and macOS
-  lack, so `standards:check` runs on Linux: in CI or WSL. The root package's
-  policy tests compare POSIX paths, so `rust:test` runs on Linux or macOS. On
+- The root package's policy tests compare POSIX paths, so `rust:test`, and
+  with it `standards:check`, runs on Linux or macOS: in CI or WSL. On
   Windows, run `rust:fmt`, `rust:lint`, `rust:doc`, `rust:test:members`,
   `rust:footprint`, and the `md:` tasks.
 - `mise lock` records every platform in `lockfile_platforms`; commit
@@ -392,8 +391,7 @@ workspace on demand, before a release.
 `.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
 approval, because the Linux gate compiles them out.
 Read [mutation operation](wiki/Rust-standards.md#mutation-testing)
-before changing report paths, mutation selection, or transaction handling.
-Confirm no run is active before clearing a stale lock.
+before changing report paths or mutation selection.
 
 ### Dependencies and review
 

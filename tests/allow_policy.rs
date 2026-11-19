@@ -2995,27 +2995,14 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     );
 
     for (lane, task) in [("full", full), ("diff", diff)] {
-        for contract in [
-            ". scripts/mutants-lock.sh",
-            "run_mutants_task_child",
-            "mutants_task_release_lock",
-        ] {
-            assert!(
-                task.contains(contract),
-                "the {lane} mutation task is missing transaction-lock contract {contract}"
-            );
-        }
         // The copied target/ holds only current workspace builds: the copy
         // resets modification times, so Cargo cannot tell a stale build from
         // a current one.
         let steps = [
-            format!("acquire_mutants_task_lock {lane}"),
             "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then".to_owned(),
-            "run_mutants_task_child cargo test --no-run --workspace --all-features --locked"
-                .to_owned(),
-            "rm -rf mutants.out".to_owned(),
-            "run_mutants_task_child cargo mutants ".to_owned(),
-            format!("sh scripts/verify-mutants.sh {lane} mutants.out"),
+            "cargo test --no-run --workspace --all-features --locked".to_owned(),
+            "\ncargo mutants ".to_owned(),
+            format!("sh scripts/check-mutants.sh {lane} mutants.out"),
         ];
         let positions: Vec<usize> = steps
             .iter()
@@ -3026,12 +3013,9 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
             .collect();
         assert!(
             positions.is_sorted(),
-            "the {lane} mutation task must, under its lock, bring a copied target/ up to date, clear the previous report, then run and verify cargo-mutants"
+            "the {lane} mutation task must bring a copied target/ up to date, then run cargo-mutants and check its report"
         );
-        let Some(mutants_run) = task
-            .lines()
-            .find(|line| line.starts_with("run_mutants_task_child cargo mutants "))
-        else {
+        let Some(mutants_run) = task.lines().find(|line| line.starts_with("cargo mutants ")) else {
             panic!("the {lane} mutation task should run cargo-mutants");
         };
         // The in-place build matches the build cargo-mutants runs for each
@@ -3082,14 +3066,12 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
             "the diff mutation task is missing base-resolution contract {contract}"
         );
     }
-    // cargo-mutants writes a report without outcomes when a shard selects no
-    // mutants. Read-only selection can finish an empty shard even while
-    // another run owns the report. All build and report work stays locked.
+    // An empty shard finishes before it downloads the text reader model or
+    // builds anything.
     let steps = [
         "sh scripts/select-mutants.sh ",
         "if [ -z \"$selected\" ]; then",
-        "acquire_mutants_task_lock diff",
-        "run_mutants_task_child mise run ocr:model",
+        "mise run ocr:model",
         "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then",
     ];
     let positions: Vec<usize> = steps
@@ -3101,12 +3083,9 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         .collect();
     assert!(
         positions.is_sorted(),
-        "the diff mutation task must finish empty selections before taking the lock, then build under the lock"
+        "the diff mutation task must finish empty selections before it downloads or builds"
     );
-    let Some(mutants_run) = diff
-        .lines()
-        .find(|line| line.starts_with("run_mutants_task_child cargo mutants "))
-    else {
+    let Some(mutants_run) = diff.lines().find(|line| line.starts_with("cargo mutants ")) else {
         panic!("the diff mutation task should run cargo-mutants");
     };
     let Some(mutants_list) = selection

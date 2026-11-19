@@ -27,9 +27,8 @@ run = "cargo fmt --all -- --check"
 # cheapest check to the full test run instead of letting them contend for it.
 # rust:policy runs beside them, and the mutation lane waits for all of them, so
 # a copy of target/ never catches a build half written. rust:policy's
-# `cargo test` builds also take the shared lock; the rest of its time goes to
-# the lock self-test's shutdown timeouts and to Clippy on the lint-wall probe,
-# which uses a separate target directory.
+# `cargo test` build also takes the shared lock; the rest of its time goes to
+# Clippy on the lint-wall probe, which uses a separate target directory.
 # tests/lint_wall.rs replays only rust:lint's run value: keep it one plain
 # command line that passes Cargo only the arguments the test lists, set no key
 # but description and run, and define rust:lint in no other mise file.
@@ -38,16 +37,8 @@ description = "Run Clippy for all Rust workspace targets/features"
 run = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -F clippy::allow_attributes -F clippy::allow_attributes_without_reason"
 
 [tasks."rust:policy"]
-description = "Self-test the mutation verifiers and prove the configured lint wall fires"
-run = """
-set -eu
-
-sh scripts/verify-mutants.sh --self-test
-sh scripts/mutants-lock.sh --self-test
-cargo test --locked --all-features --test lint_wall -- --ignored
-
-echo "The mutation verifiers and configured lint wall passed."
-"""
+description = "Prove the configured lint wall fires"
+run = "cargo test --locked --all-features --test lint_wall -- --ignored"
 
 [tasks."rust:doc"]
 description = "Build Rust documentation with warnings denied"
@@ -125,6 +116,11 @@ run = "cargo package --workspace --allow-dirty --locked --list > /dev/null"
 # Both lanes test two mutants at once: each mutant's build waits on its linker
 # most of the time, so a second build uses the idle cores.
 #
+# cargo-mutants locks mutants.out while it runs, so a second run in the same
+# tree waits, and it moves an old report to mutants.out.old before it writes
+# a new one. scripts/check-mutants.sh then applies the project's own rules to
+# the report.
+#
 # cargo-mutants leaves ignored files out of its copy too, and the text reader
 # model is one, so both lanes point the setup app's tests at the one
 # ocr:model downloaded with APPYTAPPY_TEXT_READER_MODEL.
@@ -140,19 +136,11 @@ set -eu
 
 export APPYTAPPY_TEXT_READER_MODEL="$PWD/apps/setup/src-tauri/models/text-recognition.onnx"
 
-. scripts/mutants-lock.sh
-acquire_mutants_task_lock full
-trap mutants_task_release_lock EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
-  run_mutants_task_child cargo test --no-run --workspace --all-features --locked
+  cargo test --no-run --workspace --all-features --locked
 fi
-rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} ${MUTANTS_SHARD:+--sharding=round-robin}
-run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
+cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} ${MUTANTS_SHARD:+--sharding=round-robin}
+sh scripts/check-mutants.sh full mutants.out
 """
 
 # The standards gate runs this lane, so it finishes in minutes rather than
@@ -169,30 +157,21 @@ export APPYTAPPY_TEXT_READER_MODEL="$PWD/apps/setup/src-tauri/models/text-recogn
 diff_file="$(mktemp)"
 trap 'rm -f "$diff_file"' EXIT
 
-# When this shard selects no mutants, cargo-mutants writes a report without
-# outcomes.json, which verification rejects, so the lane lists the mutants
-# first and stops when there are none. Listing builds nothing.
+# The lane lists the mutants first and stops when this shard selects none,
+# before it downloads the text reader model. Listing builds nothing.
 selected="$(sh scripts/select-mutants.sh "$diff_file")"
 if [ -z "$selected" ]; then
   echo "The diff selects no mutants${MUTANTS_SHARD:+ in shard $MUTANTS_SHARD}; nothing to test."
   exit 0
 fi
 
-. scripts/mutants-lock.sh
-acquire_mutants_task_lock diff
-trap 'mutants_task_release_lock; rm -f "$diff_file"' EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-run_mutants_task_child mise run ocr:model
+mise run ocr:model
 
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
-  run_mutants_task_child cargo test --no-run --workspace --all-features --locked
+  cargo test --no-run --workspace --all-features --locked
 fi
-rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file"
-run_mutants_task_child sh scripts/verify-mutants.sh diff mutants.out
+cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file"
+sh scripts/check-mutants.sh diff mutants.out
 """
 
 [tasks."rust:machete"]

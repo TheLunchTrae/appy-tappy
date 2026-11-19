@@ -163,27 +163,24 @@ cargo-mutants leaves ignored files out of its copy of the tree, and the setup
 app's [text reader model](Setup-app.md#the-text-reader) is one. Both lanes
 run `ocr:model` and set `APPYTAPPY_TEXT_READER_MODEL` to the downloaded
 file, so the test that reads with the model finds it from the copy. The diff
-lane downloads the model only after selecting work and taking the run lock.
+lane downloads the model only after selecting work.
 
-`rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
-`mutants.out/` and validate its JSON, so stale evidence cannot pass. Every
-report needs exactly one successful baseline. A full report in which every
-mutant is unviable fails. A diff report may hold only unviable mutants, as a
+cargo-mutants owns `mutants.out/`: it locks the directory while it runs, so a
+second run in the same tree waits for the first, and it moves the previous
+report to `mutants.out.old/` before it writes a new one. It fails the run for
+a surviving mutant, a timeout, or a failed baseline. `scripts/check-mutants.sh`
+then checks the two rules that are the project's own, and
+`tests/mutation_check.rs` tests it. A full report must test at least one
+mutant that builds. A diff report may hold only unviable mutants, as a
 shard of a small change can, but only when each mutant's log shows a compiler
 error in the mutated file: a broken build directory, or a build killed for
 memory or disk, also leaves every mutant unviable. A surviving mutant is a
 review finding.
 
-Both lanes hold `target/standards-mutants.lock` through the run and its
-verification, so a second run fails instead of replacing the report. If a
-crash leaves the lock behind, the error names the directory. Confirm that no
-mutation task is running, then remove it. The lock uses `setsid` and
-process-group signals, so mutation runs on Linux only.
-
 `scripts/select-mutants.sh` writes the diff to its path argument and lists
 its selected mutants without building or downloading the text model. Both
 the diff lane and the quality workflow use it. A selection failure fails the
-check; an empty selection succeeds without acquiring the run lock.
+check; an empty selection succeeds without building anything.
 
 ## Repository settings
 
