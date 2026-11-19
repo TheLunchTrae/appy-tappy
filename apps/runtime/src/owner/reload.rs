@@ -1,7 +1,8 @@
 //! What the owner knows about reading the saved files, and what each read
 //! means: which files to read again and when, whether automations start as
 //! the tray last left them, and the orders that put what was read to use.
-//! The owner reads the files and carries out what comes back; every
+//! The owner reads the files, lends the read of the tray's last state for
+//! the one decision that needs it, and carries out what comes back; every
 //! decision is here, where a table of reads tests it without a disk.
 
 use std::time::{Duration, Instant};
@@ -16,11 +17,11 @@ use crate::plan;
 
 /// How long the owner waits before it reads the saved files again after
 /// they could not be read, such as while another program held one.
-pub(super) const RETRY_WAIT: Duration = Duration::from_secs(2);
+const RETRY_WAIT: Duration = Duration::from_secs(2);
 
 /// How many times in a row the owner reads the saved files again before it
 /// waits for the next save.
-pub(super) const RETRIES: u32 = 5;
+const RETRIES: u32 = 5;
 
 /// Which saved files the owner reads: the settings, the applications and
 /// automations, or both.

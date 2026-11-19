@@ -896,7 +896,8 @@ and sends `Reload` each time the setup app sets it. Several saves before the
 reload watch wakes become one reload. `read_saved` in
 `apps/runtime/src/owner.rs` reads the files that the reload names, and
 `Reloads::reloaded` in `apps/runtime/src/owner/reload.rs` decides what the
-read means, with no disk: the log lines, and the orders from
+read means, reading only the tray's last state, and only when the first
+settings say to remember it: the log lines, and the orders from
 `Model::reload`, which takes the settings' read interval first, so the
 readers that a new plan starts read at it, then the plan, then starts over
 the readers the plan kept running at the old interval, so no reader starts

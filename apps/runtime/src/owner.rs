@@ -281,7 +281,7 @@ impl Crew {
     }
 
     /// Keeps the reader `started` for `session`, its reader number `number`,
-    /// and answers whether it started. When its thread could not start, the
+    /// and traces that it is reading. When its thread could not start, the
     /// log says so for the application named `name`, and the owner hears
     /// that the reader ended, as a reader that ran tells it itself, so the
     /// session starts its next reader after a wait.
@@ -292,11 +292,11 @@ impl Crew {
         started: io::Result<Reader>,
         name: &str,
         log: &mut Log,
-    ) -> bool {
+    ) {
         match started {
             Ok(reader) => {
                 self.readers.insert(session, reader);
-                true
+                record(&mut self.trace, What::Reading, (session, None, None));
             },
             Err(error) => {
                 note(log, &format!("{name}: its reader cannot start: {error}"));
@@ -309,7 +309,6 @@ impl Crew {
                     reason = "the owner holds the receiver while it runs, so the send cannot fail"
                 )]
                 let _ = self.events.send(Event::Reading(ended));
-                false
             },
         }
     }
@@ -801,8 +800,9 @@ fn run_once(
 }
 
 /// Carries out `orders`: starts and stops readers and hands actions to the
-/// action thread, with the trace records [`records`] names for each.
-#[mutants::skip] // Starts threads; `records` holds its decisions.
+/// action thread, with the trace records [`records`] names for each and
+/// the one [`Crew::read`] makes for a reader that started.
+#[mutants::skip] // Starts threads; `records` and `Crew::read` hold its decisions.
 fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
     for order in orders {
         if let Some(line) = order_line(&order) {
@@ -813,7 +813,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
         if let Some(what) = before {
             record(&mut crew.trace, what, subject);
         }
-        let done = match order {
+        match order {
             Order::Read {
                 session,
                 reader,
@@ -826,13 +826,12 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                 let (job, trace) = crew.reader_job(session, reader, plan, watched, interval);
                 let system = Arc::clone(&crew.system);
                 let started = Reader::start(CHECK_AGAIN, system, job, trace, crew.events.clone());
-                crew.read(session, reader, started, &name, log)
+                crew.read(session, reader, started, &name, log);
             },
             Order::StopReading(id, name) => {
                 if let Some(Err(error)) = crew.readers.remove(&id).map(Reader::stop) {
                     note(log, &format!("{name}'s reader stopped badly: {error}"));
                 }
-                true
             },
             Order::Run {
                 owner,
@@ -853,7 +852,6 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                     cause,
                 };
                 crew.act(act::Control::Job(job), log);
-                true
             },
             Order::Undo {
                 owner,
@@ -866,23 +864,22 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                     cause,
                 };
                 crew.act(act::Control::Job(job), log);
-                true
             },
-            Order::Held(..) => true,
-        };
-        if done && let Some(what) = after {
+            Order::Held(..) => {},
+        }
+        if let Some(what) = after {
             record(&mut crew.trace, what, subject);
         }
     }
 }
 
-/// The trace records carrying out `order` makes: one before, and one after,
-/// which a reader whose thread cannot start does not make. A fired or
-/// released automation is recorded, then queued once the action thread has
-/// its job.
+/// The trace records carrying out `order` makes: one before, and one after.
+/// A fired or released automation is recorded, then queued once the action
+/// thread has its job. A reader's record is [`Crew::read`]'s, since only a
+/// reader whose thread started is reading.
 const fn records(order: &Order) -> (Option<What>, Option<What>) {
     match order {
-        Order::Read { .. } => (None, Some(What::Reading)),
+        Order::Read { .. } => (None, None),
         Order::StopReading(..) => (None, Some(What::Stopped)),
         Order::Run { .. } => (Some(What::Fired), Some(What::Queued)),
         Order::Undo { .. } => (Some(What::Released), Some(What::Queued)),
@@ -1717,9 +1714,12 @@ mod tests {
     fn a_reader_that_cannot_start_tells_the_owner_it_ended() {
         let (mut crew, _controls, _received, heard) = crew();
         let mut scratch = Scratch::new("reader-cannot-start");
+        let (trace, entries) = Trace::for_test(1, &[TraceCategory::Lifecycle]);
+        crew.trace = trace;
         let no_thread = Err(io::Error::other("no more threads"));
         let (session, reader) = (SessionId(3), ReaderNumber(1));
-        assert!(!crew.read(session, reader, no_thread, "Example App", &mut scratch.log));
+        crew.read(session, reader, no_thread, "Example App", &mut scratch.log);
+        assert!(crate::trace::sent(&entries).is_empty(), "it is not reading");
         assert!(
             matches!(
                 heard.try_recv(),
@@ -1740,23 +1740,30 @@ mod tests {
     }
 
     #[test]
-    fn a_reader_that_started_is_kept_for_its_session() {
+    fn a_reader_that_started_is_kept_for_its_session_and_traced() {
         let (mut crew, _controls, _received, heard) = crew();
         let mut scratch = Scratch::new("reader-started");
+        let (trace, entries) = Trace::for_test(1, &[TraceCategory::Lifecycle]);
+        crew.trace = trace;
         let (reader, _told) = Reader::stand_in();
         let session = SessionId(3);
-        assert!(crew.read(
+        crew.read(
             session,
             ReaderNumber(1),
             Ok(reader),
             "Example App",
             &mut scratch.log,
-        ));
+        );
         assert_eq!(
             crew.readers.keys().collect::<Vec<_>>(),
             [&session],
             "the owner stops it with its session"
         );
+        let sent: Vec<(What, Option<SessionId>)> = crate::trace::sent(&entries)
+            .into_iter()
+            .map(|record| (record.what, record.session))
+            .collect();
+        assert_eq!(sent, [(What::Reading, Some(session))]);
         assert!(heard.try_recv().is_err(), "nothing ended");
         assert_eq!(scratch.log(), "", "and nothing is logged");
     }
@@ -1799,7 +1806,7 @@ mod tests {
                 .each_ref()
                 .map(|order| (records(order), subject(order))),
             [
-                ((None, Some(What::Reading)), (SessionId(1), None, None)),
+                ((None, None), (SessionId(1), None, None)),
                 ((None, Some(What::Stopped)), (SessionId(1), None, None)),
                 (
                     (Some(What::Fired), Some(What::Queued)),
