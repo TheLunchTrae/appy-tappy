@@ -227,7 +227,8 @@ stateDiagram-v2
   orders too and sets `picked` (see [Reload watch](#reload-watch)), `Due`
   when a timer passed, `Reload` the saved files, `TraceFailed`, or `Stop`.
   `carry` traces each order as `records` in `apps/runtime/src/owner.rs`
-  says, before it carries it out and after. The owner waits for its next
+  says, before it carries it out and after, and `Crew::read` traces a
+  reader once its thread starts. The owner waits for its next
   event until the first deadline from `wake`: a held rule, a reader restart,
   a retry of the saved files, or the trace's end. When the deadline passes,
   `OwnerTimer` puts one `Due` after the events already queued. A pending
