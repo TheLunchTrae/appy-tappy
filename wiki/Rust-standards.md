@@ -37,7 +37,9 @@ Panic-class lints, the print macros, and the shared-state types that
 overflow checks.
 
 An exception is a per-site `#[expect(lint, reason = "...")]`, which fails once
-the lint stops firing. `#[allow]` is rejected everywhere.
+the lint stops firing. `#[allow]` is rejected everywhere: `Cargo.toml` forbids
+`allow_attributes` and `allow_attributes_without_reason`, so the compiler also
+rejects an attempt to expect or allow either one away.
 
 ## Ownership boundary
 
@@ -56,8 +58,7 @@ inherits the lint wall. It parses every first-party Rust source and rejects:
 
 - `#[allow]` in any form, including `cfg_attr`-nested, raw `r#allow`, and
   attributes inside macro bodies;
-- `#[expect]` that names more than one lint, a lint group, or an
-  allow-attribute lint;
+- `#[expect]` that names more than one lint or a lint group;
 - crate-level `#![expect]` outside test roots;
 - outside test code, panic-lint expectations that cover a module, `impl`, or
   `trait`, and calls to `assert!`, `assert_eq!`, and `assert_ne!`.
@@ -75,17 +76,15 @@ POSIX paths, so it runs on Linux or macOS, not Windows.
 
 ## Lint-wall proof
 
-`rust:policy` proves that the wall fires. `tests/lint_wall.rs` replays the
-`rust:lint` command over `policy-fixtures/lint-wall.rs.in` in a scratch package
-that takes the workspace's lints, edition, and `rust-version`. Each
-`//~ ERROR <code>` comment marks a diagnostic that line must report; a missing
-or unexpected diagnostic fails the task. The proof also fails on these routes
-that could lower lint levels without the probe noticing: extra keys or
-arguments on `rust:lint`; `-A`, `--allow`, `--force-warn`, `--cap-lints`,
-unstable `-Z`, or `@file` flags in the Clippy arguments, `RUSTFLAGS`-style
-variables, or Cargo config `rustflags`; a forced `CLIPPY_ARGS`; or a
-`CLIPPY_CONF_DIR` outside the project. Change the probe and the test's list of codes together with the
-wall.
+`rust:policy` proves that the wall fires. `tests/lint_wall.rs` runs Clippy
+with warnings denied over `policy-fixtures/lint-wall.rs.in` in a scratch
+package that takes the workspace's lints, edition, and `rust-version`, and the
+project's `clippy.toml`. Each `//~ ERROR <code>` comment marks a diagnostic
+that line must report; a missing or unexpected diagnostic fails the task. The
+probe defends what nothing else checks: that the `clippy.toml` entries
+resolve, which a typo would make silent, and that the wall covers
+`#[cfg(test)]` code. Change the probe and the test's list of codes together
+with the wall.
 
 ## Dependencies
 

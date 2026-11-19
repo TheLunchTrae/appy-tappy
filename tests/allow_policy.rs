@@ -49,12 +49,6 @@ const LINT_GROUPS: [&str; 24] = [
     "warnings",
 ];
 
-/// The lints that keep `#[allow]` out; expecting them reopens that door.
-const ALLOW_ATTRIBUTE_LINTS: [&str; 2] = [
-    "clippy::allow_attributes",
-    "clippy::allow_attributes_without_reason",
-];
-
 /// The Cargo target kind whose roots may carry a crate-level expectation.
 /// Benches, examples, and build scripts are not test crates.
 const TEST_TARGET_KIND: &str = "test";
@@ -77,8 +71,8 @@ const PANIC_LINTS: [&str; 10] = [
 
 /// The other Clippy lints the workspace denies by name. Their findings are not
 /// panic sites, so a module-wide expectation of one stays allowed. Every lint
-/// denied by name sits in this list, `PANIC_LINTS`, or `ALLOW_ATTRIBUTE_LINTS`,
-/// so denying a new one forces that classification.
+/// denied by name sits in this list or `PANIC_LINTS`, so denying a new one
+/// forces that classification. The forbidden lints cannot be expected at all.
 const NON_PANIC_LINTS: [&str; 11] = [
     "clippy::clone_on_ref_ptr",
     "clippy::dbg_macro",
@@ -358,14 +352,13 @@ fn meta_contains(meta: &Meta, matches: fn(&Meta) -> bool) -> bool {
         .is_ok_and(|metas| metas.iter().any(|meta| meta_contains(meta, matches)))
 }
 
-/// An expectation must name one lint that is neither a group nor a lint that
-/// keeps `#[allow]` out.
+/// An expectation must name one lint that is not a group.
 fn is_broad_expectation(meta: &Meta) -> bool {
     let lints = expected_lints(meta);
     lints.len() > 1
-        || lints.iter().any(|lint| {
-            LINT_GROUPS.contains(&lint.as_str()) || ALLOW_ATTRIBUTE_LINTS.contains(&lint.as_str())
-        })
+        || lints
+            .iter()
+            .any(|lint| LINT_GROUPS.contains(&lint.as_str()))
 }
 
 fn expects_arithmetic(meta: &Meta) -> bool {
@@ -1653,21 +1646,6 @@ fn rejects_expectations_naming_lint_groups() {
 }
 
 #[test]
-fn rejects_expectations_on_the_allow_attribute_lints() {
-    let source = r#"
-        #[expect(clippy::allow_attributes, reason = "claimed exception")]
-        fn bare_allow() {}
-
-        #[cfg_attr(test, expect(clippy::allow_attributes_without_reason, reason = "claimed exception"))]
-        fn unexplained_allow() {}
-        "#;
-    assert_eq!(
-        allow_policy_violation_count(source).expect("valid Rust tokens"),
-        2
-    );
-}
-
-#[test]
 fn accepts_single_lint_reasoned_expectations() {
     let source = r#"
         #[expect(clippy::unwrap_used, reason = "the parser accepted this input")]
@@ -2174,7 +2152,7 @@ fn denied_clippy_lints_are_classified_by_panic_scope() {
                 value
                     .as_str()
                     .or_else(|| value.get("level").and_then(toml::Value::as_str)),
-                Some("deny" | "forbid")
+                Some("deny")
             )
         })
         .map(|(name, _)| format!("clippy::{name}"))
@@ -2183,12 +2161,11 @@ fn denied_clippy_lints_are_classified_by_panic_scope() {
     let classified: BTreeSet<String> = PANIC_LINTS
         .iter()
         .chain(&NON_PANIC_LINTS)
-        .chain(&ALLOW_ATTRIBUTE_LINTS)
         .map(|lint| (*lint).to_owned())
         .collect();
     assert_eq!(
         denied, classified,
-        "each lint [workspace.lints.clippy] denies must sit in PANIC_LINTS, NON_PANIC_LINTS, or ALLOW_ATTRIBUTE_LINTS, and each listed lint must be denied"
+        "each lint [workspace.lints.clippy] denies must sit in PANIC_LINTS or NON_PANIC_LINTS, and each listed lint must be denied"
     );
 }
 

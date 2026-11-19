@@ -29,12 +29,9 @@ run = "cargo fmt --all -- --check"
 # a copy of target/ never catches a build half written. rust:policy's
 # `cargo test` build also takes the shared lock; the rest of its time goes to
 # Clippy on the lint-wall probe, which uses a separate target directory.
-# tests/lint_wall.rs replays only rust:lint's run value: keep it one plain
-# command line that passes Cargo only the arguments the test lists, set no key
-# but description and run, and define rust:lint in no other mise file.
 [tasks."rust:lint"]
 description = "Run Clippy for all Rust workspace targets/features"
-run = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -F clippy::allow_attributes -F clippy::allow_attributes_without_reason"
+run = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
 
 [tasks."rust:policy"]
 description = "Prove the configured lint wall fires"

@@ -338,8 +338,8 @@ outside test targets, and expectations of a panic lint such as
 silence too much;
 `tests/allow_policy.rs` rejects them.
 Stale expectations fail the lint gate. Lint levels come only from
-`[workspace.lints]` and reasoned expectations; `rust:policy` rejects inherited
-compiler flags and Cargo configuration that lower them.
+`[workspace.lints]` and reasoned expectations; do not lower them with
+compiler flags or Cargo configuration.
 
 For a justified panic assertion, use `expect` with a message naming the
 invariant. Clippy's test exemptions cover `#[test]` functions and items under

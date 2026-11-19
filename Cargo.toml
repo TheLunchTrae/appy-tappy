@@ -94,9 +94,10 @@ pedantic = { level = "deny", priority = -1 }
 
 # Exceptions are visible and self-expiring or they do not exist: no bare
 # `#[allow]`, ever. `#[expect]` fails the build once the lint stops firing,
-# so stale exceptions cannot accumulate.
-allow_attributes = "deny"
-allow_attributes_without_reason = "deny"
+# so stale exceptions cannot accumulate. Forbidden, so no attribute can
+# expect or allow these two away.
+allow_attributes = "forbid"
+allow_attributes_without_reason = "forbid"
 
 # Panic-free production code: a reachable panic is an invariant the types
 # failed to carry. Test code is exempt only through clippy.toml's
