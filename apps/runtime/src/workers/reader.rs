@@ -42,9 +42,10 @@
 //! capture's frame loop panicked, after [`RESTART_AFTER`] frames in a row
 //! fail, and when reading a frame panics, which the capture's frame handler
 //! catches so it does not end the capture's thread without a word. After a
-//! capture ends this way, the reader waits before it captures again, from
-//! a second up to [`RESTART_WAIT_MAX`] as a [`Backoff`] waits, doubling while each new capture ends before it reads
-//! a frame, which a frame whose reading panicked is not, and logs why once
+//! capture ends this way, the reader waits before it captures again, with a
+//! [`Backoff`] that starts at a second and doubles up to [`RESTART_WAIT_MAX`]
+//! while each new capture ends before it reads a frame, which a frame whose
+//! reading panicked is not, and logs why once
 //! until the reason changes. While capturing, the reader
 //! checks every [`CHECK_AGAIN`] that the window still shows and still fits
 //! the application best, because a hidden window sends no frames and no

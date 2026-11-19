@@ -805,8 +805,9 @@ stateDiagram-v2
   after a panic thereby replaces what the old one said. The owner takes it
   that actions can run until the first report, keeps the last report in the
   model's `actions_can_run`, and the tray shows it.
-- **Ready.** After each job, the worker tries the pending restores that are
-  due. While any restore is pending, it waits for the next job only until
+- **Ready.** After each job, the worker retries the pending restores: every
+  volume restore, and each media restore whose wait is over. While any
+  restore is pending, it waits for the next job only until
   `Actions::next_retry`, when the journal says the next one is due.
 - **LastTry.** `last_try` tries every pending restore once, due or not, and
   forgets them.

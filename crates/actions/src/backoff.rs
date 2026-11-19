@@ -31,7 +31,8 @@ impl Backoff {
     }
 
     /// Starts waiting after the first failure, at `now`, waiting at most
-    /// `longest` between two tries.
+    /// `longest` between two tries. A `longest` of zero waits not at all, so
+    /// a caller that loops on it tries again at once.
     #[must_use]
     pub fn up_to(now: Instant, longest: Duration) -> Self {
         let first = FIRST_WAIT.min(longest);

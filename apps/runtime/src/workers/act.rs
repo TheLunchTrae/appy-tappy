@@ -300,8 +300,9 @@ where
     }
 
     /// When no job came in time: makes the controls again if they are
-    /// missing and their wait is over, or tries the pending restores that
-    /// are due at `now`.
+    /// missing and their wait is over, or else retries the pending restores
+    /// at `now`, as [`Actions::retry_restores`] does: every volume restore,
+    /// and each media restore whose wait is over.
     fn retry(&mut self, now: Instant) -> Vec<String> {
         match self.actions.get_mut() {
             Ok(actions) => given_up(actions.retry_restores(now)).into_iter().collect(),
