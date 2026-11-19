@@ -23,7 +23,7 @@ use appytappy_config::signal::Value;
 use appytappy_engine::{Effect, RuleIndex, Session};
 
 use crate::click::ClickTargets;
-use crate::lifecycle::Change;
+use crate::lifecycle::{Change, keeps_process};
 use crate::plan::{AppPlan, RulePlan};
 
 /// One session of an attached application. A new session starts each time
@@ -357,13 +357,13 @@ impl Model {
             }
         }
         let mut orders: Vec<Order> = changed.into_iter().flat_map(|id| self.stop(id)).collect();
-        // Detection must confirm a process again after its executable pattern
-        // changes. Do not restart against the old attachment in the meantime.
+        // Detection ends the process's attachment too and confirms a process
+        // again, so nothing starts against the old attachment meanwhile.
         self.attached.retain(|app, _| {
             self.plan
                 .get(app)
                 .zip(plan.get(app))
-                .is_some_and(|(old, new)| old.runs.window.executable == new.runs.window.executable)
+                .is_some_and(|(old, new)| keeps_process(&old.runs.window, &new.runs.window))
         });
         self.plan = plan;
         let attached: Vec<String> = self.attached.keys().cloned().collect();
@@ -378,10 +378,23 @@ impl Model {
         self.interval
     }
 
-    /// Sets how often readers read. Readers that start from now on read at
-    /// it; [`Model::restart_readers`] moves the running ones to it.
-    pub(crate) const fn set_interval(&mut self, interval: ReadInterval) {
-        self.interval = interval;
+    /// Puts what a reload read to use at `now`: the read interval and the
+    /// plan, each when it read. The interval comes first, so the readers a
+    /// new plan starts read at it; then the plan; then the readers the plan
+    /// kept running start over at the new interval, so no reader starts
+    /// twice.
+    pub(crate) fn reload(
+        &mut self,
+        interval: Option<ReadInterval>,
+        plan: Option<BTreeMap<String, Arc<AppPlan>>>,
+        now: Instant,
+    ) -> Vec<Order> {
+        if let Some(interval) = interval {
+            self.interval = interval;
+        }
+        let mut orders = plan.map_or_else(Vec::new, |plan| self.replan(plan));
+        orders.extend(self.restart_readers(now));
+        orders
     }
 
     /// Starts over each running app's reader that reads at another interval
@@ -390,7 +403,7 @@ impl Model {
     /// stopped carries its number, so it is dropped. A session whose reader
     /// ended starts no reader here: the one it starts when its wait passes
     /// reads at the new interval.
-    pub(crate) fn restart_readers(&mut self, now: Instant) -> Vec<Order> {
+    fn restart_readers(&mut self, now: Instant) -> Vec<Order> {
         let interval = self.interval;
         let mut orders = Vec::new();
         for (id, running) in &mut self.running {
@@ -1043,16 +1056,14 @@ mod tests {
         model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &plan("B", 90.0))]));
         model.apply(started("a", 7));
         model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
-        model.set_interval(ReadInterval::DEFAULT);
         assert_eq!(
-            model.restart_readers(Instant::now()),
+            model.reload(Some(ReadInterval::DEFAULT), None, Instant::now()),
             [],
             "the same interval changes nothing"
         );
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        model.set_interval(slower);
-        let orders = model.restart_readers(Instant::now());
+        let orders = model.reload(Some(slower), None, Instant::now());
         assert_eq!(kinds(&orders), ["stop 0 A", "read 0 A"], "b is not running");
         let Some(Order::Read { interval, .. }) = orders.last() else {
             panic!("a read order");
@@ -1064,7 +1075,7 @@ mod tests {
             "the automation stays run"
         );
         assert_eq!(
-            model.restart_readers(Instant::now()),
+            model.reload(None, None, Instant::now()),
             [],
             "a moves to it once"
         );
@@ -1090,8 +1101,7 @@ mod tests {
         assert!(model.next_due().is_some(), "held back by its cooldown");
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        model.set_interval(slower);
-        model.restart_readers(Instant::now());
+        model.reload(Some(slower), None, Instant::now());
         assert_eq!(model.next_due(), None, "nothing holds on unseen values");
         assert_eq!(model.recheck(now + Duration::from_secs(61)), []);
     }
@@ -1104,11 +1114,11 @@ mod tests {
         model.apply(started("b", 8));
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        // As the owner does on a reload: the interval, then the plan, then
-        // the readers the plan left running.
-        model.set_interval(slower);
-        let mut orders = model.replan(plans(&[("a", &plan("A", 80.0)), ("b", &plan("B", 90.0))]));
-        orders.extend(model.restart_readers(Instant::now()));
+        let orders = model.reload(
+            Some(slower),
+            Some(plans(&[("a", &plan("A", 80.0)), ("b", &plan("B", 90.0))])),
+            Instant::now(),
+        );
         assert_eq!(
             kinds(&orders),
             ["stop 0 A", "read 2 A", "stop 1 B", "read 1 B"],
@@ -1255,8 +1265,7 @@ mod tests {
         // Long after that reader started, the session starts another.
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        model.set_interval(slower);
-        model.restart_readers(after(now, 40_000));
+        model.reload(Some(slower), None, after(now, 40_000));
         model.reader_ended(SessionId(0), ReaderNumber(2), after(now, 41_000));
         assert_eq!(
             model.next_due(),
@@ -1291,9 +1300,8 @@ mod tests {
         model.apply(started("a", 7));
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        model.set_interval(slower);
         assert_eq!(
-            readers(&model.restart_readers(Instant::now())),
+            readers(&model.reload(Some(slower), None, Instant::now())),
             [(SessionId(0), ReaderNumber(1), slower)]
         );
         assert_eq!(
@@ -1329,9 +1337,8 @@ mod tests {
         model.reader_ended(SessionId(0), ReaderNumber(0), now);
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        model.set_interval(slower);
         assert_eq!(
-            model.restart_readers(Instant::now()),
+            model.reload(Some(slower), None, Instant::now()),
             [],
             "no reader runs to start over"
         );
@@ -1340,7 +1347,7 @@ mod tests {
             [(SessionId(0), ReaderNumber(1), slower)],
             "the reader that starts after the wait reads at the new interval"
         );
-        assert_eq!(model.restart_readers(Instant::now()), []);
+        assert_eq!(model.reload(None, None, Instant::now()), []);
     }
 
     #[test]
