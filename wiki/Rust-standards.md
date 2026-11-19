@@ -172,7 +172,7 @@ cargo-mutants owns `mutants.out/`: it moves the previous report to
 `mutants.out.old/` before it writes a new one. Its lock on the directory lasts
 only while it runs, not through the check that follows, so a second lane in
 the same tree can replace the report that the first is about to check. Run
-one mutation lane at a time in a tree; CI runs one on each runner. It fails the run for
+one mutation lane at a time in a tree; CI runs one on each runner. cargo-mutants fails the run for
 a surviving mutant, a timeout, or a failed baseline. `scripts/check-mutants.sh`
 then checks the two rules that are the project's own, and
 `tests/mutation_check.rs` tests it. A full report must test at least one
