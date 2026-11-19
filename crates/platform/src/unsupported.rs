@@ -184,7 +184,7 @@ pub fn lower_thread_priority() -> io::Result<()> {
 impl LocalTime {
     /// `None`, since AppyTappy does not run here.
     #[must_use]
-    pub const fn now() -> Option<Self> {
+    pub fn now() -> Option<Self> {
         None
     }
 }
