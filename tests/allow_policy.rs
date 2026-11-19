@@ -862,7 +862,8 @@ fn path_is_ident(path: &syn::Path, expected: &str) -> bool {
 }
 
 /// Directories the walk skips wherever they are: Git's own, and installed
-/// JavaScript packages.
+/// JavaScript packages. It also skips each directory that holds a
+/// `CACHEDIR.TAG`, as every Cargo build directory does, whatever its name.
 const SKIPPED_DIRECTORIES: [&str; 2] = [".git", "node_modules"];
 
 /// Directories the walk skips beside a Cargo manifest: build and mutation
@@ -896,6 +897,7 @@ fn walk_project(
             ));
         } else if kind.is_dir() {
             let skipped = SKIPPED_DIRECTORIES.contains(&name.as_ref())
+                || path.join("CACHEDIR.TAG").is_file()
                 || (package && PACKAGE_OUTPUT_DIRECTORIES.contains(&name.as_ref()));
             if !skipped {
                 walk_project(&path, sources, manifests, violations)?;
@@ -913,13 +915,23 @@ fn walk_project(
 /// the test targets, and the rest. A manifest that sets a custom target path
 /// is reported by [`manifest_violations`].
 fn crate_roots(package: &Path) -> io::Result<(Vec<PathBuf>, Vec<PathBuf>)> {
-    let mut others: Vec<PathBuf> = ["src/lib.rs", "src/main.rs", "build.rs"]
-        .iter()
-        .map(|root| package.join(root))
-        .filter(|root| root.is_file())
-        .collect();
-    for directory in ["src/bin", "examples", "benches"] {
-        others.extend(target_files(&package.join(directory))?);
+    // Each path joins its parts one at a time, so it takes the platform's
+    // separator, as the paths a directory walk finds do.
+    let src = package.join("src");
+    let mut others: Vec<PathBuf> = [
+        src.join("lib.rs"),
+        src.join("main.rs"),
+        package.join("build.rs"),
+    ]
+    .into_iter()
+    .filter(|root| root.is_file())
+    .collect();
+    for directory in [
+        src.join("bin"),
+        package.join("examples"),
+        package.join("benches"),
+    ] {
+        others.extend(target_files(&directory)?);
     }
     let tests = target_files(&package.join("tests"))?;
     Ok((tests, others))
@@ -1981,6 +1993,19 @@ fn prunes_generated_roots_without_hiding_nested_source_directories() {
     fs::create_dir_all(root.join("vendor")).expect("root vendor directory should be creatable");
     fs::write(
         root.join("vendor/generated.rs"),
+        "#[allow(dead_code)] fn generated() {}",
+    )
+    .expect("generated source should be writable");
+
+    let build = root.join("src/build-elsewhere");
+    fs::create_dir_all(&build).expect("a second build directory should be creatable");
+    fs::write(
+        build.join("CACHEDIR.TAG"),
+        "Signature: 8a477f597d28d172789f06886806bc55",
+    )
+    .expect("the cache tag should be writable");
+    fs::write(
+        build.join("out.rs"),
         "#[allow(dead_code)] fn generated() {}",
     )
     .expect("generated source should be writable");
