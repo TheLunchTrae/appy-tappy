@@ -56,6 +56,14 @@ const OWNER_GRACE: Duration = RESCAN;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Watchlist(BTreeMap<String, WindowMatch>);
 
+/// Whether a process that fits `old` stays attached once its app's window
+/// match is `new`: only while the executable pattern stays the same. A
+/// changed pattern ends the attachment, in detection and in the model, and
+/// detection confirms a process again.
+pub(crate) fn keeps_process(old: &WindowMatch, new: &WindowMatch) -> bool {
+    old.executable == new.executable
+}
+
 impl Watchlist {
     /// Watches `apps`, each an app's ID and its window match.
     pub(crate) fn new(apps: impl IntoIterator<Item = (String, WindowMatch)>) -> Self {
@@ -189,11 +197,13 @@ impl Lifecycle {
     /// to find the apps it adds.
     pub(crate) fn watch(&mut self, watchlist: Watchlist, now: Instant) -> Vec<Change> {
         let mut changes = Vec::new();
-        let executable = |watchlist: &Watchlist, app: &str| {
-            watchlist.0.get(app).map(|window| window.executable.clone())
-        };
         self.running.retain(|app, watched| {
-            let kept = executable(&self.watchlist, app) == executable(&watchlist, app);
+            let kept = self
+                .watchlist
+                .0
+                .get(app)
+                .zip(watchlist.0.get(app))
+                .is_some_and(|(old, new)| keeps_process(old, new));
             if !kept {
                 changes.push(Change::Exited {
                     app: app.clone(),

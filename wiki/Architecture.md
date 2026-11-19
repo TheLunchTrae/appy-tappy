@@ -228,7 +228,7 @@ Each thread below is a plain `std::thread`, and each channel is a
   automations' file cannot be read as a whole, such as while another program
   holds the file, the runtime logs it, keeps running the plan it has, and
   reads them again a few times, as `RETRY_WAIT` and `RETRIES` in
-  `apps/runtime/src/owner.rs` set, before it waits for the next save.
+  `apps/runtime/src/owner/reload.rs` set, before it waits for the next save.
   [Files and handoff](#files-and-handoff) describes what it reads.
 - **Trace writer.** Only while the [runtime trace](Trace.md) records. Owns
   the trace files and turns the records the other threads send it into CSV

@@ -12,7 +12,6 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use appytappy_actions::Watched;
-use appytappy_config::app_file::BuildDef;
 use appytappy_config::paths::Locations;
 use appytappy_config::settings_file::{ReadInterval, SettingsFile, TraceCategory};
 use appytappy_config::store::{
@@ -25,7 +24,7 @@ use appytappy_sources::HostSystem;
 use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
-use crate::model::{Model, Order, Owner, ReaderNumber, Refused, SessionId};
+use crate::model::{Model, Order, ReaderNumber, Refused, SessionId};
 use crate::trace::switch::Switch;
 use crate::trace::writer::TraceReport;
 use crate::trace::{Detail, Record, Trace, What};
@@ -33,6 +32,12 @@ use crate::workers::act::ActionReport;
 use crate::workers::reader::{self, CHECK_AGAIN, Reader, Reading};
 use crate::workers::{act, join, spawn, tell_end};
 use crate::{lifecycle, note, plan, tray};
+
+mod lines;
+mod reload;
+
+use lines::{describe, order_line};
+use reload::{Read, Reloads, Stale};
 
 /// What reaches the owner thread.
 #[derive(Debug)]
@@ -128,6 +133,10 @@ enum Step {
     /// orders, and from now on in this run the settings no longer start
     /// automations as the tray last left them.
     Picked(Vec<Order>),
+    /// A timer is due, as [`wake`] lists them: carry out these orders,
+    /// which held rules that were due at the time give, then read the saved
+    /// files again if that retry was due then too.
+    Due(Instant, Vec<Order>),
     /// Read the saved automations again.
     Reload,
     /// Trace `0` stopped, as its writer reported.
@@ -271,11 +280,11 @@ impl Crew {
         let _ = self.events.send(Event::DetectionEnded);
     }
 
-    /// Keeps the reader `started` for `session`, its reader number `number`.
-    /// When its thread could not start, the log says so for the application
-    /// named `name`, and the owner hears that the reader ended, as a reader
-    /// that ran tells it itself, so the session starts its next reader after
-    /// a wait.
+    /// Keeps the reader `started` for `session`, its reader number `number`,
+    /// and answers whether it started. When its thread could not start, the
+    /// log says so for the application named `name`, and the owner hears
+    /// that the reader ended, as a reader that ran tells it itself, so the
+    /// session starts its next reader after a wait.
     fn read(
         &mut self,
         session: SessionId,
@@ -283,14 +292,11 @@ impl Crew {
         started: io::Result<Reader>,
         name: &str,
         log: &mut Log,
-    ) {
+    ) -> bool {
         match started {
             Ok(reader) => {
                 self.readers.insert(session, reader);
-                self.trace.record(What::Reading, |record| Record {
-                    session: Some(session),
-                    ..record
-                });
+                true
             },
             Err(error) => {
                 note(log, &format!("{name}: its reader cannot start: {error}"));
@@ -303,6 +309,7 @@ impl Crew {
                     reason = "the owner holds the receiver while it runs, so the send cannot fail"
                 )]
                 let _ = self.events.send(Event::Reading(ended));
+                false
             },
         }
     }
@@ -438,7 +445,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     carry(first.orders, &mut crew, log);
     let mut timer = OwnerTimer::default();
     loop {
-        let due = wake(model.next_due(), reloads.retry, crew.tracing.until());
+        let due = wake(model.next_due(), reloads.retry_at(), crew.tracing.until());
         let Some(event) = timer.next(&events, &crew.events, due) else {
             break;
         };
@@ -451,7 +458,11 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         let read = match step {
             Step::Carry(orders) | Step::Picked(orders) => {
                 carry(orders, &mut crew, log);
-                reloads.due(Instant::now())
+                None
+            },
+            Step::Due(at, orders) => {
+                carry(orders, &mut crew, log);
+                reloads.due(at)
             },
             Step::Reload => Some(Stale::BOTH),
             Step::TraceFailed(id) => {
@@ -611,149 +622,16 @@ impl OwnerTimer {
     }
 }
 
-/// How long the owner waits before it reads the saved files again after
-/// they could not be read, such as while another program held one.
-const RETRY_WAIT: Duration = Duration::from_secs(2);
-
-/// How many times in a row the owner reads the saved files again before it
-/// waits for the next save.
-const RETRIES: u32 = 5;
-
-/// Which saved files the owner reads: the settings, the applications and
-/// automations, or both.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct Stale {
-    /// The applications and automations.
-    files: bool,
-    /// The settings.
-    settings: bool,
-}
-
-impl Stale {
-    /// Every saved file.
-    const BOTH: Self = Self {
-        files: true,
-        settings: true,
-    };
-}
-
-/// What the owner knows about reading the saved files: when it tries again,
-/// which files that try reads, and what it has read so far.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Reloads {
-    /// When it reads again the files that did not read.
-    retry: Option<Retry>,
-    /// The files that did not read at the last try.
-    failing: Stale,
-    /// Whether the applications and automations ever read.
-    had: Had,
-    /// Whether the settings ever read.
-    had_settings: bool,
-    /// Whether the user picked Enable or Disable from the tray in this run,
-    /// which outranks how the tray left them in an earlier run.
-    picked: bool,
-}
-
-impl Default for Reloads {
-    /// Before the first read.
-    fn default() -> Self {
-        Self {
-            retry: None,
-            failing: Stale::default(),
-            had: Had::Nothing,
-            had_settings: false,
-            picked: false,
-        }
-    }
-}
-
-impl Reloads {
-    /// Notes what `step` means for the reads to come, before the owner takes
-    /// it: a pick from the tray outranks how the tray left automations in an
-    /// earlier run, and a save starts the tries over.
-    fn after(&mut self, step: &Step) {
-        match step {
-            Step::Picked(_) => self.picked = true,
-            Step::Reload => self.retry = None,
-            Step::Carry(_) | Step::TraceFailed(_) | Step::Stop => {},
-        }
-    }
-
-    /// The files to read again at `now`, when a retry is due.
-    fn due(&self, now: Instant) -> Option<Stale> {
-        self.retry
-            .is_some_and(|retry| retry.due(now))
-            .then_some(self.failing)
-    }
-}
-
-/// When the owner reads the saved files again after a read failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Retry {
-    /// When.
-    at: Instant,
-    /// How many more tries follow this one, should it fail too.
-    left: u32,
-}
-
-impl Retry {
-    /// Whether the files are to be read again at `now`.
-    fn due(self, now: Instant) -> bool {
-        self.at <= now
-    }
-}
-
-/// When the owner wakes with no event: the first of `next_due`, when a held
-/// rule is due, `retry`, when it reads the saved files again, and
-/// `trace_ends`, when the trace's time is up.
+/// When the owner wakes with no event, which a [`Step::Due`] then handles:
+/// the first of `next_due`, when a held rule is due, `retry`, when it reads
+/// the saved files again, and `trace_ends`, when the trace's time is up,
+/// which the owner checks after every event.
 fn wake(
     next_due: Option<Instant>,
-    retry: Option<Retry>,
+    retry: Option<Instant>,
     trace_ends: Option<Instant>,
 ) -> Option<Instant> {
-    [next_due, retry.map(|retry| retry.at), trace_ends]
-        .into_iter()
-        .flatten()
-        .min()
-}
-
-/// What the runtime runs while the saved files cannot be read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Had {
-    /// Nothing, since no read has worked since it started.
-    Nothing,
-    /// The plan from the last read that worked.
-    Plan,
-}
-
-impl Had {
-    /// What the runtime does meanwhile, as the log says it.
-    const fn keeps(self) -> &'static str {
-        match self {
-            Self::Nothing => "runs no automations",
-            Self::Plan => "keeps running what it ran",
-        }
-    }
-}
-
-/// What the runtime uses while the settings cannot be read at start.
-const DEFAULTS: &str = "uses the default settings";
-
-/// What the runtime uses while the settings cannot be read later.
-const KEPT: &str = "keeps its settings";
-
-/// Reads the saved automations and logs what cannot run.
-///
-/// # Errors
-///
-/// Returns why the saved files cannot be read as a whole.
-fn load(stores: &Stores, log: &mut Log) -> Result<plan::Plan, String> {
-    let plan = plan::load(&stores.apps, &stores.automations)?;
-    for problem in &plan.problems {
-        note(log, problem);
-    }
-    note(log, &loaded_line(&plan));
-    Ok(plan)
+    [next_due, retry, trace_ends].into_iter().flatten().min()
 }
 
 /// What a read of the saved files gives the owner to put to use.
@@ -769,24 +647,12 @@ struct Saved {
 }
 
 /// Reads the saved files that `read` names, at start, after a save, or for
-/// a retry, and returns what to put to use. `tracing` starts or stops the
-/// trace as the settings say, and its writer reports a failure to
-/// `reports`.
-///
-/// The settings come first, so the readers that a new plan starts read at
-/// the new interval; then the plan; then the readers the plan kept running
-/// start over at the new interval, so no reader starts twice. Files that do
-/// not read are kept as they were: the model runs the plan and settings it
-/// has, and `reloads` says when to read those files again, if at all. Last,
-/// the trace learns each running session's newest plan, since neither a
-/// rename nor a new trace starts a reader over, and a new trace reaches the
-/// threads only after this returns, so it names every row.
-///
-/// The first settings that read, even on a retry, decide whether
-/// automations start enabled: when they say to remember, as the tray last
-/// left them, and otherwise enabled, as the model starts. Settings read
-/// later, or after the user picked Enable or Disable from the tray in this
-/// run, leave it to the tray.
+/// a retry, and returns what to put to use, as [`Reloads::reloaded`]
+/// decides. `tracing` starts or stops the trace as the settings say, and
+/// its writer reports a failure to `reports`. Last, the trace learns each
+/// running session's newest plan, since neither a rename nor a new trace
+/// starts a reader over, and a new trace reaches the threads only after
+/// this returns, so it names every row.
 fn read_saved(
     stores: &Stores,
     log: &mut Log,
@@ -795,66 +661,27 @@ fn read_saved(
     (read, tracing, reports): (Stale, &mut Switch, &Sender<Event>),
 ) -> Saved {
     let now = Instant::now();
-    let previous = reloads.retry;
-    let mut retry = None;
-    let mut failing = Stale::default();
-    let mut trace = None;
-    let mut orders = Vec::new();
-    if read.settings {
-        match read_settings(&stores.settings) {
-            Ok((settings, interval)) => {
-                if settings.remember_enabled && !reloads.had_settings && !reloads.picked {
-                    orders = remembered(&stores.enabled, model, log);
-                }
-                reloads.had_settings = true;
-                if interval != model.interval() {
-                    note(log, &interval_line(interval));
-                }
-                trace = tracing.apply(&settings.trace, (now, unix_ms()), reports, log);
-                model.set_interval(interval);
-            },
-            Err(error) => {
-                failing.settings = true;
-                let keeps = if reloads.had_settings { KEPT } else { DEFAULTS };
-                retry = failed(log, &error, previous, now, keeps);
-            },
-        }
+    let read = Read {
+        settings: read.settings.then(|| read_settings(&stores.settings)),
+        plan: read
+            .files
+            .then(|| plan::load(&stores.apps, &stores.automations)),
+    };
+    let reloaded = reloads.reloaded(model, read, now, || stores.enabled.load());
+    for line in &reloaded.notes {
+        note(log, line);
     }
-    let mut watchlist = None;
-    if read.files {
-        match load(stores, log) {
-            Ok(plan) => {
-                reloads.had = Had::Plan;
-                watchlist = Some(Watchlist::new(plan.windows()));
-                orders.extend(model.replan(plan.apps));
-            },
-            Err(error) => {
-                failing.files = true;
-                retry = failed(log, &error, previous, now, reloads.had.keeps());
-            },
-        }
-    }
-    orders.extend(model.restart_readers(now));
+    let trace = reloaded
+        .settings
+        .and_then(|settings| tracing.apply(&settings.trace, (now, unix_ms()), reports, log));
     for (id, plan) in model.sessions() {
         tracing.name(id, plan);
     }
-    reloads.retry = retry;
-    reloads.failing = failing;
     Saved {
-        watchlist,
-        orders,
+        watchlist: reloaded.watchlist,
+        orders: reloaded.orders,
         trace,
     }
-}
-
-/// Enables or disables automations as the tray last left them, as `store`
-/// keeps it, and logs when that leaves them disabled.
-fn remembered(store: &EnabledStore, model: &mut Model, log: &mut Log) -> Vec<Order> {
-    let enabled = store.load();
-    if !enabled {
-        note(log, "automations disabled, as the tray last left them");
-    }
-    model.set_enabled(enabled)
 }
 
 /// Milliseconds since 1970, as the settings give the trace's end; 0 should
@@ -891,34 +718,6 @@ fn receive(trace: &mut Trace, event: &Event) {
     }
 }
 
-/// Logs that the saved files cannot be read for `error`, and what the
-/// runtime `keeps` doing meanwhile, and returns when to read them again:
-/// soon, unless `previous`, the try that just failed, was the last.
-fn failed(
-    log: &mut Log,
-    error: &str,
-    previous: Option<Retry>,
-    now: Instant,
-    keeps: &str,
-) -> Option<Retry> {
-    let left = previous
-        .map_or(RETRIES, |previous| previous.left)
-        .checked_sub(1);
-    let retry = left.and_then(|left| {
-        Some(Retry {
-            at: now.checked_add(RETRY_WAIT)?,
-            left,
-        })
-    });
-    let then = if retry.is_some() {
-        format!("reads them again in {} seconds", RETRY_WAIT.as_secs())
-    } else {
-        "waits for the next save".to_owned()
-    };
-    note(log, &format!("{error}, so the runtime {keeps} and {then}"));
-    retry
-}
-
 /// Reads the settings and the read interval they ask for.
 ///
 /// # Errors
@@ -932,30 +731,6 @@ fn read_settings(store: &SettingsStore) -> Result<(SettingsFile, ReadInterval), 
         .checked()
         .map_err(|error| unreadable(&error))?;
     Ok((settings, interval))
-}
-
-/// The log line for a new read interval.
-fn interval_line(interval: ReadInterval) -> String {
-    format!(
-        "values are read every {} to {} ms",
-        interval.min().as_millis(),
-        interval.max().as_millis()
-    )
-}
-
-/// The log line that says what the runtime runs.
-fn loaded_line(plan: &plan::Plan) -> String {
-    let automations: usize = plan.apps.values().map(|app| app.runs.rules.len()).sum();
-    let names: Vec<&str> = plan
-        .apps
-        .values()
-        .map(|app| app.labels.name.as_str())
-        .collect();
-    match automations {
-        0 => "no saved automation can run".to_owned(),
-        1 => format!("1 automation runs for {}", names.join(", ")),
-        _ => format!("{automations} automations run for {}", names.join(", ")),
-    }
 }
 
 /// Why the runtime drops the setup app's request to run an automation once.
@@ -992,7 +767,7 @@ impl Dropped {
 /// Returns why nothing runs: the saved applications and automations did
 /// not read at the last try, or the model refuses.
 fn answer_once(model: &Model, reloads: &Reloads, automation: &str) -> Result<Vec<Order>, Dropped> {
-    if reloads.failing.files {
+    if reloads.files_failing() {
         return Err(Dropped::Unread);
     }
     model.run_once(automation).map_err(Dropped::Refused)
@@ -1026,14 +801,19 @@ fn run_once(
 }
 
 /// Carries out `orders`: starts and stops readers and hands actions to the
-/// action thread.
-#[mutants::skip]
+/// action thread, with the trace records [`records`] names for each.
+#[mutants::skip] // Starts threads; `records` holds its decisions.
 fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
     for order in orders {
         if let Some(line) = order_line(&order) {
             note(log, &line);
         }
-        match order {
+        let (before, after) = records(&order);
+        let subject = subject(&order);
+        if let Some(what) = before {
+            record(&mut crew.trace, what, subject);
+        }
+        let done = match order {
             Order::Read {
                 session,
                 reader,
@@ -1046,16 +826,13 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                 let (job, trace) = crew.reader_job(session, reader, plan, watched, interval);
                 let system = Arc::clone(&crew.system);
                 let started = Reader::start(CHECK_AGAIN, system, job, trace, crew.events.clone());
-                crew.read(session, reader, started, &name, log);
+                crew.read(session, reader, started, &name, log)
             },
             Order::StopReading(id, name) => {
                 if let Some(Err(error)) = crew.readers.remove(&id).map(Reader::stop) {
                     note(log, &format!("{name}'s reader stopped badly: {error}"));
                 }
-                crew.trace.record(What::Stopped, |record| Record {
-                    session: Some(id),
-                    ..record
-                });
+                true
             },
             Order::Run {
                 owner,
@@ -1075,7 +852,8 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                     keeps,
                     cause,
                 };
-                queue(crew, What::Fired, job, log);
+                crew.act(act::Control::Job(job), log);
+                true
             },
             Order::Undo {
                 owner,
@@ -1087,41 +865,63 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                     automation,
                     cause,
                 };
-                queue(crew, What::Released, job, log);
+                crew.act(act::Control::Job(job), log);
+                true
             },
-            Order::Held(owner, cause) => record_rule(&mut crew.trace, What::Held, owner, cause),
+            Order::Held(..) => true,
+        };
+        if done && let Some(what) = after {
+            record(&mut crew.trace, what, subject);
         }
     }
 }
 
-/// Hands `job` to the action thread, and records that its rule `decided`,
-/// fired or released, and that the job was queued.
-fn queue(crew: &mut Crew, decided: What, job: act::Job, log: &mut Log) {
-    let (owner, cause) = job.traced();
-    record_rule(&mut crew.trace, decided, owner, cause);
-    crew.act(act::Control::Job(job), log);
-    record_rule(&mut crew.trace, What::Queued, owner, cause);
+/// The trace records carrying out `order` makes: one before, and one after,
+/// which a reader whose thread cannot start does not make. A fired or
+/// released automation is recorded, then queued once the action thread has
+/// its job.
+const fn records(order: &Order) -> (Option<What>, Option<What>) {
+    match order {
+        Order::Read { .. } => (None, Some(What::Reading)),
+        Order::StopReading(..) => (None, Some(What::Stopped)),
+        Order::Run { .. } => (Some(What::Fired), Some(What::Queued)),
+        Order::Undo { .. } => (Some(What::Released), Some(What::Queued)),
+        Order::Held(..) => (Some(What::Held), None),
+    }
 }
 
-/// Records `what` happened to the automation `owner` names, for the
-/// reading of the frame that arrived at `cause`.
-fn record_rule(trace: &mut Trace, what: What, (session, rule): Owner, cause: Option<Instant>) {
+/// What an order's trace records name: its session, its rule's position
+/// for an order about a rule, and when the frame arrived whose reading
+/// caused it.
+const fn subject(order: &Order) -> (SessionId, Option<usize>, Option<Instant>) {
+    match *order {
+        Order::Read { session, .. } | Order::StopReading(session, _) => (session, None, None),
+        Order::Run {
+            owner: (session, rule),
+            cause,
+            ..
+        }
+        | Order::Undo {
+            owner: (session, rule),
+            cause,
+            ..
+        }
+        | Order::Held((session, rule), cause) => (session, Some(rule.0), cause),
+    }
+}
+
+/// Records `what` about the order whose `subject` it is.
+fn record(
+    trace: &mut Trace,
+    what: What,
+    (session, item, cause): (SessionId, Option<usize>, Option<Instant>),
+) {
     trace.record(what, |record| Record {
         session: Some(session),
-        item: Some(rule.0),
+        item,
         cause,
         ..record
     });
-}
-
-/// The log line for an order, if it gets one.
-fn order_line(order: &Order) -> Option<String> {
-    match order {
-        Order::Read { plan, .. } => Some(format!("{}: reading its values", plan.labels.name)),
-        Order::StopReading(..) | Order::Held(..) => None,
-        Order::Run { automation, .. } => Some(format!("{automation}: runs")),
-        Order::Undo { automation, .. } => Some(format!("{automation}: undone")),
-    }
 }
 
 /// Applies one event to the model and logs it. A pick of Enabled from the
@@ -1246,63 +1046,8 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
             note(log, &message);
             Step::TraceFailed(id)
         },
-        Event::Due(at) => Step::Carry(model.recheck(at)),
+        Event::Due(at) => Step::Due(at, model.recheck(at)),
     }
-}
-
-/// The log line for an app named `name` that runs `running` while its
-/// values were checked against `checked`, or `None` when that needs no
-/// line: the builds match, or no build was checked.
-fn build_change(
-    name: &str,
-    checked: Option<&BuildDef>,
-    running: &Result<BuildDef, String>,
-) -> Option<String> {
-    let checked = checked?;
-    match running {
-        Ok(running) if running == checked => None,
-        Ok(running) => Some(format!(
-            "{name}: its executable changed since its values were checked ({}). Its values are \
-             still read; check them in AppyTappy Setup",
-            build_difference(checked, running)
-        )),
-        Err(error) => Some(format!(
-            "{name}: which build of its executable runs cannot be read, so a change since its \
-             values were checked goes unnoticed: {error}"
-        )),
-    }
-}
-
-/// How `running` differs from the `checked` build, in a few words: both
-/// versions when they differ, and otherwise that the file does.
-fn build_difference(checked: &BuildDef, running: &BuildDef) -> String {
-    let version = |build: &BuildDef| build.version.as_deref().unwrap_or("no version").to_owned();
-    match (&checked.version, &running.version) {
-        (then, now) if then != now => {
-            format!("{} then, {} now", version(checked), version(running))
-        },
-        (Some(both), _) => format!("still {both}, but another file"),
-        (None, _) => "another file, with no version either time".to_owned(),
-    }
-}
-
-/// The log line for `change`, if it needs one.
-fn describe(model: &Model, change: &Change) -> Option<String> {
-    let line = match change {
-        Change::Started {
-            app,
-            process,
-            executable,
-        } => format!("{app} started as {executable} (process {process}): attached"),
-        Change::Exited { app, process } => format!("{app} exited (process {process}): detached"),
-        Change::Identified { app, build } => {
-            let plan = model.plan(app)?;
-            return build_change(&plan.labels.name, plan.labels.checked.as_ref(), build);
-        },
-        Change::ScanFailed(problem) => format!("process snapshots fail: {problem}"),
-        Change::ScanRestored => "process snapshots work again".to_owned(),
-    };
-    Some(line)
 }
 
 #[cfg(test)]
@@ -1503,10 +1248,12 @@ mod tests {
         let event = timer
             .next(&events, &sender, None)
             .expect("the queued timer");
-        assert!(matches!(event, Event::Due(_)));
+        let Event::Due(at) = event else {
+            panic!("the queued timer: {event:?}");
+        };
         assert_eq!(
             handle(&mut model, &mut scratch.log, &enabled, event),
-            Step::Carry(Vec::new())
+            Step::Due(at, Vec::new())
         );
         assert_eq!(model.next_due(), None, "the reading is unknown");
     }
@@ -1523,128 +1270,15 @@ mod tests {
 
         assert_eq!(
             handle(&mut model, &mut scratch.log, &enabled, Event::Due(start)),
-            Step::Carry(Vec::new()),
+            Step::Due(start, Vec::new()),
             "a marker queued before this rule was due must not run it"
         );
         assert_eq!(model.next_due(), Some(due));
         assert!(
             matches!(handle(&mut model, &mut scratch.log, &enabled, Event::Due(due)),
-                Step::Carry(orders) if matches!(orders.as_slice(), [Order::Run { .. }])),
+                Step::Due(_, orders) if matches!(orders.as_slice(), [Order::Run { .. }])),
             "a marker queued after the deadline can run the rule"
         );
-    }
-
-    #[test]
-    fn log_lines_name_the_app_and_process() {
-        let process = ProcessId::new(42);
-        let lines = [
-            Change::Started {
-                app: "example".to_owned(),
-                process,
-                executable: "Example.exe".to_owned(),
-            },
-            Change::Exited {
-                app: "example".to_owned(),
-                process,
-            },
-            Change::ScanFailed("denied".to_owned()),
-            Change::ScanRestored,
-        ]
-        .map(|change| describe(&Model::default(), &change));
-        assert_eq!(
-            lines,
-            [
-                "example started as Example.exe (process 42): attached",
-                "example exited (process 42): detached",
-                "process snapshots fail: denied",
-                "process snapshots work again",
-            ]
-            .map(|line| Some(line.to_owned()))
-        );
-    }
-
-    #[test]
-    fn a_build_difference_names_both_versions_or_the_file() {
-        let build = |version: Option<&str>, size| BuildDef {
-            version: version.map(str::to_owned),
-            size,
-            modified: 1_762_588_800,
-        };
-        assert_eq!(
-            build_difference(&build(Some("1.4.2.0"), 1), &build(Some("1.5.0.0"), 1)),
-            "1.4.2.0 then, 1.5.0.0 now"
-        );
-        assert_eq!(
-            build_difference(&build(None, 1), &build(Some("1.5.0.0"), 1)),
-            "no version then, 1.5.0.0 now"
-        );
-        assert_eq!(
-            build_difference(&build(Some("1.4.2.0"), 1), &build(Some("1.4.2.0"), 2)),
-            "still 1.4.2.0, but another file"
-        );
-        assert_eq!(
-            build_difference(&build(None, 1), &build(None, 2)),
-            "another file, with no version either time"
-        );
-    }
-
-    #[test]
-    fn a_build_other_than_the_checked_one_gets_a_log_line() {
-        let build = |version: Option<&str>, size| BuildDef {
-            version: version.map(str::to_owned),
-            size,
-            modified: 1_762_588_800,
-        };
-        let checked = build(Some("1.4.2.0"), 1_024);
-        let mut model = Model::default();
-        let mut plan = app_plan("Example App", &["Pause music"]);
-        Arc::get_mut(&mut plan).expect("unshared").labels.checked = Some(checked.clone());
-        model.replan(BTreeMap::from([
-            ("example".to_owned(), plan),
-            ("unchecked".to_owned(), app_plan("Unchecked", &["Mute"])),
-        ]));
-        let line = |app: &str, running: Result<BuildDef, String>| {
-            describe(
-                &model,
-                &Change::Identified {
-                    app: app.to_owned(),
-                    build: running,
-                },
-            )
-        };
-        assert_eq!(line("example", Ok(checked.clone())), None);
-        assert_eq!(
-            line("example", Ok(build(Some("1.5.0.0"), 1_024))).as_deref(),
-            Some(
-                "Example App: its executable changed since its values were checked (1.4.2.0 \
-                 then, 1.5.0.0 now). Its values are still read; check them in AppyTappy Setup"
-            )
-        );
-        // The same version in a file of another size is another build.
-        assert_eq!(
-            line("example", Ok(build(Some("1.4.2.0"), 2_048))).as_deref(),
-            Some(
-                "Example App: its executable changed since its values were checked (still \
-                 1.4.2.0, but another file). Its values are still read; check them in \
-                 AppyTappy Setup"
-            )
-        );
-        assert_eq!(
-            line("example", Ok(build(None, 2_048))).as_deref(),
-            Some(
-                "Example App: its executable changed since its values were checked (1.4.2.0 \
-                 then, no version now). Its values are still read; check them in AppyTappy Setup"
-            )
-        );
-        assert_eq!(
-            line("example", Err("access denied".to_owned())).as_deref(),
-            Some(
-                "Example App: which build of its executable runs cannot be read, so a change \
-                 since its values were checked goes unnoticed: access denied"
-            )
-        );
-        assert_eq!(line("unchecked", Ok(checked.clone())), None);
-        assert_eq!(line("gone", Ok(checked)), None);
     }
 
     #[test]
@@ -1767,7 +1401,7 @@ mod tests {
 
     /// An app plan named `name` that reads no value, with an automation of
     /// each name in `automations`.
-    fn app_plan(name: &str, automations: &[&str]) -> Arc<plan::AppPlan> {
+    pub(super) fn app_plan(name: &str, automations: &[&str]) -> Arc<plan::AppPlan> {
         Arc::new(plan::AppPlan {
             labels: plan::Labels {
                 name: name.to_owned(),
@@ -1793,20 +1427,6 @@ mod tests {
                 clicks: Arc::default(),
             },
         })
-    }
-
-    #[test]
-    fn the_log_counts_the_automations_and_names_their_apps() {
-        let mut plan = plan::Plan::default();
-        plan.apps
-            .insert("a".to_owned(), app_plan("Example App", &["Mute"]));
-        assert_eq!(loaded_line(&plan), "1 automation runs for Example App");
-        plan.apps
-            .insert("b".to_owned(), app_plan("Other App", &["Pause", "Play"]));
-        assert_eq!(
-            loaded_line(&plan),
-            "3 automations run for Example App, Other App"
-        );
     }
 
     /// The saved files in a scratch folder, which it removes when dropped.
@@ -1857,10 +1477,6 @@ mod tests {
                 (read, &mut self.tracing, &reports),
             )
         }
-
-        fn reload(&mut self, model: &mut Model, reloads: &mut Reloads, read: Stale) -> Vec<Order> {
-            self.read(model, reloads, read).orders
-        }
     }
 
     impl Drop for Scratch {
@@ -1877,234 +1493,35 @@ mod tests {
     };
 
     #[test]
-    fn settings_set_the_read_interval_and_unreadable_ones_are_kept() {
-        let mut scratch = Scratch::new("settings");
+    fn a_read_logs_what_it_read_and_why_a_file_did_not() {
+        let mut scratch = Scratch::new("read-saved");
+        scratch.write("settings.json", "not JSON");
+        scratch.write("automations.json", NO_AUTOMATIONS);
         let mut model = Model::default();
         let mut reloads = Reloads::default();
-        assert_eq!(scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY), []);
+        let saved = scratch.read(&mut model, &mut reloads, Stale::BOTH);
+        assert!(saved.watchlist.is_some(), "the files read");
+        assert_eq!(saved.orders, []);
         assert_eq!(
-            model.interval(),
-            ReadInterval::DEFAULT,
-            "no file is the defaults"
-        );
-        scratch.write(
-            "settings.json",
-            r#"{"format":1,"readInterval":{"fastestMs":40,"slowestMs":2000}}"#,
-        );
-        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
-        let slower = ReadInterval::new(Duration::from_millis(40), Duration::from_secs(2));
-        assert_eq!(Some(model.interval()), slower);
-        scratch.write("settings.json", "not JSON");
-        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
-        assert_eq!(Some(model.interval()), slower, "the settings are kept");
-        assert_eq!(
-            reloads.due(Instant::now() + RETRY_WAIT),
+            reloads.due(Instant::now() + Duration::from_secs(2)),
             Some(SETTINGS_ONLY),
-            "only the settings are read again, soon"
+            "only the settings are read again"
         );
         let written = scratch.log();
         let lines: Vec<&str> = written.lines().collect();
         assert_eq!(lines.len(), 2, "{written:?}");
         assert!(
-            lines[0].ends_with("values are read every 40 to 2000 ms"),
+            lines[0].contains("the settings cannot be read: the settings file is not valid: ")
+                && lines[0].ends_with(
+                    ", so the runtime uses the default settings and reads them again in 2 \
+                     seconds"
+                ),
             "{written:?}"
         );
         assert!(
-            lines[1].contains("the settings cannot be read: the settings file is not valid: "),
+            lines[1].ends_with("no saved automation can run"),
             "{written:?}"
         );
-        assert!(
-            lines[1]
-                .ends_with(", so the runtime keeps its settings and reads them again in 2 seconds"),
-            "{written:?}"
-        );
-    }
-
-    #[test]
-    fn settings_that_never_read_leave_the_defaults() {
-        let mut scratch = Scratch::new("first-settings");
-        scratch.write("settings.json", "not JSON");
-        scratch.write("automations.json", NO_AUTOMATIONS);
-        let mut model = Model::default();
-        let mut reloads = Reloads::default();
-        let Saved {
-            watchlist, orders, ..
-        } = scratch.read(&mut model, &mut reloads, Stale::BOTH);
-        assert_eq!(orders, []);
-        assert!(watchlist.is_some(), "the files read");
-        assert_eq!(model.interval(), ReadInterval::DEFAULT);
-        assert_eq!(reloads.failing, SETTINGS_ONLY);
-        let written = scratch.log();
-        assert!(
-            written.contains(
-                ", so the runtime uses the default settings and reads them again in 2 seconds\n"
-            ),
-            "{written:?}"
-        );
-        // A retry reads the settings only, so the plan is not logged again.
-        scratch.write("settings.json", r#"{"format":1}"#);
-        let retry = reloads.due(Instant::now() + RETRY_WAIT).expect("a retry");
-        assert_eq!(scratch.reload(&mut model, &mut reloads, retry), []);
-        assert_eq!(reloads.retry, None);
-        assert_eq!(
-            scratch.log().matches("no saved automation can run").count(),
-            1,
-            "the files were read once"
-        );
-    }
-
-    #[test]
-    fn a_reload_that_changes_the_interval_restarts_only_the_readers_the_plan_keeps() {
-        let mut scratch = Scratch::new("interval");
-        scratch.write(
-            "settings.json",
-            r#"{"format":1,"readInterval":{"fastestMs":40,"slowestMs":2000}}"#,
-        );
-        scratch.write("automations.json", NO_AUTOMATIONS);
-        let mut model = Model::default();
-        model.replan(BTreeMap::from([(
-            "a".to_owned(),
-            app_plan("Example App", &["Mute"]),
-        )]));
-        let orders = model.apply(Change::Started {
-            app: "a".to_owned(),
-            process: ProcessId::new(7),
-            executable: "Example.exe".to_owned(),
-        });
-        assert!(matches!(orders.first(), Some(Order::Read { .. })));
-        let mut reloads = Reloads::default();
-        assert_eq!(
-            scratch.reload(&mut model, &mut reloads, Stale::BOTH),
-            [Order::StopReading(SessionId(0), "Example App".to_owned())],
-            "the app the plan dropped stops and does not start again"
-        );
-    }
-
-    const REMEMBER: &str = r#"{"format":1,"rememberEnabled":true}"#;
-
-    #[test]
-    fn the_first_settings_start_automations_as_the_tray_left_them_if_they_remember() {
-        // Each case: whether the settings remember, what the enabled file
-        // holds, and whether automations start enabled.
-        for (settings, kept, starts) in [
-            (r#"{"format":1}"#, Some("off\n"), true),
-            (REMEMBER, Some("off\n"), false),
-            (REMEMBER, Some("on\n"), true),
-            (REMEMBER, None, true),
-        ] {
-            let mut scratch = Scratch::new("remember");
-            scratch.write("settings.json", settings);
-            if let Some(kept) = kept {
-                scratch.write("enabled.txt", kept);
-            }
-            let mut model = Model::default();
-            let mut reloads = Reloads::default();
-            assert_eq!(scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY), []);
-            assert_eq!(model.enabled(), starts, "{settings} {kept:?}");
-            assert_eq!(
-                scratch
-                    .log()
-                    .contains("automations disabled, as the tray last left them"),
-                !starts,
-                "{settings} {kept:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn settings_read_later_leave_automations_as_the_tray_has_them() {
-        let mut scratch = Scratch::new("remember-later");
-        let mut model = Model::default();
-        let mut reloads = Reloads::default();
-        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
-        scratch.write("settings.json", REMEMBER);
-        scratch.write("enabled.txt", "off\n");
-        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
-        assert!(
-            model.enabled(),
-            "turning the setting on changes nothing now"
-        );
-    }
-
-    /// A scratch folder whose settings remember and whose enabled file says
-    /// off, and a model that runs one application, whose reader started.
-    fn running_with_the_tray_left_off(name: &str) -> (Scratch, Model) {
-        let scratch = Scratch::new(name);
-        scratch.write("enabled.txt", "off\n");
-        let mut model = Model::default();
-        model.replan(BTreeMap::from([(
-            "a".to_owned(),
-            app_plan("Example App", &["Mute"]),
-        )]));
-        let orders = model.apply(Change::Started {
-            app: "a".to_owned(),
-            process: ProcessId::new(7),
-            executable: "Example.exe".to_owned(),
-        });
-        assert!(matches!(orders.first(), Some(Order::Read { .. })));
-        (scratch, model)
-    }
-
-    #[test]
-    fn settings_that_first_read_late_stop_what_runs_when_the_tray_left_it_off() {
-        let (mut scratch, mut model) = running_with_the_tray_left_off("remember-late");
-        let mut reloads = Reloads::default();
-        // The first read fails, so the first settings that work come with a
-        // retry, while the application runs.
-        scratch.write("settings.json", "{");
-        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
-        assert!(reloads.retry.is_some() && model.enabled());
-        scratch.write("settings.json", REMEMBER);
-        assert_eq!(
-            scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY),
-            [Order::StopReading(SessionId(0), "Example App".to_owned())]
-        );
-        assert!(!model.enabled());
-    }
-
-    #[test]
-    fn settings_that_first_read_after_a_tray_pick_leave_the_pick() {
-        let (mut scratch, mut model) = running_with_the_tray_left_off("remember-picked");
-        let mut reloads = Reloads::default();
-        scratch.write("settings.json", "{");
-        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
-        // The pick cannot be kept, so the enabled file still says off.
-        let unkept = EnabledStore::new(scratch.folder.join("enabled.txt").join("enabled.txt"));
-        let enable = Event::from(TrayEvent::Picked(tray::ENABLE));
-        let step = handle(&mut model, &mut scratch.log, &unkept, enable);
-        assert_eq!(step, Step::Picked(Vec::new()));
-        reloads.after(&step);
-        scratch.write("settings.json", REMEMBER);
-        assert_eq!(scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY), []);
-        assert!(model.enabled(), "the pick stands");
-        assert!(reloads.had_settings && reloads.retry.is_none());
-        assert!(
-            !scratch
-                .log()
-                .contains("automations disabled, as the tray last left them")
-        );
-    }
-
-    #[test]
-    fn only_a_pick_marks_the_reloads_picked_and_only_a_save_ends_the_tries() {
-        let retrying = || Reloads {
-            retry: Some(Retry {
-                at: Instant::now(),
-                left: RETRIES,
-            }),
-            ..Reloads::default()
-        };
-        for step in [Step::Carry(Vec::new()), Step::TraceFailed(0), Step::Stop] {
-            let mut reloads = retrying();
-            reloads.after(&step);
-            assert!(!reloads.picked && reloads.retry.is_some(), "{step:?}");
-        }
-        let mut reloads = retrying();
-        reloads.after(&Step::Picked(Vec::new()));
-        assert!(reloads.picked && reloads.retry.is_some());
-        let mut reloads = retrying();
-        reloads.after(&Step::Reload);
-        assert!(!reloads.picked && reloads.retry.is_none());
     }
 
     #[test]
@@ -2302,7 +1719,7 @@ mod tests {
         let mut scratch = Scratch::new("reader-cannot-start");
         let no_thread = Err(io::Error::other("no more threads"));
         let (session, reader) = (SessionId(3), ReaderNumber(1));
-        crew.read(session, reader, no_thread, "Example App", &mut scratch.log);
+        assert!(!crew.read(session, reader, no_thread, "Example App", &mut scratch.log));
         assert!(
             matches!(
                 heard.try_recv(),
@@ -2323,32 +1740,78 @@ mod tests {
     }
 
     #[test]
-    fn a_reader_that_started_is_kept_for_its_session_and_traced() {
+    fn a_reader_that_started_is_kept_for_its_session() {
         let (mut crew, _controls, _received, heard) = crew();
         let mut scratch = Scratch::new("reader-started");
-        let (trace, entries) = Trace::for_test(1, &[TraceCategory::Lifecycle]);
-        crew.trace = trace;
         let (reader, _told) = Reader::stand_in();
         let session = SessionId(3);
-        crew.read(
+        assert!(crew.read(
             session,
             ReaderNumber(1),
             Ok(reader),
             "Example App",
             &mut scratch.log,
-        );
+        ));
         assert_eq!(
             crew.readers.keys().collect::<Vec<_>>(),
             [&session],
             "the owner stops it with its session"
         );
-        let sent: Vec<(What, Option<SessionId>)> = crate::trace::sent(&entries)
-            .into_iter()
-            .map(|record| (record.what, record.session))
-            .collect();
-        assert_eq!(sent, [(What::Reading, Some(session))]);
         assert!(heard.try_recv().is_err(), "nothing ended");
         assert_eq!(scratch.log(), "", "and nothing is logged");
+    }
+
+    #[test]
+    fn each_order_is_traced_before_and_after_it_is_carried_out() {
+        let owner = (SessionId(1), appytappy_engine::RuleIndex(2));
+        let cause = Some(Instant::now());
+        let watched = Watched {
+            process: ProcessId::new(1),
+            executable: "Example.exe".to_owned(),
+        };
+        let orders = [
+            Order::Read {
+                session: SessionId(1),
+                reader: ReaderNumber(0),
+                plan: app_plan("Example App", &[]),
+                watched: watched.clone(),
+                interval: ReadInterval::DEFAULT,
+            },
+            Order::StopReading(SessionId(1), "Example App".to_owned()),
+            Order::Run {
+                owner,
+                automation: "Mute".to_owned(),
+                watched,
+                actions: Box::new([]),
+                clicks: Arc::default(),
+                keeps: appytappy_actions::Keeps::ForRelease,
+                cause,
+            },
+            Order::Undo {
+                owner,
+                automation: "Mute".to_owned(),
+                cause,
+            },
+            Order::Held(owner, cause),
+        ];
+        assert_eq!(
+            orders
+                .each_ref()
+                .map(|order| (records(order), subject(order))),
+            [
+                ((None, Some(What::Reading)), (SessionId(1), None, None)),
+                ((None, Some(What::Stopped)), (SessionId(1), None, None)),
+                (
+                    (Some(What::Fired), Some(What::Queued)),
+                    (SessionId(1), Some(2), cause)
+                ),
+                (
+                    (Some(What::Released), Some(What::Queued)),
+                    (SessionId(1), Some(2), cause)
+                ),
+                ((Some(What::Held), None), (SessionId(1), Some(2), cause)),
+            ]
+        );
     }
 
     #[test]
@@ -2364,7 +1827,12 @@ mod tests {
             automation: "Mute".to_owned(),
             cause: Some(cause),
         };
-        queue(&mut crew, What::Released, job.clone(), &mut scratch.log);
+        let undo = Order::Undo {
+            owner,
+            automation: "Mute".to_owned(),
+            cause: Some(cause),
+        };
+        carry(vec![undo], &mut crew, &mut scratch.log);
         assert!(
             matches!(controls.try_recv(), Ok(act::Control::Job(sent)) if sent == job),
             "the action thread gets the job"
@@ -2394,7 +1862,7 @@ mod tests {
         let (trace, entries) = Trace::for_test(1, &[TraceCategory::Actions]);
         crew.trace = trace;
         let owner = (SessionId(2), appytappy_engine::RuleIndex(4));
-        let job = act::Job::Run {
+        let run = Order::Run {
             owner,
             automation: "Mute".to_owned(),
             watched: Watched {
@@ -2406,7 +1874,7 @@ mod tests {
             keeps: appytappy_actions::Keeps::ForRelease,
             cause: None,
         };
-        queue(&mut crew, What::Fired, job, &mut scratch.log);
+        carry(vec![run], &mut crew, &mut scratch.log);
         let Crew { actor, .. } = crew;
         actor.stop().expect("the new thread runs the job and ends");
         assert!(
@@ -2526,12 +1994,7 @@ mod tests {
     fn a_rule_is_traced_with_its_automation_and_its_frame() {
         let (mut trace, entries) = Trace::for_test(1, &[TraceCategory::Rules]);
         let cause = Instant::now();
-        record_rule(
-            &mut trace,
-            What::Held,
-            (SessionId(2), appytappy_engine::RuleIndex(4)),
-            Some(cause),
-        );
+        record(&mut trace, What::Held, (SessionId(2), Some(4), Some(cause)));
         let sent = crate::trace::sent(&entries);
         let [held] = sent.as_slice() else {
             panic!("one record: {sent:?}");
@@ -2549,138 +2012,17 @@ mod tests {
     }
 
     #[test]
-    fn a_reload_that_cannot_read_the_files_keeps_the_plan_and_tries_again() {
-        let mut scratch = Scratch::new("reload");
-        let mut model = Model::default();
-        model.replan(BTreeMap::from([(
-            "a".to_owned(),
-            app_plan("Example App", &["Mute"]),
-        )]));
-        model.apply(Change::Started {
-            app: "a".to_owned(),
-            process: ProcessId::new(7),
-            executable: "Example.exe".to_owned(),
-        });
-        scratch.write("automations.json", "not JSON");
-        let mut reloads = Reloads {
-            had: Had::Plan,
-            ..Reloads::default()
-        };
-        let mut tries = Vec::new();
-        let mut read = Stale::BOTH;
-        for _ in 0..=RETRIES {
-            assert_eq!(scratch.reload(&mut model, &mut reloads, read), []);
-            tries.push(reloads.retry.map(|retry| retry.left));
-            if let Some(again) = reloads.due(Instant::now() + RETRY_WAIT) {
-                read = again;
-            }
-        }
-        assert_eq!(
-            read,
-            Stale {
-                files: true,
-                settings: false
-            },
-            "the settings read"
-        );
-        assert_eq!(
-            model.active_automations(),
-            ["Mute"],
-            "the plan keeps running"
-        );
-        assert_eq!(
-            tries,
-            [Some(4), Some(3), Some(2), Some(1), Some(0), None],
-            "the tries are bounded"
-        );
-        assert_eq!(
-            reloads.due(Instant::now() + RETRY_WAIT),
-            None,
-            "after the last try only a save reads the files again"
-        );
-        // A save starts the tries over; both files failing share one try.
-        scratch.write("settings.json", "not JSON");
-        reloads.retry = None;
-        scratch.reload(&mut model, &mut reloads, Stale::BOTH);
-        assert_eq!(reloads.retry.map(|retry| retry.left), Some(4));
-        assert_eq!(reloads.failing, Stale::BOTH);
-        scratch.write("settings.json", r#"{"format":1}"#);
-        scratch.write("automations.json", NO_AUTOMATIONS);
-        let Saved {
-            watchlist, orders, ..
-        } = scratch.read(&mut model, &mut reloads, Stale::BOTH);
-        assert!(watchlist.is_some(), "the files read");
-        assert_eq!(reloads.retry, None, "a read that works needs no retry");
-        assert_eq!(
-            orders,
-            [Order::StopReading(SessionId(0), "Example App".to_owned())]
-        );
-        let written = scratch.log();
-        assert!(
-            written.contains("the automations cannot be read: the automations file is not valid: "),
-            "{written:?}"
-        );
-        assert_eq!(
-            written
-                .matches(
-                    ", so the runtime keeps running what it ran and reads them again in 2 seconds\n"
-                )
-                .count(),
-            6,
-            "five tries, then the save's: {written:?}"
-        );
-        assert!(
-            written.contains(
-                ", so the runtime keeps running what it ran and waits for the next save\n"
-            ),
-            "{written:?}"
-        );
-        assert!(
-            written.contains(
-                ", so the runtime keeps its settings and reads them again in 2 seconds\n"
-            ),
-            "both failures are logged: {written:?}"
-        );
-        assert!(
-            written.ends_with("no saved automation can run\n"),
-            "{written:?}"
-        );
-    }
-
-    #[test]
-    fn the_first_read_that_fails_runs_nothing() {
-        let mut scratch = Scratch::new("start");
-        scratch.write("automations.json", "not JSON");
-        let mut model = Model::default();
-        let mut reloads = Reloads::default();
-        scratch.reload(&mut model, &mut reloads, Stale::BOTH);
-        assert_eq!(reloads.had, Had::Nothing);
-        assert!(
-            scratch.log().contains(
-                ", so the runtime runs no automations and reads them again in 2 seconds\n"
-            )
-        );
-    }
-
-    #[test]
     fn a_retry_alone_wakes_the_owner() {
         let now = Instant::now();
         let soon = now.checked_add(Duration::from_secs(1)).expect("soon");
         let later = now.checked_add(Duration::from_secs(3)).expect("later");
-        let retry = |at| Retry { at, left: 2 };
         assert_eq!(wake(None, None, None), None);
-        assert_eq!(wake(None, Some(retry(soon)), None), Some(soon));
-        assert_eq!(wake(Some(later), Some(retry(soon)), None), Some(soon));
-        assert_eq!(wake(Some(soon), Some(retry(later)), None), Some(soon));
+        assert_eq!(wake(None, Some(soon), None), Some(soon));
+        assert_eq!(wake(Some(later), Some(soon), None), Some(soon));
+        assert_eq!(wake(Some(soon), Some(later), None), Some(soon));
         assert_eq!(wake(Some(soon), None, None), Some(soon));
         assert_eq!(wake(None, None, Some(soon)), Some(soon), "the trace ends");
-        assert_eq!(
-            wake(Some(later), Some(retry(later)), Some(soon)),
-            Some(soon)
-        );
-        assert!(!retry(soon).due(now), "not yet");
-        assert!(retry(soon).due(soon), "right on time");
-        assert!(retry(now).due(soon), "late");
+        assert_eq!(wake(Some(later), Some(later), Some(soon)), Some(soon));
     }
 
     /// A model that runs the automation Mute, with the ID `mute`, of an
@@ -2715,22 +2057,22 @@ mod tests {
             Err(Dropped::Refused(Refused::NotRunning)),
             "one that was deleted since, or a file that names none"
         );
-        let unread = Reloads {
-            failing: Stale {
-                files: true,
-                settings: false,
-            },
-            ..reloads
-        };
+        let unread = Reloads::unread();
         assert_eq!(
             answer_once(&model, &unread, "mute"),
             Err(Dropped::Unread),
             "the plan it keeps may be older than the save"
         );
-        let settings_only = Reloads {
-            failing: SETTINGS_ONLY,
-            ..reloads
-        };
+        let mut settings_only = Reloads::default();
+        settings_only.reloaded(
+            &mut muting(),
+            Read {
+                settings: Some(Err("the settings cannot be read".to_owned())),
+                ..Read::default()
+            },
+            Instant::now(),
+            || true,
+        );
         assert!(
             answer_once(&model, &settings_only, "mute").is_ok(),
             "settings that do not read change no automation"
@@ -2758,10 +2100,7 @@ mod tests {
         for request in [Ok(Some("pause".to_owned())), Err(io::Error::other("held"))] {
             assert_eq!(run_once(&model, &reloads, request, &mut scratch.log), []);
         }
-        let unread = Reloads {
-            failing: Stale::BOTH,
-            ..reloads
-        };
+        let unread = Reloads::unread();
         let while_unread = Ok(Some("mute".to_owned()));
         assert_eq!(
             run_once(&model, &unread, while_unread, &mut scratch.log),
@@ -2788,50 +2127,5 @@ mod tests {
                 "{line:?} should end with {message:?}"
             );
         }
-    }
-
-    #[test]
-    fn orders_that_change_something_get_a_log_line() {
-        let plan = app_plan("Example App", &[]);
-        let owner = (SessionId(1), appytappy_engine::RuleIndex(0));
-        let watched = appytappy_actions::Watched {
-            process: ProcessId::new(1),
-            executable: "Example.exe".to_owned(),
-        };
-        let orders = [
-            Order::Read {
-                session: SessionId(1),
-                reader: ReaderNumber(0),
-                plan,
-                watched: watched.clone(),
-                interval: ReadInterval::DEFAULT,
-            },
-            Order::StopReading(SessionId(1), "Example App".to_owned()),
-            Order::Run {
-                owner,
-                automation: "Mute".to_owned(),
-                watched,
-                actions: Box::new([]),
-                clicks: Arc::default(),
-                keeps: appytappy_actions::Keeps::ForRelease,
-                cause: None,
-            },
-            Order::Undo {
-                owner,
-                automation: "Mute".to_owned(),
-                cause: None,
-            },
-            Order::Held(owner, None),
-        ];
-        assert_eq!(
-            orders.each_ref().map(order_line),
-            [
-                Some("Example App: reading its values".to_owned()),
-                None,
-                Some("Mute: runs".to_owned()),
-                Some("Mute: undone".to_owned()),
-                None,
-            ]
-        );
     }
 }

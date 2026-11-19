@@ -224,15 +224,19 @@ stateDiagram-v2
   watch starts.
 - **Running.** Each event becomes a `Step`: `Carry` some orders, `Picked`
   when the user picked Enable or Disable from the tray, which carries its
-  orders too and sets `picked` (see [Reload watch](#reload-watch)), `Reload`
-  the saved files, `TraceFailed`, or `Stop`. The owner waits for its next
+  orders too and sets `picked` (see [Reload watch](#reload-watch)), `Due`
+  when a timer passed, `Reload` the saved files, `TraceFailed`, or `Stop`.
+  `carry` traces each order as `records` in `apps/runtime/src/owner.rs`
+  says, before it carries it out and after. The owner waits for its next
   event until the first deadline from `wake`: a held rule, a reader restart,
   a retry of the saved files, or the trace's end. When the deadline passes,
   `OwnerTimer` puts one `Due` after the events already queued. A pending
   frame can invalidate a held rule, and later events go after the timer.
-  Taking `Due` clears the queued flag. It rechecks the deadlines that
-  had passed when it entered the queue, and a later deadline gets its own
-  turn after the events already waiting then.
+  Taking `Due` clears the queued flag. It rechecks the held rules and reader
+  restarts, and reads the saved files again when their retry is due, for the
+  deadlines that had passed when it entered the queue, and a later deadline
+  gets its own turn after the events already waiting then. The trace's end is
+  checked after every event.
   With no deadline or queued timer, the owner waits with no limit. After
   each step the tray gets a fresh menu if it changed.
 - **A worker that ended.** Every send to the action thread and to detection
@@ -889,21 +893,28 @@ while the menu is open, but it still calls the procedure, so neither is lost.
 
 The reload watch waits on the auto-reset named event `Local\AppyTappy.Reload`
 and sends `Reload` each time the setup app sets it. Several saves before the
-reload watch wakes become one reload. `read_saved` reads the settings first,
-gives the model their read interval, and starts, keeps, or stops the trace as
-[Runtime trace](#runtime-trace) describes, so the readers that `replan` starts
-read at the new interval. It then reads the saved applications and
-automations; when they read, the owner sends detection the new watchlist and
-`replan` switches to their plan. Then `restart_readers` starts over the
-readers the plan kept running at the old interval, so no reader starts twice.
-Last, the trace writer gets each running session's newest plan, for its
-names. When either read fails, such as while
+reload watch wakes become one reload. `read_saved` in
+`apps/runtime/src/owner.rs` reads the files that the reload names, and
+`Reloads::reloaded` in `apps/runtime/src/owner/reload.rs` decides what the
+read means, with no disk: the log lines, and the orders from
+`Model::reload`, which takes the settings' read interval first, so the
+readers that a new plan starts read at it, then the plan, then starts over
+the readers the plan kept running at the old interval, so no reader starts
+twice. The owner then writes the lines, starts, keeps, or stops the trace as
+[Runtime trace](#runtime-trace) describes, and sends detection the new
+watchlist when the plan read. Last, the trace writer gets each running
+session's newest plan, for its names. When either read fails, such as while
 another program holds a file, the owner keeps what it has (the plan, or the
 settings, or the defaults when they never read) and reads the files that
 failed again, and only those. Its state is `Reloads`: `retry`, an optional
 `Retry` with a time and the tries left; `failing`, which files the try reads;
 `had` and `had_settings`, whether each read has worked yet; and `picked`,
 whether the user picked Enable or Disable from the tray in this run.
+
+A plan that changes an application's executable pattern ends its process's
+attachment in the model and in detection, as `lifecycle::keeps_process`
+decides for both: the session stops, nothing starts on the old process, and
+detection finds a process for the new pattern.
 
 The first settings read that works, even on a retry late in the run, applies
 the remembered state when `rememberEnabled` is on: automations become enabled
@@ -926,8 +937,8 @@ stateDiagram-v2
 ```
 
 A try comes 2 seconds (`RETRY_WAIT`) after the read before it failed, and at
-most 5 tries (`RETRIES`) follow one failed read. A try runs when the owner
-wakes at its time, or with the first event after it. One automation that
+most 5 tries (`RETRIES`) follow one failed read. A try runs with the `Due`
+that the owner wakes with at its time. One automation that
 cannot run, such as one that breaks a rule after a hand edit, does not fail
 the read: it is logged and left out of the plan.
 
