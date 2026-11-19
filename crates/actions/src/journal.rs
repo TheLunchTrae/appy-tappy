@@ -4,15 +4,69 @@
 use std::time::{Duration, Instant};
 
 use appytappy_config::action::{
-    Action, KeyChord, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
+    Action, KeyChord, MediaCommand, MediaTarget, OpenTarget, SoundFile, VolumeLevel, VolumeTarget,
 };
+use appytappy_config::click::Click;
 use appytappy_config::process::ProcessId;
 use appytappy_config::rule::Restore;
 
-use crate::{ActionError, Controls, HOLD, Input, MediaSession, Stroke, Volume, strokes};
+use crate::{ActionError, Controls, MediaSession, Volume, keys};
 
 /// How long a failed media restore waits before its one more try.
 pub const MEDIA_RETRY: Duration = Duration::from_secs(2);
+
+/// How long a failed volume restore waits before it is tried again, unless
+/// an action comes first.
+pub const VOLUME_RETRY: Duration = Duration::from_secs(10);
+
+/// An action that [`Actions::perform`] runs: every action but a click,
+/// whose place on the screen its caller finds and which runs through
+/// [`crate::click`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Performable<'a> {
+    /// Controls a media session.
+    Media {
+        /// The session to control.
+        target: &'a MediaTarget,
+        /// What to do.
+        command: MediaCommand,
+    },
+    /// Sets a volume.
+    SetVolume {
+        /// Whose volume to set.
+        target: &'a VolumeTarget,
+        /// The level to set.
+        level: VolumeLevel,
+    },
+    /// Presses keys.
+    PressKeys(&'a KeyChord),
+    /// Opens a program, a file, or a web link.
+    Open(&'a OpenTarget),
+    /// Starts playing a WAV file.
+    PlaySound(&'a SoundFile),
+}
+
+impl<'a> TryFrom<&'a Action> for Performable<'a> {
+    /// The click, which its caller places and runs.
+    type Error = &'a Click;
+
+    fn try_from(action: &'a Action) -> Result<Self, &'a Click> {
+        Ok(match action {
+            Action::Media { target, command } => Self::Media {
+                target,
+                command: *command,
+            },
+            Action::SetVolume { target, level } => Self::SetVolume {
+                target,
+                level: *level,
+            },
+            Action::PressKeys(keys) => Self::PressKeys(keys),
+            Action::Open(target) => Self::Open(target),
+            Action::PlaySound(file) => Self::PlaySound(file),
+            Action::Click(click) => return Err(click),
+        })
+    }
+}
 
 /// What the journal keeps of the changes one run of actions makes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,9 +169,35 @@ impl<M: PartialEq, V: PartialEq> Change<M, V> {
 #[derive(Debug)]
 struct Pending<M, V> {
     change: Change<M, V>,
-    /// When a media restore gets its one more try. A volume restore has
-    /// none: it is tried on every retry until it works.
-    once_at: Option<Instant>,
+    retry: Retry,
+}
+
+/// When a pending restore is tried again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Retry {
+    /// Once more, at this time, and then given up: a media restore.
+    Once(Instant),
+    /// On every [`Actions::retry_restores`], and by this time at the latest,
+    /// until it works: a volume restore.
+    UntilItWorks(Instant),
+}
+
+impl Retry {
+    /// The first retry of `change`, whose restore failed at `failed_at`.
+    fn after<M, V>(change: &Change<M, V>, failed_at: Instant) -> Self {
+        if change.retried_once() {
+            Self::Once(failed_at.checked_add(MEDIA_RETRY).unwrap_or(failed_at))
+        } else {
+            Self::UntilItWorks(failed_at.checked_add(VOLUME_RETRY).unwrap_or(failed_at))
+        }
+    }
+
+    /// When it is due.
+    const fn due(self) -> Instant {
+        match self {
+            Self::Once(at) | Self::UntilItWorks(at) => at,
+        }
+    }
 }
 
 /// One entry of the restore journal.
@@ -141,8 +221,9 @@ struct Entry<O, M, V> {
 ///
 /// A restore that fails is kept pending rather than forgotten:
 /// [`Actions::retry_restores`] tries a volume restore again until it works,
-/// such as once a disconnected headset returns, and a media restore once
-/// more, [`MEDIA_RETRY`] after it failed. A volume restore of an audio
+/// such as once a disconnected headset returns, at least every
+/// [`VOLUME_RETRY`], and a media restore once more, [`MEDIA_RETRY`] after it
+/// failed. [`Actions::next_retry`] says when the next try is due. A volume restore of an audio
 /// session that ended is dropped, because there is nothing left to put
 /// back. A later change of the same target takes over a pending restore's
 /// "before" state, as a later journal entry would, and a permanent change
@@ -177,6 +258,11 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         &mut self.controls
     }
 
+    /// The input a click goes through.
+    pub fn input(&mut self) -> &mut C::Input {
+        self.controls.input()
+    }
+
     /// Runs `action` for `owner`.
     ///
     /// `keeps` says what the journal keeps of what it changed, as [`Keeps`]
@@ -203,23 +289,23 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
     pub fn perform(
         &mut self,
         owner: O,
-        action: &Action,
+        action: Performable<'_>,
         keeps: Keeps,
         watched: &Watched,
     ) -> Result<(), ActionError> {
         match action {
-            Action::Media { target, command } => {
-                for session in self.pick_sessions(target, *command)? {
+            Performable::Media { target, command } => {
+                for session in self.pick_sessions(target, command)? {
                     let after = match command {
                         MediaCommand::Pause => false,
                         MediaCommand::Play => true,
                         MediaCommand::Next | MediaCommand::Previous => {
-                            send(&mut self.controls, &session.key, *command)?;
+                            send(&mut self.controls, &session.key, command)?;
                             continue;
                         },
                     };
                     if after != session.playing {
-                        send(&mut self.controls, &session.key, *command)?;
+                        send(&mut self.controls, &session.key, command)?;
                     }
                     let change = Change::Media {
                         session: session.key,
@@ -229,82 +315,28 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
                     self.record(owner, change, keeps);
                 }
             },
-            Action::SetVolume { target, level } => {
+            Performable::SetVolume { target, level } => {
                 for volume in self.pick_volumes(target)? {
-                    if !self.controls.set_volume(&volume.key, *level)? {
+                    if !self.controls.set_volume(&volume.key, level)? {
                         return Err(ActionError::NoAudio);
                     }
                     let change = Change::Volume {
                         control: volume.key,
                         before: volume.level,
-                        after: *level,
+                        after: level,
                     };
                     self.record(owner, change, keeps);
                 }
             },
             // Pressed keys cannot be unpressed, and nothing opened or played
             // has a state to put back, so they leave no record.
-            Action::PressKeys(keys) => self.press(keys, watched)?,
-            Action::Open(target) => self.controls.open(target)?,
-            Action::PlaySound(file) => {
+            Performable::PressKeys(chord) => keys::press(self.controls.input(), chord, watched)?,
+            Performable::Open(target) => self.controls.open(target)?,
+            Performable::PlaySound(file) => {
                 if !self.controls.play_sound(file.path())? {
                     return Err(ActionError::SoundNotPlayed);
                 }
             },
-            // Where a click lands takes the target's window, which the
-            // runtime finds, so a click runs through `crate::click` instead.
-            Action::Click(_) => return Err(ActionError::Unplaced),
-        }
-        Ok(())
-    }
-
-    /// Presses `keys` into `watched`'s window, if it has the keyboard focus.
-    /// Every key that went down goes up again, even when Windows drops some.
-    fn press(&mut self, keys: &KeyChord, watched: &Watched) -> Result<(), ActionError> {
-        let input = self.controls.input();
-        if input.focused_process()? != Some(watched.process) {
-            return Err(ActionError::NotInFront(watched.executable.clone()));
-        }
-        let held = input.held_modifiers()?;
-        let (down, up) = strokes(keys, &held);
-        let sent = input.send_strokes(&down)?;
-        if sent < down.len() {
-            let pressed = down.get(..sent).unwrap_or_default();
-            if !pressed.is_empty() {
-                let release: Vec<Stroke> = pressed
-                    .iter()
-                    .rev()
-                    .map(|stroke| stroke.reversed())
-                    .collect();
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "the press already failed, and its error says why"
-                )]
-                let _ = input.send_strokes(&release);
-            }
-            return Err(ActionError::KeysDropped {
-                sent,
-                of: down.len(),
-            });
-        }
-        input.hold(HOLD);
-        // A key left down would stay down for the user, so whatever did not
-        // come up gets one more try, whether Windows dropped it or failed.
-        let (sent, failed) = match input.send_strokes(&up) {
-            Ok(sent) => (sent, None),
-            Err(error) => (0, Some(error)),
-        };
-        if sent < up.len() {
-            let rest = up.get(sent..).unwrap_or_default();
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "the release already failed, and its error says why"
-            )]
-            let _ = input.send_strokes(rest);
-            return Err(failed.map_or(
-                ActionError::KeysDropped { sent, of: up.len() },
-                ActionError::Os,
-            ));
         }
         Ok(())
     }
@@ -353,11 +385,8 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
             };
             if let Err(error) = self.undo(&change) {
                 failure.get_or_insert(error);
-                let once_at = change.retried_once().then(|| {
-                    let failed_at = now();
-                    failed_at.checked_add(MEDIA_RETRY).unwrap_or(failed_at)
-                });
-                self.pending.push(Pending { change, once_at });
+                let retry = Retry::after(&change, now());
+                self.pending.push(Pending { change, retry });
             }
         }
         failure.map_or(Ok(()), Err)
@@ -365,8 +394,9 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
 
     /// Tries each pending restore again that is due at `now`: every volume
     /// restore, and each media restore whose wait is over. One that works
-    /// is done; a volume restore that fails stays pending, and a media
-    /// restore is given up after this try.
+    /// is done; a volume restore that fails stays pending, due again
+    /// [`VOLUME_RETRY`] later, and a media restore is given up after this
+    /// try.
     ///
     /// # Errors
     ///
@@ -374,15 +404,20 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
     /// due restore.
     pub fn retry_restores(&mut self, now: Instant) -> Result<(), ActionError> {
         let mut given_up = None;
-        for pending in std::mem::take(&mut self.pending) {
-            if pending.once_at.is_some_and(|at| now < at) {
-                self.pending.push(pending);
-            } else if let Err(error) = self.undo(&pending.change) {
-                if pending.once_at.is_some() {
-                    given_up.get_or_insert(error);
-                } else {
-                    self.pending.push(pending);
-                }
+        for mut pending in std::mem::take(&mut self.pending) {
+            match pending.retry {
+                Retry::Once(at) if now < at => self.pending.push(pending),
+                Retry::Once(_) => {
+                    if let Err(error) = self.undo(&pending.change) {
+                        given_up.get_or_insert(error);
+                    }
+                },
+                Retry::UntilItWorks(_) => {
+                    if self.undo(&pending.change).is_err() {
+                        pending.retry = Retry::after(&pending.change, now);
+                        self.pending.push(pending);
+                    }
+                },
             }
         }
         given_up.map_or(Ok(()), Err)
@@ -404,22 +439,12 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         failure.map_or(Ok(()), Err)
     }
 
-    /// When the next media restore is due, so the caller should call
+    /// When the next pending restore is due, so the caller calls
     /// [`Actions::retry_restores`] then rather than wait for its next
-    /// action.
+    /// action, or `None` when no restore is pending.
     #[must_use]
     pub fn next_retry(&self) -> Option<Instant> {
-        self.pending
-            .iter()
-            .filter_map(|pending| pending.once_at)
-            .min()
-    }
-
-    /// Whether any restore is pending, so the caller should call
-    /// [`Actions::retry_restores`] now and then even when no action comes.
-    #[must_use]
-    pub fn has_pending(&self) -> bool {
-        !self.pending.is_empty()
+        self.pending.iter().map(|pending| pending.retry.due()).min()
     }
 
     fn record(&mut self, owner: O, mut change: Change<C::Media, C::Volume>, keeps: Keeps) {
@@ -547,7 +572,7 @@ mod tests {
     use appytappy_config::click::{Click, ClickAt, ClickButton, ClickDelivery, Corner, Spot};
 
     use super::*;
-    use crate::{MouseMessage, Press};
+    use crate::{Input, MouseMessage, Press, Stroke};
 
     /// Controls over a few media sessions and volume controls that apply every
     /// command, and log each one.
@@ -788,6 +813,11 @@ mod tests {
         }
     }
 
+    /// `action`, which is not a click.
+    fn step(action: &Action) -> Performable<'_> {
+        Performable::try_from(action).expect("not a click")
+    }
+
     /// A media player as session 1, current, and playing or not.
     fn watched() -> Watched {
         Watched {
@@ -849,14 +879,14 @@ mod tests {
             actions
                 .perform(
                     'a',
-                    &current(MediaCommand::Pause),
+                    step(&current(MediaCommand::Pause)),
                     Keeps::ForRelease,
                     &watched(),
                 )
                 .expect("first session paused");
             let pause_all = media(MediaTarget::App(app("Browser")), MediaCommand::Pause);
             actions
-                .perform('b', &pause_all, keeps, &watched())
+                .perform('b', step(&pause_all), keeps, &watched())
                 .expect("app paused");
             actions
                 .release('a', Instant::now)
@@ -879,7 +909,7 @@ mod tests {
         let mut actions = player(true);
         let pause = current(MediaCommand::Pause);
         actions
-            .perform('a', &pause, Keeps::ForRelease, &watched())
+            .perform('a', step(&pause), Keeps::ForRelease, &watched())
             .expect("paused");
         assert!(!actions.controls().playing(1));
         actions.release('a', Instant::now).expect("resumed");
@@ -888,7 +918,7 @@ mod tests {
         let mut actions = player(false);
         let play = current(MediaCommand::Play);
         actions
-            .perform('a', &play, Keeps::ForRelease, &watched())
+            .perform('a', step(&play), Keeps::ForRelease, &watched())
             .expect("played");
         assert!(actions.controls().playing(1));
         actions.release('a', Instant::now).expect("paused");
@@ -901,7 +931,7 @@ mod tests {
         let mut actions = player(false);
         let pause = current(MediaCommand::Pause);
         actions
-            .perform('a', &pause, Keeps::ForRelease, &watched())
+            .perform('a', step(&pause), Keeps::ForRelease, &watched())
             .expect("nothing to do");
         actions.release('a', Instant::now).expect("nothing to undo");
         assert_eq!(actions.controls().log, [] as [String; 0]);
@@ -913,10 +943,10 @@ mod tests {
         for order in [['a', 'b'], ['b', 'a']] {
             let mut actions = player(true);
             actions
-                .perform('a', &pause, Keeps::ForRelease, &watched())
+                .perform('a', step(&pause), Keeps::ForRelease, &watched())
                 .expect("paused");
             actions
-                .perform('b', &pause, Keeps::ForRelease, &watched())
+                .perform('b', step(&pause), Keeps::ForRelease, &watched())
                 .expect("already paused");
             actions
                 .release(order[0], Instant::now)
@@ -937,13 +967,13 @@ mod tests {
             actions
                 .perform(
                     'a',
-                    &volume(VolumeTarget::System, 20),
+                    step(&volume(VolumeTarget::System, 20)),
                     Keeps::ForRelease,
                     &watched(),
                 )
                 .expect("set");
             actions
-                .perform('b', &system(), Keeps::ForRelease, &watched())
+                .perform('b', step(&system()), Keeps::ForRelease, &watched())
                 .expect("set");
             actions
                 .release(order[0], Instant::now)
@@ -982,7 +1012,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &volume(VolumeTarget::System, 20),
+                step(&volume(VolumeTarget::System, 20)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -990,14 +1020,19 @@ mod tests {
         actions
             .perform(
                 'a',
-                &current(MediaCommand::Pause),
+                step(&current(MediaCommand::Pause)),
                 Keeps::ForRelease,
                 &watched(),
             )
             .expect("paused");
         let player = VolumeTarget::App(app("Player.exe"));
         actions
-            .perform('b', &volume(player, 10), Keeps::ForRelease, &watched())
+            .perform(
+                'b',
+                step(&volume(player, 10)),
+                Keeps::ForRelease,
+                &watched(),
+            )
             .expect("set");
         actions.release('a', Instant::now).expect("released");
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
@@ -1011,7 +1046,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &volume(VolumeTarget::System, 80),
+                step(&volume(VolumeTarget::System, 80)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1027,7 +1062,7 @@ mod tests {
             actions
                 .perform(
                     'a',
-                    &volume(VolumeTarget::System, level),
+                    step(&volume(VolumeTarget::System, level)),
                     Keeps::ForRelease,
                     &watched(),
                 )
@@ -1052,7 +1087,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &volume(VolumeTarget::System, 20),
+                step(&volume(VolumeTarget::System, 20)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1060,7 +1095,7 @@ mod tests {
         actions
             .perform(
                 'n',
-                &volume(VolumeTarget::System, 50),
+                step(&volume(VolumeTarget::System, 50)),
                 Keeps::Permanent,
                 &watched(),
             )
@@ -1074,12 +1109,12 @@ mod tests {
         let mut actions = speakers();
         let quiet = volume(VolumeTarget::System, 20);
         actions
-            .perform('a', &quiet, Keeps::ForRelease, &watched())
+            .perform('a', step(&quiet), Keeps::ForRelease, &watched())
             .expect("set");
         actions
             .perform(
                 'a',
-                &volume(VolumeTarget::System, 50),
+                step(&volume(VolumeTarget::System, 50)),
                 Keeps::Untouched,
                 &watched(),
             )
@@ -1092,7 +1127,7 @@ mod tests {
             "the release puts back what the rule found"
         );
         actions
-            .perform('a', &quiet, Keeps::Untouched, &watched())
+            .perform('a', step(&quiet), Keeps::Untouched, &watched())
             .expect("set");
         actions.release('a', Instant::now).expect("nothing to undo");
         assert_eq!(
@@ -1119,7 +1154,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &media(browser(), MediaCommand::Pause),
+                step(&media(browser(), MediaCommand::Pause)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1138,7 +1173,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &media(browser(), MediaCommand::Play),
+                step(&media(browser(), MediaCommand::Play)),
                 Keeps::Permanent,
                 &watched(),
             )
@@ -1151,7 +1186,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &media(browser(), MediaCommand::Play),
+                step(&media(browser(), MediaCommand::Play)),
                 Keeps::Permanent,
                 &watched(),
             )
@@ -1167,10 +1202,10 @@ mod tests {
         });
         let pause = media(MediaTarget::App(app("Browser")), MediaCommand::Pause);
         actions
-            .perform('a', &pause, Keeps::ForRelease, &watched())
+            .perform('a', step(&pause), Keeps::ForRelease, &watched())
             .expect("paused");
         actions
-            .perform('b', &pause, Keeps::ForRelease, &watched())
+            .perform('b', step(&pause), Keeps::ForRelease, &watched())
             .expect("already paused");
         actions.release('a', Instant::now).expect("released");
         assert!(!actions.controls().playing(2));
@@ -1188,7 +1223,7 @@ mod tests {
         });
         let next = media(MediaTarget::App(app("Browser")), MediaCommand::Next);
         actions
-            .perform('a', &next, Keeps::ForRelease, &watched())
+            .perform('a', step(&next), Keeps::ForRelease, &watched())
             .expect("skipped");
         actions
             .controls()
@@ -1197,7 +1232,7 @@ mod tests {
             .for_each(|session| session.playing = false);
         let previous = media(MediaTarget::App(app("Browser")), MediaCommand::Previous);
         actions
-            .perform('a', &previous, Keeps::ForRelease, &watched())
+            .perform('a', step(&previous), Keeps::ForRelease, &watched())
             .expect("skipped");
         actions.release('a', Instant::now).expect("nothing to undo");
         assert_eq!(actions.controls().log, ["Next 2", "Previous 1"]);
@@ -1210,7 +1245,7 @@ mod tests {
             assert!(matches!(
                 actions.perform(
                     'a',
-                    &media(target, MediaCommand::Pause),
+                    step(&media(target, MediaCommand::Pause)),
                     Keeps::Permanent,
                     &watched()
                 ),
@@ -1222,7 +1257,7 @@ mod tests {
         assert!(matches!(
             actions.perform(
                 'a',
-                &current(MediaCommand::Pause),
+                step(&current(MediaCommand::Pause)),
                 Keeps::ForRelease,
                 &watched()
             ),
@@ -1260,7 +1295,12 @@ mod tests {
         });
         let chat = || VolumeTarget::App(app("Chat.exe"));
         actions
-            .perform('a', &volume(chat(), 20), Keeps::ForRelease, &watched())
+            .perform(
+                'a',
+                step(&volume(chat(), 20)),
+                Keeps::ForRelease,
+                &watched(),
+            )
             .expect("set");
         assert_eq!(actions.controls().level("call"), Some(percent(20)));
         assert_eq!(actions.controls().level("ping"), Some(percent(20)));
@@ -1294,7 +1334,7 @@ mod tests {
         });
         let chat = VolumeTarget::App(app("Chat.exe"));
         assert!(matches!(
-            actions.perform('a', &volume(chat, 20), Keeps::ForRelease, &watched()),
+            actions.perform('a', step(&volume(chat, 20)), Keeps::ForRelease, &watched()),
             Err(ActionError::Os(_))
         ));
         actions.release('a', Instant::now).expect("restored");
@@ -1320,14 +1360,19 @@ mod tests {
         actions
             .perform(
                 'a',
-                &volume(VolumeTarget::System, 20),
+                step(&volume(VolumeTarget::System, 20)),
                 Keeps::ForRelease,
                 &watched(),
             )
             .expect("set");
         let player = VolumeTarget::App(app("Player.exe"));
         actions
-            .perform('a', &volume(player, 10), Keeps::ForRelease, &watched())
+            .perform(
+                'a',
+                step(&volume(player, 10)),
+                Keeps::ForRelease,
+                &watched(),
+            )
             .expect("set");
         actions.controls().broken = Some("music");
         assert!(matches!(
@@ -1348,7 +1393,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &volume(VolumeTarget::System, 20),
+                step(&volume(VolumeTarget::System, 20)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1358,15 +1403,20 @@ mod tests {
             actions.release('a', || now),
             Err(ActionError::Os(_))
         ));
-        assert_eq!(actions.next_retry(), None, "it waits for later actions");
-        assert!(actions.has_pending());
+        assert_eq!(actions.next_retry(), Some(now + VOLUME_RETRY));
+        let soon = now + Duration::from_secs(1);
         actions
-            .retry_restores(now)
+            .retry_restores(soon)
             .expect("still pending, not given up");
         assert_eq!(actions.controls().level("speakers"), Some(percent(20)));
+        assert_eq!(
+            actions.next_retry(),
+            Some(soon + VOLUME_RETRY),
+            "each failed try waits again"
+        );
         actions.controls().broken = None;
-        actions.retry_restores(now).expect("restored");
-        assert!(!actions.has_pending());
+        actions.retry_restores(soon).expect("restored");
+        assert_eq!(actions.next_retry(), None);
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
         actions.retry_restores(now).expect("nothing left");
         assert_eq!(
@@ -1390,13 +1440,13 @@ mod tests {
         });
         let quiet = volume(VolumeTarget::App(app("Player.exe")), 10);
         actions
-            .perform('a', &quiet, Keeps::ForRelease, &watched())
+            .perform('a', step(&quiet), Keeps::ForRelease, &watched())
             .expect("set");
         actions.controls().apps.clear();
         actions
             .release('a', Instant::now)
             .expect("nothing left to put back");
-        assert!(!actions.has_pending());
+        assert_eq!(actions.next_retry(), None);
     }
 
     #[test]
@@ -1405,7 +1455,7 @@ mod tests {
         let mut actions = player(true);
         let pause = current(MediaCommand::Pause);
         actions
-            .perform('a', &pause, Keeps::ForRelease, &watched())
+            .perform('a', step(&pause), Keeps::ForRelease, &watched())
             .expect("paused");
         actions.controls().refuse = true;
         assert!(matches!(
@@ -1423,7 +1473,6 @@ mod tests {
             Err(ActionError::Refused)
         ));
         assert_eq!(actions.next_retry(), None, "it was given up");
-        assert!(!actions.has_pending());
         actions.controls().refuse = false;
         actions.retry_restores(due).expect("nothing left");
         assert!(!actions.controls().playing(1));
@@ -1431,7 +1480,7 @@ mod tests {
 
         let mut actions = player(true);
         actions
-            .perform('a', &pause, Keeps::ForRelease, &watched())
+            .perform('a', step(&pause), Keeps::ForRelease, &watched())
             .expect("paused");
         actions.controls().refuse = true;
         assert!(actions.release('a', || start).is_err());
@@ -1455,7 +1504,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &current(MediaCommand::Pause),
+                step(&current(MediaCommand::Pause)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1463,7 +1512,7 @@ mod tests {
         actions
             .perform(
                 'b',
-                &volume(VolumeTarget::System, 20),
+                step(&volume(VolumeTarget::System, 20)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1498,7 +1547,7 @@ mod tests {
         let lower = volume(VolumeTarget::System, 20);
         for (owner, action) in [('a', &pause), ('b', &lower)] {
             actions
-                .perform(owner, action, Keeps::ForRelease, &watched())
+                .perform(owner, step(action), Keeps::ForRelease, &watched())
                 .expect("changed");
         }
         actions.controls().refuse = true;
@@ -1511,7 +1560,7 @@ mod tests {
             "the volume restore still fails"
         );
         assert!(actions.controls().playing(1), "not due yet, but tried");
-        assert!(!actions.has_pending(), "every restore is forgotten");
+        assert_eq!(actions.next_retry(), None, "every restore is forgotten");
         actions.controls().broken = None;
         actions.last_try().expect("nothing left");
         assert_eq!(actions.controls().level("speakers"), Some(percent(20)));
@@ -1524,7 +1573,7 @@ mod tests {
         let lower = |level| volume(VolumeTarget::System, level);
         for (owner, level) in [('x', 50), ('a', 20)] {
             actions
-                .perform(owner, &lower(level), Keeps::ForRelease, &watched())
+                .perform(owner, step(&lower(level)), Keeps::ForRelease, &watched())
                 .expect("set");
         }
         actions.controls().broken = Some("speakers");
@@ -1532,7 +1581,7 @@ mod tests {
         actions.controls().broken = None;
         actions.release('x', || start).expect("restored");
         actions.retry_restores(start).expect("nothing pending");
-        assert!(!actions.has_pending());
+        assert_eq!(actions.next_retry(), None);
         assert_eq!(
             actions.controls().level("speakers"),
             Some(percent(80)),
@@ -1543,7 +1592,7 @@ mod tests {
         actions
             .perform(
                 'x',
-                &current(MediaCommand::Pause),
+                step(&current(MediaCommand::Pause)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1551,7 +1600,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &current(MediaCommand::Play),
+                step(&current(MediaCommand::Play)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1573,21 +1622,21 @@ mod tests {
         let mut actions = speakers();
         for (owner, level) in [('x', 80), ('a', 20)] {
             actions
-                .perform(owner, &lower(level), Keeps::ForRelease, &watched())
+                .perform(owner, step(&lower(level)), Keeps::ForRelease, &watched())
                 .expect("set");
         }
         actions.controls().broken = Some("speakers");
         assert!(actions.release('a', || start).is_err());
         actions.controls().broken = None;
         actions.release('x', || start).expect("restored");
-        assert!(!actions.has_pending());
+        assert_eq!(actions.next_retry(), None);
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
 
         let mut actions = player(false);
         actions
             .perform(
                 'x',
-                &current(MediaCommand::Pause),
+                step(&current(MediaCommand::Pause)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1595,7 +1644,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &current(MediaCommand::Play),
+                step(&current(MediaCommand::Play)),
                 Keeps::ForRelease,
                 &watched(),
             )
@@ -1604,7 +1653,7 @@ mod tests {
         assert!(actions.release('a', || start).is_err());
         actions.controls().refuse = false;
         actions.release('x', || start).expect("paused");
-        assert!(!actions.has_pending());
+        assert_eq!(actions.next_retry(), None);
         assert!(
             !actions.controls().playing(1),
             "paused, as before both rules"
@@ -1618,7 +1667,7 @@ mod tests {
         let lower = |level| volume(VolumeTarget::System, level);
         for (owner, level) in [('x', 50), ('y', 30), ('a', 20)] {
             actions
-                .perform(owner, &lower(level), Keeps::ForRelease, &watched())
+                .perform(owner, step(&lower(level)), Keeps::ForRelease, &watched())
                 .expect("set");
         }
         actions.controls().broken = Some("speakers");
@@ -1640,13 +1689,13 @@ mod tests {
         let mut actions = speakers();
         let lower = |level| volume(VolumeTarget::System, level);
         actions
-            .perform('a', &lower(20), Keeps::ForRelease, &watched())
+            .perform('a', step(&lower(20)), Keeps::ForRelease, &watched())
             .expect("set");
         actions.controls().broken = Some("speakers");
         assert!(actions.release('a', Instant::now).is_err());
         actions.controls().broken = None;
         actions
-            .perform('b', &lower(10), Keeps::ForRelease, &watched())
+            .perform('b', step(&lower(10)), Keeps::ForRelease, &watched())
             .expect("set");
         actions
             .retry_restores(Instant::now())
@@ -1661,13 +1710,13 @@ mod tests {
 
         let mut actions = speakers();
         actions
-            .perform('a', &lower(20), Keeps::ForRelease, &watched())
+            .perform('a', step(&lower(20)), Keeps::ForRelease, &watched())
             .expect("set");
         actions.controls().broken = Some("speakers");
         assert!(actions.release('a', Instant::now).is_err());
         actions.controls().broken = None;
         actions
-            .perform('n', &lower(50), Keeps::Permanent, &watched())
+            .perform('n', step(&lower(50)), Keeps::Permanent, &watched())
             .expect("set");
         actions
             .retry_restores(Instant::now())
@@ -1687,13 +1736,13 @@ mod tests {
         actions
             .perform(
                 'a',
-                &current(MediaCommand::Pause),
+                step(&current(MediaCommand::Pause)),
                 Keeps::ForRelease,
                 &watched(),
             )
             .expect("paused");
         actions
-            .perform('a', &keys, Keeps::ForRelease, &watched())
+            .perform('a', step(&keys), Keeps::ForRelease, &watched())
             .expect("pressed");
         actions.release('a', Instant::now).expect("released");
         assert_eq!(
@@ -1709,7 +1758,7 @@ mod tests {
         );
         actions.controls().broken = Some("keyboard");
         assert!(matches!(
-            actions.perform('a', &keys, Keeps::Permanent, &watched()),
+            actions.perform('a', step(&keys), Keeps::Permanent, &watched()),
             Err(ActionError::Os(_))
         ));
     }
@@ -1722,7 +1771,7 @@ mod tests {
         // same executable name.
         for focused in [None, Some(8), Some(0)] {
             actions.controls().focused = focused;
-            let pressed = actions.perform('a', &keys, Keeps::Permanent, &watched());
+            let pressed = actions.perform('a', step(&keys), Keeps::Permanent, &watched());
             assert!(
                 matches!(&pressed, Err(ActionError::NotInFront(watched)) if watched == "Example.exe"),
                 "{focused:?}: {pressed:?}"
@@ -1748,7 +1797,7 @@ mod tests {
             ..Fake::default()
         });
         let keys = Action::PressKeys(KeyChord::parse("Ctrl+Alt+Shift+M").expect("valid"));
-        let pressed = actions.perform('a', &keys, Keeps::Permanent, &watched());
+        let pressed = actions.perform('a', step(&keys), Keeps::Permanent, &watched());
         assert!(
             matches!(pressed, Err(ActionError::KeysDropped { sent: 1, of: 3 })),
             "{pressed:?}"
@@ -1764,7 +1813,7 @@ mod tests {
         );
         actions.controls().takes = vec![0];
         assert!(matches!(
-            actions.perform('a', &keys, Keeps::Permanent, &watched()),
+            actions.perform('a', step(&keys), Keeps::Permanent, &watched()),
             Err(ActionError::KeysDropped { sent: 0, of: 3 })
         ));
         assert_eq!(
@@ -1783,7 +1832,7 @@ mod tests {
         });
         let keys = Action::PressKeys(KeyChord::parse("Ctrl+M").expect("valid"));
         assert!(matches!(
-            actions.perform('a', &keys, Keeps::Permanent, &watched()),
+            actions.perform('a', step(&keys), Keeps::Permanent, &watched()),
             Err(ActionError::KeysDropped { sent: 1, of: 2 })
         ));
         assert_eq!(
@@ -1803,7 +1852,7 @@ mod tests {
         let sound = Action::PlaySound(SoundFile::parse(r"C:\Ding.wav").expect("valid"));
         for action in [&current(MediaCommand::Pause), &open, &sound] {
             actions
-                .perform('a', action, Keeps::ForRelease, &watched())
+                .perform('a', step(action), Keeps::ForRelease, &watched())
                 .expect("ran");
         }
         actions.release('a', Instant::now).expect("released");
@@ -1819,12 +1868,12 @@ mod tests {
         );
         actions.controls().broken = Some("sound");
         assert!(matches!(
-            actions.perform('a', &sound, Keeps::Permanent, &watched()),
+            actions.perform('a', step(&sound), Keeps::Permanent, &watched()),
             Err(ActionError::SoundNotPlayed)
         ));
         actions.controls().broken = Some("shell");
         assert!(matches!(
-            actions.perform('a', &open, Keeps::Permanent, &watched()),
+            actions.perform('a', step(&open), Keeps::Permanent, &watched()),
             Err(ActionError::Os(error)) if error.kind() == io::ErrorKind::NotFound
         ));
     }
@@ -1834,14 +1883,19 @@ mod tests {
         let mut actions = Actions::<char, _>::new(Fake::default());
         for target in [VolumeTarget::System, VolumeTarget::App(app("Player.exe"))] {
             assert!(matches!(
-                actions.perform('a', &volume(target, 20), Keeps::ForRelease, &watched()),
+                actions.perform(
+                    'a',
+                    step(&volume(target, 20)),
+                    Keeps::ForRelease,
+                    &watched()
+                ),
                 Err(ActionError::NoAudio)
             ));
         }
     }
 
     #[test]
-    fn a_click_runs_only_once_it_is_placed() {
+    fn a_click_is_left_to_its_caller_to_place() {
         let click = Click::new(
             "target_app",
             ClickButton::Left,
@@ -1849,11 +1903,7 @@ mod tests {
             ClickAt::Spot(Spot::new(Corner::TopLeft, 1, 1).expect("valid")),
         )
         .expect("valid");
-        let mut actions = Actions::<char, _>::new(Fake::default());
-        assert!(matches!(
-            actions.perform('a', &Action::Click(click), Keeps::Permanent, &watched()),
-            Err(ActionError::Unplaced)
-        ));
-        assert_eq!(actions.controls().log, Vec::<String>::new());
+        let action = Action::Click(click.clone());
+        assert_eq!(Performable::try_from(&action), Err(&click));
     }
 }

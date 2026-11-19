@@ -1181,7 +1181,7 @@ mod tests {
             mpsc::channel().1,
         );
         let mut recovery = Recovery::new();
-        recovery.failed("reading a frame panicked".to_owned(), None);
+        recovery.failed("reading a frame panicked".to_owned(), None, Instant::now());
         frames.carry(&recovery, Vec::new());
         let red = frame_image(2, 2, |_, _| true);
         frames.handle(Ok(frame(&red, WINDOW)));
@@ -1201,6 +1201,7 @@ mod tests {
         recovery.failed(
             "the capture starts again".to_owned(),
             Some("the copy failed".to_owned()),
+            Instant::now(),
         );
         frames.carry(&recovery, Vec::new());
         frames.handle(Err(io::Error::other("the copy failed")));

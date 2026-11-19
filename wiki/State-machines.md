@@ -503,7 +503,7 @@ The thread can also panic in any state, which ends it.
   the 2 second check ended the capture, it then sends `Unseen`, so no
   reading from the old capture can follow it.
 - **Backoff.** After `Lost`, `Failing`, or `Panicked`, the thread waits
-  before it looks again: `RESTART_WAIT_MIN` at first, doubling up to
+  before it looks again: a `Backoff` of 1 second at first, doubling up to
   `RESTART_WAIT_MAX` while each new capture ends before it reads a frame. It
   logs the reason once until the reason changes. A restarted capture that
   reads a frame sends `Recovered`, which resets both. A frame whose reading
@@ -778,8 +778,9 @@ stateDiagram-v2
 The action thread (`apps/runtime/src/workers/act.rs`) makes the media and audio
 controls when it starts, then runs each job in order. Its loop is a `Worker`
 whose `actions` field holds the restore journal (`Actions`) once the controls
-are made, or a `Missing` record with the last error and a `Backoff` while they
-cannot be.
+are made, or the last error and a `Backoff` while they cannot be: a
+`Retrying` from `crates/actions/src/backoff.rs`, which the Windows controls
+also use for the media session manager.
 
 ```mermaid
 stateDiagram-v2
@@ -804,9 +805,10 @@ stateDiagram-v2
   after a panic thereby replaces what the old one said. The owner takes it
   that actions can run until the first report, keeps the last report in the
   model's `actions_can_run`, and the tray shows it.
-- **Ready.** After each job, the worker tries the pending restores that are
-  due. While any restore is pending, it waits for the next job only until the
-  next one is due, or 10 seconds (`VOLUME_RETRY`) for a volume restore.
+- **Ready.** After each job, the worker retries the pending restores: every
+  volume restore, and each media restore whose wait is over. While any
+  restore is pending, it waits for the next job only until
+  `Actions::next_retry`, when the journal says the next one is due.
 - **LastTry.** `last_try` tries every pending restore once, due or not, and
   forgets them.
 
@@ -833,8 +835,10 @@ one audio session's volume, the entries form a stack:
   journal before its undo runs.
 - **Failed undo.** The change moves to `pending` instead of being dropped. A
   volume restore is tried again until it works, and is dropped only once its
-  audio session is gone. A failed media restore gets one more try 2 seconds after the player
-  reports the failure (`MEDIA_RETRY`).
+  audio session is gone. It is tried after each later job, and is due again
+  10 seconds after each failed try (`VOLUME_RETRY`). A failed media restore
+  gets one more try 2 seconds after the player reports the failure
+  (`MEDIA_RETRY`).
 
 The journal and pending restores release their COM session keys before the
 controls leave their COM apartment. The journal lives only in memory, so a

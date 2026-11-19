@@ -42,10 +42,10 @@
 //! capture's frame loop panicked, after [`RESTART_AFTER`] frames in a row
 //! fail, and when reading a frame panics, which the capture's frame handler
 //! catches so it does not end the capture's thread without a word. After a
-//! capture ends this way, the reader waits before it captures again, from
-//! [`RESTART_WAIT_MIN`] up to
-//! [`RESTART_WAIT_MAX`], doubling while each new capture ends before it reads
-//! a frame, which a frame whose reading panicked is not, and logs why once
+//! capture ends this way, the reader waits before it captures again, with a
+//! [`Backoff`] that starts at a second and doubles up to [`RESTART_WAIT_MAX`]
+//! while each new capture ends before it reads a frame, which a frame whose
+//! reading panicked is not, and logs why once
 //! until the reason changes. While capturing, the reader
 //! checks every [`CHECK_AGAIN`] that the window still shows and still fits
 //! the application best, because a hidden window sends no frames and no
@@ -71,7 +71,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use appytappy_actions::Watched;
+use appytappy_actions::{Backoff, Watched};
 use appytappy_config::settings_file::ReadInterval;
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::settle::Settle;
@@ -97,9 +97,6 @@ pub(crate) const CHECK_AGAIN: Duration = Duration::from_secs(2);
 
 /// How many frames in a row may fail before the capture starts again.
 const RESTART_AFTER: u32 = 5;
-
-/// The wait before the first capture after one that ended because it failed.
-const RESTART_WAIT_MIN: Duration = Duration::from_secs(1);
 
 /// The longest wait before a capture whose frames keep failing starts again.
 const RESTART_WAIT_MAX: Duration = Duration::from_secs(30);
@@ -223,8 +220,8 @@ struct Recovery {
     /// The error that made the last capture's frames fail, which they
     /// logged already.
     frame_error: Option<String>,
-    /// How long to wait before the next capture.
-    wait: Duration,
+    /// When to capture again, once a capture ended this way.
+    backoff: Option<Backoff>,
 }
 
 impl Recovery {
@@ -232,20 +229,30 @@ impl Recovery {
         Self {
             problem: None,
             frame_error: None,
-            wait: RESTART_WAIT_MIN,
+            backoff: None,
         }
     }
 
-    /// Notes that a capture ended for `problem`, after frames that failed
-    /// with `frame_error`, if any. Returns the wait before the next capture,
-    /// and whether `problem` is new, so it is logged.
-    fn failed(&mut self, problem: String, frame_error: Option<String>) -> (Duration, bool) {
+    /// Notes that a capture ended at `now` for `problem`, after frames that
+    /// failed with `frame_error`, if any. Returns the wait before the next
+    /// capture, and whether `problem` is new, so it is logged.
+    fn failed(
+        &mut self,
+        problem: String,
+        frame_error: Option<String>,
+        now: Instant,
+    ) -> (Duration, bool) {
         let new = self.problem.as_ref() != Some(&problem);
-        let wait = self.wait;
-        self.wait = self.wait.saturating_mul(2).min(RESTART_WAIT_MAX);
+        let backoff = match &mut self.backoff {
+            Some(backoff) => {
+                backoff.failed_again(now);
+                *backoff
+            },
+            None => *self.backoff.insert(Backoff::up_to(now, RESTART_WAIT_MAX)),
+        };
         self.problem = Some(problem);
         self.frame_error = frame_error;
-        (wait, new)
+        (backoff.retry_at().saturating_duration_since(now), new)
     }
 
     /// Notes that a capture read a frame again.
@@ -524,7 +531,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                 carried = problems;
             },
             Ok(Ended::Lost(problem)) => {
-                let (pause_for, new) = recovery.failed(problem.clone(), None);
+                let (pause_for, new) = recovery.failed(problem.clone(), None, Instant::now());
                 if (new && !report(&mut reported, problem))
                     || !pause(control, pause_for, &mut trace)
                 {
@@ -536,7 +543,8 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                     "{RESTART_AFTER} frames in a row cannot be read, so its capture starts \
                      again: {error}"
                 );
-                let (pause_for, new) = recovery.failed(problem.clone(), Some(error));
+                let (pause_for, new) =
+                    recovery.failed(problem.clone(), Some(error), Instant::now());
                 if (new && !report(&mut reported, problem))
                     || !pause(control, pause_for, &mut trace)
                 {
@@ -867,9 +875,13 @@ mod tests {
     #[test]
     fn recovery_waits_longer_after_each_failure_until_a_frame_is_read() {
         let mut recovery = Recovery::new();
+        let now = Instant::now();
         let failed =
-            |recovery: &mut Recovery, problem: &str| recovery.failed(problem.to_owned(), None);
-        assert_eq!(failed(&mut recovery, "lost"), (RESTART_WAIT_MIN, true));
+            |recovery: &mut Recovery, problem: &str| recovery.failed(problem.to_owned(), None, now);
+        assert_eq!(
+            failed(&mut recovery, "lost"),
+            (Duration::from_secs(1), true)
+        );
         assert_eq!(
             failed(&mut recovery, "lost"),
             (Duration::from_secs(2), false)
@@ -883,7 +895,10 @@ mod tests {
         }
         assert_eq!(failed(&mut recovery, "gone"), (RESTART_WAIT_MAX, false));
         recovery.recovered();
-        assert_eq!(failed(&mut recovery, "gone"), (RESTART_WAIT_MIN, true));
+        assert_eq!(
+            failed(&mut recovery, "gone"),
+            (Duration::from_secs(1), true)
+        );
     }
 
     /// A capture the fake system started: its window, its crop, and the
@@ -1474,10 +1489,10 @@ mod tests {
             Err(RecvTimeoutError::Timeout),
             "the same reason is logged once"
         );
-        // The second wait is twice the first, so it outlasts RESTART_WAIT_MIN.
+        // The second wait is twice the first, so it outlasts the first.
         assert!(
             matches!(
-                desk.lists.recv_timeout(RESTART_WAIT_MIN),
+                desk.lists.recv_timeout(Duration::from_secs(1)),
                 Err(RecvTimeoutError::Timeout)
             ),
             "it waits longer"
@@ -1801,7 +1816,8 @@ mod tests {
         let lost = || Control::Lost("closed".to_owned());
         let mut recovery = Recovery::new();
         let mut trace = Trace::OFF;
-        recovery.failed("closed".to_owned(), None);
+        let now = Instant::now();
+        recovery.failed("closed".to_owned(), None, now);
         for left in [
             lost(),
             Control::Resizing {
@@ -1814,13 +1830,10 @@ mod tests {
         }
         assert!(!stopped_meanwhile(&received, &mut recovery, &mut trace));
         assert_eq!(received.try_recv(), Err(TryRecvError::Empty));
-        assert_eq!(recovery.wait, Duration::from_secs(2), "still failing");
+        assert!(recovery.backoff.is_some(), "still failing");
         control.send(Control::Recovered).expect("send");
         assert!(!stopped_meanwhile(&received, &mut recovery, &mut trace));
-        assert_eq!(
-            recovery.wait, RESTART_WAIT_MIN,
-            "a frame was read meanwhile"
-        );
+        assert_eq!(recovery.backoff, None, "a frame was read meanwhile");
         for left in [Control::Stop, lost(), Control::Stop] {
             control.send(left).expect("send");
         }
@@ -2016,10 +2029,10 @@ mod tests {
             matches!(readings.recv_timeout(QUIET), Err(RecvTimeoutError::Timeout)),
             "a capture that panicked before it read anything has nothing new to say"
         );
-        // The second wait is twice the first, so it outlasts RESTART_WAIT_MIN.
+        // The second wait is twice the first, so it outlasts the first.
         assert!(
             matches!(
-                desk.lists.recv_timeout(RESTART_WAIT_MIN),
+                desk.lists.recv_timeout(Duration::from_secs(1)),
                 Err(RecvTimeoutError::Timeout)
             ),
             "it waits longer"

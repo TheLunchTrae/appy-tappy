@@ -94,7 +94,7 @@ use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
 use crate::{
-    Backoff, Controls, Executables, Input, MediaSession, MouseButton, MouseMessage, Press, Stroke,
+    Controls, Executables, Input, MediaSession, MouseButton, MouseMessage, Press, Retrying, Stroke,
     Volume, pack,
 };
 
@@ -187,7 +187,7 @@ impl PartialEq for VolumeKey {
 #[derive(Debug)]
 pub struct WindowsControls {
     /// The media session manager, or why Windows did not give it yet.
-    media: Result<GlobalSystemMediaTransportControlsSessionManager, MediaMissing>,
+    media: Retrying<GlobalSystemMediaTransportControlsSessionManager>,
     devices: IMMDeviceEnumerator,
     opener: Opener,
     input: WindowsInput,
@@ -211,10 +211,7 @@ impl WindowsControls {
         let devices = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }?;
         // A manager that is not ready yet is asked for again by a later
         // media action, so volume and key actions run meanwhile.
-        let media = media_manager().map_err(|error| MediaMissing {
-            error: error.to_string(),
-            backoff: Backoff::new(Instant::now()),
-        });
+        let media = Retrying::new(media_manager(), Instant::now());
         Ok(Self {
             media,
             devices,
@@ -229,23 +226,9 @@ impl WindowsControls {
     /// it before and the wait since the last try is over. Each request can
     /// take up to [`MEDIA_TIMEOUT`], so it is not made on every action.
     fn media(&mut self) -> io::Result<&GlobalSystemMediaTransportControlsSessionManager> {
-        if let Err(missing) = &mut self.media {
-            let now = Instant::now();
-            if missing.backoff.is_over(now) {
-                match media_manager() {
-                    Ok(manager) => self.media = Ok(manager),
-                    Err(error) => {
-                        missing.error = error.to_string();
-                        missing.backoff.failed_again(now);
-                    },
-                }
-            }
-        }
-        self.media.as_ref().map_err(|missing| {
-            io::Error::other(format!(
-                "the media session manager is not ready: {}",
-                missing.error
-            ))
+        self.media.make_again(Instant::now(), media_manager);
+        self.media.get().map_err(|error| {
+            io::Error::other(format!("the media session manager is not ready: {error}"))
         })
     }
 
@@ -1125,15 +1108,6 @@ fn virtual_key(key: Key) -> (VIRTUAL_KEY, bool) {
         Key::Left => (VK_LEFT, true),
         Key::Right => (VK_RIGHT, true),
     }
-}
-
-/// Why the media session manager is missing, and when to ask for it again.
-#[derive(Debug)]
-struct MediaMissing {
-    /// The last error asking for it.
-    error: String,
-    /// When to ask again.
-    backoff: Backoff,
 }
 
 /// Asks Windows for the media session manager.

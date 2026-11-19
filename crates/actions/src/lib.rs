@@ -22,13 +22,13 @@ mod keys;
 #[cfg(windows)]
 pub mod win;
 
-pub use backoff::Backoff;
+pub use backoff::{Backoff, Retrying};
 pub use click::{MouseButton, MouseEvent, MouseMessage, PlacedClick, Press, click, pack};
 pub use controls::{Controls, Executables, MediaSession, NoControls, Volume};
 pub use error::ActionError;
 pub use input::{Input, Unsupported};
-pub use journal::{Actions, Keeps, MEDIA_RETRY, Watched};
-pub use keys::{HOLD, Stroke, strokes};
+pub use journal::{Actions, Keeps, MEDIA_RETRY, Performable, VOLUME_RETRY, Watched};
+pub use keys::Stroke;
 
 /// The [`Input`] of the platform this build targets.
 #[cfg(windows)]
