@@ -173,7 +173,10 @@ extern "system" fn collect_window(window: HWND, collected: LPARAM) -> BOOL {
     BOOL::from(true)
 }
 
-fn window_entry(window: HWND) -> WindowEntry {
+/// What the list of windows says about `window`, or `None` when its bounds
+/// cannot be read: the window closed after [`EnumWindows`] named it, so it
+/// is no longer there to list.
+fn window_entry(window: HWND) -> Option<WindowEntry> {
     let mut process = 0;
     let mut title = [0_u16; 512];
     let mut class = [0_u16; 256];
@@ -190,29 +193,14 @@ fn window_entry(window: HWND) -> WindowEntry {
             GetWindowRect(window, &raw mut rect).is_ok(),
         )
     };
-    let bounds = if rect_read {
-        Bounds {
-            left: rect.left,
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-        }
-    } else {
-        Bounds {
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-        }
-    };
-    WindowEntry {
+    rect_read.then(|| WindowEntry {
         handle: window.0.addr() as u64,
         process: ProcessId::new(process),
         title: utf16_to_string(&title),
         class: utf16_to_string(&class),
         visible,
-        bounds,
-    }
+        bounds: bounds_of(rect),
+    })
 }
 
 impl System for WindowsSystem {
@@ -252,7 +240,7 @@ impl System for WindowsSystem {
         // SAFETY: `collect_window` reads `collected` only as the `handles` vector,
         // which outlives this call.
         unsafe { EnumWindows(Some(collect_window), collected) }?;
-        Ok(handles.into_iter().map(window_entry).collect())
+        Ok(handles.into_iter().filter_map(window_entry).collect())
     }
 
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {

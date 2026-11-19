@@ -320,12 +320,9 @@ fn run_tray<E: From<TrayEvent>>(
         {
             return Ok(TrayExit::OwnerGone);
         }
-        let mut changed = false;
-        while let Ok(next) = updates.try_recv() {
+        // Only the newest of the menus that came in meanwhile matters.
+        if let Some(next) = updates.try_iter().last() {
             menu = next;
-            changed = true;
-        }
-        if changed {
             icon.show(&menu.tooltip);
         }
     }

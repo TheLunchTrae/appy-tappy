@@ -89,7 +89,8 @@ pub trait System {
     /// Returns the operating system's error.
     fn processes(&self) -> io::Result<Vec<ProcessEntry>>;
 
-    /// Lists top-level windows without opening their processes.
+    /// Lists top-level windows without opening their processes. A window
+    /// that closes while the list is made is left out.
     ///
     /// # Errors
     ///
