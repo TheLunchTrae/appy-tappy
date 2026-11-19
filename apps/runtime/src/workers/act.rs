@@ -223,8 +223,8 @@ where
     }
 
     /// Runs `job`, after making the controls again if they are missing and
-    /// their wait is over, then tries the pending restores that are due.
-    /// They come after the job, so a pending restore of a target the job
+    /// their wait is over, then retries the pending restores, as
+    /// [`Actions::retry_restores`] does. They come after the job, so a pending restore of a target the job
     /// changes is taken over by the job instead of being sent just before
     /// it.
     fn job<S: System + Capture>(
