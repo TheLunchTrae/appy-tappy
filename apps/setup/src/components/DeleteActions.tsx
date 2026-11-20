@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react';
 
 import { errorText } from '../lib/api.ts';
+import { focusIsFree } from '../lib/focus.ts';
 import { background } from '../lib/repeat.ts';
 import { Question, useQuestion } from './Question.tsx';
 
@@ -29,19 +30,20 @@ interface Props {
  * delete failed, says why there instead.
  */
 export function DeleteActions({ name, loses, actLabel, blocked, confirming, onConfirm, onDelete, children }: Props) {
-  const { control, refs } = useQuestion<HTMLButtonElement>(confirming);
   const [deleting, setDeleting] = useState(false);
-  // Why the delete the user answered for failed, until it is dismissed.
+  // Why the delete the user answered for failed, until it is dismissed. It shows whichever row the page asks about
+  // by then, since the delete carries on when the question moves to another row.
   const [refused, setRefused] = useState<string | null>(null);
-  const { keep } = refs;
+  const { control, refs } = useQuestion<HTMLButtonElement>(confirming || refused !== null, confirming);
+  const { keep, question } = refs;
   useEffect(() => {
-    // The refusal takes the place of the locked answers, which held the focus.
-    if (refused !== null) {
+    // The refusal takes the place of the locked answers, which held the focus unless the user moved it.
+    if (refused !== null && focusIsFree(question.current)) {
       keep.current?.focus();
     }
-  }, [refused, keep]);
-  const why = blocked ?? refused;
-  if (confirming && why !== null) {
+  }, [refused, keep, question]);
+  const why = refused ?? (confirming ? blocked : undefined);
+  if (why !== undefined) {
     return (
       <Question
         refs={refs}
@@ -49,10 +51,12 @@ export function DeleteActions({ name, loses, actLabel, blocked, confirming, onCo
         keepLabel="OK"
         onKeep={() => {
           setRefused(null);
-          onConfirm(false);
+          if (confirming) {
+            onConfirm(false);
+          }
         }}
       >
-        {why}
+        Can&apos;t delete {name}: {why}
       </Question>
     );
   }
@@ -93,8 +97,6 @@ export function DeleteActions({ name, loses, actLabel, blocked, confirming, onCo
         type="button"
         className="btn small"
         onClick={() => {
-          // A refusal left under another row's question is about a delete long past.
-          setRefused(null);
           onConfirm(true);
         }}
       >

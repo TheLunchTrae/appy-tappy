@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 
 import type { AppSummary, DraftSummary } from '../lib/bindings.ts';
 import { deleteReference, errorText } from '../lib/api.ts';
 import { andList, keptByReaders, readers, referenceCharacters } from '../lib/reference.ts';
 import { originText } from '../lib/sharing.ts';
+import { useRowGone } from '../lib/focus.ts';
 import { CharacterChips } from '../components/CharacterChips.tsx';
 import { DeleteActions } from '../components/DeleteActions.tsx';
 import { RiskMark } from '../components/RiskMark.tsx';
@@ -30,23 +31,22 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const headingRef = useRef<HTMLHeadingElement>(null);
+  const { heading, rowGone } = useRowGone<HTMLHeadingElement>();
   // The row says why when this fails.
   const remove = async (app: string, reference: string): Promise<void> => {
     await deleteReference(app, reference);
+    setDeleteError(null);
     // The question stays until the row is gone, so its buttons take no press meanwhile.
     await onChanged();
     setConfirming((current) => (current === `${app}/${reference}` ? null : current));
-    // The deleted row took the focused button with it.
-    headingRef.current?.focus();
+    rowGone();
   };
 
   const removeDraft = async (id: string): Promise<void> => {
     try {
       await onDeleteDraft(id);
       setDeleteError(null);
-      // The deleted row took the focused button with it.
-      headingRef.current?.focus();
+      rowGone();
     } catch (error: unknown) {
       setDeleteError(errorText(error));
     }
@@ -90,7 +90,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
   return (
     <main className="page">
       <div className="page-head">
-        <h1 ref={headingRef} tabIndex={-1}>
+        <h1 ref={heading} tabIndex={-1}>
           References
         </h1>
         <span className="lead">

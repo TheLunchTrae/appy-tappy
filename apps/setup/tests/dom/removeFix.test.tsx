@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { useState } from 'react';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 
 import type { AppSummary, OverlayView, ValueDef } from '../../src/lib/bindings.ts';
@@ -55,8 +55,8 @@ const view: OverlayView = {
 };
 
 /** The page over files that lose the fix once the page reads them again. */
-function Page() {
-  const [value, setValue] = useState(fixed);
+function Page({ saved = fixed }: { readonly saved?: ValueDef }) {
+  const [value, setValue] = useState(saved);
   return (
     <ValuesPage
       apps={[appWith(value)]}
@@ -119,4 +119,57 @@ test('Remove fix asks first, removes once, and leaves the focus in the row', asy
   });
   expect(screen.queryByRole('button', { name: 'Remove fix of Playback icon' })).toBeNull();
   expect(screen.getByRole('row', { name: /Playback icon/ }).contains(document.activeElement)).toBe(true);
+});
+
+test('a window that takes another size with a fix closes the question about the fix at the first', async () => {
+  const other = { width: 800, height: 600 };
+  let size = now;
+  let removals = 0;
+  mockIPC((command) => {
+    if (command === 'live_values') {
+      return [['player', { Ok: { ...view, windowSize: size } }]];
+    }
+    if (command === 'remove_fix') {
+      removals += 1;
+    }
+    return undefined;
+  });
+  const user = userEvent.setup();
+  const both: ValueDef = {
+    ...fixed,
+    screen: { ...fixed.screen, fixes: [...fixed.screen.fixes, { windowSize: other, region, images: [] }] },
+  };
+  render(<Page saved={both} />);
+
+  await user.click(await screen.findByRole('button', { name: 'Remove fix of Playback icon' }));
+  expect(screen.getByRole('alertdialog', { name: 'Remove the fix of Playback icon at 1280 × 720?' })).not.toBeNull();
+  size = other;
+  // The page asks what the values read once a second.
+  await waitFor(
+    () => {
+      expect(screen.getByRole('columnheader', { name: /At 800 × 600 now/u })).not.toBeNull();
+    },
+    { timeout: 3000 },
+  );
+  // The fix at the size now is another one, which nobody asked about.
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Remove fix of Playback icon' })).not.toBeNull();
+  expect(removals).toBe(0);
+});
+
+test('a removal that fails says why on the page and puts the focus back on Remove fix', async () => {
+  mockIPC(async (command) => {
+    if (command === 'live_values') {
+      return [['player', { Ok: view }]];
+    }
+    return command === 'remove_fix' ? Promise.reject("AppyTappy can't save Player. Try again.") : undefined;
+  });
+  const user = userEvent.setup();
+  render(<Page />);
+
+  await user.click(await screen.findByRole('button', { name: 'Remove fix of Playback icon' }));
+  await user.click(screen.getByRole('button', { name: 'Remove fix' }));
+  expect((await screen.findByRole('alert')).textContent).toBe("AppyTappy can't save Player. Try again.");
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove fix of Playback icon' }));
 });

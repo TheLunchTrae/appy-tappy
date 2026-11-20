@@ -9,6 +9,7 @@ import { Hint } from '../components/Hint.tsx';
 import { RuntimeWarning } from '../components/RuntimeWarning.tsx';
 import { NEEDS_RUNNING_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
+import { useRowGone } from '../lib/focus.ts';
 import { type Resumed, draftOfSaved, draftProblem, newDrafts } from '../lib/drafts.ts';
 import { keptAutomation } from '../lib/flow.ts';
 import { DraftActions, DraftNote, DraftPill } from '../components/Drafts.tsx';
@@ -201,7 +202,7 @@ export function AutomationsPage({
   // The same set, read when a press arrives: a second press can come before the first one's render.
   const inFlight = useRef(new Set<string>());
   const [actionError, setActionError] = useState<string | null>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
+  const { heading, rowGone } = useRowGone<HTMLHeadingElement>();
 
   const run = async (change: () => Promise<void>): Promise<boolean> => {
     try {
@@ -237,18 +238,18 @@ export function AutomationsPage({
   // The row says why when this fails.
   const remove = async (id: string): Promise<void> => {
     await deleteAutomation(id);
+    setActionError(null);
     // The question stays until the row is gone, so its buttons take no press meanwhile.
     await onChanged();
     setConfirming((current) => (current === id ? null : current));
-    // The deleted row took the focused button with it.
-    headingRef.current?.focus();
+    rowGone();
   };
 
   const removeDraft = async (id: string): Promise<void> => {
     try {
       await onDeleteDraft(id);
       setActionError(null);
-      headingRef.current?.focus();
+      rowGone();
     } catch (error: unknown) {
       setActionError(errorText(error));
     }
@@ -266,7 +267,7 @@ export function AutomationsPage({
   const canCreate = apps !== null && loadError === null;
   const head = (
     <div className="page-head">
-      <h1 ref={headingRef} tabIndex={-1}>
+      <h1 ref={heading} tabIndex={-1}>
         Automations
       </h1>
       <span className="lead">When a value becomes true, AppyTappy runs the actions in order.</span>

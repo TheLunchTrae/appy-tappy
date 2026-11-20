@@ -2983,7 +2983,8 @@ stateDiagram-v2
     Deleting --> [*]: the item is deleted and the page has read its files again
     Deleting --> Telling: the delete fails
     Deleting --> Buttons: Delete on another row, while the delete carries on
-    Telling --> Buttons: OK, Escape, or Delete on another row
+    Buttons --> Telling: a delete that carried on fails
+    Telling --> Buttons: OK or Escape, and for an item in use Delete on another row
 ```
 
 - The question takes the buttons' place (`Question`), and focus moves to
@@ -2993,17 +2994,33 @@ stateDiagram-v2
   read with it (`keptByReaders`), and a value from the automations that
   watch it (`keptByAutomations`), once the automations are read. The owner
   refuses the same deletes, and any delete that fails shows what the owner
-  answered. **OK** and Escape put focus back on **Delete**, and a refusal
-  goes with them, so **Delete** asks again.
-- A delete that works moves focus to the page's heading, since the row and
-  its buttons are gone.
+  answered, after **Can't delete** and the item's name. **OK** and Escape
+  put focus back on **Delete**, and a refusal goes with them, so **Delete**
+  asks again.
+- A delete carries on when **Delete** on another row moves the question
+  there. The row shows its buttons meanwhile, and its answers stay disabled
+  if **Delete** asks again before the delete settles. When that delete
+  fails, the row says why in its buttons' place, whichever row the page asks
+  about by then, and stays `Telling` until **OK** or Escape: the refusal is
+  the row's own (`refused`), so the other row's question keeps its place.
+- A refusal takes focus to **OK** only while focus is still in the question
+  or nothing holds it, as after the locked answer that held it. Focus the
+  user moved during the delete, as to another row's question, stays there
+  (`focusIsFree` in `apps/setup/src/lib/focus.ts`).
+- A delete that works moves focus to the page's heading once the row is
+  gone, when the row's buttons held the focus (`useRowGone`). Focus that is
+  elsewhere by then, as in another row's question, stays there. It also
+  clears what the page said about an earlier failure, such as a draft that
+  could not be deleted.
 
 ### Remove fix question
 
 A value's cell for the window's size now (`NowCellView` in
 `apps/setup/src/pages/ValuesPage.tsx`) shows **Remove fix** while the value
 reads from a fix at that size. The cell holds whether it asks (`asking`) and
-whether the removal is on its way (`removing`).
+whether the removal is on its way (`removing`), and its row gives it a key
+of the window's size, so the cell and what it holds start again when the
+window takes another size.
 
 ```mermaid
 stateDiagram-v2
@@ -3014,10 +3031,21 @@ stateDiagram-v2
     Removing --> [*]: the fix is removed and the page has read its files again
     Removing --> Button: the removal fails, and the page says why
     Asking --> [*]: the window takes a size the value has no fix at
+    Asking --> Button: the window takes another size the value has a fix at
+    Removing --> [*]: the window takes a size the value has no fix at
+    Removing --> Button: the window takes another size the value has a fix at
 ```
 
 `[*]` is the cell without **Remove fix**, which shows again as `Button` when
 the value reads from a fix.
+
+- The question is about the fix at the size it was asked at. A window that
+  takes another size closes it, also when the value has a fix at the new
+  size: **Remove fix** there asks about that fix.
+- A size change during the removal closes the question too. The removal it
+  sent carries on for the size it was asked at: when it fails, the page
+  says why, and when it works, the fix is gone the next time the window has
+  that size. The focus the question held is not moved.
 
 - The question takes the place of **Remove fix** (`Question`), and focus
   moves to **Keep**. **Keep** and Escape put focus back on **Remove fix**.

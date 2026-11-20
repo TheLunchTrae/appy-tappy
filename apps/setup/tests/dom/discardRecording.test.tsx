@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 
@@ -29,7 +30,7 @@ const empty: RecordingView = {
   shapes: [],
 };
 
-function panel(view: RecordingView, onDiscard: () => Promise<void>) {
+function panel(view: RecordingView, onDiscard: () => Promise<void>, error: string | null = null) {
   return (
     <RecordPanel
       view={view}
@@ -43,7 +44,7 @@ function panel(view: RecordingView, onDiscard: () => Promise<void>) {
       onScope={() => undefined}
       appName="Player"
       crops={new Map()}
-      error={null}
+      error={error}
       onStart={() => undefined}
       onMore={() => undefined}
       onStop={() => undefined}
@@ -107,4 +108,40 @@ test('Discard drops a recording with no readings at once', async () => {
   await user.click(screen.getByRole('button', { name: 'Discard' }));
   expect(discards).toBe(1);
   expect(screen.queryByRole('alertdialog')).toBeNull();
+});
+
+/** The panel as the flow holds it: a discard that fails settles, and the flow hands the panel why. */
+function FailingDiscard({ failed }: { readonly failed: Promise<never> }) {
+  const [error, setError] = useState<string | null>(null);
+  return panel(
+    { ...empty, readings: [reading] },
+    async () => {
+      await failed.catch((why: unknown) => {
+        setError(String(why));
+      });
+    },
+    error,
+  );
+}
+
+test('a discard that fails says why, and the button asks again', async () => {
+  const failing = Promise.withResolvers<never>();
+  const user = userEvent.setup();
+  render(<FailingDiscard failed={failing.promise} />);
+  const button = (name: string): HTMLElement => screen.getByRole('button', { name });
+
+  await user.click(button('Discard'));
+  await user.click(button('Discard recording'));
+  expect(button('Discard recording')).toHaveProperty('disabled', true);
+  await act(async () => {
+    failing.reject('The recording is still being read.');
+    await failing.promise.catch(() => undefined);
+  });
+
+  expect(screen.getByRole('alert').textContent).toBe('The recording is still being read.');
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(document.activeElement).toBe(button('Discard'));
+  // The lock went with the question, so the next answer discards again.
+  await user.click(button('Discard'));
+  expect(button('Discard recording')).toHaveProperty('disabled', false);
 });

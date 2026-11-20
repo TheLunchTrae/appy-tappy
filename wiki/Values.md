@@ -851,6 +851,6 @@ Draw the region again and the value says how you make it now.
 ## Delete a value
 
 Select **Delete** next to a value, then **Delete value** to confirm. A value
-that an automation watches cannot be deleted: **Delete** names the
-automations to change or delete first, in the value's row, and **OK** closes
-that.
+that an automation watches cannot be deleted: **Delete** says **Can't
+delete** with the value's name and the automations to change or delete
+first, in the value's row, and **OK** closes that.

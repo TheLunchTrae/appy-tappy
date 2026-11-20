@@ -19,23 +19,26 @@ export interface QuestionFocus<T extends HTMLElement> {
 }
 
 /**
- * Focus for a question that takes a control's place while `confirming`: it moves to the question's safe answer
- * when the question shows, and back to the control after an answer given in the question. Put `control` on the
- * control and pass `refs` to the {@link Question}.
+ * Focus for a question that takes a control's place while `showing`: it moves to the question's safe answer when
+ * the question shows, and back to the control after an answer given in the question. A question that shows by
+ * itself, with `asked` false, leaves the focus where the user has it. Put `control` on the control and pass `refs`
+ * to the {@link Question}.
  */
-export function useQuestion<T extends HTMLElement>(confirming: boolean): QuestionFocus<T> {
+export function useQuestion<T extends HTMLElement>(showing: boolean, asked = showing): QuestionFocus<T> {
   const control = useRef<T>(null);
   const keep = useRef<HTMLButtonElement>(null);
   const question = useRef<HTMLSpanElement>(null);
   const hadFocus = useRef(false);
   useEffect(() => {
-    if (confirming) {
-      keep.current?.focus();
+    if (showing) {
+      if (asked) {
+        keep.current?.focus();
+      }
     } else if (hadFocus.current) {
       hadFocus.current = false;
       control.current?.focus();
     }
-  }, [confirming]);
+  }, [showing, asked]);
   const refs: QuestionRefs = { keep, question, hadFocus };
   return { control, refs };
 }

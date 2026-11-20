@@ -20,6 +20,7 @@ import { MARK_CHECKED_HINT } from '../lib/hints.ts';
 import { hex } from '../lib/pixels.ts';
 import { originText } from '../lib/sharing.ts';
 import { background } from '../lib/repeat.ts';
+import { focusIsFree, useRowGone } from '../lib/focus.ts';
 import {
   FIX_HINT,
   NOW_HINT,
@@ -110,16 +111,20 @@ interface NowProps {
 
 /** A value's reading at the window's size now, or why it has none, with a way to fix it at that size. A state
  * check that matches none of its states may be right, so it shows as a note, not a warning. Remove fix asks first,
- * in its own place. */
+ * in its own place, about the fix at `size` alone. */
 function NowCellView({ value, cell, size, onFix, onRemoveFix }: NowProps) {
   const tone = { reading: undefined, waiting: undefined, noState: 'note', unread: 'warn', notDrawn: 'warn' }[cell.kind];
   const fixed = cell.kind !== 'notDrawn' && cell.kind !== 'waiting' && cell.from === 'fixed';
+  // The question is about the fix at `size`: the row gives the cell a key of the size, so a window that takes
+  // another size starts the cell again, and what it asked goes with it.
   const [asking, setAsking] = useState(false);
   const [removing, setRemoving] = useState(false);
-  // A question about a fix the cell reads from no more, as at another window size, is not asked again later.
-  if (asking && !fixed && !removing) {
-    setAsking(false);
-  }
+  useEffect(() => {
+    // A question about a fix the cell reads from no more is not asked again when the cell reads from one later.
+    if (!fixed && !removing) {
+      setAsking(false);
+    }
+  }, [fixed, removing]);
   const { control, refs } = useQuestion<HTMLButtonElement>(asking && fixed);
   const fixButton = useRef<HTMLButtonElement>(null);
   // Whether the question's answer removed the fix, until the focus it left behind is placed.
@@ -130,7 +135,7 @@ function NowCellView({ value, cell, size, onFix, onRemoveFix }: NowProps) {
     }
     removed.current = false;
     // The fix took Remove fix with it, which the question would give the focus back to.
-    if (document.activeElement === null || document.activeElement === document.body) {
+    if (focusIsFree()) {
       fixButton.current?.focus();
     }
   }, [asking, fixed]);
@@ -302,6 +307,7 @@ function AppRows({
                 <span className="note">{running ? '' : 'Not running'}</span>
               ) : (
                 <NowCellView
+                  key={`${size.width}x${size.height}`}
                   value={value}
                   cell={cell}
                   size={size}
@@ -403,15 +409,15 @@ export function ValuesPage({
     }
   };
 
-  const headingRef = useRef<HTMLHeadingElement>(null);
+  const { heading, rowGone } = useRowGone<HTMLHeadingElement>();
   // The row says why when this fails.
   const remove = async (app: string, value: string): Promise<void> => {
     await deleteValue(app, value);
+    setActionError(null);
     // The question stays until the row is gone, so its buttons take no press meanwhile.
     await onChanged();
     setConfirming((current) => (current === `${app}/${value}` ? null : current));
-    // The deleted row took the focused button with it.
-    headingRef.current?.focus();
+    rowGone();
   };
 
   const markAsChecked = async (app: string): Promise<void> => {
@@ -431,8 +437,7 @@ export function ValuesPage({
       try {
         await onDeleteDraft(id);
         setActionError(null);
-        // The deleted row took the focused button with it.
-        headingRef.current?.focus();
+        rowGone();
       } catch (error: unknown) {
         setActionError(errorText(error));
       }
@@ -447,7 +452,7 @@ export function ValuesPage({
   return (
     <main className="page">
       <div className="page-head">
-        <h1 ref={headingRef} tabIndex={-1}>
+        <h1 ref={heading} tabIndex={-1}>
           Values
         </h1>
         <span className="lead">What AppyTappy reads from each application&apos;s window.</span>

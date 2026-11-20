@@ -4,7 +4,8 @@ import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 
-import type { AppSummary, AutomationSummary } from '../../src/lib/bindings.ts';
+import { DeleteActions } from '../../src/components/DeleteActions.tsx';
+import type { AppSummary, AutomationSummary, DraftSummary } from '../../src/lib/bindings.ts';
 import { AutomationsPage } from '../../src/pages/AutomationsPage.tsx';
 import { ReferencesPage } from '../../src/pages/ReferencesPage.tsx';
 import { ValuesPage } from '../../src/pages/ValuesPage.tsx';
@@ -55,7 +56,16 @@ const automation: AutomationSummary = {
   problem: null,
 };
 
-const shared = {
+interface Shared {
+  readonly apps: readonly AppSummary[];
+  readonly loadError: null;
+  readonly onChanged: () => Promise<void>;
+  readonly onNew: () => void;
+  readonly drafts: readonly DraftSummary[];
+  readonly onFinish: () => void;
+  readonly onDeleteDraft: () => Promise<void>;
+}
+const shared: Shared = {
   apps: [app],
   loadError: null,
   onChanged: async () => {},
@@ -65,15 +75,16 @@ const shared = {
   onDeleteDraft: async () => {},
 };
 /** A page with its item saved, or with `gone` once it is deleted and the page has read its files again. */
-type Page = (gone?: boolean, onChanged?: () => Promise<void>) => ReactElement;
+type Page = (gone?: boolean, onChanged?: () => Promise<void>, more?: Partial<Shared>) => ReactElement;
 const PAGES: readonly (readonly [string, string, string, Page])[] = [
   [
     'value',
     'delete_value',
     'Delete value',
-    (gone = false, onChanged = shared.onChanged) => (
+    (gone = false, onChanged = shared.onChanged, more = {}) => (
       <ValuesPage
         {...shared}
+        {...more}
         apps={gone ? [] : [app]}
         onChanged={onChanged}
         automations={[]}
@@ -85,17 +96,18 @@ const PAGES: readonly (readonly [string, string, string, Page])[] = [
     'reference',
     'delete_reference',
     'Delete reference',
-    (gone = false, onChanged = shared.onChanged) => (
-      <ReferencesPage {...shared} apps={gone ? [] : [app]} onChanged={onChanged} onEdit={() => undefined} />
+    (gone = false, onChanged = shared.onChanged, more = {}) => (
+      <ReferencesPage {...shared} {...more} apps={gone ? [] : [app]} onChanged={onChanged} onEdit={() => undefined} />
     ),
   ],
   [
     'automation',
     'delete_automation',
     'Delete automation',
-    (gone = false, onChanged = shared.onChanged) => (
+    (gone = false, onChanged = shared.onChanged, more = {}) => (
       <AutomationsPage
         {...shared}
+        {...more}
         onChanged={onChanged}
         automations={gone ? [] : [automation]}
         runtime
@@ -123,13 +135,18 @@ afterEach(async () => {
 // What the References page is answered for each reference's mark.
 const NO_RISKS = { lookalikes: [], hidesTone: false };
 
+/** Answers `command` as `answer` does, and each reference's mark with no risks. */
+function mockCommands(answer: (command: string) => unknown = () => undefined): void {
+  mockIPC((command) => (command === 'saved_reading_risks' ? NO_RISKS : answer(command)));
+}
+
 test.each(PAGES)('deleting a saved %s waits for an answer of its own', async (_kind, command, actLabel, page) => {
   let deletions = 0;
-  mockIPC((called) => {
+  mockCommands((called) => {
     if (called === command) {
       deletions += 1;
     }
-    return called === 'saved_reading_risks' ? NO_RISKS : undefined;
+    return undefined;
   });
   const user = userEvent.setup();
   render(page());
@@ -156,7 +173,7 @@ test.each(PAGES)('deleting a saved %s waits for an answer of its own', async (_k
 });
 
 test.each(PAGES)('deleting a saved %s moves the focus to the page heading', async (_kind, _command, actLabel, page) => {
-  mockIPC(() => undefined);
+  mockCommands();
   const user = userEvent.setup();
   render(<Deleting page={page} />);
 
@@ -174,12 +191,12 @@ test.each(PAGES)(
   async (_kind, command, actLabel, page) => {
     const pending = Promise.withResolvers<undefined>();
     let deletions = 0;
-    mockIPC((called) => {
+    mockCommands((called) => {
       if (called === command) {
         deletions += 1;
         return pending.promise;
       }
-      return called === 'saved_reading_risks' ? NO_RISKS : undefined;
+      return undefined;
     });
     const user = userEvent.setup();
     render(page());
@@ -211,13 +228,13 @@ const IN_USE: readonly (readonly [string, string, string, () => ReactElement])[]
   [
     'value',
     'delete_value',
-    'Pause music uses it. Change or delete that automation first.',
+    "Can't delete Playback icon: Pause music uses it. Change or delete that automation first.",
     () => <ValuesPage {...shared} automations={[automation]} onChange={() => undefined} />,
   ],
   [
     'reference',
     'delete_reference',
-    'Percent reads with it. Point it at another reference first.',
+    "Can't delete Percent font: Percent reads with it. Point it at another reference first.",
     () => (
       <ReferencesPage
         {...shared}
@@ -230,7 +247,7 @@ const IN_USE: readonly (readonly [string, string, string, () => ReactElement])[]
 
 test.each(IN_USE)('Delete on a %s in use says what uses it and asks nothing', async (_kind, command, reason, page) => {
   let deletions = 0;
-  mockIPC((called) => {
+  mockCommands((called) => {
     if (called === command) {
       deletions += 1;
     }
@@ -241,7 +258,7 @@ test.each(IN_USE)('Delete on a %s in use says what uses it and asks nothing', as
 
   await user.click(screen.getByRole('button', { name: 'Delete' }));
   const notice = screen.getByRole('alertdialog');
-  expect(notice.textContent).toContain(reason);
+  expect(within(notice).getByText(reason)).not.toBeNull();
   expect(within(notice).getAllByRole('button')).toHaveLength(1);
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'OK' }));
 
@@ -252,18 +269,166 @@ test.each(IN_USE)('Delete on a %s in use says what uses it and asks nothing', as
 });
 
 test.each(PAGES)('a saved %s whose delete fails says why in its row', async (_kind, command, actLabel, page) => {
-  mockIPC(async (called) => (called === command ? Promise.reject('Something else uses it.') : undefined));
+  mockCommands(async (called) => (called === command ? Promise.reject('Something else uses it.') : undefined));
   const user = userEvent.setup();
   render(page());
 
   await user.click(screen.getByRole('button', { name: 'Delete' }));
   await user.click(screen.getByRole('button', { name: actLabel }));
-  const why = await screen.findByText('Something else uses it.');
+  const why = await screen.findByText(/Can't delete .+: Something else uses it\./u);
   expect(why.closest('tr')).not.toBeNull();
   expect(screen.queryByRole('button', { name: actLabel })).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'OK' }));
 
   await user.click(screen.getByRole('button', { name: 'OK' }));
-  expect(screen.queryByText('Something else uses it.')).toBeNull();
+  expect(screen.queryByText(/Something else uses it\./u)).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Delete' }));
 });
+
+/** Two rows of a list, which the page asks about one at a time, with the first row's delete in the test's hands. */
+function TwoRows({ onDelete }: { readonly onDelete: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState<string | null>(null);
+  return (
+    <>
+      <input aria-label="Elsewhere" />
+      {['First', 'Second'].map((name) => (
+        <div key={name} role="group" aria-label={name}>
+          <DeleteActions
+            name={name}
+            actLabel="Delete value"
+            confirming={confirming === name}
+            onConfirm={(asking) => {
+              setConfirming(asking ? name : null);
+            }}
+            onDelete={name === 'First' ? onDelete : async () => {}}
+          >
+            {null}
+          </DeleteActions>
+        </div>
+      ))}
+    </>
+  );
+}
+
+test('a delete that fails after the question moved to another row says why in its own row', async () => {
+  const pending = Promise.withResolvers<undefined>();
+  const user = userEvent.setup();
+  render(<TwoRows onDelete={async () => pending.promise} />);
+  const row = (name: string) => within(screen.getByRole('group', { name }));
+
+  await user.click(row('First').getByRole('button', { name: 'Delete' }));
+  await user.click(row('First').getByRole('button', { name: 'Delete value' }));
+  await user.click(row('Second').getByRole('button', { name: 'Delete' }));
+  const keep = row('Second').getByRole('button', { name: 'Keep' });
+  expect(document.activeElement).toBe(keep);
+  await act(async () => {
+    pending.reject('Something else uses it.');
+    await pending.promise.catch(() => undefined);
+  });
+
+  // The other row's question keeps its place and the focus.
+  expect(row('First').getByText("Can't delete First: Something else uses it.")).not.toBeNull();
+  expect(row('Second').getByRole('alertdialog', { name: 'Delete Second?' })).not.toBeNull();
+  expect(document.activeElement).toBe(keep);
+
+  await user.click(row('First').getByRole('button', { name: 'OK' }));
+  expect(screen.queryByText(/Something else uses it/u)).toBeNull();
+  expect(document.activeElement).toBe(row('First').getByRole('button', { name: 'Delete' }));
+  expect(row('Second').getByRole('alertdialog', { name: 'Delete Second?' })).not.toBeNull();
+});
+
+test('a refusal leaves the focus where the user put it during the delete', async () => {
+  const pending = Promise.withResolvers<undefined>();
+  const user = userEvent.setup();
+  render(<TwoRows onDelete={async () => pending.promise} />);
+
+  await user.click(within(screen.getByRole('group', { name: 'First' })).getByRole('button', { name: 'Delete' }));
+  await user.click(screen.getByRole('button', { name: 'Delete value' }));
+  const elsewhere = screen.getByRole('textbox', { name: 'Elsewhere' });
+  await user.click(elsewhere);
+  await act(async () => {
+    pending.reject('Something else uses it.');
+    await pending.promise.catch(() => undefined);
+  });
+
+  expect(screen.getByText("Can't delete First: Something else uses it.")).not.toBeNull();
+  expect(document.activeElement).toBe(elsewhere);
+});
+
+/**
+ * A draft the page lists in a row of its own, whose flow kept nothing the row reads. A value's or a reference's is
+ * of an application that is not saved, so its row stays in place when the saved item goes.
+ */
+function draft(kind: string): DraftSummary {
+  if (kind !== 'value' && kind !== 'reference' && kind !== 'automation') {
+    throw new Error(`no draft of a ${kind}`);
+  }
+  return {
+    id: 'draft',
+    draft: {
+      kind,
+      app: kind === 'automation' ? null : 'unsaved',
+      changes: null,
+      name: 'Unfinished',
+      missing: [],
+      pictures: [],
+      state: null,
+    },
+    problem: null,
+    screenshots: 0,
+  };
+}
+
+test.each(PAGES)(
+  'deleting a saved %s clears what the page said about an earlier failure',
+  async (kind, _command, actLabel, page) => {
+    mockCommands();
+    const user = userEvent.setup();
+    render(
+      <Deleting
+        page={(gone, onChanged) =>
+          page(gone, onChanged, {
+            drafts: [draft(kind)],
+            onDeleteDraft: async () => Promise.reject('The draft is open elsewhere.'),
+          })
+        }
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Delete the draft Unfinished' }));
+    await user.click(screen.getByRole('button', { name: 'Delete draft' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('The draft is open elsewhere.');
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await user.click(screen.getByRole('button', { name: actLabel }));
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: actLabel })).toBeNull();
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+
+test.each(PAGES)(
+  'deleting a saved %s leaves the focus in a question that opened meanwhile',
+  async (kind, command, actLabel, page) => {
+    const pending = Promise.withResolvers<undefined>();
+    mockCommands((called) => (called === command ? pending.promise : undefined));
+    const user = userEvent.setup();
+    render(<Deleting page={(gone, onChanged) => page(gone, onChanged, { drafts: [draft(kind)] })} />);
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await user.click(screen.getByRole('button', { name: actLabel }));
+    await user.click(screen.getByRole('button', { name: 'Delete the draft Unfinished' }));
+    const asked = screen.getByRole('alertdialog', { name: 'Delete the draft Unfinished?' });
+    const keep = within(asked).getByRole('button', { name: 'Keep' });
+    expect(document.activeElement).toBe(keep);
+    await act(async () => {
+      pending.resolve(undefined);
+      await pending.promise;
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+    });
+    expect(document.activeElement).toBe(keep);
+  },
+);
