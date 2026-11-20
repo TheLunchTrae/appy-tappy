@@ -3018,6 +3018,35 @@ the value reads from a fix.
   **Fix at this size** in the same cell, unless the user has put it
   elsewhere meanwhile. A removal that fails puts focus back on
   **Remove fix**.
+
+### Discard recording question
+
+Each button that discards a [recording](#recording) of readings
+(`DiscardRecording` in `apps/setup/src/components/Recording.tsx`) is
+**Discard** in the recording part, while it records and once it stopped, and
+**Discard recording** in review's bar. The button holds whether it asks
+(`asking`) and whether the discard is on its way (`discarding`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Button
+    Button --> [*]: Discard, and the recording has no readings
+    Button --> Asking: Discard, and the recording has readings
+    Asking --> Button: Keep recording or Escape
+    Asking --> Discarding: Discard recording
+    Discarding --> [*]: the recording is discarded
+    Discarding --> Button: the discard fails, and the recording part says why
+```
+
+- A recording with no readings has nothing to lose: review's edits and the
+  kept readings are of its readings. It discards at once.
+- The question takes the button's place (`Question`), and focus moves to
+  **Keep recording**, which leaves a recording that is under way recording.
+  **Keep recording** and Escape put focus back on the button.
+- While `Discarding`, the answers are disabled, so one answer sends one
+  discard. A discard that works moves focus to the recording part's title
+  (`discarded` in `apps/setup/src/lib/useReview.ts`), and one that fails
+  puts it back on the button.
 - The answer that deletes ignores the later clicks of a double-click, since
   the question may show under the pointer where **Delete** was pressed. Key
   presses and single clicks answer.

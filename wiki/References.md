@@ -547,7 +547,10 @@ stray shape and draw a box around it instead.
    **Use its settings** puts them back. In a reference you teach by itself,
    that moves the box it recorded at back to where it was and to the top of
    the list, or adds an empty box there if you deleted it. Or **Discard**
-   the recording to start a new one.
+   the recording to start a new one. A recording with readings asks first,
+   since its readings go with any text you typed and any readings you kept
+   in review: **Discard recording** drops them, and **Keep recording**
+   leaves everything as it is.
    Changing window also discards it.
 
 A digit, a sign such as `%` or `.`, and a letter are collected the same way.

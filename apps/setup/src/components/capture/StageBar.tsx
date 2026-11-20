@@ -5,6 +5,7 @@ import { clock } from '../../lib/review.ts';
 import type { Size } from '../../lib/region.ts';
 import type { useReview } from '../../lib/useReview.ts';
 import { Question, useQuestion } from '../Question.tsx';
+import { DiscardRecording } from '../Recording.tsx';
 
 /** What the stage shows now, for the bar's pill. */
 type StageStatus =
@@ -77,7 +78,10 @@ interface ReviewProps {
   readonly recordBlocked: string | null;
   /** Record more, which takes the focus once it shows in place of Use its settings. */
   readonly recordMore: RefObject<HTMLButtonElement | null>;
-  readonly onDiscard: () => void;
+  /** How many readings the recording holds, which discarding it loses. */
+  readonly readings: number;
+  /** Discards the recording, and settles once it is gone or the discard failed. */
+  readonly onDiscard: () => Promise<void>;
   readonly onUseSettings: () => void;
   readonly onRecordMore: () => void;
 }
@@ -88,6 +92,7 @@ export function ReviewActions({
   settingsChanged,
   recordBlocked,
   recordMore,
+  readings,
   onDiscard,
   onUseSettings,
   onRecordMore,
@@ -97,9 +102,7 @@ export function ReviewActions({
       <button type="button" className="btn" onClick={review.close}>
         Back
       </button>
-      <button type="button" className="btn" onClick={onDiscard}>
-        Discard recording
-      </button>
+      <DiscardRecording label="Discard recording" readings={readings} onDiscard={onDiscard} />
       {settingsChanged ? (
         <button type="button" className="btn" onClick={onUseSettings}>
           Use its settings

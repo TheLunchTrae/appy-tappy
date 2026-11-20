@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { RecordedReading, RecordingScope, RecordingView } from '../lib/bindings.ts';
 import { CHECK_CHARACTERS_HINT, RECORD_RESIZED_HINT, RECORD_SCOPE_HINT, TEXT_SIZES_HINT } from '../lib/hints.ts';
 import type { Size } from '../lib/region.ts';
+import { background } from '../lib/repeat.ts';
 import type { RecordFocus } from '../lib/useReview.ts';
 import { Hint } from './Hint.tsx';
+import { Question, useQuestion } from './Question.tsx';
 import { PictureCanvas } from './canvas.tsx';
 import { CharacterChips, MissingChips, glyphStyle } from './CharacterChips.tsx';
 import type { Discovery } from '../lib/discovery.ts';
@@ -30,6 +32,64 @@ const LISTED = 6;
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
+}
+
+interface DiscardProps {
+  /** The button's label, such as `Discard`. */
+  readonly label: string;
+  /** How many readings the recording holds. With none it has nothing to lose, in review either. */
+  readonly readings: number;
+  /** Discards the recording, and settles once it is gone or the discard failed. */
+  readonly onDiscard: () => Promise<void>;
+}
+
+/** The button that discards a recording, which asks first, in its own place, when the recording has readings. */
+export function DiscardRecording({ label, readings, onDiscard }: DiscardProps) {
+  const [asking, setAsking] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const { control, refs } = useQuestion<HTMLButtonElement>(asking);
+  if (asking) {
+    return (
+      <Question
+        refs={refs}
+        label="Discard the recording?"
+        keepLabel="Keep recording"
+        actLabel="Discard recording"
+        busy={discarding}
+        onKeep={() => {
+          setAsking(false);
+        }}
+        onAct={() => {
+          setDiscarding(true);
+          background(
+            onDiscard().finally(() => {
+              setDiscarding(false);
+              setAsking(false);
+            }),
+          );
+        }}
+      >
+        Discard the recording? You lose its {plural(readings, 'reading', 'readings')}, with any text you typed and any
+        readings you kept in review.
+      </Question>
+    );
+  }
+  return (
+    <button
+      ref={control}
+      type="button"
+      className="btn"
+      onClick={() => {
+        if (readings === 0) {
+          background(onDiscard());
+        } else {
+          setAsking(true);
+        }
+      }}
+    >
+      {label}
+    </button>
+  );
 }
 
 /** What a recording of the whole window says of the `count` places the window shows text like its own in now. */
@@ -210,7 +270,8 @@ interface PanelProps {
   /** Goes on with the stopped recording. */
   readonly onMore: () => void;
   readonly onStop: () => void;
-  readonly onDiscard: () => void;
+  /** Discards the recording, and settles once it is gone or the discard failed. */
+  readonly onDiscard: () => Promise<void>;
   readonly onReview: () => void;
   /** Whether the draft's region, color or tolerance differ from the stopped recording's. */
   readonly settingsChanged: boolean;
@@ -333,9 +394,7 @@ export function RecordPanel(props: PanelProps) {
           <button type="button" className="btn primary" ref={stopButton} onClick={props.onStop}>
             Stop and review
           </button>
-          <button type="button" className="btn" onClick={props.onDiscard}>
-            Discard
-          </button>
+          <DiscardRecording label="Discard" readings={count} onDiscard={props.onDiscard} />
         </div>
       </section>
     );
@@ -378,9 +437,7 @@ export function RecordPanel(props: PanelProps) {
             Record more
           </button>
         )}
-        <button type="button" className="btn" onClick={props.onDiscard}>
-          Discard
-        </button>
+        <DiscardRecording label="Discard" readings={count} onDiscard={props.onDiscard} />
       </div>
     </section>
   );

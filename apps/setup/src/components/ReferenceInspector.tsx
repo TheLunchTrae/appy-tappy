@@ -64,9 +64,8 @@ export function teachingSheet(teaching: Teaching): { readonly actions: ReactNode
         settingsChanged={teaching.settingsChanged}
         recordBlocked={teaching.recordBlocked}
         recordMore={teaching.focus.more}
-        onDiscard={() => {
-          background(teaching.discard());
-        }}
+        readings={reviewed.readings.length}
+        onDiscard={teaching.discard}
         onUseSettings={teaching.useSettings}
         onRecordMore={() => {
           background(teaching.record(true));
@@ -289,9 +288,7 @@ export function ReferenceInspector({
             onStop={() => {
               background(teaching.stop());
             }}
-            onDiscard={() => {
-              background(teaching.discard());
-            }}
+            onDiscard={teaching.discard}
             onReview={() => {
               review.show(true);
             }}
