@@ -284,6 +284,23 @@ describe('review entries', () => {
     ];
     expect(disagreements(readings, short).size).toBe(0);
     expect(disagreements(readings, [{ keep: true, text: '12' }]).size).toBe(0);
+    // Each names the earliest reading that gives the shape another character.
+    const three = [read('12'), read('l2', shapesOf('12'), 1_000), read('I2', shapesOf('12'), 2_000)];
+    expect([...disagreements(three, entries(three, new Map(), new Map()))]).toEqual([
+      [0, 'Its 1 has the same shape as the l of the reading at 0:01. Fix the text that is wrong.'],
+      [1, 'Its l has the same shape as the 1 of the reading at 0:00. Fix the text that is wrong.'],
+      [2, 'Its I has the same shape as the 1 of the reading at 0:00. Fix the text that is wrong.'],
+    ]);
+    // A character given again later names the reading that gave it first.
+    const again = [read('12'), read('l2', shapesOf('12'), 1_000), read('12', undefined, 2_000)];
+    expect(disagreements(again, entries(again, new Map(), new Map())).get(1)).toBe(
+      'Its l has the same shape as the 1 of the reading at 0:00. Fix the text that is wrong.',
+    );
+    // A reading that shows a shape twice gives it the character at its first place, and can clash with itself.
+    const twice = [read('l1', shapesOf('ll')), read('l', shapesOf('l'), 1_000)];
+    expect([...disagreements(twice, entries(twice, new Map(), new Map()))]).toEqual([
+      [0, 'Its 1 has the same shape as the l of the reading at 0:00. Fix the text that is wrong.'],
+    ]);
     expect(disagreements([read('12'), read('13')], entries([read('12'), read('13')], new Map(), new Map())).size).toBe(
       0,
     );
