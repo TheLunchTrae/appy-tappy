@@ -1,5 +1,7 @@
 import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useId, useRef } from 'react';
 
+import { focusIsFree } from '../lib/focus.ts';
+
 /**
  * The question's own elements and the flag it records for the control it replaces. A cell passes them to its
  * {@link Question} as they are.
@@ -36,7 +38,10 @@ export function useQuestion<T extends HTMLElement>(showing: boolean, asked = sho
       }
     } else if (hadFocus.current) {
       hadFocus.current = false;
-      control.current?.focus();
+      // Focus the user moved meanwhile, as to another row's question, stays there.
+      if (focusIsFree()) {
+        control.current?.focus();
+      }
     }
   }, [showing, asked]);
   const refs: QuestionRefs = { keep, question, hadFocus };

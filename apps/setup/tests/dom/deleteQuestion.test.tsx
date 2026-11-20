@@ -285,8 +285,8 @@ test.each(PAGES)('a saved %s whose delete fails says why in its row', async (_ki
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Delete' }));
 });
 
-/** Two rows of a list, which the page asks about one at a time, with the first row's delete in the test's hands. */
-function TwoRows({ onDelete }: { readonly onDelete: () => Promise<void> }) {
+/** Two rows of a list, which the page asks about one at a time, with the `slow` row's delete in the test's hands. */
+function TwoRows({ onDelete, slow = 'First' }: { readonly onDelete: () => Promise<void>; readonly slow?: string }) {
   const [confirming, setConfirming] = useState<string | null>(null);
   return (
     <>
@@ -300,7 +300,7 @@ function TwoRows({ onDelete }: { readonly onDelete: () => Promise<void> }) {
             onConfirm={(asking) => {
               setConfirming(asking ? name : null);
             }}
-            onDelete={name === 'First' ? onDelete : async () => {}}
+            onDelete={name === slow ? onDelete : async () => {}}
           >
             {null}
           </DeleteActions>
@@ -335,6 +335,23 @@ test('a delete that fails after the question moved to another row says why in it
   expect(screen.queryByText(/Something else uses it/u)).toBeNull();
   expect(document.activeElement).toBe(row('First').getByRole('button', { name: 'Delete' }));
   expect(row('Second').getByRole('alertdialog', { name: 'Delete Second?' })).not.toBeNull();
+});
+
+test('a row whose delete is on its way leaves the focus in the question of a row above it', async () => {
+  const pending = Promise.withResolvers<undefined>();
+  const user = userEvent.setup();
+  render(<TwoRows slow="Second" onDelete={async () => pending.promise} />);
+  const row = (name: string) => within(screen.getByRole('group', { name }));
+
+  await user.click(row('Second').getByRole('button', { name: 'Delete' }));
+  await user.click(row('Second').getByRole('button', { name: 'Delete value' }));
+  await user.click(row('First').getByRole('button', { name: 'Delete' }));
+
+  expect(document.activeElement).toBe(row('First').getByRole('button', { name: 'Keep' }));
+  await act(async () => {
+    pending.resolve(undefined);
+    await pending.promise;
+  });
 });
 
 test('a refusal leaves the focus where the user put it during the delete', async () => {
