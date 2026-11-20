@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use appytappy_sources::screen::digits::DigitReader;
+use appytappy_sources::screen::digits::{DigitReader, InkRule};
 use appytappy_sources::screen::{Image, Region};
 use serde::Serialize;
 
@@ -39,7 +39,13 @@ pub(super) struct Found {
 #[derive(Debug)]
 struct Item {
     region: Region,
-    image: Image,
+    /// Its region of the screenshot with the pixels around it, one on each
+    /// side the screenshot has one: all that any reference is given of its
+    /// region ([`DigitReader::cut`]), kept so a reread does not need the
+    /// screenshot.
+    around: Image,
+    /// Where its region is in `around`.
+    within: Region,
     text: Text,
     /// How tall its characters are, in pixels, when that is another size
     /// than the sample's.
@@ -98,6 +104,49 @@ pub(crate) struct FindView {
     /// that color and tolerance split them, with a name for its shape that
     /// a recorded reading's character of the same shape shares.
     pub(crate) characters: Vec<CharacterView>,
+}
+
+/// The characters `region` of `image` shows, as `reader` splits them in
+/// the pixels it is given of the region ([`DigitReader::cut`]), each where
+/// it is in the region; `None` when the region reaches outside `image`. A
+/// box's characters and a find's are both these, so a find shows the
+/// characters the box it becomes does.
+fn characters_in(
+    image: &Image,
+    region: Region,
+    reader: &DigitReader,
+) -> Option<Vec<CharacterView>> {
+    let read = reader.reads(region, image.size());
+    // The page marks each character on the region itself.
+    let around = region.x().saturating_sub(read.x());
+    let characters = character::of(&image.crop(read)?, reader);
+    Some(
+        characters
+            .into_iter()
+            .map(|character| CharacterView {
+                left: character.left.saturating_sub(around),
+                right: character.right.saturating_sub(around),
+                ..character
+            })
+            .collect(),
+    )
+}
+
+/// `region` of `image` with the pixels around it, one on each side `image`
+/// has one, and where `region` is in them; `None` when it reaches outside
+/// `image`. Those are the pixels a reference that finds its characters by
+/// contrast is given of the region, the most any is, so each reader is
+/// given of the region in them what it is given of it in `image`.
+fn with_pixels_around(image: &Image, region: Region) -> Option<(Image, Region)> {
+    let read = InkRule::Contrast { tolerance: 0 }.reads(region, image.size());
+    let size = region.size();
+    let within = Region::new(
+        region.x().saturating_sub(read.x()),
+        region.y().saturating_sub(read.y()),
+        size.width,
+        size.height,
+    )?;
+    Some((image.crop(read)?, within))
 }
 
 impl Found {
@@ -168,17 +217,16 @@ impl<H: Host> Owner<H> {
         let id = self.tickets.next();
         let mut items = Vec::with_capacity(search.finds.len());
         for found in search.finds {
-            // A find has a margin around its ink, so its own pixels read
-            // as the ones a reference is given of it do.
-            let Some(cropped) = image.crop(found.region) else {
+            let Some((around, within)) = with_pixels_around(image, found.region) else {
                 continue;
             };
             // Its place among the finds kept, which the reader's guess names.
             let text = self.read(id, items.len(), found.line);
             items.push(Item {
                 region: found.region,
-                characters: character::of(&cropped, &reader),
-                image: cropped,
+                characters: characters_in(&around, within, &reader).unwrap_or_default(),
+                around,
+                within,
                 text,
                 other_size: found.other_size,
                 read_with: (ink, tolerance),
@@ -241,7 +289,7 @@ impl<H: Host> Owner<H> {
                 .filter_map(|index| {
                     let item = found.items.get(index)?;
                     (item.text != Text::Pending)
-                        .then(|| (index, find::ink_line(&item.image, &reader)))
+                        .then(|| (index, find::ink_line(&item.around, item.within, &reader)))
                 })
                 .collect()
         };
@@ -253,7 +301,8 @@ impl<H: Host> Owner<H> {
             {
                 item.text = text;
                 item.read_with = (ink, tolerance);
-                item.characters = character::of(&item.image, &reader);
+                item.characters =
+                    characters_in(&item.around, item.within, &reader).unwrap_or_default();
             }
         }
         self.found_state()
@@ -304,7 +353,8 @@ impl<H: Host> Owner<H> {
     ) -> Option<Vec<u8>> {
         self.search(search)
             .and_then(|found| found.items.get(index))
-            .map(|item| pixels::rgba(&item.image, max_width))
+            .and_then(|item| item.around.crop(item.within))
+            .map(|image| pixels::rgba(&image, max_width))
     }
 
     /// Forgets the search.
@@ -331,22 +381,7 @@ impl<H: Host> Owner<H> {
             .screenshots()
             .get(screenshot)
             .zip(Region::try_from(region).ok())
-            .and_then(|(image, region)| {
-                let read = reader.reads(region, image.size());
-                // The page marks each character on the box itself.
-                let around = region.x().saturating_sub(read.x());
-                let characters = character::of(&image.crop(read)?, &reader);
-                Some(
-                    characters
-                        .into_iter()
-                        .map(|character| CharacterView {
-                            left: character.left.saturating_sub(around),
-                            right: character.right.saturating_sub(around),
-                            ..character
-                        })
-                        .collect(),
-                )
-            })
+            .and_then(|(image, region)| characters_in(image, region, &reader))
             .unwrap_or_default()
     }
 
@@ -419,11 +454,54 @@ mod tests {
     }
 
     fn searchable() -> (Harness, FrameHandler) {
+        searchable_on(&marks())
+    }
+
+    /// A harness with screenshot 0 of `frame`.
+    fn searchable_on(frame: &Image) -> (Harness, FrameHandler) {
         let mut harness = harness(false);
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&marks()));
+        harness.deliver(&mut handler, Ok(frame));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         (harness, handler)
+    }
+
+    /// A light 60 by 60 window with two dark panels, each with two white
+    /// strokes 3 wide and 10 tall: one panel 28 by 18 at (2, 2), with
+    /// strokes at x 8 and 14, and one 20 by 14 at (34, 30), with strokes
+    /// at x 36 and 49, two pixels inside it.
+    fn panels() -> Image {
+        let inside = |x: u32, y: u32, (left, top, width, height): (u32, u32, u32, u32)| {
+            (left..left.saturating_add(width)).contains(&x)
+                && (top..top.saturating_add(height)).contains(&y)
+        };
+        let strokes = [
+            (8, 6, 3, 10),
+            (14, 6, 3, 10),
+            (36, 32, 3, 10),
+            (49, 32, 3, 10),
+        ];
+        let panels = [(2, 2, 28, 18), (34, 30, 20, 14)];
+        let pixels = (0..60_u32)
+            .flat_map(|y| (0..60_u32).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                if strokes.iter().any(|&stroke| inside(x, y, stroke)) {
+                    [255, 255, 255, 0]
+                } else if panels.iter().any(|&panel| inside(x, y, panel)) {
+                    [20, 20, 20, 0]
+                } else {
+                    [200, 200, 200, 0]
+                }
+            })
+            .collect();
+        Image::new(
+            Size {
+                width: 60,
+                height: 60,
+            },
+            pixels,
+        )
+        .expect("matching length")
     }
 
     fn find_like(
@@ -791,6 +869,55 @@ mod tests {
                 .map(|character| (character.left, character.right))
                 .collect::<Vec<_>>(),
             [(0, 2)]
+        );
+    }
+
+    #[test]
+    fn a_find_shows_the_characters_and_ink_its_region_does_as_a_box() {
+        // By contrast, a find whose margin ends where its panel does is
+        // read with the window around the panel as its background, as a
+        // box there is, so the whole panel is one character.
+        let (mut harness, _handler) = searchable_on(&panels());
+        let found = harness
+            .ask(|owner| owner.find_like(0, region(6, 4, 13, 14), &[], &[], None, 30))
+            .expect("found");
+        let panel = region(34, 30, 20, 14);
+        let regions: Vec<RegionDef> = found.finds.iter().map(|find| find.region).collect();
+        assert_eq!(regions, [panel]);
+        let drawn = harness
+            .ask(move |owner: &mut Owner<FakeHost>| owner.box_characters(0, panel, None, 30));
+        assert_eq!(
+            drawn
+                .iter()
+                .map(|character| (character.left, character.right))
+                .collect::<Vec<_>>(),
+            [(0, 20)]
+        );
+        assert_eq!(found.finds[0].characters, drawn);
+        // The text reader is sent the panel's 20 columns too, with its
+        // margin of 2 on each side, not the 16 the strokes span.
+        let sent = |harness: &Harness| -> Vec<u32> {
+            harness.jobs.try_iter().map(|job| job.line.width).collect()
+        };
+        assert_eq!(sent(&harness), [24]);
+        assert!(
+            harness
+                .owner
+                .handle(found_text(FIRST, 0, Text::Failed("no".to_owned())))
+                .is_continue()
+        );
+        let again = harness
+            .ask(|owner| owner.reread_found(FIRST, &[0], None, 30))
+            .expect("kept");
+        assert_eq!(again.finds[0].characters, drawn, "a reread splits it so");
+        assert_eq!(sent(&harness), [24], "and sends the same ink");
+        let crop = panels()
+            .crop(Region::new(34, 30, 20, 14).expect("not empty"))
+            .expect("inside");
+        assert_eq!(
+            harness.ask(|owner| owner.found_pixels(FIRST, 0, 60)),
+            Some(pixels::rgba(&crop, 60)),
+            "the picture is the find's region alone"
         );
     }
 

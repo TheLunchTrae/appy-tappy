@@ -150,7 +150,11 @@ above, or below. A moved or thicker edge sets cells beside the other
 shape's, so none is apart; a stroke that one character has and the other
 lacks is. The closest learned shape has the fewest cells apart, then the
 fewest that differ at all, and it matches when at most 1 in 32 of the cells
-either shape sets are apart (`CELLS_PER_APART` in `screen/digits.rs`). The
+either shape sets are apart (`CELLS_PER_APART` in `screen/digits.rs`). Only
+the closest learned shape is asked. A shape further off can pass that share
+where the closest does not, since a bolder shape sets more cells, but the
+closer shape says the character may be another, so the character is
+unlearned and the read fails rather than take the further shape. The
 tests draw text as a game does, bold with an outline and anti-aliased at any
 fraction of a pixel (`screen/digits/drawn.rs`), and read it at any
 fraction and at other sizes from three labeled pictures.

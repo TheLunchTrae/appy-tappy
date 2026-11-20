@@ -28,7 +28,10 @@
 //!    apart; a stroke that one character has and another lacks is. The
 //!    closest glyph has the fewest cells apart, then the fewest that differ
 //!    at all, and it matches when at most 1 in 32 of the cells either sets
-//!    are apart.
+//!    are apart. Only the closest glyph is asked: a glyph further off can
+//!    pass that share where the closest does not, since it is of the cells
+//!    either sets and a bolder glyph sets more, but the closer glyph says
+//!    the shape may be another character, so the shape matches none.
 
 use std::cmp::Ordering;
 use std::error::Error;
@@ -527,7 +530,9 @@ fn shape(ink: &Ink, line: &Range<u32>, span: Span) -> Shape {
 }
 
 /// The glyph of `glyphs` closest to `shape`, the earliest learned of equals,
-/// or `None` when there are none.
+/// or `None` when there are none. It is the closest whether or not it
+/// matches: a caller that finds it does not match takes no glyph further
+/// off in its place, as the module's matching step says.
 fn closest(glyphs: &[Glyph], shape: &Shape) -> Option<GlyphScore> {
     let around = grown(shape);
     glyphs
@@ -1989,6 +1994,21 @@ mod tests {
             closest(&twins.glyphs, &shape_of(&wide)).map(|closest| closest.character),
             Some('1')
         );
+    }
+
+    #[test]
+    fn a_shape_its_closest_glyph_does_not_match_takes_no_glyph_further_off() {
+        // The shape is a line of 30 cells. The `1` is the line and one cell
+        // apart from it: 1 apart of 31 set, which does not match. The `7`
+        // is the line three rows thick and two cells apart from it: 2 apart
+        // of 92 set, which would match, but the `1` is closer.
+        const LINE: &str = "##############################";
+        let thin = shape_of(&["", LINE]);
+        let bold = shape_of(&[LINE, LINE, LINE, "", "#.#"]);
+        let reader = reader_of(&[('1', shape_of(&["", LINE, "", "", "#"])), ('7', bold)]);
+        assert_eq!(reader.take(&thin), Taken::Unknown(Some('1')));
+        // Alone, the `7` is the closest glyph, and it matches.
+        assert_eq!(reader_of(&[('7', bold)]).take(&thin), Taken::Kept('7'));
     }
 
     #[test]

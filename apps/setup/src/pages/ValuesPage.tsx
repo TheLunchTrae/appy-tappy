@@ -13,6 +13,7 @@ import { deleteValue, errorText, markChecked, removeFix } from '../lib/api.ts';
 import { usedBy } from '../lib/automation.ts';
 import { readingText } from '../lib/reading.ts';
 import { buildState, checkedText } from '../lib/build.ts';
+import { DeleteActions } from '../components/DeleteActions.tsx';
 import { Hint } from '../components/Hint.tsx';
 import { MARK_CHECKED_HINT } from '../lib/hints.ts';
 import { hex } from '../lib/pixels.ts';
@@ -94,7 +95,7 @@ interface AppRowsProps {
   readonly nowColumn: boolean;
   readonly confirming: string | null;
   readonly onConfirm: (key: string | null) => void;
-  readonly onDelete: (value: string) => void;
+  readonly onDelete: (value: string) => Promise<void>;
   readonly onMarkChecked: () => void;
   readonly onFix: (value: ValueDef) => void;
   readonly onEdit: (value: ValueDef) => void;
@@ -268,52 +269,30 @@ function AppRows({
             ) : null}
             <td className="note">{usedByText(automations === null ? null : usedBy(automations, app.id, value.id))}</td>
             <td className="end">
-              {confirming === key ? (
-                <span className="confirm">
-                  {drafts.some((each) => each.def.kind === 'fix' && each.def.changes === value.id) ? (
-                    <small className="note">Its fix drafts go with it.</small>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn small"
-                    onClick={() => {
-                      onConfirm(null);
-                    }}
-                  >
-                    Keep
-                  </button>
-                  <button
-                    type="button"
-                    className="btn small danger"
-                    onClick={() => {
-                      onDelete(value.id);
-                    }}
-                  >
-                    Delete {value.name}
-                  </button>
-                </span>
-              ) : (
-                <span className="confirm">
-                  <button
-                    type="button"
-                    className="btn small"
-                    onClick={() => {
-                      onEdit(value);
-                    }}
-                  >
-                    Edit<span className="visually-hidden"> {value.name}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="btn small"
-                    onClick={() => {
-                      onConfirm(key);
-                    }}
-                  >
-                    Delete
-                  </button>
-                </span>
-              )}
+              <DeleteActions
+                name={value.name}
+                loses={
+                  drafts.some((each) => each.def.kind === 'fix' && each.def.changes === value.id)
+                    ? 'Its fix drafts go with it.'
+                    : undefined
+                }
+                actLabel="Delete value"
+                confirming={confirming === key}
+                onConfirm={(asking) => {
+                  onConfirm(asking ? key : null);
+                }}
+                onDelete={() => onDelete(value.id)}
+              >
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => {
+                    onEdit(value);
+                  }}
+                >
+                  Edit<span className="visually-hidden"> {value.name}</span>
+                </button>
+              </DeleteActions>
             </td>
           </tr>
         );
@@ -379,8 +358,9 @@ export function ValuesPage({
     try {
       await deleteValue(app, value);
       setActionError(null);
-      setConfirming(null);
+      // The question stays until the row is gone, so its buttons take no press meanwhile.
       await onChanged();
+      setConfirming((current) => (current === `${app}/${value}` ? null : current));
     } catch (error: unknown) {
       setActionError(errorText(error));
     }
@@ -482,9 +462,7 @@ export function ValuesPage({
                 nowColumn={nowColumn}
                 confirming={confirming}
                 onConfirm={setConfirming}
-                onDelete={(value) => {
-                  background(remove(app.id, value));
-                }}
+                onDelete={(value) => remove(app.id, value)}
                 onMarkChecked={() => {
                   background(markAsChecked(app.id));
                 }}

@@ -2853,7 +2853,8 @@ marks the reading or find as failed and asks the user to type it.
 
 A search for text like the selected box of a reference
 (`apps/setup/src-tauri/src/owner/found.rs`) is `None` or a `Found` with its ID,
-the screenshot it searched, and each find's region, pixels, and text.
+the screenshot it searched, and each find's region, its pixels with one
+pixel around them, and its text.
 
 ```mermaid
 stateDiagram-v2
@@ -2917,6 +2918,13 @@ stateDiagram-v2
   accepts its pending pictures. It also starts a new turn, so the search's state as it
   was read before the reread does not put the finds back and end the wait for
   their text.
+- The UI's `searching` flag (`useFound`) says a search is under way, and
+  the editor shows it. **Find more like it** and **Show them again** set
+  it. The newest search's answer or failure clears it, and so does a
+  dismissal: **Add**, **Not these**, or the editor closing. An answer to a
+  search the user moved on from leaves it as the newer search set it, by
+  the UI's turn. **Reread** does nothing while it is set, since the search
+  under way replaces the one whose finds it would read.
 - A ticked find is flagged without asking the owner when it has no text, or
   when the reader's guess has a letter while the reference has learned none
   (`foundRows`), and otherwise when the reference cannot learn it after the
@@ -2945,6 +2953,33 @@ stateDiagram-v2
   why. A reread that fails leaves the finds as they were and says why above
   the list. A failed check of which finds the reference can learn flags
   none, since the save learns the text again.
+
+### Delete question
+
+A saved value's, reference's, or automation's row
+(`apps/setup/src/components/DeleteActions.tsx`) shows its buttons, asks, or
+deletes. The page holds which row asks (`confirming`), and the row holds
+whether its delete is on its way (`deleting`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Buttons
+    Buttons --> Asking: Delete
+    Asking --> Buttons: Keep, Escape, or Delete on another row
+    Asking --> Deleting: the answer that deletes
+    Deleting --> [*]: the item is deleted and the page has read its files again
+    Deleting --> Asking: the delete fails, and the page says why
+    Deleting --> Buttons: Delete on another row, while the delete carries on
+```
+
+- The question takes the buttons' place (`Question`), and focus moves to
+  **Keep**. **Keep** and Escape put focus back on **Delete**.
+- The answer that deletes ignores the later clicks of a double-click, since
+  the question may show under the pointer where **Delete** was pressed. Key
+  presses and single clicks answer.
+- While `Deleting`, the answers are disabled, so one answer sends one
+  delete. The question stays until the page has read the files again and
+  the row is gone.
 
 ### Character check
 

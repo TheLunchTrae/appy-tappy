@@ -205,6 +205,7 @@ export function useFound(
 
   const forget = (): void => {
     turn.drop();
+    setSearching(false);
     setView(null);
     setEdits(new Map());
     setError(null);
@@ -244,7 +245,10 @@ export function useFound(
         setError(errorText(error));
       }
     } finally {
-      setSearching(false);
+      // Whatever began the turn after this one says whether a search is under way.
+      if (current()) {
+        setSearching(false);
+      }
     }
   };
 
@@ -285,7 +289,8 @@ export function useFound(
     rereadOffer: offer,
     reread: async () => {
       const again = offer?.indexes ?? [];
-      if (view === null || again.length === 0) {
+      // A search under way replaces the one shown, so its finds are no longer the owner's to read again.
+      if (view === null || again.length === 0 || searching) {
         return;
       }
       // The search's state read before this would show the finds as they were, and end the wait for their text.

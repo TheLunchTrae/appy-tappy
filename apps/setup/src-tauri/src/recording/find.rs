@@ -127,7 +127,7 @@ pub(crate) struct Spot {
 pub(crate) struct Find {
     /// Where it is on the screenshot, with a margin around its ink.
     pub(crate) region: Region,
-    /// Its ink for the text reader, or `None` when the margin left none.
+    /// Its ink for the text reader, or `None` when it shows none.
     pub(crate) line: Option<Line>,
     /// How tall its characters are, in pixels, when that is another size
     /// than the sample's.
@@ -378,10 +378,13 @@ fn same_size(height: u32, sample: u32) -> bool {
     height.abs_diff(sample) <= slack
 }
 
-/// The ink of `image`, a find's pixels, for the text reader, as `reader`
-/// tells ink from background; `None` when it shows none.
-pub(crate) fn ink_line(image: &Image, reader: &DigitReader) -> Option<Line> {
-    Line::of(&reader.ink(image))
+/// The ink of a find at `region` of `image` for the text reader, as
+/// `reader` tells it from the background in the pixels it is given of the
+/// region ([`DigitReader::cut`]), which a reference is given of the box the
+/// find becomes; `None` when it shows none or `region` reaches outside
+/// `image`.
+pub(crate) fn ink_line(image: &Image, region: Region, reader: &DigitReader) -> Option<Line> {
+    Line::of(&reader.ink(&reader.cut(image, region)?))
 }
 
 /// The height of the characters among `blobs` that `region` shows: that of
@@ -398,10 +401,10 @@ fn sample_of(blobs: &[Bounds], region: Region, line: u32) -> u32 {
         .unwrap_or(line)
 }
 
-/// `run` with a margin of a quarter of `sample` around its ink, kept
+/// `run` with a margin of a quarter of `height` around its ink, kept
 /// inside the screenshot of `ink`; `None` when that leaves no region.
-fn with_margin(run: Bounds, sample: u32, ink: &Ink) -> Option<Region> {
-    let margin = sample.checked_div(4).unwrap_or(0).max(1);
+fn with_margin(run: Bounds, height: u32, ink: &Ink) -> Option<Region> {
+    let margin = height.checked_div(4).unwrap_or(0).max(1);
     let left = run.left.saturating_sub(margin);
     let top = run.top.saturating_sub(margin);
     let right = run.right.saturating_add(margin).min(ink.size().width);
@@ -563,8 +566,12 @@ fn sizes_among(blobs: &[Bounds], sample: u32) -> Vec<u32> {
 /// as finds added already, and each find at one of `passed`, such as the
 /// finds an earlier search offered and the user left out. Only a find at
 /// exactly such a region is left out, so passing over a large find does
-/// not hide the text it covers. `None` when `region` holds no ink or lies
-/// outside `image`.
+/// not hide the text it covers. A find's margin is a quarter of the height
+/// of its own characters, not of the size the search took them for, which
+/// follows the sample: a search from a sample of another size leaves out
+/// a run it joins from the same ink. Which ink joins a run follows
+/// the sample, so such a search can offer the text again as another run.
+/// `None` when `region` holds no ink or lies outside `image`.
 pub(crate) fn like(
     image: &Image,
     region: Region,
@@ -598,7 +605,7 @@ pub(crate) fn like(
             !run.bounds.meets(region) && !skip.iter().any(|&added| run.bounds.meets(added))
         })
         .filter_map(|(run, height)| {
-            with_margin(run.bounds, height, &ink).map(|at| (run, height, at))
+            with_margin(run.bounds, run.tallest, &ink).map(|at| (run, height, at))
         })
         .partition(|&(_, _, at)| passed.contains(&at));
     found.sort_by_key(|&(run, height, _)| {
@@ -614,7 +621,7 @@ pub(crate) fn like(
         .into_iter()
         .take(MAX_FOUND)
         .map(|(run, height, region)| {
-            let line = image.crop(region).and_then(|crop| ink_line(&crop, reader));
+            let line = ink_line(image, region, reader);
             Find {
                 region,
                 line,
@@ -1087,12 +1094,13 @@ mod tests {
         let image = screenshot(80, 120, &boxes);
         let search =
             like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
-        assert_eq!(places(&search), [(15, 35, Some(25))]);
+        // Its margin is a quarter of that height, 6, around ink from (20, 40).
+        assert_eq!(places(&search), [(14, 34, Some(25))]);
         let boxes = [pair(2, 2, 8), pair(20, 40, 22), pair(20, 80, 25)].concat();
         let image = screenshot(80, 120, &boxes);
         let search =
             like(&image, region(0, 0, 12, 12), &[], &[], &reader()).expect("the sample has ink");
-        assert_eq!(places(&search), [(15, 35, Some(22)), (15, 75, Some(25))]);
+        assert_eq!(places(&search), [(15, 35, Some(22)), (14, 74, Some(25))]);
     }
 
     #[test]
@@ -1222,6 +1230,25 @@ mod tests {
             .map(|find| (find.region.x(), find.region.y()))
             .collect();
         assert_eq!(rest, [(19, 54), (39, 54)]);
+    }
+
+    #[test]
+    fn a_find_passed_over_is_not_found_again_from_a_box_of_another_size() {
+        // Text 20, 18, and 40 tall. From the first, the second is text of
+        // the sample's size, 20; from the third, the first and second are
+        // text 18 tall. Its region is the same from both.
+        let boxes = [pair(5, 5, 20), pair(60, 50, 18), pair(20, 90, 40)].concat();
+        let image = screenshot(120, 140, &boxes);
+        let first =
+            like(&image, region(3, 3, 12, 24), &[], &[], &reader()).expect("the sample has ink");
+        let passed: Vec<Region> = first.finds.iter().map(|find| find.region).collect();
+        // Ink 60..67 by 50..68, with a margin of a quarter of 18.
+        assert_eq!(passed, [region(56, 46, 15, 26), region(10, 80, 27, 60)]);
+        let second = like(&image, region(18, 88, 12, 44), &[], &passed, &reader())
+            .expect("the sample has ink");
+        let regions: Vec<Region> = second.finds.iter().map(|find| find.region).collect();
+        assert_eq!(regions, [region(0, 0, 17, 30)]);
+        assert_eq!(second.passed, 1);
     }
 
     #[test]

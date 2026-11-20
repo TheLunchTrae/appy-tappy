@@ -688,19 +688,27 @@ unless an earlier search on the screenshot offered a find at the same
 region, margin included, and the user didn't add it (`passed`). Only that
 exact region is skipped, so text inside a large find the user passed over,
 such as part of the scene, is still found, and the search counts the finds
-it skipped that way. A find's region follows the
-sizes and ink the sample gives, so a search from another box can offer a
-passed-over find again at a slightly other region. Finds of the sample's
+it skipped that way. A find's margin is a quarter of the height of its own
+tallest character, not of the size the search took the run for, which
+follows the sample. So a search from a box of another size skips the run
+too when it joins the same ink into it. Which ink a run joins
+follows the sample, its size and its background, so such a search can
+offer a passed-over find again where it joins the run differently. Finds of the sample's
 size come first, then each other size from the one nearest the sample's,
 and each size's go top to bottom, then left to right.
-The first 12 (`MAX_FOUND`) are kept with a margin of a quarter of their
-size, each of another size with how tall its characters are, and the rest
-are counted. A reference reads best at the sizes it learned
+The first 12 (`MAX_FOUND`) are kept, each of another size with how tall its
+characters are, and the rest are counted. A reference reads best at the
+sizes it learned
 ([Matching](Screen-regions.md#matching)), so the finds of other sizes are
 how one screenshot teaches several.
 
 The owner keeps the search (`owner/found.rs`) with each find's pixels and
-sends each to the text reader. A new search replaces it, and dismissing,
+the pixels around them, and sends each find's ink to the text reader. It
+cuts a find's ink and characters as a reference cuts a box at the find's
+region (`DigitReader::cut`), with the pixels around the region for a
+reference that finds its characters by contrast, so a find shows the
+characters that the box it becomes shows. A new search replaces it, and
+dismissing,
 adding, **Change window**, picking another window, or leaving the flow
 forgets it; reads already
 queued for a forgotten search still run, and their text is dropped. Pictures

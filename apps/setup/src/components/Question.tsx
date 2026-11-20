@@ -116,8 +116,12 @@ export function Question({ refs, label, keepLabel, actLabel, busy = false, onKee
           className="btn small danger"
           disabled={busy}
           onKeyDown={escape}
-          onClick={() => {
-            answer(true);
+          onClick={(event) => {
+            // The question may show under the pointer, where the control was pressed. The later clicks of a
+            // double-click there are that press carried on, not an answer.
+            if (event.detail <= 1) {
+              answer(true);
+            }
           }}
         >
           {actLabel}
