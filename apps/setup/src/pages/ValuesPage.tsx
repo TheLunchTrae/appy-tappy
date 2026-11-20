@@ -360,7 +360,7 @@ export function ValuesPage({
       setActionError(null);
       // The question stays until the row is gone, so its buttons take no press meanwhile.
       await onChanged();
-      setConfirming(null);
+      setConfirming((current) => (current === `${app}/${value}` ? null : current));
     } catch (error: unknown) {
       setActionError(errorText(error));
     }

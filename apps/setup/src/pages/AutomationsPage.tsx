@@ -207,9 +207,7 @@ export function AutomationsPage({
     try {
       await change();
       setActionError(null);
-      // A delete's question stays until the row is gone, so its buttons take no press meanwhile.
       await onChanged();
-      setConfirming(null);
       return true;
     } catch (error: unknown) {
       setActionError(errorText(error));
@@ -242,6 +240,8 @@ export function AutomationsPage({
         await deleteAutomation(id);
       })
     ) {
+      // The question stayed until the row was gone, so its buttons took no press meanwhile.
+      setConfirming((current) => (current === id ? null : current));
       // The deleted row took the focused button with it.
       headingRef.current?.focus();
     }

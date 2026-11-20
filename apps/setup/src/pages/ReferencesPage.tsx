@@ -35,7 +35,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
       setDeleteError(null);
       // The question stays until the row is gone, so its buttons take no press meanwhile.
       await onChanged();
-      setConfirming(null);
+      setConfirming((current) => (current === `${app}/${reference}` ? null : current));
     } catch (error: unknown) {
       setDeleteError(errorText(error));
     }

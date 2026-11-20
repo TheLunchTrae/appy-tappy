@@ -2969,6 +2969,7 @@ stateDiagram-v2
     Asking --> Deleting: the answer that deletes
     Deleting --> [*]: the item is deleted and the page has read its files again
     Deleting --> Asking: the delete fails, and the page says why
+    Deleting --> Buttons: Delete on another row, while the delete carries on
 ```
 
 - The question takes the buttons' place (`Question`), and focus moves to

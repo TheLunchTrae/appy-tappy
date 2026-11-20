@@ -569,7 +569,7 @@ fn sizes_among(blobs: &[Bounds], sample: u32) -> Vec<u32> {
 /// not hide the text it covers. A find's margin is a quarter of the height
 /// of its own characters, not of the size the search took them for, which
 /// follows the sample: a search from a sample of another size leaves out
-/// a run it joins from the same ink. Which ink joins a run still follows
+/// a run it joins from the same ink. Which ink joins a run follows
 /// the sample, so such a search can offer the text again as another run.
 /// `None` when `region` holds no ink or lies outside `image`.
 pub(crate) fn like(
