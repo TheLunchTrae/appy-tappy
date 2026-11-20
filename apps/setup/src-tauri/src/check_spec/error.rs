@@ -6,7 +6,7 @@ use std::fmt;
 
 use appytappy_config::app_file::{CheckDefError, MAX_STATES};
 use appytappy_sources::screen::Size;
-use appytappy_sources::screen::digits::LearnError;
+use appytappy_sources::screen::digits::{LearnError, MAX_GLYPHS};
 use appytappy_sources::screen::saved::SavedError;
 
 use crate::words::sentence;
@@ -22,6 +22,16 @@ pub(crate) enum Cut {
     Recording,
     /// The screenshot a state is taken from, by index.
     State(usize),
+}
+
+/// What a reference being taught adds to its saved samples, and so what a
+/// lesson that fails names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Lesson {
+    /// A box on a screenshot, with the text typed for it.
+    Box,
+    /// A kept reading of the recording.
+    Reading,
 }
 
 /// A check the UI described cannot be saved, or cannot be read as saved.
@@ -114,9 +124,11 @@ pub(crate) enum SpecError {
         /// Why the reference cannot learn from it.
         source: LearnError,
     },
-    /// A reference could not learn from a label.
+    /// A reference could not learn from a box or a kept reading.
     Learn {
-        /// The text the user typed.
+        /// Which of the two.
+        lesson: Lesson,
+        /// The text the user typed, or kept.
         text: String,
         /// Why the reference could not learn from it.
         source: LearnError,
@@ -160,12 +172,12 @@ impl fmt::Display for SpecError {
                 characters,
             } => write!(
                 formatter,
-                "{reference} knows none of the characters this value needs, {characters:?}. Teach \
-                 it one of them, or change the characters the value needs."
+                "{reference} knows none of the characters this value needs, \"{characters}\". \
+                 Teach it one of them, or change the characters the value needs."
             ),
             Self::NothingSelected(name) => write!(
                 formatter,
-                "Nothing in the region is selected for the state {name:?}. Select it again, clear its selection, or stop ignoring the background.",
+                "Nothing in the region is selected for the state \"{name}\". Select it again, clear its selection, or stop ignoring the background.",
             ),
             Self::NoLabels => formatter.write_str(
                 "Type what at least one box shows, or keep a recorded reading.",
@@ -213,7 +225,9 @@ impl fmt::Display for SpecError {
                     "{what} {size}, but {place} screenshot {drawn_on}, which is {drawn}. {fix}"
                 )
             },
-            Self::Picture => formatter.write_str("A picture of the region could not be saved."),
+            Self::Picture => {
+                formatter.write_str("AppyTappy can't save a picture of the region. Try again.")
+            },
             Self::Reference(why) => formatter.write_str(why),
             Self::OtherApplication => formatter.write_str(
                 "That reference belongs to another application. Pick one of this application's.",
@@ -229,9 +243,10 @@ impl fmt::Display for SpecError {
                 source,
             } => write!(
                 formatter,
-                "{reference} can't learn from its saved picture of \"{text}\": {source}. Edit \
+                "{reference} can't learn from its saved picture of \"{text}\": {} Edit \
                  {reference} and remove that picture under Saved pictures it can't learn, or \
-                 change its text color."
+                 change its text color.",
+                cant_learn(source)
             ),
             // The reference's own editor says these, where the picture
             // shows in the list they name.
@@ -242,20 +257,70 @@ impl fmt::Display for SpecError {
             ),
             Self::SavedLearn { text, source } => write!(
                 formatter,
-                "Can't learn from its saved picture of \"{text}\": {source}. Remove it under \
-                 Saved pictures it can't learn, or change the text color."
+                "Can't learn from its saved picture of \"{text}\": {} Remove it under Saved \
+                 pictures it can't learn, or change the text color.",
+                cant_learn(source)
             ),
             Self::Unreadable(why) => {
-                write!(formatter, "AppyTappy could not read this value as saved: {why}.")
+                write!(formatter, "AppyTappy can't read this value as saved: {why}.")
             },
             Self::TooManyExpected => write!(
                 formatter,
                 "A value needs at most {MAX_EXPECTED_CHARACTERS} characters. Remove some."
             ),
-            Self::Learn { text, source } => {
-                write!(formatter, "Could not learn from \"{text}\": {source}")
+            Self::Learn {
+                lesson,
+                text,
+                source,
+            } => {
+                let from = match lesson {
+                    Lesson::Box => "the box with the text",
+                    Lesson::Reading => "the kept reading",
+                };
+                write!(
+                    formatter,
+                    "Can't learn from {from} \"{text}\": {}",
+                    cant_learn(source)
+                )
             },
         }
+    }
+}
+
+/// Why a reference can't learn from a picture, in the setup app's words:
+/// the end of a sentence that says it can't, with its full stop. The
+/// runtime's log says the same in the lesson's own words.
+pub(crate) fn cant_learn(error: &LearnError) -> String {
+    let shown = |found: usize| {
+        if found == 1 {
+            "1 character".to_owned()
+        } else {
+            format!("{found} characters")
+        }
+    };
+    match error {
+        LearnError::NoInk => "nothing in it stands out from its background, or has the \
+                              reference's text color."
+            .to_owned(),
+        LearnError::TooManyCharacters => "it shows more than 24 characters.".to_owned(),
+        LearnError::FewerCharacters { found, expected } => format!(
+            "it shows {} but the text has {expected}. Characters that touch count as one.",
+            shown(*found)
+        ),
+        LearnError::MoreCharacters { found, expected } => format!(
+            "it shows {} but the text has {expected}. A character drawn as separate marks side \
+             by side, as some percent signs are, counts once for each mark, and so does \
+             anything else that stands out as the characters do.",
+            shown(*found)
+        ),
+        LearnError::Conflict { learned, new } => format!(
+            "a character given as \"{new}\" has the same shape as one learned as \
+             \"{learned}\". Change the text of one of them, or leave one out."
+        ),
+        LearnError::Full => format!(
+            "the reference holds {MAX_GLYPHS} character shapes already, the most one can hold. \
+             Remove boxes, readings, or saved pictures it doesn't need."
+        ),
     }
 }
 
