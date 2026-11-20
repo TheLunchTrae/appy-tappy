@@ -193,6 +193,10 @@ names such as Escape, and nothing else. Write **New automation** and
 itself and the Google style that the docs follow. The user guide names each
 control exactly as the app shows it.
 
+A control keeps its label while its work is pending, so its size does not
+shift: **Save file** stays **Save file**, never **Saving…**. Show the pending
+state with `aria-busy` and the disabled style instead.
+
 The setup app's window title, its messages, and the user guide call it
 **AppyTappy Setup**, a proper name, so both words keep their capitals. The
 installer, the Start menu, and the tray name the product **AppyTappy**.

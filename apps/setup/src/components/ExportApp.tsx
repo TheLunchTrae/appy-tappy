@@ -61,7 +61,7 @@ export function ExportApp({ app, name, onClose }: Props) {
             background(save());
           }}
         >
-          {busy ? 'Saving…' : 'Save file'}
+          Save file
         </button>
       </div>
     </Dialog>

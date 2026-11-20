@@ -100,6 +100,7 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
             className="btn"
             disabled={findBlocked !== null}
             // Not disabled while searching, so focus stays on it when a search fails.
+            aria-busy={searching}
             aria-disabled={searching}
             aria-describedby={findBlocked === null ? 'hint-find-like' : 'hint-find-like find-blocked'}
             onClick={() => {
@@ -108,7 +109,7 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
               }
             }}
           >
-            {searching ? 'Finding…' : 'Find more like it'}
+            Find more like it
           </button>
           <Hint topic="Find more like it" id="hint-find-like">
             {FIND_LIKE_HINT}

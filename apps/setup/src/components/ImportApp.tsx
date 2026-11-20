@@ -224,7 +224,7 @@ export function ImportApp({ onImported }: Props) {
                   }
                 }}
               >
-                {busy ? 'Importing…' : 'Import'}
+                Import
               </button>
             ) : null}
           </div>
