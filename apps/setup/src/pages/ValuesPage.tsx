@@ -10,7 +10,7 @@ import {
   type ValueView,
 } from '../lib/bindings.ts';
 import { deleteValue, errorText, markChecked, removeFix } from '../lib/api.ts';
-import { usedBy } from '../lib/automation.ts';
+import { keptByAutomations, usedBy } from '../lib/automation.ts';
 import { readingText } from '../lib/reading.ts';
 import { buildState, checkedText } from '../lib/build.ts';
 import { DeleteActions } from '../components/DeleteActions.tsx';
@@ -266,6 +266,7 @@ function AppRows({
                     : undefined
                 }
                 actLabel="Delete value"
+                blocked={automations === null ? undefined : keptByAutomations(usedBy(automations, app.id, value.id))}
                 confirming={confirming === key}
                 onConfirm={(asking) => {
                   onConfirm(asking ? key : null);
@@ -342,16 +343,12 @@ export function ValuesPage({
     }
   };
 
+  // The row says why when this fails.
   const remove = async (app: string, value: string): Promise<void> => {
-    try {
-      await deleteValue(app, value);
-      setActionError(null);
-      // The question stays until the row is gone, so its buttons take no press meanwhile.
-      await onChanged();
-      setConfirming((current) => (current === `${app}/${value}` ? null : current));
-    } catch (error: unknown) {
-      setActionError(errorText(error));
-    }
+    await deleteValue(app, value);
+    // The question stays until the row is gone, so its buttons take no press meanwhile.
+    await onChanged();
+    setConfirming((current) => (current === `${app}/${value}` ? null : current));
   };
 
   const markAsChecked = async (app: string): Promise<void> => {

@@ -698,4 +698,5 @@ you made it by hand with boxes on screenshots you took:
 
 Select **Delete** next to a reference, then **Delete reference** to confirm.
 A reference that a value reads with, at every size or in a fix at one size,
-cannot be deleted: AppyTappy names the values to change or delete first.
+cannot be deleted: **Delete** names the values to point at another reference
+first, in the reference's row, and **OK** closes that.

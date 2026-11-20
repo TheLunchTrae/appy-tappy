@@ -2957,23 +2957,35 @@ stateDiagram-v2
 ### Delete question
 
 A saved value's, reference's, or automation's row
-(`apps/setup/src/components/DeleteActions.tsx`) shows its buttons, asks, or
-deletes. The page holds which row asks (`confirming`), and the row holds
-whether its delete is on its way (`deleting`).
+(`apps/setup/src/components/DeleteActions.tsx`) shows its buttons, asks,
+deletes, or says why it cannot be deleted. The page holds which row asks
+(`confirming`) and why an item in use cannot be deleted (`blocked`), and the
+row holds whether its delete is on its way (`deleting`) and why the delete
+failed (`refused`).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Buttons
     Buttons --> Asking: Delete
+    Buttons --> Telling: Delete on an item in use
     Asking --> Buttons: Keep, Escape, or Delete on another row
+    Asking --> Telling: something starts to use the item
     Asking --> Deleting: the answer that deletes
     Deleting --> [*]: the item is deleted and the page has read its files again
-    Deleting --> Asking: the delete fails, and the page says why
+    Deleting --> Telling: the delete fails
     Deleting --> Buttons: Delete on another row, while the delete carries on
+    Telling --> Buttons: OK, Escape, or Delete on another row
 ```
 
 - The question takes the buttons' place (`Question`), and focus moves to
   **Keep**. **Keep** and Escape put focus back on **Delete**.
+- `Telling` shows in the same place, with the reason and **OK** alone, which
+  takes the focus. The page knows a reference is in use from the values that
+  read with it (`keptByReaders`), and a value from the automations that
+  watch it (`keptByAutomations`), once the automations are read. The owner
+  refuses the same deletes, and any delete that fails shows what the owner
+  answered. **OK** and Escape put focus back on **Delete**, and a refusal
+  goes with them, so **Delete** asks again.
 - The answer that deletes ignores the later clicks of a double-click, since
   the question may show under the pointer where **Delete** was pressed. Key
   presses and single clicks answer.

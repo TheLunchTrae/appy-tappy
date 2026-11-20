@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 
 import type { AppSummary, DraftSummary } from '../lib/bindings.ts';
 import { deleteReference, errorText } from '../lib/api.ts';
-import { andList, readers, referenceCharacters } from '../lib/reference.ts';
+import { andList, keptByReaders, readers, referenceCharacters } from '../lib/reference.ts';
 import { originText } from '../lib/sharing.ts';
 import { CharacterChips } from '../components/CharacterChips.tsx';
 import { DeleteActions } from '../components/DeleteActions.tsx';
@@ -29,16 +29,12 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // The row says why when this fails.
   const remove = async (app: string, reference: string): Promise<void> => {
-    try {
-      await deleteReference(app, reference);
-      setDeleteError(null);
-      // The question stays until the row is gone, so its buttons take no press meanwhile.
-      await onChanged();
-      setConfirming((current) => (current === `${app}/${reference}` ? null : current));
-    } catch (error: unknown) {
-      setDeleteError(errorText(error));
-    }
+    await deleteReference(app, reference);
+    // The question stays until the row is gone, so its buttons take no press meanwhile.
+    await onChanged();
+    setConfirming((current) => (current === `${app}/${reference}` ? null : current));
   };
 
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -176,7 +172,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                         <DeleteActions
                           name={reference.name}
                           actLabel="Delete reference"
-                          title={used.length === 0 ? undefined : `${andList(used)} read with it`}
+                          blocked={keptByReaders(used)}
                           confirming={confirming === key}
                           onConfirm={(asking) => {
                             setConfirming(asking ? key : null);

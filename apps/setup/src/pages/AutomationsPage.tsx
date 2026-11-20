@@ -234,17 +234,14 @@ export function AutomationsPage({
     });
   };
 
+  // The row says why when this fails.
   const remove = async (id: string): Promise<void> => {
-    if (
-      await run(async () => {
-        await deleteAutomation(id);
-      })
-    ) {
-      // The question stayed until the row was gone, so its buttons took no press meanwhile.
-      setConfirming((current) => (current === id ? null : current));
-      // The deleted row took the focused button with it.
-      headingRef.current?.focus();
-    }
+    await deleteAutomation(id);
+    // The question stays until the row is gone, so its buttons take no press meanwhile.
+    await onChanged();
+    setConfirming((current) => (current === id ? null : current));
+    // The deleted row took the focused button with it.
+    headingRef.current?.focus();
   };
 
   const removeDraft = async (id: string): Promise<void> => {
