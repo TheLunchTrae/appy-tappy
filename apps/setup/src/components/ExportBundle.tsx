@@ -97,7 +97,7 @@ export function ExportBundle({ trace, onClose }: Props) {
             background(save());
           }}
         >
-          {busy ? 'Saving…' : 'Save bundle'}
+          Save bundle
         </button>
       </div>
     </Dialog>
