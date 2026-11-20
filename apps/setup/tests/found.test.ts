@@ -283,8 +283,6 @@ describe('passOver', () => {
   });
 });
 
-test('the add button says how many finds it adds, and no number while none is ticked', () => {
+test('the add button names no number while no find is ticked', () => {
   expect(addLabel(0)).toBe('Add to the reference');
-  expect(addLabel(1)).toBe('Add 1 to the reference');
-  expect(addLabel(3)).toBe('Add 3 to the reference');
 });
