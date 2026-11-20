@@ -197,6 +197,7 @@ export function ReferenceInspector({
         coverage={covered}
         lookalikes={neededPairs(teaching.risks.lookalikes, lookalikeNeeds)}
         hidesTone={teaching.risks.hidesTone}
+        risksProblem={teaching.risks.problem}
         readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
         onName={(name) => {
           setEditing((current) => (current === null ? null : { ...current, name }));

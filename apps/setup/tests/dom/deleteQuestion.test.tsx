@@ -120,13 +120,16 @@ afterEach(async () => {
   clearMocks();
 });
 
+// What the References page is answered for each reference's mark.
+const NO_RISKS = { lookalikes: [], hidesTone: false };
+
 test.each(PAGES)('deleting a saved %s waits for an answer of its own', async (_kind, command, actLabel, page) => {
   let deletions = 0;
   mockIPC((called) => {
     if (called === command) {
       deletions += 1;
     }
-    return undefined;
+    return called === 'saved_reading_risks' ? NO_RISKS : undefined;
   });
   const user = userEvent.setup();
   render(page());
@@ -176,7 +179,7 @@ test.each(PAGES)(
         deletions += 1;
         return pending.promise;
       }
-      return undefined;
+      return called === 'saved_reading_risks' ? NO_RISKS : undefined;
     });
     const user = userEvent.setup();
     render(page());

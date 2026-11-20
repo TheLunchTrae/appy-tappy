@@ -853,6 +853,13 @@ changes the spec.
 [Reading risks](State-machines.md#reading-risks) has its
 states. Only the setup app checks this, so the runtime is unchanged.
 
+The References page asks the same of each saved reference, and of its hidden
+outlines, once its row shows (`saved_reading_risks`, `useSavedRiskMark`), and
+marks the row (`RiskMark`). The owner learns the reference from its saved
+pictures for each ask, on its own thread.
+[Saved reference marks](State-machines.md#saved-reference-marks) has the
+states.
+
 ### Hidden outlines
 
 By contrast, a tone of the text counts as ink only where it is further from

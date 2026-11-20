@@ -6,6 +6,7 @@ import { andList, keptByReaders, readers, referenceCharacters } from '../lib/ref
 import { originText } from '../lib/sharing.ts';
 import { CharacterChips } from '../components/CharacterChips.tsx';
 import { DeleteActions } from '../components/DeleteActions.tsx';
+import { RiskMark } from '../components/RiskMark.tsx';
 import type { SavedRef } from '../lib/flow.ts';
 import { type Resumed, draftOfSaved, draftProblem, draftsOf } from '../lib/drafts.ts';
 import { labeledCharacters } from '../lib/captureDraft.ts';
@@ -156,6 +157,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                     <tr key={key}>
                       <td>
                         {reference.name}
+                        <RiskMark app={app.id} file={file} reference={reference} />
                         {changes === null ? null : (
                           <>
                             {' '}

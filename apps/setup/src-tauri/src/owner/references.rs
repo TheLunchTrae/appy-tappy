@@ -12,7 +12,7 @@ use crate::pixels;
 use crate::stores::SavedApp;
 
 use super::host::Host;
-use super::{Changed, Edit, Owner};
+use super::{Changed, Edit, Owner, ReadingRisks};
 
 /// A reference to save, as the UI describes it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -201,6 +201,23 @@ impl<H: Host> Owner<H> {
         })
     }
 
+    /// What may keep the saved reference `reference` from reading as its
+    /// samples do, as [`Owner::reading_risks`] answers for one being
+    /// taught, for the References page to mark it.
+    pub(crate) fn saved_reading_risks(
+        &self,
+        reference: &ReferenceRef,
+    ) -> Result<ReadingRisks, String> {
+        let (lookalikes, hides_tone) = self
+            .saved_reference(reference)?
+            .risks()
+            .map_err(|error| error.to_string())?;
+        Ok(ReadingRisks {
+            lookalikes,
+            hides_tone,
+        })
+    }
+
     /// The pixels of the picture `image` of a sample of the saved reference
     /// `reference`, at most `max_width` wide; `None` when the reference
     /// has no such sample or its picture cannot be read.
@@ -347,8 +364,8 @@ mod tests {
 
     use crate::owner::SavedValue;
     use crate::owner::test_support::{
-        FakeHost, Harness, add_example_app, characters, frame_image, harness_with, scratch_store,
-        spec, teaching, trial,
+        FakeHost, Harness, add_example_app, characters, frame_image, harness_with, near_twins,
+        scratch_store, spec, teaching, trial,
     };
 
     use super::*;
@@ -576,6 +593,50 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["small"],
             "only the deleted reference is gone"
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_saved_reference_says_what_may_keep_it_from_reading_without_a_window() {
+        let (stores, root) = scratch_store("references-risks");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&near_twins()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // The block is an 8, its twin a 6, and the bar a 1.
+        let twins = ReferenceSaveSpec {
+            app: "example".to_owned(),
+            reference_name: "Twins".to_owned(),
+            characters: serde_json::from_str(
+                r#"{"region":{"x":0,"y":0,"width":17,"height":8},"screenshot":0,
+                    "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+                    "labels":[{"screenshot":0,"text":"861"}]}"#,
+            )
+            .expect("valid JSON"),
+        };
+        let saved = harness
+            .ask(|owner| owner.save_reference(&twins))
+            .expect("saves");
+        harness.ask(Owner::stop);
+        let risks = |id: &str| {
+            let reference = ReferenceRef {
+                app: "example".to_owned(),
+                id: id.to_owned(),
+            };
+            move |owner: &mut Owner<FakeHost>| owner.saved_reading_risks(&reference)
+        };
+        assert_eq!(
+            harness.ask(risks(&saved.reference)),
+            Ok(ReadingRisks {
+                lookalikes: vec![('8', '6')],
+                hides_tone: false,
+            })
+        );
+        assert_eq!(
+            harness.ask(risks("gone")),
+            Err("Example App no longer has that reference.".to_owned())
         );
         std::fs::remove_dir_all(root).expect("clean up");
     }

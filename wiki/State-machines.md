@@ -139,8 +139,17 @@ it was about has gone. These guards reject stale state and messages:
   spec: the region, the samples, the text color, and the tolerance
   (`riskKey` in `apps/setup/src/lib/useReadingRisks.ts`). An answer under
   another key than the reference asks under now is not shown
-  (`risksArrived`), and a change of key clears the answer, so one for a
-  reference saved again under the same ID never shows.
+  (`risksArrived`), and neither is a failure under one. A change of key
+  clears the answer, so one for a reference saved again under the same ID
+  never shows.
+- **Saved reference mark keys.** The
+  [mark of a saved reference](#saved-reference-marks) on the References page
+  is asked for under a key made of its application's ID, the reference as
+  the application's file has it, and the characters the values that read
+  with it need (`useSavedRiskMark` in
+  `apps/setup/src/lib/useReadingRisks.ts`). A change of key cancels the ask
+  before it, so its answer is dropped, and a mark shows only under the key
+  it was asked under.
 - **Pointer IDs.** A region drag keeps the ID of the pointer that started it
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
@@ -3364,8 +3373,51 @@ stateDiagram-v2
   none or none reads with it. It warns about no pair when none is left. It
   also warns when the answer says the tolerance leaves an outline or a
   shadow out, whatever the value needs.
-- **Unanswered** is a failed request. The failure is logged and no warning
-  shows; the reference's own messages say what is wrong with its samples.
+- **Unanswered** is a failed request. The failure is logged, and the editor
+  says that it can't check for characters that look alike, and why
+  (`risksFailed`), in place of the warnings, so a failed check does not look
+  like a check that found nothing. The failure is kept under the key it was
+  asked under, like an answer, so it goes when the key changes.
+
+### Saved reference marks
+
+The References page marks each saved reference that may not read as its
+samples do, for the same two reasons its editor warns about under
+[Reading risks](#reading-risks) (`RiskMark` in
+`apps/setup/src/components/RiskMark.tsx`, `useSavedRiskMark` in
+`apps/setup/src/lib/useReadingRisks.ts`). Each row has its own state: the key
+it asks under now, and the last mark with the key it was asked under. The
+owner keeps nothing for it; each request is one `saved_reading_risks`
+command, which learns the reference from its saved pictures.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Asking: the row shows
+    Asking --> Marked: the answer names a risk for what its values need
+    Asking --> Unmarked: the answer names none, or the request fails
+    Marked --> Asking: the reference or what its values need changes
+    Unmarked --> Asking: the reference or what its values need changes
+    Asking --> Asking: the reference or what its values need changes
+    Asking --> [*]: the row goes
+    Marked --> [*]: the row goes
+    Unmarked --> [*]: the row goes
+```
+
+- **Asking** has a request out and shows no mark. The page shows before the
+  first request is sent, since the effect that sends it runs after the row
+  is drawn, and the rows ask one after another on the owner's thread.
+- **Marked** shows **May misread** with the reasons (`riskMark`): a pair of
+  characters with one that the values reading with the reference need, or
+  any pair when one of them needs none or none reads with it, and an outline
+  or a shadow its tolerance leaves out.
+- **Unmarked** shows nothing: the reference has neither risk, or the request
+  failed. A failure is logged and is not a state of its own, since a
+  reference that can't learn its saved pictures says so in its editor and on
+  each value that reads with it.
+- A change to the reference in its application's file, such as a save from
+  its editor, or to what its values need, changes the key. The ask under the
+  old key is canceled (`ask`), so an answer for the reference as it was is
+  dropped, and the mark goes until the new answer arrives.
 
 ### Saved pictures a reference can't learn
 

@@ -213,6 +213,24 @@ impl SavedReference {
         self.unlearned(ink, self.settled_tolerance(ink, tolerance))
     }
 
+    /// What may keep the reference from reading as its saved samples do,
+    /// which its editor warns about while it is taught: the pairs of
+    /// characters whose learned shapes match each other, and whether it
+    /// finds its characters by contrast with a tolerance that leaves an
+    /// outline or a shadow of a sample out, as [`contrast::hides_a_tone`]
+    /// describes.
+    ///
+    /// # Errors
+    ///
+    /// Returns why the reference cannot learn its samples: a picture that
+    /// is missing or cannot be decoded, or one it cannot learn from.
+    pub(crate) fn risks(&self) -> Result<(Vec<(char, char)>, bool), SpecError> {
+        let reader = learned(&self.reference, &[], 0, &self.pictures)?;
+        let hides_tone = self.reference.ink.is_none()
+            && contrast::hides_a_tone(&self.samples(), self.reference.tolerance);
+        Ok((reader.lookalikes(), hides_tone))
+    }
+
     /// The picture of `sample`, when it is there and decodes.
     pub(crate) fn picture(&self, sample: &SampleDef) -> Option<Image> {
         let (_, png) = self

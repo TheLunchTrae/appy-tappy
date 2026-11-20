@@ -941,6 +941,19 @@ pub(crate) async fn reading_risks(
     .await
 }
 
+/// What may keep the saved reference `reference` from reading as its
+/// samples do.
+#[tauri::command]
+pub(crate) async fn saved_reading_risks(
+    app: AppHandle,
+    reference: ReferenceRef,
+) -> Result<ReadingRisks, String> {
+    try_ask(&app, "saved_reading_risks", move |owner| {
+        owner.saved_reading_risks(&reference)
+    })
+    .await
+}
+
 /// Finds text like what `region` of screenshot `screenshot` shows, as its
 /// characters stand out from its background and at their size, elsewhere
 /// on that screenshot and away from `added` and `passed`, in place of any

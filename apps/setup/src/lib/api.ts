@@ -268,6 +268,14 @@ export async function readingRisks(spec: CharactersSpec): Promise<ReadingRisks> 
 }
 
 /**
+ * What may keep the saved reference `reference` from reading as its samples do, as `readingRisks` answers
+ * for one being taught. Rejects with why when the reference cannot learn its saved pictures.
+ */
+export async function savedReadingRisks(reference: ReferenceRef): Promise<ReadingRisks> {
+  return invoke<ReadingRisks>('saved_reading_risks', { reference });
+}
+
+/**
  * Finds text like what `region` of screenshot `screenshot` shows, as a reference with the text color `ink`,
  * or by contrast without one, and `tolerance` tells it from the region's background, at any size,
  * elsewhere on that screenshot and away from the finds `added` already and those an earlier search offered

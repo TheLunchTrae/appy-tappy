@@ -2985,6 +2985,13 @@ div.match-answer {
   color: var(--capture);
 }
 
+/* A saved reference that may not read as its samples do. */
+.pill.risk {
+  background: transparent;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+}
+
 tr.draft-row > td:not(.end):not(.row-actions) {
   opacity: 0.85;
 }

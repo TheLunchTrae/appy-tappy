@@ -140,6 +140,16 @@ another color it can count, and the number won't read, as when a game goes
 from one level or scene to the next: give the reference a
 [text color](#text-color), so only the inside of the characters counts.
 
+When AppyTappy can't check for either of the two, the editor says **Can't
+check for characters that look alike.** and why, in place of the warnings.
+No warning then doesn't mean that the reference has neither problem. The
+check runs again when a box, the text color, or the tolerance changes.
+
+The References page marks a saved reference that has either problem with
+**May misread** beside its name. Hold the pointer over the mark to see which,
+and select **Edit** to see what to do. The mark shows a moment after the
+page does. Neither warning holds up **Save reference**.
+
 AppyTappy learns a character from a box, found text you add, or a kept
 reading, never because a value needs it. A reference you make or edit from
 the References page is taught for no value, so nothing shows as missing
