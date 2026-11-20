@@ -209,9 +209,27 @@ export function disagreements(
   all: readonly ReviewEntry[],
 ): ReadonlyMap<number, string> {
   const names = readings.map((reading, index) => named(reading, all[index]?.text ?? ''));
-  // The character reading `at`'s text gives `shape`, if its text names its shapes and it shows the shape.
-  const nameOf = (at: number, shape: number): string | undefined =>
-    names[at]?.[readings[at]?.shapes.indexOf(shape) ?? -1];
+  // For each shape, each character a text gives it, at the shape's first place in that reading, and the first reading
+  // whose text does. A whole-window recording keeps hundreds of readings and review runs this on each keystroke, so a
+  // reading looks its shapes up here rather than going through every other reading.
+  const firstNaming = new Map<number, Map<string, number>>();
+  readings.forEach((reading, at) => {
+    const own = names[at] ?? null;
+    if (own === null) {
+      return;
+    }
+    for (const [place, shape] of reading.shapes.entries()) {
+      const character = own[place];
+      if (character === undefined || reading.shapes.indexOf(shape) !== place) {
+        continue;
+      }
+      const byCharacter = firstNaming.get(shape) ?? new Map<string, number>();
+      firstNaming.set(shape, byCharacter);
+      if (!byCharacter.has(character)) {
+        byCharacter.set(character, at);
+      }
+    }
+  });
   const found = new Map<number, string>();
   readings.forEach((reading, index) => {
     const own = names[index] ?? null;
@@ -220,13 +238,18 @@ export function disagreements(
     }
     for (const [place, shape] of reading.shapes.entries()) {
       const character = own[place];
-      const other = readings.findIndex((_, at) => {
-        const theirs = nameOf(at, shape);
-        return theirs !== undefined && theirs !== character;
-      });
-      const theirs = nameOf(other, shape);
-      if (character !== undefined && theirs !== undefined) {
-        const when = clock(readings[other]?.firstMs ?? 0);
+      // The first reading whose text gives the shape another character: the map holds each character in the order a
+      // reading first gave it.
+      let other: readonly [string, number] | undefined;
+      for (const entry of firstNaming.get(shape) ?? []) {
+        if (entry[0] !== character) {
+          other = entry;
+          break;
+        }
+      }
+      if (character !== undefined && other !== undefined) {
+        const [theirs, at] = other;
+        const when = clock(readings[at]?.firstMs ?? 0);
         found.set(
           index,
           `Its ${character} has the same shape as the ${theirs} of the reading at ${when}. Fix the text that is wrong.`,
