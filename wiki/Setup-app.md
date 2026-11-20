@@ -701,7 +701,12 @@ sizes it learned
 how one screenshot teaches several.
 
 The owner keeps the search (`owner/found.rs`) with each find's pixels and
-sends each to the text reader. A new search replaces it, and dismissing,
+the pixels around them, and sends each find's ink to the text reader. It
+cuts a find's ink and characters as a reference cuts a box at the find's
+region (`DigitReader::cut`), with the pixels around the region for a
+reference that finds its characters by contrast, so a find shows the
+characters that the box it becomes shows. A new search replaces it, and
+dismissing,
 adding, **Change window**, picking another window, or leaving the flow
 forgets it; reads already
 queued for a forgotten search still run, and their text is dropped. Pictures

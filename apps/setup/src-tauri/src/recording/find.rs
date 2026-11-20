@@ -127,7 +127,7 @@ pub(crate) struct Spot {
 pub(crate) struct Find {
     /// Where it is on the screenshot, with a margin around its ink.
     pub(crate) region: Region,
-    /// Its ink for the text reader, or `None` when the margin left none.
+    /// Its ink for the text reader, or `None` when it shows none.
     pub(crate) line: Option<Line>,
     /// How tall its characters are, in pixels, when that is another size
     /// than the sample's.
@@ -378,10 +378,13 @@ fn same_size(height: u32, sample: u32) -> bool {
     height.abs_diff(sample) <= slack
 }
 
-/// The ink of `image`, a find's pixels, for the text reader, as `reader`
-/// tells ink from background; `None` when it shows none.
-pub(crate) fn ink_line(image: &Image, reader: &DigitReader) -> Option<Line> {
-    Line::of(&reader.ink(image))
+/// The ink of a find at `region` of `image` for the text reader, as
+/// `reader` tells it from the background in the pixels it is given of the
+/// region ([`DigitReader::cut`]), which a reference is given of the box the
+/// find becomes; `None` when it shows none or `region` reaches outside
+/// `image`.
+pub(crate) fn ink_line(image: &Image, region: Region, reader: &DigitReader) -> Option<Line> {
+    Line::of(&reader.ink(&reader.cut(image, region)?))
 }
 
 /// The height of the characters among `blobs` that `region` shows: that of
@@ -617,7 +620,7 @@ pub(crate) fn like(
         .into_iter()
         .take(MAX_FOUND)
         .map(|(run, height, region)| {
-            let line = image.crop(region).and_then(|crop| ink_line(&crop, reader));
+            let line = ink_line(image, region, reader);
             Find {
                 region,
                 line,
