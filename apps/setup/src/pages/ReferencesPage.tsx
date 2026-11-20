@@ -117,8 +117,9 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
         <div className="empty">
           <h2>No references yet</h2>
           <p>
-            A reference is how AppyTappy knows an application&apos;s characters: their color and the shape of each
-            digit. Make one here, or from a number value&apos;s region while you set the value up.
+            A reference is how AppyTappy knows an application&apos;s characters: the shape of each digit and sign, and a
+            text color when the text needs one. Make one here, or from a number value&apos;s region while you set the
+            value up.
           </p>
           <button type="button" className="btn primary" onClick={onNew}>
             New reference

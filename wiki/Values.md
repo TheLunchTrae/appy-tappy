@@ -665,11 +665,12 @@ The Values page shows each value's size and side under **Region**, such as
 
 ### Fix a value at one size
 
-While the application runs, the Values page adds a column for the window's
-size now, such as **At 3440 × 1440 now**, with what each value reads there.
-Closing an application's window clears its live readings. When no windows
-are open for the listed values, their saved rows stay and the live column
-goes away.
+The Values page has a column for the window's size now, with what each value
+reads there while its application runs. The column's heading names the size,
+such as **At 3440 × 1440 now**, or says **At the window's size now** while
+no window is open or the open windows differ in size. Closing an
+application's window clears its live readings, and its values say
+**Not running** there.
 
 Each value has **Fix at this size** beside it there, unless the window is at
 the size the value was first drawn at. At that size, [edit the

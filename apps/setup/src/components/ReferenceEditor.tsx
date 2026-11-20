@@ -74,8 +74,8 @@ function learnedNote(saved: number, labeled: number, recorded: number): string {
 }
 
 /**
- * The text color, folded away since most references need none. It stays open for a reference that has one, which
- * also shows the tolerance and the way back to contrast.
+ * The text color, folded away since most references need none. It opens for a reference that has one, which also
+ * shows the tolerance and the way back to contrast, and the user can fold it again.
  */
 function TextColor(
   props: Pick<Props, 'ink' | 'tolerance' | 'picking' | 'canPick' | 'onPick' | 'onNoTextColor' | 'onTolerance'>,

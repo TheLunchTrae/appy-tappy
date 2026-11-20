@@ -53,16 +53,11 @@ function valueDrafts(drafts: readonly DraftSummary[] | null, apps: readonly AppS
   );
 }
 
+/** How many columns the table has, which the heading of each group of rows spans. */
+const COLUMNS = 6;
+
 /** A value or fix draft's rows, with as many cells as the table has columns. */
-function ValueDraftRows({
-  list,
-  nowColumn,
-  rows,
-}: {
-  readonly list: readonly Resumed[];
-  readonly nowColumn: boolean;
-  readonly rows: DraftRows;
-}) {
+function ValueDraftRows({ list, rows }: { readonly list: readonly Resumed[]; readonly rows: DraftRows }) {
   return list.map((resumed) => (
     <CaptureDraftRow
       key={resumed.id}
@@ -72,7 +67,7 @@ function ValueDraftRows({
         <>
           <td className="note">{setup === null ? '' : CHECKS[setup.draft.kind].label}</td>
           <td className="note">{setup?.draft.region === null || setup === null ? 'No region yet' : 'Region drawn'}</td>
-          {nowColumn ? <td className="note">Doesn&apos;t read</td> : null}
+          <td className="note">Doesn&apos;t read</td>
           <td className="note">Can&apos;t be used until finished</td>
         </>
       )}
@@ -89,10 +84,8 @@ function ValueDraftRows({
 interface AppRowsProps {
   readonly app: AppSummary;
   readonly automations: readonly AutomationSummary[] | null;
-  /** What its values read now, while the page shows a column for that. */
+  /** What its values read now, or null while it has no window to read. */
   readonly live: LiveApp | null;
-  /** Whether the page shows a column for what values read now. */
-  readonly nowColumn: boolean;
   readonly confirming: string | null;
   readonly onConfirm: (key: string | null) => void;
   readonly onDelete: (value: string) => Promise<void>;
@@ -163,7 +156,6 @@ function AppRows({
   app,
   automations,
   live,
-  nowColumn,
   confirming,
   onConfirm,
   onDelete,
@@ -175,17 +167,16 @@ function AppRows({
   rows,
 }: AppRowsProps) {
   const running = app.windows.length > 0;
-  const columns = nowColumn ? 6 : 5;
   if (app.file === null) {
     return (
       <tbody>
         <tr className="group">
-          <th colSpan={columns} scope="rowgroup">
+          <th colSpan={COLUMNS} scope="rowgroup">
             {app.id}
             <small className="warn">{app.error ?? 'This application could not be read.'}</small>
           </th>
         </tr>
-        <ValueDraftRows list={drafts} nowColumn={nowColumn} rows={rows} />
+        <ValueDraftRows list={drafts} rows={rows} />
       </tbody>
     );
   }
@@ -200,7 +191,7 @@ function AppRows({
   return (
     <tbody>
       <tr className="group">
-        <th colSpan={columns} scope="rowgroup">
+        <th colSpan={COLUMNS} scope="rowgroup">
           <span className={running ? 'dot running' : 'dot'} />
           {app.file.name}
           <small>
@@ -248,25 +239,23 @@ function AppRows({
               {summary.name}
             </td>
             <td className="note">{regionText(value.screen)}</td>
-            {nowColumn ? (
-              <td>
-                {cell === null || size === null ? (
-                  <span className="note">{running ? '' : 'Not running'}</span>
-                ) : (
-                  <NowCellView
-                    value={value}
-                    cell={cell}
-                    size={size}
-                    onFix={() => {
-                      onFix(value);
-                    }}
-                    onRemoveFix={() => {
-                      onRemoveFix(value.id, size);
-                    }}
-                  />
-                )}
-              </td>
-            ) : null}
+            <td>
+              {cell === null || size === null ? (
+                <span className="note">{running ? '' : 'Not running'}</span>
+              ) : (
+                <NowCellView
+                  value={value}
+                  cell={cell}
+                  size={size}
+                  onFix={() => {
+                    onFix(value);
+                  }}
+                  onRemoveFix={() => {
+                    onRemoveFix(value.id, size);
+                  }}
+                />
+              )}
+            </td>
             <td className="note">{usedByText(automations === null ? null : usedBy(automations, app.id, value.id))}</td>
             <td className="end">
               <DeleteActions
@@ -297,7 +286,7 @@ function AppRows({
           </tr>
         );
       })}
-      <ValueDraftRows list={drafts} nowColumn={nowColumn} rows={rows} />
+      <ValueDraftRows list={drafts} rows={rows} />
     </tbody>
   );
 }
@@ -342,7 +331,6 @@ export function ValuesPage({
   const [confirming, setConfirming] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const live = useLiveValues(apps);
-  const nowColumn = live.size > 0;
 
   const unfix = async (app: string, value: string, size: SizeDef): Promise<void> => {
     try {
@@ -440,12 +428,10 @@ export function ValuesPage({
               <th scope="col">Value</th>
               <th scope="col">Check</th>
               <th scope="col">Region</th>
-              {nowColumn ? (
-                <th scope="col">
-                  {nowHeading(live)}
-                  <Hint topic={nowHeading(live)}>{NOW_HINT}</Hint>
-                </th>
-              ) : null}
+              <th scope="col">
+                {nowHeading(live)}
+                <Hint topic={nowHeading(live)}>{NOW_HINT}</Hint>
+              </th>
               <th scope="col">Used by</th>
               <th scope="col">
                 <span className="note">Actions</span>
@@ -458,7 +444,6 @@ export function ValuesPage({
               app={app}
               automations={automations}
               live={live.get(app.id) ?? null}
-              nowColumn={nowColumn}
               confirming={confirming}
               onConfirm={setConfirming}
               onDelete={(value) => remove(app.id, value)}
@@ -481,12 +466,12 @@ export function ValuesPage({
           {orphans.length === 0 ? null : (
             <tbody>
               <tr className="group">
-                <th colSpan={nowColumn ? 6 : 5} scope="rowgroup">
+                <th colSpan={COLUMNS} scope="rowgroup">
                   Drafts
                   <small className="warn">Their application is no longer saved.</small>
                 </th>
               </tr>
-              <ValueDraftRows list={orphans} nowColumn={nowColumn} rows={rows} />
+              <ValueDraftRows list={orphans} rows={rows} />
             </tbody>
           )}
         </table>
