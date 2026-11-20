@@ -688,14 +688,15 @@ unless an earlier search on the screenshot offered a find at the same
 region, margin included, and the user didn't add it (`passed`). Only that
 exact region is skipped, so text inside a large find the user passed over,
 such as part of the scene, is still found, and the search counts the finds
-it skipped that way. A find's region follows the
-sizes and ink the sample gives, so a search from another box can offer a
-passed-over find again at a slightly other region. Finds of the sample's
+it skipped that way. A find's margin is a quarter of the height of its own
+tallest character, not of the size the search took the run for, which
+follows the sample. So a search from a box of another size gives the run
+the same region and skips it too. Finds of the sample's
 size come first, then each other size from the one nearest the sample's,
 and each size's go top to bottom, then left to right.
-The first 12 (`MAX_FOUND`) are kept with a margin of a quarter of their
-size, each of another size with how tall its characters are, and the rest
-are counted. A reference reads best at the sizes it learned
+The first 12 (`MAX_FOUND`) are kept, each of another size with how tall its
+characters are, and the rest are counted. A reference reads best at the
+sizes it learned
 ([Matching](Screen-regions.md#matching)), so the finds of other sizes are
 how one screenshot teaches several.
 
