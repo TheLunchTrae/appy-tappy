@@ -690,8 +690,10 @@ exact region is skipped, so text inside a large find the user passed over,
 such as part of the scene, is still found, and the search counts the finds
 it skipped that way. A find's margin is a quarter of the height of its own
 tallest character, not of the size the search took the run for, which
-follows the sample. So a search from a box of another size gives the run
-the same region and skips it too. Finds of the sample's
+follows the sample. So a search from a box of another size skips the run
+too when it joins the same ink into it. Which ink a run joins still
+follows the sample, its size and its background, so such a search can
+offer a passed-over find again where it joins the run differently. Finds of the sample's
 size come first, then each other size from the one nearest the sample's,
 and each size's go top to bottom, then left to right.
 The first 12 (`MAX_FOUND`) are kept, each of another size with how tall its

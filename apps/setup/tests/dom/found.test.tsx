@@ -115,15 +115,17 @@ test('a search stays under way until the newest one answers', async () => {
   expect(result.current.searching).toBe(false);
 });
 
-test('a search that a dismissal or a reread overtakes is no longer under way', async () => {
+test('a dismissal ends a search under way, and a reread waits for one', async () => {
   const late = Promise.withResolvers<FoundView>();
   let searches = 0;
+  let rereads = 0;
   mockIPC((command) => {
     if (command === 'find_like') {
       searches += 1;
       return searches === 2 ? found(2, { kind: 'failed', text: 'Read failed.' }) : late.promise;
     }
     if (command === 'reread_found') {
+      rereads += 1;
       return found(2);
     }
     return command === 'found_picture' ? picture() : undefined;
@@ -144,6 +146,6 @@ test('a search that a dismissal or a reread overtakes is no longer under way', a
   });
   expect(result.current.searching).toBe(true);
   await act(async () => result.current.reread());
-  expect(result.current.searching).toBe(false);
-  expect(result.current.view?.finds[0]?.text).toEqual({ kind: 'read', text: '12' });
+  expect(rereads).toBe(0);
+  expect(result.current.searching).toBe(true);
 });

@@ -289,12 +289,12 @@ export function useFound(
     rereadOffer: offer,
     reread: async () => {
       const again = offer?.indexes ?? [];
-      if (view === null || again.length === 0) {
+      // A search under way replaces the one shown, so its finds are no longer the owner's to read again.
+      if (view === null || again.length === 0 || searching) {
         return;
       }
       // The search's state read before this would show the finds as they were, and end the wait for their text.
       const current = turn.begin();
-      setSearching(false);
       try {
         const result = await rereadFound(view.id, again, draft.ink, draft.tolerance);
         if (current() && result !== null) {
