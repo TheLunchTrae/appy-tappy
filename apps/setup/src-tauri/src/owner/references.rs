@@ -137,7 +137,7 @@ impl<H: Host> Owner<H> {
     ) -> Result<SavedReferenceId, String> {
         let name = spec.reference_name.trim();
         if name.is_empty() {
-            return Err("Name the reference first.".to_owned());
+            return Err("Name the reference.".to_owned());
         }
         let editing = spec.characters.reference.as_ref();
         if let Some(editing) = editing
@@ -249,7 +249,7 @@ impl<H: Host> Owner<H> {
     ) -> Result<SavedReferenceId, String> {
         let name = spec.reference_name.trim();
         if name.is_empty() {
-            return Err("Name the reference first.".to_owned());
+            return Err("Name the reference.".to_owned());
         }
         let ReferenceRef { app, id } = &spec.reference;
         self.update_app(app, Changed::Values, |_owner, found| {
@@ -410,7 +410,7 @@ mod tests {
         };
         assert_eq!(
             harness.ask(save(reference("example", " ", None))),
-            Err("Name the reference first.".to_owned())
+            Err("Name the reference.".to_owned())
         );
         assert_eq!(
             harness.ask(save(reference("missing", "Digits", None))),
@@ -782,7 +782,7 @@ mod tests {
         };
         assert_eq!(
             save(&mut harness, settings("digits", " ", red)),
-            Err("Name the reference first.".to_owned())
+            Err("Name the reference.".to_owned())
         );
         assert_eq!(
             save(&mut harness, settings("digits", "other", red)),

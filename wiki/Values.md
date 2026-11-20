@@ -678,8 +678,8 @@ the size the value was first drawn at. At that size, [edit the
 value](#edit-a-value) instead. **Matches no state** isn't always wrong: the
 region may show none of the states right now. A value that can't be read
 there says why and what to do about it, such as **Can't read: character 3 of
-"8 7 ?" has a shape Digits hasn't learned. It looks closest to 8. Teach it on
-the References page.**
+"8 7 ?" has a shape Digits hasn't learned. It looks closest to "8". Teach it
+on the References page.**
 
 1. AppyTappy finds the application's window and takes a screenshot of it at
    its size now, with the region where the value would be read there: it

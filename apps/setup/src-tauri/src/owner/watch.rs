@@ -25,7 +25,7 @@ use appytappy_sources::screen::{
 use serde::Serialize;
 
 use crate::debug::workings::{self, ReadingDetails};
-use crate::reading::{Reading, at_size, cant_read_saved, reference_of};
+use crate::reading::{Reading, at_size, cant_build, cant_read_saved, reference_of};
 use crate::ticket::{Running, Ticket};
 
 use super::capture::{self, Capture, FrameStream};
@@ -214,7 +214,7 @@ impl<H: Host> Owner<H> {
             file.size_changes,
             |name| found.picture(name),
         )
-        .map_err(|error| format!("{} can't be read: {error}.", saved.name))?;
+        .map_err(|error| format!("{} can't be read: {}.", saved.name, cant_build(&error)))?;
         let (processes, windows) = self.desktop()?;
         let window = self
             .host

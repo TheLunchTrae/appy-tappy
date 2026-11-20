@@ -304,7 +304,7 @@ mod tests {
             )
             .map(drop),
             Err(
-                "AppyTappy can't read this value as saved: its picture gone.png cannot be \
+                "AppyTappy can't read this value as saved: its picture gone.png can't be \
                  read."
                     .to_owned()
             )

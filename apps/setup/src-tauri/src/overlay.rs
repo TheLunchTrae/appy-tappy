@@ -36,7 +36,7 @@ use appytappy_sources::system::WindowPlace;
 use serde::Serialize;
 
 use crate::owner::{Event, Host, Message};
-use crate::reading::{Reading, at_size, cant_read_saved, reference_of};
+use crate::reading::{Reading, at_size, cant_build, cant_read_saved, reference_of};
 use crate::stores::SavedApp;
 use crate::ticket::{Running, Ticket, Tickets};
 
@@ -496,7 +496,7 @@ fn open<S>(
                 file.size_changes,
                 picture.clone(),
             )
-            .map_err(|error| format!("Can't read: {error}."));
+            .map_err(|error| format!("Can't read: {}.", cant_build(&error)));
             (value.name.clone(), check)
         })
         .collect();

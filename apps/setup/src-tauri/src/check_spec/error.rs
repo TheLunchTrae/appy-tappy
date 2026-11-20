@@ -6,9 +6,10 @@ use std::fmt;
 
 use appytappy_config::app_file::{CheckDefError, MAX_STATES};
 use appytappy_sources::screen::Size;
-use appytappy_sources::screen::digits::{LearnError, MAX_GLYPHS};
+use appytappy_sources::screen::digits::{LearnError, MAX_CHARACTERS, MAX_GLYPHS};
 use appytappy_sources::screen::saved::SavedError;
 
+use crate::reading::cant_build;
 use crate::words::sentence;
 
 use super::MAX_EXPECTED_CHARACTERS;
@@ -302,7 +303,9 @@ pub(crate) fn cant_learn(error: &LearnError) -> String {
         LearnError::NoInk => "nothing in it stands out from its background, or has the \
                               reference's text color."
             .to_owned(),
-        LearnError::TooManyCharacters => "it shows more than 24 characters.".to_owned(),
+        LearnError::TooManyCharacters => {
+            format!("it shows more than {MAX_CHARACTERS} characters.")
+        },
         LearnError::FewerCharacters { found, expected } => format!(
             "it shows {} but the text has {expected}. Characters that touch count as one.",
             shown(*found)
@@ -330,7 +333,7 @@ impl From<SavedError> for SpecError {
             SavedError::EmptyRegion => Self::EmptyRegion,
             SavedError::OutsideWindow { .. } => Self::Outside,
             SavedError::Check(broken) => Self::Check(broken),
-            other => Self::Unreadable(other.to_string()),
+            other => Self::Unreadable(cant_build(&other)),
         }
     }
 }

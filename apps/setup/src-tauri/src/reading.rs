@@ -5,8 +5,8 @@ use appytappy_config::app_file::{CheckDef, ReferenceDef, ScreenDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::Size;
 use appytappy_sources::screen::check::CheckError;
-use appytappy_sources::screen::digits::ReadError;
-use appytappy_sources::screen::saved::Unread;
+use appytappy_sources::screen::digits::{MAX_CHARACTERS, ReadError};
+use appytappy_sources::screen::saved::{SavedError, Unread};
 use serde::Serialize;
 
 /// A value the check read, as the UI shows it.
@@ -81,7 +81,7 @@ pub(crate) fn cant_read(error: &CheckError, reference: Option<&str>) -> String {
              {reference}."
         ),
         CheckError::Number(ReadError::TooManyCharacters) => {
-            "its region shows more than 24 characters.".to_owned()
+            format!("its region shows more than {MAX_CHARACTERS} characters.")
         },
         CheckError::Number(ReadError::UnknownCharacter {
             position,
@@ -93,7 +93,7 @@ pub(crate) fn cant_read(error: &CheckError, reference: Option<&str>) -> String {
             let unlearned =
                 format!("character {number} of \"{read}\" has a shape {reference} hasn't learned.");
             match closest {
-                Some(closest) => format!("{unlearned} It looks closest to {closest}."),
+                Some(closest) => format!("{unlearned} It looks closest to \"{closest}\"."),
                 None => unlearned,
             }
         },
@@ -103,6 +103,24 @@ pub(crate) fn cant_read(error: &CheckError, reference: Option<&str>) -> String {
         CheckError::Number(ReadError::NoNumber { read }) => {
             format!("it read \"{read}\", which holds no number.")
         },
+    }
+}
+
+/// Why `error` keeps a saved value from being read as saved, in the setup
+/// app's words: the end of a sentence that says it can't be read, without
+/// its full stop. The runtime's log says the same in `saved::build`'s own
+/// words, which the rest of the reasons are said in here too.
+pub(crate) fn cant_build(error: &SavedError) -> String {
+    match error {
+        SavedError::Missing { name, .. } => format!("its picture {name} can't be read"),
+        SavedError::Learn { name, source } => {
+            format!("its reference can't learn from the picture {name}: {source}")
+        },
+        SavedError::Fix {
+            window_size,
+            source,
+        } => format!("at {window_size}, {}", cant_build(source)),
+        other => other.to_string(),
     }
 }
 
@@ -131,9 +149,11 @@ pub(crate) fn cant_read_saved(error: &CheckError, reference: Option<&str>) -> St
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use appytappy_sources::screen::Image;
     use appytappy_sources::screen::Rgb;
-    use appytappy_sources::screen::digits::{DigitReader, InkRule};
+    use appytappy_sources::screen::digits::{DigitReader, InkRule, LearnError};
 
     use super::*;
 
@@ -184,7 +204,7 @@ mod tests {
                 failed(&reader, &["#.###", "#.#.#", "#.###"]),
                 Some("Digits"),
                 "character 2 of \"1 ?\" has a shape Digits hasn't learned. It looks closest to \
-                 %. Teach it on the References page.",
+                 \"%\". Teach it on the References page.",
             ),
             (
                 failed(&untaught(), &["#"]),
@@ -229,6 +249,40 @@ mod tests {
                 "the next step follows the reason: {says}"
             );
         }
+    }
+
+    #[test]
+    fn a_value_that_cant_be_built_says_why_in_the_setup_apps_words() {
+        let missing = || SavedError::Missing {
+            name: "gone.png".to_owned(),
+            source: io::Error::from(io::ErrorKind::NotFound),
+        };
+        assert_eq!(cant_build(&missing()), "its picture gone.png can't be read");
+        assert_eq!(
+            cant_build(&SavedError::Fix {
+                window_size: Size {
+                    width: 16,
+                    height: 8
+                },
+                source: Box::new(missing()),
+            }),
+            "at 16x8, its picture gone.png can't be read"
+        );
+        assert_eq!(
+            cant_build(&SavedError::Learn {
+                name: "ref-digits-1.png".to_owned(),
+                source: LearnError::Conflict {
+                    learned: '8',
+                    new: '6'
+                },
+            }),
+            "its reference can't learn from the picture ref-digits-1.png: a character shaped \
+             like '8' was given as '6'"
+        );
+        assert_eq!(
+            cant_build(&SavedError::SameSize),
+            "it is drawn at this size already"
+        );
     }
 
     #[test]

@@ -58,7 +58,7 @@ const GRID_ROWS: u32 = 16;
 const GRID_COLUMNS: u32 = u32::BITS;
 
 /// The most characters one read or one screenshot may hold.
-const MAX_CHARACTERS: usize = 24;
+pub const MAX_CHARACTERS: usize = 24;
 
 /// The most glyphs a reader learns.
 pub const MAX_GLYPHS: usize = 256;
