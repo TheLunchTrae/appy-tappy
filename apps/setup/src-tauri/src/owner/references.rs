@@ -361,11 +361,12 @@ pub(super) fn and_list(names: &[&str]) -> String {
 mod tests {
     use appytappy_config::anti_cheat::AntiCheatClass;
     use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
+    use appytappy_sources::screen::Image;
 
     use crate::owner::SavedValue;
     use crate::owner::test_support::{
         FakeHost, Harness, add_example_app, characters, frame_image, harness_with, near_twins,
-        scratch_store, spec, teaching, trial,
+        outlined, scratch_store, spec, teaching, trial,
     };
 
     use super::*;
@@ -637,6 +638,68 @@ mod tests {
         assert_eq!(
             harness.ask(risks("gone")),
             Err("Example App no longer has that reference.".to_owned())
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_saved_reference_hides_a_tone_only_by_contrast_and_only_when_its_samples_do() {
+        let (stores, root) = scratch_store("references-hidden-tone");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut hides = |frame: &Image, name: &str, characters: &str| {
+            let mut handler = harness.pick();
+            harness.deliver(&mut handler, Ok(frame));
+            let screenshot = harness.ask(Owner::screenshot).expect("a frame arrived");
+            let spec = ReferenceSaveSpec {
+                app: "example".to_owned(),
+                reference_name: name.to_owned(),
+                characters: serde_json::from_str(
+                    &characters.replace("SHOT", &screenshot.to_string()),
+                )
+                .expect("valid JSON"),
+            };
+            let saved = harness
+                .ask(|owner| owner.save_reference(&spec))
+                .expect("saves");
+            harness.ask(Owner::stop);
+            let reference = ReferenceRef {
+                app: "example".to_owned(),
+                id: saved.reference,
+            };
+            harness
+                .ask(|owner| owner.saved_reading_risks(&reference))
+                .map(|risks| risks.hides_tone)
+        };
+        let outlined_spec = |ink: &str| {
+            format!(
+                r#"{{"region":{{"x":1,"y":1,"width":12,"height":6}},"screenshot":SHOT,{ink}
+                    "tolerance":168,"labels":[{{"screenshot":SHOT,"text":"11"}}]}}"#
+            )
+        };
+        assert_eq!(
+            hides(&outlined(), "Outlined", &outlined_spec("")),
+            Ok(true),
+            "its tolerance leaves the black outline out"
+        );
+        assert_eq!(
+            hides(
+                &outlined(),
+                "Filled",
+                &outlined_spec(r#""ink":{"red":255,"green":255,"blue":255},"#)
+            ),
+            Ok(false),
+            "a text color counts only the fill, whatever contrast would leave out"
+        );
+        assert_eq!(
+            hides(
+                &near_twins(),
+                "Plain",
+                r#"{"region":{"x":0,"y":0,"width":17,"height":8},"screenshot":SHOT,
+                    "tolerance":40,"labels":[{"screenshot":SHOT,"text":"861"}]}"#
+            ),
+            Ok(false),
+            "nothing around its characters is left out"
         );
         std::fs::remove_dir_all(root).expect("clean up");
     }

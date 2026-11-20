@@ -316,39 +316,12 @@ mod tests {
     use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
         BAR, Harness, add_example_app, capturing, characters, frame_image, harness, harness_with,
-        near_twins, scratch_store, teaching, trial,
+        near_twins, outlined, scratch_store, teaching, trial,
     };
     use crate::reading::Reading;
     use crate::stores::SavedApp;
 
     use super::*;
-
-    /// A 14 by 8 frame of two white blocks whose black outlines touch, on
-    /// a dark blue background.
-    fn outlined() -> Image {
-        let pixels = (0..8_u32)
-            .flat_map(|y| {
-                (0..14_u32).flat_map(move |x| {
-                    let inside = (2..6).contains(&y);
-                    if inside && ((3..5).contains(&x) || (9..11).contains(&x)) {
-                        [255, 255, 255, 0]
-                    } else if (1..7).contains(&y) && (2..12).contains(&x) {
-                        [0, 0, 0, 0]
-                    } else {
-                        [90, 30, 10, 0]
-                    }
-                })
-            })
-            .collect();
-        Image::new(
-            Size {
-                width: 14,
-                height: 8,
-            },
-            pixels,
-        )
-        .expect("matching length")
-    }
 
     #[test]
     fn reading_risks_name_the_learned_shapes_that_match_each_other() {
