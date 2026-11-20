@@ -91,14 +91,18 @@ Check these in order:
    number, and a percentage with decimals can pass 50 between two reads. Use
    **is at least** or **is at most** instead.
 
-The reasons a number has no reading:
+The reasons a number has no reading follow, each as the overlay and the
+Values page say it. The log names the same reason in fewer words, which each
+reason gives too:
 
-- **It is not read at the window's size now.** The window isn't the size it
+- **Can't read at the window's size now.** The window isn't the size it
   was when you drew the value, and windowed and fullscreen are different
   sizes. [Window size](Values.md#window-size) says how to resize the window
   or fix the value at this size.
-- **No pixel in the region stands out from its background, or has the
-  reference's text color.** The region isn't on the number now, or the number
+- **Nothing in its region stands out from the background, or has the text
+  color of its reference.** In the log: `no pixel in the region stands out
+  from its background, or has the reference's text color`. The region isn't
+  on the number now, or the number
   is another color than the reference's [text color](References.md#text-color).
   When
   the log line says **where its region scales to**, the window isn't at a
@@ -107,11 +111,13 @@ The reasons a number has no reading:
   Otherwise, for a reference with a text color,
   [edit the reference](References.md#text-color): pick the color on the
   middle of a character, or raise **Tolerance**.
-- **The region holds more than 24 characters.** Something else that stands
+- **Its region shows more than 24 characters.** In the log: `the region
+  holds more than 24 characters`. Something else that stands
   out from the background is in the region, or the background is too busy to
   tell the characters from. Draw the region around the number alone, or
   give the reference a [text color](References.md#text-color).
-- **A character has a shape the reference has not learned.** The message
+- **A character has a shape the reference hasn't learned.** In the log: `a
+  character has a shape the reference has not learned`. The message
   shows what it read, with a `?` for each character it couldn't, such as
   `8 7 ?`, and the character it learned that the first `?` looks most like.
   If that is the character the application shows there, the application drew
@@ -124,13 +130,15 @@ The reasons a number has no reading:
   [text color](References.md#text-color).
   [What a reference can't learn](References.md#what-a-reference-cant-learn)
   lists the characters no box teaches.
-- **The value leaves out a character its number holds.** The message shows
-  what it read, such as `- 5` or `1 , 2 3 4`. The value's
+- **The number shows a character that isn't in Characters it needs.** In
+  the log: `the value leaves out a character its number holds`. The message
+  shows what it read, such as `- 5` or `1 , 2 3 4`. The value's
   [characters](Values.md#characters-a-number-needs) leave out a `-`, a `.`,
   a `,`, or a digit that is a part of the number: turn it on under
   **Characters it needs**.
-- **The characters hold no number.** The message shows what it read, such as
-  `%`. The region shows no digit now, or the region cuts the digits off.
+- **It read characters that hold no number.** In the log: `the characters
+  hold no number`. The message shows what it read, such as `%`. The region
+  shows no digit now, or the region cuts the digits off.
 
 The box in setup reads the live window the way the automation does, at the
 size the window has then. So try the value in setup with the window at the

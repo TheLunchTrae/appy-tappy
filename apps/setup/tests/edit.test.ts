@@ -122,7 +122,7 @@ test('an edit is saved once nothing stops it and the user agreed to lose exactly
   expect(saveable(null, [])).toBe(false);
   expect(saveable(clean, [])).toBe(true);
   // What the window's size now leaves unread does not stop a save.
-  expect(saveable({ ...clean, unread: 'Not read at this size.' }, [])).toBe(true);
+  expect(saveable({ ...clean, unread: "Can't read at this size." }, [])).toBe(true);
   expect(saveable({ ...clean, refused: 'Pause music uses Status.' }, [])).toBe(false);
   expect(saveable(drops, [])).toBe(false);
   expect(saveable(drops, [{ ...larger }])).toBe(true);

@@ -168,6 +168,11 @@ export function rowFlags(
   return flags;
 }
 
+/** What the button that adds the `kept` ticked finds says: how many it adds, or no number while none is ticked. */
+export function addLabel(kept: number): string {
+  return kept === 0 ? 'Add to the reference' : `Add ${kept} to the reference`;
+}
+
 /** Why the kept rows cannot be added yet, or null when they can; `checked` says the reference has answered for them. */
 export function addBlocked(
   rows: readonly FoundRow[],

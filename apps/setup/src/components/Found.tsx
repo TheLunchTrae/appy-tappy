@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-import { type FoundRow, keptState, listed } from '../lib/found.ts';
+import { type FoundRow, addLabel, keptState, listed } from '../lib/found.ts';
 import { CHECK_CHARACTERS_HINT, FIND_LIKE_HINT, FOUND_HINT, REREAD_HINT } from '../lib/hints.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { background } from '../lib/repeat.ts';
@@ -300,7 +300,7 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
             aria-describedby={addBlocked === null ? undefined : 'found-blocked'}
             onClick={finder.add}
           >
-            {kept === 1 ? 'Add 1 to the reference' : `Add ${kept} to the reference`}
+            {addLabel(kept)}
           </button>
         )}
         <button type="button" className="btn" onClick={finder.dismiss}>

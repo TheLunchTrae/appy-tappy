@@ -192,7 +192,8 @@ characters, lists every find.
    characters out. A find AppyTappy could not read at
    all is read again whenever you select **Reread**.
 4. **Add them.** Select the button that says how many you add, such as
-   **Add 3 to the reference**. Each becomes a [box](#boxes), which you can
+   **Add 3 to the reference**. With none ticked it says **Add to the
+   reference** and waits. Each becomes a [box](#boxes), which you can
    move, retype, or delete like one you drew. Until you add them,
    **Characters it knows** outlines the characters only the finds would
    teach, and they still count under **Characters still missing**.

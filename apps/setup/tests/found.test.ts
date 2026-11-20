@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import type { FoundView } from '../src/lib/bindings.ts';
 import {
   addBlocked,
+  addLabel,
   askable,
   asLabels,
   fitsNeeds,
@@ -280,4 +281,10 @@ describe('passOver', () => {
     const earlier = new Map([[view.screenshot, [passedAt(200)]]]);
     expect(passOver(earlier, view.screenshot, all)).toBe(earlier);
   });
+});
+
+test('the add button says how many finds it adds, and no number while none is ticked', () => {
+  expect(addLabel(0)).toBe('Add to the reference');
+  expect(addLabel(1)).toBe('Add 1 to the reference');
+  expect(addLabel(3)).toBe('Add 3 to the reference');
 });

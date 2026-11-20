@@ -24,7 +24,7 @@ use appytappy_sources::screen::{FrameMeaning, Image, Size};
 use serde::{Deserialize, Serialize};
 
 use crate::check_spec::{self, CharactersSpec, CheckSpec, SpecError, expected_characters};
-use crate::reading::at_size;
+use crate::reading::{at_size, cant_read};
 
 use super::Owner;
 use super::host::Host;
@@ -175,7 +175,7 @@ impl LiveCheck {
                 .unread
                 .filter(|(unread_at, _)| *unread_at == other)
                 .map_or(Ok(None), |(_, unread)| Err(not_read(other, unread))),
-            FrameMeaning::Unreadable(outside) => Err(on_window(&outside)),
+            FrameMeaning::Unreadable(outside) => Err(on_window(&format!("{outside}."))),
         }
     }
 
@@ -188,18 +188,19 @@ impl LiveCheck {
         check
             .read(&region)
             .map(Some)
-            .map_err(|error| on_window(&error))
+            .map_err(|error| on_window(&cant_read(&error, None)))
     }
 }
 
 /// That a value is not read on a window of `size`, and why, as a sentence.
 fn not_read(size: Size, unread: Unread) -> String {
-    format!("Not read {}.", at_size(size, unread))
+    format!("Can't read {}.", at_size(size, unread))
 }
 
-/// That the newest frame cannot be read, and why, as a sentence.
-fn on_window(error: &dyn std::fmt::Display) -> String {
-    format!("Not read on the live window now: {error}.")
+/// That the newest frame cannot be read, as a sentence that ends with
+/// `why`, which has its full stop.
+fn on_window(why: &str) -> String {
+    format!("Can't read on the live window now: {why}")
 }
 
 impl<H: Host> Owner<H> {
@@ -552,8 +553,8 @@ mod tests {
         assert_eq!(
             harness.ask(Owner::reading),
             Err(
-                "Not read on the live window now: no pixel in the region stands out from its \
-                 background, or has the reference's text color."
+                "Can't read on the live window now: nothing in its region stands out from the \
+                 background, or has the text color of its reference."
                     .to_owned()
             )
         );
@@ -623,8 +624,8 @@ mod tests {
         "reference":{"app":"example","id":"percent"},"whole":false}"#;
 
     /// What the live box says of `379%` read without the `7`.
-    const NO_SEVEN: &str = "Not read on the live window now: the value leaves out a character \
-        its number holds: it read `3 7 9 %`.";
+    const NO_SEVEN: &str = "Can't read on the live window now: the number shows a character \
+        that isn't in Characters it needs. It read \"3 7 9 %\".";
 
     /// A harness whose application `example` changes size as `size_changes`
     /// say, with a window that shows `379%` at [`DRAWN`] on screenshot 0 and
@@ -803,7 +804,7 @@ mod tests {
 
     /// What the live box says at a window a column wider than [`DRAWN`]
     /// when the application's window changes size rarely.
-    const A_COLUMN_WIDER: &str = "Not read at 25 × 12, the window's size now: it is read only \
+    const A_COLUMN_WIDER: &str = "Can't read at 25 × 12, the window's size now: it is read only \
         at the window sizes it was drawn at.";
 
     #[test]
@@ -868,7 +869,7 @@ mod tests {
         // Its text still shows inside the region as drawn, which is not
         // read all the same.
         harness.wait(SETTLE / 2);
-        let unread = "Not read at 25 × 12, the window's size now: it is read only at the window \
+        let unread = "Can't read at 25 × 12, the window's size now: it is read only at the window \
                       sizes it was drawn at.";
         assert_eq!(harness.ask(Owner::reading), Err(unread.to_owned()));
         assert_eq!(

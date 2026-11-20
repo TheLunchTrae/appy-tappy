@@ -135,9 +135,9 @@ This page covers what the user guide leaves out.
   failure as its problem. Once the window has closed, no recording starts or goes
   on until another window is picked.
 - **Live reading.** `read_value` answers what the check being set up reads
-  on the newest frame, or why that frame cannot be read, in the check's own
-  words (`CheckError`), which the box under the check shows in place of a
-  reading. The live check is the value the check would save
+  on the newest frame, or why that frame cannot be read, in the setup app's
+  words for the check's error (`reading::cant_read`), which the box under
+  the check shows in place of a reading. The live check is the value the check would save
   (`owner/live.rs`): `set_check` converts the page's description to its
   saved form with `check_spec::to_saved` and reads it back with
   `saved::build`, as a save does, so no second implementation of a check

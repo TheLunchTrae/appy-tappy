@@ -1928,7 +1928,7 @@ stateDiagram-v2
   An answer replaces what the box shows: a reading, no reading while the
   window's size settles, why the frame cannot be read, or that the value is
   not read at the window's size now, such as
-  `Not read at 1280 × 720, the window's size now: …`. The check stays set
+  `Can't read at 1280 × 720, the window's size now: …`. The check stays set
   through that answer, an edit's included, so frames of a size the value is
   read at answer a reading with no new trial.
 - **Failed** (`error`). The owner refused the check, such as a label its

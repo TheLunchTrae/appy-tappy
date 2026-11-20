@@ -1194,7 +1194,7 @@ fn trying_an_edit_reads_the_live_frame_as_the_runtime_would_and_saves_nothing() 
         harness.ask(|owner| owner.try_edit(&kept)),
         Ok(EditPreview {
             unread: Some(
-                "Not read at 8 × 4, the window's size now: it is read only at the window sizes \
+                "Can't read at 8 × 4, the window's size now: it is read only at the window sizes \
                  it was drawn at."
                     .to_owned()
             ),
@@ -1205,7 +1205,7 @@ fn trying_an_edit_reads_the_live_frame_as_the_runtime_would_and_saves_nothing() 
     assert_eq!(
         read(&mut harness),
         Err(
-            "Not read at 8 × 4, the window's size now: it is read only at the window sizes it \
+            "Can't read at 8 × 4, the window's size now: it is read only at the window sizes it \
              was drawn at."
                 .to_owned()
         ),

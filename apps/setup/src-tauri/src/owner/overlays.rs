@@ -342,7 +342,7 @@ mod tests {
                 over,
                 None,
                 Some(&format!(
-                    "Not read at {width} × 2, the window's size now: it is read only at the window \
+                    "Can't read at {width} × 2, the window's size now: it is read only at the window \
                      sizes it was drawn at."
                 )),
             );
@@ -369,8 +369,13 @@ mod tests {
         let white = Image::new(WINDOW, vec![255; 32]).expect("matching length");
         harness.deliver_at(&mut handler, Ok((WINDOW, &white)), OVERLAY_INTERVAL);
         let view = harness.ask(overlay_state).expect("shows");
-        let problem = view.values[0].problem.as_deref().expect("a problem");
-        assert!(problem.starts_with("Cannot read: "), "{problem}");
+        assert_eq!(
+            view.values[0].problem.as_deref(),
+            Some(
+                "Can't read: nothing in its region is near the bar's filled or empty color. If \
+                 the bar shows there now, edit the value to pick its colors again."
+            )
+        );
         // Back at the size the capture reads at, it is not started again
         // once that size settles.
         harness.wait(SETTLE);
@@ -520,14 +525,14 @@ mod tests {
                 "Small",
                 None,
                 Some(
-                    "Not read at 4 × 2, the window's size now: it is read only at the window sizes it was drawn at."
+                    "Can't read at 4 × 2, the window's size now: it is read only at the window sizes it was drawn at."
                 )
             )
         );
         let (icon, reading, problem) = lines[2].clone();
         assert_eq!((icon, reading), ("Icon", None));
         assert!(
-            problem.is_some_and(|problem| problem.starts_with("Cannot read: ")),
+            problem.is_some_and(|problem| problem.starts_with("Can't read: ")),
             "{problem:?}"
         );
 
@@ -548,7 +553,7 @@ mod tests {
         assert_eq!(
             view.values[0].problem.as_deref(),
             Some(
-                "Not read at 8 × 4, the window's size now: it is read only at the window sizes it was drawn at."
+                "Can't read at 8 × 4, the window's size now: it is read only at the window sizes it was drawn at."
             )
         );
         assert_eq!(view.values[1].reading, Some(Reading::Number(50.0)));

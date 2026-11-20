@@ -5,7 +5,7 @@ import { afterRead, type LiveRead, liveReads, NOTHING_READ, type ReadAnswer } fr
 import { trialOf } from '../src/lib/useLiveCheck.ts';
 
 const shown: LiveRead = { reading: { kind: 'number', value: 87 }, problem: null };
-const failing: LiveRead = { reading: null, problem: 'Not read on the live window now.' };
+const failing: LiveRead = { reading: null, problem: "Can't read on the live window now." };
 const read: ReadAnswer = { ok: true, reading: { kind: 'number', value: 12 } };
 const failed: ReadAnswer = { ok: false, problem: 'No pixel in the region has the color.' };
 
@@ -84,7 +84,7 @@ describe('trialOf', () => {
 describe('a reading that shows already', () => {
   test('is the same object after a read that answers it again, reading or problem', () => {
     expect(afterRead(shown, 2, 2, { ok: true, reading: { kind: 'number', value: 87 } })).toBe(shown);
-    expect(afterRead(failing, 2, 2, { ok: false, problem: 'Not read on the live window now.' })).toBe(failing);
+    expect(afterRead(failing, 2, 2, { ok: false, problem: "Can't read on the live window now." })).toBe(failing);
     expect(afterRead(NOTHING_READ, 2, 2, { ok: true, reading: null })).toBe(NOTHING_READ);
     // Another value, another kind with the same value, and a reading in place of a problem all show anew.
     expect(afterRead(shown, 2, 2, read)).not.toBe(shown);

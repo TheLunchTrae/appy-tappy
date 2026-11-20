@@ -92,27 +92,27 @@ describe('nowCell', () => {
       kind: 'noState',
       from: 'scaled',
     });
-    expect(nowCell(fixed, 'often', larger, null, 'Cannot read.')).toEqual({
+    expect(nowCell(fixed, 'often', larger, null, "Can't read.")).toEqual({
       kind: 'unread',
-      problem: 'Cannot read.',
+      problem: "Can't read.",
       from: 'fixed',
     });
     // Read only at its drawn sizes, it says so whatever the window read.
-    expect(nowCell(screen, 'rarely', larger, reading, 'Not read.')).toEqual({ kind: 'notDrawn' });
+    expect(nowCell(screen, 'rarely', larger, reading, "Can't read.")).toEqual({ kind: 'notDrawn' });
   });
 });
 
 describe('nowText', () => {
   test('says why a value does not read, not only that it does not', () => {
-    const problem = 'Cannot read: a character has a shape the reference has not learned.';
+    const problem = 'Can\'t read: character 3 of "8 7 ?" has a shape Digits hasn\'t learned.';
     expect(nowText({ kind: 'unread', problem, from: 'drawn' }, window)).toBe(problem);
-    expect(nowText({ kind: 'notDrawn' }, larger)).toBe("Not read at 3440 × 1440, the window's size now");
+    expect(nowText({ kind: 'notDrawn' }, larger)).toBe("Can't read at 3440 × 1440, the window's size now");
   });
 });
 
 describe('offersFix', () => {
   test('offers a fix at any size but the one a value was first drawn at, once it read or did not', () => {
-    const unread = (from: ReadFrom): NowCell => ({ kind: 'unread', problem: 'Cannot read.', from });
+    const unread = (from: ReadFrom): NowCell => ({ kind: 'unread', problem: "Can't read.", from });
     expect(offersFix(unread('scaled'))).toBe(true);
     expect(offersFix(unread('fixed'))).toBe(true);
     expect(offersFix(unread('drawn'))).toBe(false);

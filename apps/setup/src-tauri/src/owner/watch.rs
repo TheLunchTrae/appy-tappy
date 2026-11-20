@@ -25,7 +25,7 @@ use appytappy_sources::screen::{
 use serde::Serialize;
 
 use crate::debug::workings::{self, ReadingDetails};
-use crate::reading::{Reading, at_size};
+use crate::reading::{Reading, at_size, cant_read_saved, reference_of};
 use crate::ticket::{Running, Ticket};
 
 use super::capture::{self, Capture, FrameStream};
@@ -157,6 +157,9 @@ struct Watched {
     value: String,
     /// Its name, for messages.
     name: String,
+    /// The name of the reference it reads its number with, for messages:
+    /// [`reference_of`].
+    reference: Option<String>,
     /// The captured window.
     window: u64,
     /// The value's saved check.
@@ -211,7 +214,7 @@ impl<H: Host> Owner<H> {
             file.size_changes,
             |name| found.picture(name),
         )
-        .map_err(|error| format!("{} cannot be read: {error}.", saved.name))?;
+        .map_err(|error| format!("{} can't be read: {error}.", saved.name))?;
         let (processes, windows) = self.desktop()?;
         let window = self
             .host
@@ -238,6 +241,7 @@ impl<H: Host> Owner<H> {
                 app: app.to_owned(),
                 value: value.to_owned(),
                 name: saved.name.clone(),
+                reference: reference_of(&saved.screen, &file.references).map(str::to_owned),
                 window,
                 check,
                 reads: (size, at),
@@ -345,7 +349,7 @@ impl<H: Host> Owner<H> {
         let name = &watched.name;
         if let WatchCapture::Lost(error) = &watching.capture {
             return Ok(Live::Lost {
-                message: format!("{name} cannot be read: {error}."),
+                message: format!("{name} can't be read: {error}."),
             });
         }
         let Some((seen, _seen_at)) = &watched.seen else {
@@ -363,7 +367,7 @@ impl<H: Host> Owner<H> {
                     .filter(|(unread_at, _)| *unread_at == size)
                     .map_or(Live::Waiting, |(_, unread)| Live::Problem {
                         message: format!(
-                            "{name} is not read {}. {}",
+                            "{name} can't be read {}. {}",
                             at_size(size, unread),
                             advice(unread)
                         ),
@@ -371,7 +375,7 @@ impl<H: Host> Owner<H> {
             },
             FrameMeaning::Unreadable(outside) => {
                 return Ok(Live::Problem {
-                    message: format!("{name} cannot be read now: {outside}."),
+                    message: format!("{name} can't be read now: {outside}."),
                 });
             },
         };
@@ -379,7 +383,10 @@ impl<H: Host> Owner<H> {
             Ok(value) => value,
             Err(error) => {
                 return Ok(Live::Problem {
-                    message: format!("{name} cannot be read now: {error}."),
+                    message: format!(
+                        "{name} can't be read now: {}",
+                        cant_read_saved(&error, watched.reference.as_deref())
+                    ),
                 });
             },
         };
@@ -650,7 +657,7 @@ mod tests {
         assert_eq!(
             harness.ask(watched(watch, None)),
             Ok(Live::Problem {
-                message: "Progress bar is not read at 3 × 2, the window's size now: scaled to this window size, its \
+                message: "Progress bar can't be read at 3 × 2, the window's size now: scaled to this window size, its \
                           region reaches outside the window. Fix the value at this size on the \
                           Values page."
                     .to_owned()
@@ -666,7 +673,7 @@ mod tests {
         assert!(
             matches!(
                 harness.ask(watched(watch, None)),
-                Ok(Live::Problem { message }) if message.starts_with("Progress bar is not read at 3 × 2, the window's size now: ")
+                Ok(Live::Problem { message }) if message.starts_with("Progress bar can't be read at 3 × 2, the window's size now: ")
             ),
             "its region still fits, and it is not read there all the same"
         );
@@ -677,9 +684,10 @@ mod tests {
         let Ok(Live::Problem { message }) = harness.ask(watched(watch, None)) else {
             panic!("a bar of neither color cannot be read");
         };
-        assert!(
-            message.starts_with("Progress bar cannot be read now: ") && message.ends_with('.'),
-            "{message}"
+        assert_eq!(
+            message,
+            "Progress bar can't be read now: nothing in its region is near the bar's filled or \
+             empty color. If the bar shows there now, edit the value to pick its colors again."
         );
         // The capture reads at another size since, so a frame that only
         // passes the size the bar was not read at says nothing of it.
@@ -693,7 +701,7 @@ mod tests {
         assert_eq!(
             harness.ask(watched(watch, None)),
             Ok(Live::Lost {
-                message: "Progress bar cannot be read: the window closed.".to_owned()
+                message: "Progress bar can't be read: the window closed.".to_owned()
             })
         );
         assert_eq!(
@@ -774,7 +782,7 @@ mod tests {
         assert_eq!(
             harness.ask(watched(watch, None)),
             Ok(Live::Problem {
-                message: "Progress bar is not read at 8 × 4, the window's size now: it is read only at the window sizes \
+                message: "Progress bar can't be read at 8 × 4, the window's size now: it is read only at the window sizes \
                           it was drawn at. Resize the window, or fix the value at this size on \
                           the Values page."
                     .to_owned()
@@ -801,7 +809,7 @@ mod tests {
         assert_eq!(
             harness.ask(watched(watch, None)),
             Ok(Live::Lost {
-                message: "Progress bar cannot be read: no capture here.".to_owned()
+                message: "Progress bar can't be read: no capture here.".to_owned()
             })
         );
         assert_eq!(harness.closed.try_recv(), Ok(7), "the old capture closes");
@@ -829,7 +837,7 @@ mod tests {
         );
         assert_eq!(harness.closed.try_recv(), Ok(7), "the capture closes");
         let lost = Ok(Live::Lost {
-            message: "Progress bar cannot be read: the window closed.".to_owned(),
+            message: "Progress bar can't be read: the window closed.".to_owned(),
         });
         harness.wait(SETTLE);
         assert_eq!(harness.ask(watched(watch, None)), lost);
@@ -933,7 +941,7 @@ mod tests {
             .ask(watch("example", "icon_visible"))
             .expect_err("no picture");
         assert!(
-            missing.starts_with("Icon visible cannot be read: ") && missing.ends_with('.'),
+            missing.starts_with("Icon visible can't be read: ") && missing.ends_with('.'),
             "{missing}"
         );
         std::fs::write(&picture, bytes).expect("restore");
