@@ -3413,7 +3413,8 @@ stateDiagram-v2
 - **Asking** has a request out and shows no mark. The page shows before the
   first request is sent, since the effect that sends it runs after the row
   is drawn, and the rows ask one after another on the owner's thread.
-- **Marked** shows **May misread** with the reasons (`riskMark`): a pair of
+- **Marked** shows **May misread** and a **?** that says the reasons to the
+  pointer and the keyboard (`Hint`, `riskMark`): a pair of
   characters with one that the values reading with the reference need, or
   any pair when one of them needs none or none reads with it, and an outline
   or a shadow its tolerance leaves out.

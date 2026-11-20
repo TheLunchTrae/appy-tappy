@@ -2992,6 +2992,22 @@ div.match-answer {
   color: var(--warn);
 }
 
+/* The mark with the ? that says why. The name column is the table's first, so the explanation opens under the mark
+   toward the right, at a readable width. */
+.risk-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  vertical-align: middle;
+}
+
+.risk-mark > .hint-wrap > .tip {
+  right: auto;
+  width: min(320px, 80vw);
+  font-weight: 400;
+}
+
 tr.draft-row > td:not(.end):not(.row-actions) {
   opacity: 0.85;
 }
