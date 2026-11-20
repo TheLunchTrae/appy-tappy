@@ -702,7 +702,8 @@ has not learned**.
 At that size AppyTappy then reads the fix exactly, instead of scaling. The
 **Region** column lists each fix, such as **· fixed at 3440 × 1440**. A value
 can have up to 8 fixes. Fixing it again at the same size replaces the fix,
-and **Remove fix** beside a reading made with one removes it.
+and **Remove fix** beside a reading made with one removes it, after you
+answer **Remove fix** again to confirm.
 
 While you resize the window, AppyTappy waits until the window keeps one size
 for a quarter of a second before it reads at that size. While the window is

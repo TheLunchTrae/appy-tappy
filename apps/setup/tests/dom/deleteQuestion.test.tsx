@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
-import type { ReactElement } from 'react';
+import { type ReactElement, useState } from 'react';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 
 import type { AppSummary, AutomationSummary } from '../../src/lib/bindings.ts';
@@ -64,21 +64,54 @@ const shared = {
   onFinish: () => undefined,
   onDeleteDraft: async () => {},
 };
-const PAGES: readonly (readonly [string, string, string, () => ReactElement])[] = [
+/** A page with its item saved, or with `gone` once it is deleted and the page has read its files again. */
+type Page = (gone?: boolean, onChanged?: () => Promise<void>) => ReactElement;
+const PAGES: readonly (readonly [string, string, string, Page])[] = [
   [
     'value',
     'delete_value',
     'Delete value',
-    () => <ValuesPage {...shared} automations={[]} onChange={() => undefined} />,
+    (gone = false, onChanged = shared.onChanged) => (
+      <ValuesPage
+        {...shared}
+        apps={gone ? [] : [app]}
+        onChanged={onChanged}
+        automations={[]}
+        onChange={() => undefined}
+      />
+    ),
   ],
-  ['reference', 'delete_reference', 'Delete reference', () => <ReferencesPage {...shared} onEdit={() => undefined} />],
+  [
+    'reference',
+    'delete_reference',
+    'Delete reference',
+    (gone = false, onChanged = shared.onChanged) => (
+      <ReferencesPage {...shared} apps={gone ? [] : [app]} onChanged={onChanged} onEdit={() => undefined} />
+    ),
+  ],
   [
     'automation',
     'delete_automation',
     'Delete automation',
-    () => <AutomationsPage {...shared} automations={[automation]} runtime onEdit={() => undefined} />,
+    (gone = false, onChanged = shared.onChanged) => (
+      <AutomationsPage
+        {...shared}
+        onChanged={onChanged}
+        automations={gone ? [] : [automation]}
+        runtime
+        onEdit={() => undefined}
+      />
+    ),
   ],
 ];
+
+/** `page`, whose item is gone once a delete makes the page read its files again. */
+function Deleting({ page }: { readonly page: Page }) {
+  const [gone, setGone] = useState(false);
+  return page(gone, async () => {
+    setGone(true);
+  });
+}
 
 afterEach(async () => {
   await act(async () => {
@@ -117,6 +150,20 @@ test.each(PAGES)('deleting a saved %s waits for an answer of its own', async (_k
   await user.click(button('Delete'));
   await user.click(button(actLabel));
   expect(deletions).toBe(1);
+});
+
+test.each(PAGES)('deleting a saved %s moves the focus to the page heading', async (_kind, _command, actLabel, page) => {
+  mockIPC(() => undefined);
+  const user = userEvent.setup();
+  render(<Deleting page={page} />);
+
+  await user.click(screen.getByRole('button', { name: 'Delete' }));
+  await user.click(screen.getByRole('button', { name: actLabel }));
+  // The deleted row takes its buttons with it.
+  await waitFor(() => {
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+  expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 }));
 });
 
 test.each(PAGES)(

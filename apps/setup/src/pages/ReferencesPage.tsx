@@ -29,15 +29,17 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const headingRef = useRef<HTMLHeadingElement>(null);
   // The row says why when this fails.
   const remove = async (app: string, reference: string): Promise<void> => {
     await deleteReference(app, reference);
     // The question stays until the row is gone, so its buttons take no press meanwhile.
     await onChanged();
     setConfirming((current) => (current === `${app}/${reference}` ? null : current));
+    // The deleted row took the focused button with it.
+    headingRef.current?.focus();
   };
 
-  const headingRef = useRef<HTMLHeadingElement>(null);
   const removeDraft = async (id: string): Promise<void> => {
     try {
       await onDeleteDraft(id);

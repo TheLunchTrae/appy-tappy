@@ -2986,6 +2986,38 @@ stateDiagram-v2
   refuses the same deletes, and any delete that fails shows what the owner
   answered. **OK** and Escape put focus back on **Delete**, and a refusal
   goes with them, so **Delete** asks again.
+- A delete that works moves focus to the page's heading, since the row and
+  its buttons are gone.
+
+### Remove fix question
+
+A value's cell for the window's size now (`NowCellView` in
+`apps/setup/src/pages/ValuesPage.tsx`) shows **Remove fix** while the value
+reads from a fix at that size. The cell holds whether it asks (`asking`) and
+whether the removal is on its way (`removing`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Button
+    Button --> Asking: Remove fix
+    Asking --> Button: Keep or Escape
+    Asking --> Removing: the answer that removes
+    Removing --> [*]: the fix is removed and the page has read its files again
+    Removing --> Button: the removal fails, and the page says why
+    Asking --> [*]: the window takes a size the value has no fix at
+```
+
+`[*]` is the cell without **Remove fix**, which shows again as `Button` when
+the value reads from a fix.
+
+- The question takes the place of **Remove fix** (`Question`), and focus
+  moves to **Keep**. **Keep** and Escape put focus back on **Remove fix**.
+- While `Removing`, the answers are disabled, so one answer sends one
+  removal. The question stays until the page has read the files again.
+- A removal that works takes **Remove fix** with it, so focus moves to
+  **Fix at this size** in the same cell, unless the user has put it
+  elsewhere meanwhile. A removal that fails puts focus back on
+  **Remove fix**.
 - The answer that deletes ignores the later clicks of a double-click, since
   the question may show under the pointer where **Delete** was pressed. Key
   presses and single clicks answer.

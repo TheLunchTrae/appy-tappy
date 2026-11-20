@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   type AppSummary,
@@ -15,6 +15,7 @@ import { readingText } from '../lib/reading.ts';
 import { buildState, checkedText } from '../lib/build.ts';
 import { DeleteActions } from '../components/DeleteActions.tsx';
 import { Hint } from '../components/Hint.tsx';
+import { Question, useQuestion } from '../components/Question.tsx';
 import { MARK_CHECKED_HINT } from '../lib/hints.ts';
 import { hex } from '../lib/pixels.ts';
 import { originText } from '../lib/sharing.ts';
@@ -92,7 +93,7 @@ interface AppRowsProps {
   readonly onMarkChecked: () => void;
   readonly onFix: (value: ValueDef) => void;
   readonly onEdit: (value: ValueDef) => void;
-  readonly onRemoveFix: (value: string, size: SizeDef) => void;
+  readonly onRemoveFix: (value: string, size: SizeDef) => Promise<boolean>;
   /** Its value and fix drafts. */
   readonly drafts: readonly Resumed[];
   readonly rows: DraftRows;
@@ -103,29 +104,86 @@ interface NowProps {
   readonly cell: NowCell;
   readonly size: SizeDef;
   readonly onFix: () => void;
-  readonly onRemoveFix: () => void;
+  /** Removes the value's fix at `size`, and answers whether it did. */
+  readonly onRemoveFix: () => Promise<boolean>;
 }
 
 /** A value's reading at the window's size now, or why it has none, with a way to fix it at that size. A state
- * check that matches none of its states may be right, so it shows as a note, not a warning. */
+ * check that matches none of its states may be right, so it shows as a note, not a warning. Remove fix asks first,
+ * in its own place. */
 function NowCellView({ value, cell, size, onFix, onRemoveFix }: NowProps) {
   const tone = { reading: undefined, waiting: undefined, noState: 'note', unread: 'warn', notDrawn: 'warn' }[cell.kind];
   const fixed = cell.kind !== 'notDrawn' && cell.kind !== 'waiting' && cell.from === 'fixed';
+  const [asking, setAsking] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  // A question about a fix the cell reads from no more, as at another window size, is not asked again later.
+  if (asking && !fixed && !removing) {
+    setAsking(false);
+  }
+  const { control, refs } = useQuestion<HTMLButtonElement>(asking && fixed);
+  const fixButton = useRef<HTMLButtonElement>(null);
+  // Whether the question's answer removed the fix, until the focus it left behind is placed.
+  const removed = useRef(false);
+  useEffect(() => {
+    if (!removed.current || asking || fixed) {
+      return;
+    }
+    removed.current = false;
+    // The fix took Remove fix with it, which the question would give the focus back to.
+    if (document.activeElement === null || document.activeElement === document.body) {
+      fixButton.current?.focus();
+    }
+  }, [asking, fixed]);
+  const label = `Remove the fix of ${value.name} at ${sizeText(size)}?`;
   return (
     <span className="now">
       <span className={tone}>{nowText(cell, size)}</span>
       {fixed ? <small className="note">fixed at this size</small> : null}
       {offersFix(cell) ? (
         <>
-          <button type="button" className="btn small" onClick={onFix}>
+          <button ref={fixButton} type="button" className="btn small" onClick={onFix}>
             Fix at this size<span className="visually-hidden"> for {value.name}</span>
           </button>
           <Hint topic="Fix at this size">{FIX_HINT}</Hint>
         </>
       ) : null}
-      {fixed ? (
+      {fixed && asking ? (
+        <Question
+          refs={refs}
+          label={label}
+          keepLabel="Keep"
+          actLabel="Remove fix"
+          busy={removing}
+          onKeep={() => {
+            setAsking(false);
+          }}
+          onAct={() => {
+            setRemoving(true);
+            background(
+              onRemoveFix()
+                .then((worked) => {
+                  removed.current = worked;
+                })
+                .finally(() => {
+                  setRemoving(false);
+                  setAsking(false);
+                }),
+            );
+          }}
+        >
+          {label} Its drawing at that size is lost.
+        </Question>
+      ) : null}
+      {fixed && !asking ? (
         <>
-          <button type="button" className="btn small" onClick={onRemoveFix}>
+          <button
+            ref={control}
+            type="button"
+            className="btn small"
+            onClick={() => {
+              setAsking(true);
+            }}
+          >
             Remove fix<span className="visually-hidden"> of {value.name}</span>
           </button>
           <Hint topic="Remove fix">{REMOVE_FIX_HINT}</Hint>
@@ -250,9 +308,7 @@ function AppRows({
                   onFix={() => {
                     onFix(value);
                   }}
-                  onRemoveFix={() => {
-                    onRemoveFix(value.id, size);
-                  }}
+                  onRemoveFix={() => onRemoveFix(value.id, size)}
                 />
               )}
             </td>
@@ -333,22 +389,29 @@ export function ValuesPage({
   const [actionError, setActionError] = useState<string | null>(null);
   const live = useLiveValues(apps);
 
-  const unfix = async (app: string, value: string, size: SizeDef): Promise<void> => {
+  // Answers whether the fix is removed; the page says why when it is not.
+  const unfix = async (app: string, value: string, size: SizeDef): Promise<boolean> => {
     try {
       await removeFix(app, value, size.width, size.height);
       setActionError(null);
+      // The question stays until the fix is gone, so its buttons take no press meanwhile.
       await onChanged();
+      return true;
     } catch (error: unknown) {
       setActionError(errorText(error));
+      return false;
     }
   };
 
+  const headingRef = useRef<HTMLHeadingElement>(null);
   // The row says why when this fails.
   const remove = async (app: string, value: string): Promise<void> => {
     await deleteValue(app, value);
     // The question stays until the row is gone, so its buttons take no press meanwhile.
     await onChanged();
     setConfirming((current) => (current === `${app}/${value}` ? null : current));
+    // The deleted row took the focused button with it.
+    headingRef.current?.focus();
   };
 
   const markAsChecked = async (app: string): Promise<void> => {
@@ -361,7 +424,6 @@ export function ValuesPage({
     }
   };
 
-  const headingRef = useRef<HTMLHeadingElement>(null);
   const rows: DraftRows = {
     apps: apps ?? [],
     onFinish,
@@ -453,9 +515,7 @@ export function ValuesPage({
               onEdit={(value) => {
                 onChange({ app: app.id, value, how: 'edit' });
               }}
-              onRemoveFix={(value, size) => {
-                background(unfix(app.id, value, size));
-              }}
+              onRemoveFix={(value, size) => unfix(app.id, value, size)}
               drafts={valueDrafts(drafts, apps, app.id)}
               rows={rows}
             />
