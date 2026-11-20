@@ -23,7 +23,7 @@ interface RowProps {
   readonly onConfirm: (confirming: boolean) => void;
   readonly onToggle: () => void;
   readonly onEdit: () => void;
-  readonly onDelete: () => void;
+  readonly onDelete: () => Promise<void>;
   /** Opens the draft of changes to it, in Edit's place, or null when it has none. */
   readonly onFinishDraft: (() => void) | null;
 }
@@ -207,8 +207,9 @@ export function AutomationsPage({
     try {
       await change();
       setActionError(null);
-      setConfirming(null);
+      // A delete's question stays until the row is gone, so its buttons take no press meanwhile.
       await onChanged();
+      setConfirming(null);
       return true;
     } catch (error: unknown) {
       setActionError(errorText(error));
@@ -345,9 +346,7 @@ export function AutomationsPage({
                 onEdit={() => {
                   onEdit(summary);
                 }}
-                onDelete={() => {
-                  background(remove(id));
-                }}
+                onDelete={() => remove(id)}
                 onFinishDraft={(() => {
                   const changes = draftOfSaved(drafts, 'automation', id);
                   return changes === null

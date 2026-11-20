@@ -3,7 +3,6 @@ import { useRef, useState } from 'react';
 import type { AppSummary, DraftSummary } from '../lib/bindings.ts';
 import { deleteReference, errorText } from '../lib/api.ts';
 import { andList, readers, referenceCharacters } from '../lib/reference.ts';
-import { background } from '../lib/repeat.ts';
 import { originText } from '../lib/sharing.ts';
 import { CharacterChips } from '../components/CharacterChips.tsx';
 import { DeleteActions } from '../components/DeleteActions.tsx';
@@ -34,8 +33,9 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
     try {
       await deleteReference(app, reference);
       setDeleteError(null);
-      setConfirming(null);
+      // The question stays until the row is gone, so its buttons take no press meanwhile.
       await onChanged();
+      setConfirming(null);
     } catch (error: unknown) {
       setDeleteError(errorText(error));
     }
@@ -178,9 +178,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                           onConfirm={(asking) => {
                             setConfirming(asking ? key : null);
                           }}
-                          onDelete={() => {
-                            background(remove(app.id, reference.id));
-                          }}
+                          onDelete={() => remove(app.id, reference.id)}
                         >
                           {changes === null ? (
                             <button

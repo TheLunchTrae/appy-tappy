@@ -95,7 +95,7 @@ interface AppRowsProps {
   readonly nowColumn: boolean;
   readonly confirming: string | null;
   readonly onConfirm: (key: string | null) => void;
-  readonly onDelete: (value: string) => void;
+  readonly onDelete: (value: string) => Promise<void>;
   readonly onMarkChecked: () => void;
   readonly onFix: (value: ValueDef) => void;
   readonly onEdit: (value: ValueDef) => void;
@@ -281,9 +281,7 @@ function AppRows({
                 onConfirm={(asking) => {
                   onConfirm(asking ? key : null);
                 }}
-                onDelete={() => {
-                  onDelete(value.id);
-                }}
+                onDelete={() => onDelete(value.id)}
               >
                 <button
                   type="button"
@@ -360,8 +358,9 @@ export function ValuesPage({
     try {
       await deleteValue(app, value);
       setActionError(null);
-      setConfirming(null);
+      // The question stays until the row is gone, so its buttons take no press meanwhile.
       await onChanged();
+      setConfirming(null);
     } catch (error: unknown) {
       setActionError(errorText(error));
     }
@@ -463,9 +462,7 @@ export function ValuesPage({
                 nowColumn={nowColumn}
                 confirming={confirming}
                 onConfirm={setConfirming}
-                onDelete={(value) => {
-                  background(remove(app.id, value));
-                }}
+                onDelete={(value) => remove(app.id, value)}
                 onMarkChecked={() => {
                   background(markAsChecked(app.id));
                 }}

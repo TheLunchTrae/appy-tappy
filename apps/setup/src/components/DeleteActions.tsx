@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 
+import { background } from '../lib/repeat.ts';
 import { Question, useQuestion } from './Question.tsx';
 
 interface Props {
@@ -13,7 +14,8 @@ interface Props {
   readonly title?: string | undefined;
   readonly confirming: boolean;
   readonly onConfirm: (confirming: boolean) => void;
-  readonly onDelete: () => void;
+  /** Deletes the item. The answers take no press until it settles, so one answer deletes once. */
+  readonly onDelete: () => Promise<void>;
   /** The row's other buttons, which show before Delete. */
   readonly children: ReactNode;
 }
@@ -21,6 +23,7 @@ interface Props {
 /** A saved item's row buttons, Delete last, which asks first in the buttons' place. */
 export function DeleteActions({ name, loses, actLabel, title, confirming, onConfirm, onDelete, children }: Props) {
   const { control, refs } = useQuestion<HTMLButtonElement>(confirming);
+  const [deleting, setDeleting] = useState(false);
   if (confirming) {
     const label = `Delete ${name}?`;
     return (
@@ -29,10 +32,18 @@ export function DeleteActions({ name, loses, actLabel, title, confirming, onConf
         label={label}
         keepLabel="Keep"
         actLabel={actLabel}
+        busy={deleting}
         onKeep={() => {
           onConfirm(false);
         }}
-        onAct={onDelete}
+        onAct={() => {
+          setDeleting(true);
+          background(
+            onDelete().finally(() => {
+              setDeleting(false);
+            }),
+          );
+        }}
       >
         {loses === undefined ? label : `${label} ${loses}`}
       </Question>

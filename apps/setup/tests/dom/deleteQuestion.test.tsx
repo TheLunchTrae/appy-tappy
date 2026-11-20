@@ -118,3 +118,30 @@ test.each(PAGES)('deleting a saved %s waits for an answer of its own', async (_k
   await user.click(button(actLabel));
   expect(deletions).toBe(1);
 });
+
+test.each(PAGES)(
+  'a saved %s is deleted once while its delete is on its way',
+  async (_kind, command, actLabel, page) => {
+    const pending = Promise.withResolvers<undefined>();
+    let deletions = 0;
+    mockIPC((called) => {
+      if (called === command) {
+        deletions += 1;
+        return pending.promise;
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(page());
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    const answer = screen.getByRole('button', { name: actLabel });
+    fireEvent.click(answer);
+    fireEvent.click(answer);
+    expect(deletions).toBe(1);
+    await act(async () => {
+      pending.resolve(undefined);
+      await pending.promise;
+    });
+  },
+);
