@@ -205,6 +205,7 @@ export function useFound(
 
   const forget = (): void => {
     turn.drop();
+    setSearching(false);
     setView(null);
     setEdits(new Map());
     setError(null);
@@ -244,7 +245,10 @@ export function useFound(
         setError(errorText(error));
       }
     } finally {
-      setSearching(false);
+      // Whatever began the turn after this one says whether a search is under way.
+      if (current()) {
+        setSearching(false);
+      }
     }
   };
 
@@ -290,6 +294,7 @@ export function useFound(
       }
       // The search's state read before this would show the finds as they were, and end the wait for their text.
       const current = turn.begin();
+      setSearching(false);
       try {
         const result = await rereadFound(view.id, again, draft.ink, draft.tolerance);
         if (current() && result !== null) {

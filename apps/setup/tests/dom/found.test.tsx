@@ -5,6 +5,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { PICTURES, type FoundView, type RecordedText } from '../../src/lib/bindings.ts';
 import type { Box } from '../../src/lib/boxes.ts';
 import { EMPTY_DRAFT } from '../../src/lib/check.ts';
+import { background } from '../../src/lib/repeat.ts';
 import { useFound } from '../../src/lib/useFound.ts';
 
 const EMPTY: readonly string[] = [];
@@ -81,4 +82,68 @@ test('rereading the same search still accepts its pending pictures', async () =>
   });
   expect(result.current.crops.get(0)).toEqual(EXPECTED_PICTURE);
   expect(pictures).toBe(1);
+});
+
+test('a search stays under way until the newest one answers', async () => {
+  const answers = [Promise.withResolvers<FoundView>(), Promise.withResolvers<FoundView>()];
+  let searches = 0;
+  mockIPC((command) => {
+    if (command === 'find_like') {
+      searches += 1;
+      return answers[searches - 1]?.promise;
+    }
+    return command === 'found_picture' ? picture() : undefined;
+  });
+  const { result } = renderHook(() => useFound(EMPTY_DRAFT, () => undefined, null, EMPTY, EMPTY));
+  const answer = async (search: number): Promise<void> => {
+    await act(async () => {
+      answers[search - 1]?.resolve(found(search));
+      await answers[search - 1]?.promise;
+    });
+  };
+  act(() => {
+    background(result.current.search(BOX));
+  });
+  act(() => {
+    background(result.current.search(BOX));
+  });
+  await answer(1);
+  expect(result.current.view).toBeNull();
+  expect(result.current.searching).toBe(true);
+  await answer(2);
+  expect(result.current.view?.id).toBe(2);
+  expect(result.current.searching).toBe(false);
+});
+
+test('a search that a dismissal or a reread overtakes is no longer under way', async () => {
+  const late = Promise.withResolvers<FoundView>();
+  let searches = 0;
+  mockIPC((command) => {
+    if (command === 'find_like') {
+      searches += 1;
+      return searches === 2 ? found(2, { kind: 'failed', text: 'Read failed.' }) : late.promise;
+    }
+    if (command === 'reread_found') {
+      return found(2);
+    }
+    return command === 'found_picture' ? picture() : undefined;
+  });
+  const { result } = renderHook(() => useFound(EMPTY_DRAFT, () => undefined, null, EMPTY, EMPTY));
+  act(() => {
+    background(result.current.search(BOX));
+  });
+  expect(result.current.searching).toBe(true);
+  act(() => {
+    result.current.dismiss();
+  });
+  expect(result.current.searching).toBe(false);
+
+  await act(async () => result.current.search(BOX));
+  act(() => {
+    background(result.current.search(BOX));
+  });
+  expect(result.current.searching).toBe(true);
+  await act(async () => result.current.reread());
+  expect(result.current.searching).toBe(false);
+  expect(result.current.view?.finds[0]?.text).toEqual({ kind: 'read', text: '12' });
 });
