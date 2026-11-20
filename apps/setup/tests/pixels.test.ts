@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { PICTURES } from '../src/lib/bindings.ts';
-import { colorAt, cropPicture, decodePicture, hex } from '../src/lib/pixels.ts';
+import { type Color, colorAt, cropPicture, decodePicture, hex, tileFor } from '../src/lib/pixels.ts';
 
 function encoded(width: number, height: number, pixels: readonly number[]): ArrayBuffer {
   const buffer = new ArrayBuffer(8 + pixels.length);
@@ -94,5 +94,33 @@ describe('cropPicture', () => {
     expect(cropPicture(picture, { x: -1, y: 0, width: 1, height: 1 })).toBeNull();
     expect(cropPicture(picture, { x: 0, y: 0, width: 0, height: 1 })).toBeNull();
     expect(cropPicture(picture, { x: 0.5, y: 0, width: 1, height: 1 })).toBeNull();
+  });
+});
+
+describe('tileFor', () => {
+  // The WCAG 2 contrast ratio of two colors.
+  const luminance = ({ red, green, blue }: Color): number => {
+    const linear = (channel: number): number => {
+      const part = channel / 255;
+      return part <= 0.04045 ? part / 12.92 : ((part + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+  };
+  const contrast = (a: Color, b: Color): number => {
+    const [dark, light] = [luminance(a), luminance(b)].toSorted((x, y) => x - y);
+    return ((light ?? 0) + 0.05) / ((dark ?? 0) + 0.05);
+  };
+
+  test('gives every text color a tile it reads on, through the grays where the tile changes', () => {
+    const levels = Array.from({ length: 256 }, (_, level) => level);
+    const inks: readonly Color[] = levels.flatMap((level) => [
+      { red: level, green: level, blue: level },
+      { red: level, green: 0, blue: 0 },
+      { red: 0, green: level, blue: 0 },
+      { red: 255, green: 255, blue: level },
+      { red: level, green: 255 - level, blue: 128 },
+    ]);
+    const unreadable = inks.filter((ink) => contrast(ink, tileFor(ink)) < 4.5).map(hex);
+    expect(unreadable).toEqual([]);
   });
 });

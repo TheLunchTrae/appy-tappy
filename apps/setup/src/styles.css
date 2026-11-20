@@ -13,8 +13,8 @@
   --holds: #5bc48a;
   --warn: #e8845b;
   --live: #e05555;
-  /* The dark tile a reference's characters sit on, so any ink color shows. */
-  --glyph: #14171c;
+  /* The tile a reference's characters sit on. Dark text takes a white tile instead, so any text color shows. */
+  --glyph: #000;
   color-scheme: dark;
   font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
@@ -2075,10 +2075,12 @@ div.match-answer {
   gap: 6px;
 }
 
-/* Characters only the text reader's guess shows: outlined, since the user has yet to check them. */
+/* Characters only the text reader's guess shows: outlined, since the user has yet to check them. A text color's
+   tile stays inside the dashes, which show on the panel. */
 .glyphs.unchecked .glyph {
   border: 1px dashed var(--muted);
   background: none;
+  background-clip: padding-box;
 }
 
 /* Text found like the selected box, to check before it teaches the reference. */
@@ -2523,9 +2525,10 @@ div.match-answer {
   font-variant-numeric: tabular-nums;
 }
 
+/* The dashes sit around the tile, on the panel, so they show beside a tile of either color. */
 .glyph.pending {
-  outline: 2px dashed var(--capture);
-  outline-offset: -2px;
+  border: 2px dashed var(--capture);
+  background-clip: padding-box;
 }
 
 .glyphs.large .glyph {

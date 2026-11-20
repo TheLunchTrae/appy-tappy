@@ -1,9 +1,12 @@
 import type { CSSProperties } from 'react';
-import { type Color, hex } from '../lib/pixels.ts';
+import { type Color, hex, tileFor } from '../lib/pixels.ts';
 
-/** How a tile draws a character of a reference: in the reference's text color when it has one. */
+/**
+ * How a tile draws a character of a reference: in the reference's text color when it has one, on the tile that
+ * color reads on.
+ */
 export function glyphStyle(ink: Color | null | undefined): CSSProperties | undefined {
-  return ink === null || ink === undefined ? undefined : { color: hex(ink) };
+  return ink === null || ink === undefined ? undefined : { color: hex(ink), backgroundColor: hex(tileFor(ink)) };
 }
 
 /** A reference's characters, each in a tile, drawn in the reference's text color when it has one. */
