@@ -6,6 +6,7 @@ import {
   neededPairs,
   riskKey,
   riskMark,
+  risksAnswered,
   risksArrived,
   risksFailed,
 } from '../src/lib/useReadingRisks.ts';
@@ -76,6 +77,16 @@ test('a check that failed says so under the key it was asked under, unlike a che
   expect(risksArrived({ key: 'asked', risks: failed }, 'asked')).toEqual(failed);
   // A change to what it asks about drops the failure with the answer, and the next answer replaces it.
   expect(risksArrived({ key: 'asked', risks: failed }, 'changed').problem).toBeNull();
+});
+
+test('a reference that cannot be taught is answered no risks and no problem, since its check says why', () => {
+  const none = { lookalikes: [], hidesTone: false, problem: null };
+  expect(risksAnswered(null)).toEqual(none);
+  expect(risksAnswered({ lookalikes: [['8', '6']], hidesTone: true })).toEqual({
+    lookalikes: [['8', '6']],
+    hidesTone: true,
+    problem: null,
+  });
 });
 
 test('a saved reference is marked for the pairs its values can misread and for a hidden outline', () => {

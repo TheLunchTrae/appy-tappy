@@ -272,14 +272,28 @@ impl<H: Host> Owner<H> {
     }
 
     /// What may keep the reference `spec` teaches from reading as its
-    /// samples do.
-    pub(crate) fn reading_risks(&mut self, spec: &CharactersSpec) -> Result<ReadingRisks, String> {
+    /// samples do, or `None` for a reference that can't learn one of its
+    /// lessons: it has no shapes to compare, and its live check says which
+    /// lesson and why.
+    pub(crate) fn reading_risks(
+        &mut self,
+        spec: &CharactersSpec,
+    ) -> Result<Option<ReadingRisks>, String> {
         self.keep_reference(spec.reference.as_ref());
         self.with_session(|session| {
-            Ok(ReadingRisks {
-                lookalikes: spec.teach(session, None, TAUGHT, &[])?.reader.lookalikes(),
+            let taught = match spec.teach(session, None, TAUGHT, &[]) {
+                Ok(taught) => taught,
+                Err(
+                    SpecError::Learn { .. }
+                    | SpecError::SavedLearn { .. }
+                    | SpecError::MissingPicture { .. },
+                ) => return Ok(None),
+                Err(error) => return Err(error),
+            };
+            Ok(Some(ReadingRisks {
+                lookalikes: taught.reader.lookalikes(),
                 hides_tone: spec.hides_a_tone(session)?,
-            })
+            }))
         })
         .map_err(|error: SpecError| error.to_string())
     }
@@ -339,16 +353,32 @@ mod tests {
         };
         assert_eq!(
             harness.ask(|owner| owner.reading_risks(&spec(0))),
-            Ok(ReadingRisks {
+            Ok(Some(ReadingRisks {
                 lookalikes: vec![('8', '6')],
                 hides_tone: false,
-            }),
+            })),
             "the bar matches neither block"
         );
         assert_eq!(
             harness.ask(|owner| owner.reading_risks(&spec(9))),
             Err("That screenshot is gone. Take a new one and try again.".to_owned())
         );
+    }
+
+    #[test]
+    fn a_reference_that_cant_learn_a_label_is_answered_no_risks_and_no_failure() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&near_twins()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // The region shows three characters, and the text has two.
+        let spec: CharactersSpec = serde_json::from_str(
+            r#"{"region":{"x":0,"y":0,"width":17,"height":8},"screenshot":0,
+                "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+                "labels":[{"screenshot":0,"text":"86"}]}"#,
+        )
+        .expect("valid JSON");
+        assert_eq!(harness.ask(|owner| owner.reading_risks(&spec)), Ok(None));
     }
 
     #[test]
@@ -367,12 +397,12 @@ mod tests {
         let mut hides = |ink: &str| {
             harness
                 .ask(|owner| owner.reading_risks(&spec(ink)))
-                .map(|risks| risks.hides_tone)
+                .map(|risks| risks.map(|risks| risks.hides_tone))
         };
-        assert_eq!(hides(""), Ok(true));
+        assert_eq!(hides(""), Ok(Some(true)));
         assert_eq!(
             hides(r#""ink":{"red":255,"green":255,"blue":255},"#),
-            Ok(false),
+            Ok(Some(false)),
             "a text color counts only the fill"
         );
     }

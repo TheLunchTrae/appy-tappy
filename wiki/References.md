@@ -143,11 +143,14 @@ from one level or scene to the next: give the reference a
 When AppyTappy can't check for either of the two, the editor says **Can't
 check for characters that look alike.** and why, in place of the warnings.
 No warning then doesn't mean that the reference has neither problem. The
-check runs again when a box, the text color, or the tolerance changes.
+check runs again when a box, the text color, or the tolerance changes. A
+reference that can't learn from a box, a kept reading, or a saved picture
+has nothing to check yet: the reading says which one it can't learn from and
+why, and the warnings wait until it can.
 
 The References page marks a saved reference that has either problem with
-**May misread** beside its name. Hold the pointer over the mark to see which,
-and select **Edit** to see what to do. The mark shows a moment after the
+**May misread** beside its name. The **?** beside the mark says which, and
+**Edit** shows what to do. The mark shows a moment after the
 page does. Neither warning holds up **Save reference**.
 
 AppyTappy learns a character from a box, found text you add, or a kept

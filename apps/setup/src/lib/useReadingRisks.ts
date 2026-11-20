@@ -78,6 +78,14 @@ const NO_RISKS: ShownRisks = { lookalikes: [], hidesTone: false, problem: null }
 /** What the reference has been answered before it asks. */
 const NO_ANSWER: Answer = { key: '', risks: NO_RISKS };
 
+/**
+ * What the editor shows of the answer `risks`. Null is a reference that can't learn one of its lessons: it shows no
+ * risks and no problem, since the reading says which lesson and why.
+ */
+export function risksAnswered(risks: ReadingRisks | null): ShownRisks {
+  return risks === null ? NO_RISKS : { ...risks, problem: null };
+}
+
 /** What the editor says when the check for `error` failed: no risks, which is not the same as none found. */
 export function risksFailed(error: unknown): ShownRisks {
   return { ...NO_RISKS, problem: `Can't check for characters that look alike. ${errorText(error)}` };
@@ -95,7 +103,7 @@ export function risksArrived(answer: Answer, wanted: string | null): ShownRisks 
  * What may keep the reference `spec` teaches from reading as its samples do, as the setup app answers for that spec,
  * or nothing while `spec` is null or the answer for it has not arrived. It asks again once a sample, the region, the
  * text color, or the tolerance changed and then rested. A request that fails says so in place of the risks, until
- * the next one answers.
+ * the next one answers; a reference that can't be taught is not a failure of the request.
  */
 export function useReadingRisks(spec: CharactersSpec | null): ShownRisks {
   const key = riskKey(spec);
@@ -110,7 +118,7 @@ export function useReadingRisks(spec: CharactersSpec | null): ShownRisks {
     const cancel = ask(
       () => readingRisks(asked),
       (risks) => {
-        setAnswer({ key, risks: { ...risks, problem: null } });
+        setAnswer({ key, risks: risksAnswered(risks) });
       },
       (error) => {
         console.error(error);

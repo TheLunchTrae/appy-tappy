@@ -3339,7 +3339,9 @@ a shadow its tolerance leaves out, as
 now (`riskKey`), or none, and the last answer with the key it was asked
 under. The owner keeps nothing for it; each request is one `reading_risks`
 command, which teaches the reference, compares its shapes, and looks at its
-samples.
+samples. For a reference that can't learn one of its lessons, a box, a kept
+reading, or a saved picture, the command answers no risks rather than
+failing.
 
 ```mermaid
 stateDiagram-v2
@@ -3372,12 +3374,17 @@ stateDiagram-v2
   it need between them (`readersNeed`), and every pair when one of them needs
   none or none reads with it. It warns about no pair when none is left. It
   also warns when the answer says the tolerance leaves an outline or a
-  shadow out, whatever the value needs.
-- **Unanswered** is a failed request. The failure is logged, and the editor
-  says that it can't check for characters that look alike, and why
-  (`risksFailed`), in place of the warnings, so a failed check does not look
-  like a check that found nothing. The failure is kept under the key it was
-  asked under, like an answer, so it goes when the key changes.
+  shadow out, whatever the value needs. The answer for a reference that
+  can't learn a lesson warns about nothing (`risksAnswered`): it has no
+  shapes to compare, and the reading of its
+  [live check](#live-check) says which lesson it can't learn and why, so the
+  editor says it once.
+- **Unanswered** is a failed request, such as one for a screenshot that is
+  gone. The failure is logged, and the editor says that it can't check for
+  characters that look alike, and why (`risksFailed`), in place of the
+  warnings, so a failed check does not look like a check that found nothing.
+  The failure is kept under the key it was asked under, like an answer, so
+  it goes when the key changes.
 
 ### Saved reference marks
 

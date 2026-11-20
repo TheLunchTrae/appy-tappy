@@ -261,10 +261,11 @@ export async function contrastTolerance(spec: CharactersSpec): Promise<number> {
 
 /**
  * What may keep the reference `spec` teaches from reading as its samples do: the pairs of characters whose
- * learned shapes match each other, and whether its tolerance leaves an outline or a shadow out.
+ * learned shapes match each other, and whether its tolerance leaves an outline or a shadow out. Null for a
+ * reference that can't learn one of its lessons, which its live check says.
  */
-export async function readingRisks(spec: CharactersSpec): Promise<ReadingRisks> {
-  return invoke<ReadingRisks>('reading_risks', { spec });
+export async function readingRisks(spec: CharactersSpec): Promise<ReadingRisks | null> {
+  return invoke<ReadingRisks | null>('reading_risks', { spec });
 }
 
 /**
