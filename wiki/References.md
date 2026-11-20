@@ -27,7 +27,8 @@ select **Capture this window**, as the first step of
 
 1. **Name it,** such as `Percent font`, with a name no other reference of
    the application has. Capitals of the letters A to Z don't count:
-   `Percent font` and `percent font` are one name.
+   `Percent font` and `percent font` are one name. Until it has a name,
+   **Save reference** waits, and says `Name the reference.` above the button.
 2. **Teach it the characters.** On a screenshot, drag to draw a box tightly
    around some characters, then type what the box shows, such as `87%`, in
    its row under **Boxes**. AppyTappy learns the shape of each character from

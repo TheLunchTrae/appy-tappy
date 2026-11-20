@@ -3,6 +3,7 @@
 import type { AppSummary, DraftDef, ReferenceDef, ValueDef } from './bindings.ts';
 import { type Built, type CheckKind, type Draft, fixDraft } from './check.ts';
 import { type Kept, draftProblem, isKept } from './drafts.ts';
+import { NAME_THE_REFERENCE } from './teaching.ts';
 import { sameContent } from './unsaved.ts';
 
 /** The reference being made or changed, and its name as typed. */
@@ -122,7 +123,7 @@ export function captureMissing(setup: CaptureSetup, built: Built<unknown>, fixin
   const { editing, draft } = setup;
   const named = editing === null ? fixing || setup.valueName.trim() !== '' : editing.name.trim() !== '';
   const missing = [
-    named ? null : editing === null ? 'Name the value.' : 'Name the reference.',
+    named ? null : editing === null ? 'Name the value.' : NAME_THE_REFERENCE,
     // A reference reads where its first box is, which what it needs says.
     editing === null && draft.region === null ? 'Draw the region where it shows.' : null,
   ].filter((part) => part !== null);

@@ -20,9 +20,18 @@ const READY: ReferenceSave = {
 
 test('a reference saves once it is named, built and tried', () => {
   expect(referenceSave(READY)).toEqual({ can: true, waits: null });
-  for (const missing of [{ named: false }, { built: false }, { tried: false }, { busy: true }]) {
+  // The reading box says what the characters need and why a try failed, and a save under way ends by itself.
+  for (const missing of [{ built: false }, { tried: false }, { busy: true }]) {
     expect(referenceSave({ ...READY, ...missing })).toEqual({ can: false, waits: null });
   }
+});
+
+test('saving waits for a name, and says so', () => {
+  expect(referenceSave({ ...READY, named: false })).toEqual({ can: false, waits: 'Name the reference.' });
+  expect(referenceSave({ ...READY, named: false, unlearned: 1 })).toEqual({
+    can: false,
+    waits: SAVE_AFTER_UNLEARNED,
+  });
 });
 
 test('saving waits while review is open, and says so', () => {
