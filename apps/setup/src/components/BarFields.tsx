@@ -80,7 +80,9 @@ export function BarReadings({ bar, position }: Props) {
     return (
       <div className="field">
         {title}
-        <p className="warn">{bar.measureError}</p>
+        <p className="warn" role="alert">
+          {bar.measureError}
+        </p>
       </div>
     );
   }

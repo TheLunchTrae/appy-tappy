@@ -352,21 +352,24 @@ select {
   vertical-align: middle;
 }
 
-.table tr:last-child td {
+/* A table's last row, which a group's heading is when the group has no rows. */
+.table tbody:last-child tr:last-child :is(td, th) {
   border-bottom: 0;
 }
 
-.table tr:last-child td:first-child {
+.table tbody:last-child tr:last-child :is(td, th):first-child {
   border-bottom-left-radius: 7px;
 }
 
-.table tr:last-child td:last-child {
+.table tbody:last-child tr:last-child :is(td, th):last-child {
   border-bottom-right-radius: 7px;
 }
 
-.table .group td {
+/* The heading of a group of rows, such as an application's values. */
+.table .group th {
   background: var(--raise);
-  font-weight: 600;
+  font-size: inherit;
+  color: var(--text);
 }
 
 .table .group small {

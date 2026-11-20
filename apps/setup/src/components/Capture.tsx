@@ -990,7 +990,11 @@ export function Capture({
         notes={
           <>
             {windowNotes}
-            {selection.error === null ? null : <p className="warn">{selection.error}</p>}
+            {selection.error === null ? null : (
+              <p className="warn" role="alert">
+                {selection.error}
+              </p>
+            )}
           </>
         }
         held={{ frozen: live.shown.frozen, picture: heldPicture }}
@@ -1150,7 +1154,11 @@ export function Capture({
                 }}
               />
               <div className="sep" />
-              {saveError === null ? null : <p className="warn">{saveError}</p>}
+              {saveError === null ? null : (
+                <p className="warn" role="alert">
+                  {saveError}
+                </p>
+              )}
               {draftError}
               <div className="actions">
                 <button type="button" className="btn" disabled={busy} onClick={onCancel}>
@@ -1196,7 +1204,11 @@ export function Capture({
           ) : shownStep === 'how' && threeSteps ? (
             <>
               {referencePicker}
-              {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
+              {appFile.error === null ? null : (
+                <p className="warn" role="alert">
+                  {appFile.error}
+                </p>
+              )}
               <div className="sep" />
               {draftError}
               <div className="actions">
@@ -1224,7 +1236,11 @@ export function Capture({
           ) : (
             <>
               {howFields[draft.kind]()}
-              {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
+              {appFile.error === null ? null : (
+                <p className="warn" role="alert">
+                  {appFile.error}
+                </p>
+              )}
               {lookPanel}
               {check.state.kind === 'set' && check.preview !== null && check.preview.unread !== null ? (
                 <p className="reading note">{check.preview.unread}</p>
@@ -1242,7 +1258,11 @@ export function Capture({
               {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
               <ReadingDetailsBox key={builtKind} ask={check.state.kind === 'set' ? explainReading : null} />
               <div className="sep" />
-              {saveError === null ? null : <p className="warn">{saveError}</p>}
+              {saveError === null ? null : (
+                <p className="warn" role="alert">
+                  {saveError}
+                </p>
+              )}
               <p className="note">
                 {fixing !== null
                   ? `The fix shows on the Values page, beside ${fixing.name}.`

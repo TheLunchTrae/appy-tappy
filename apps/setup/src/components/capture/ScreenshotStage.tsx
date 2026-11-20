@@ -156,9 +156,21 @@ export function ScreenshotStage({
       <p className="note" role="status">
         {shortcut.choosing ? 'Press the new shortcut, or Esc to keep this one.' : null}
       </p>
-      {shortcut.error === null ? null : <p className="warn">{shortcut.error}</p>}
-      {shortcut.saveError === null ? null : <p className="warn">{shortcut.saveError}</p>}
-      {screenshots.error === null ? null : <p className="warn">{screenshots.error}</p>}
+      {shortcut.error === null ? null : (
+        <p className="warn" role="alert">
+          {shortcut.error}
+        </p>
+      )}
+      {shortcut.saveError === null ? null : (
+        <p className="warn" role="alert">
+          {shortcut.saveError}
+        </p>
+      )}
+      {screenshots.error === null ? null : (
+        <p className="warn" role="alert">
+          {screenshots.error}
+        </p>
+      )}
       {notes}
       {sheet?.content}
       {absent === null || selected !== null ? (

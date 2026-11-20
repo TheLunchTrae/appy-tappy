@@ -89,13 +89,23 @@ export function SavedStates({ value, draft, retakeBlocked, onDraft, onRetake }: 
           <button
             type="button"
             className="btn small"
-            disabled={retakeBlocked !== null}
-            title={retakeBlocked ?? undefined}
-            onClick={onRetake}
+            // Not disabled while it waits, so it takes focus and a screen reader reads why.
+            aria-disabled={retakeBlocked !== null}
+            aria-describedby={retakeBlocked === null ? undefined : 'retake-blocked'}
+            onClick={() => {
+              if (retakeBlocked === null) {
+                onRetake();
+              }
+            }}
           >
             Take the states again
           </button>
         </div>
+        {retakeBlocked === null ? null : (
+          <span id="retake-blocked" className="note">
+            {retakeBlocked}
+          </span>
+        )}
       </div>
       <ToleranceField
         help="How far, on average, the compared pixels may differ from a state's image."

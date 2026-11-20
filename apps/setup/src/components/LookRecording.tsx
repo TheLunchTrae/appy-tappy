@@ -45,7 +45,11 @@ export function LookPanel(props: Props) {
   const warn = (
     <>
       {view === null || view.problem === null ? null : <p className="warn">{view.problem}</p>}
-      {error === null ? null : <p className="warn">{error}</p>}
+      {error === null ? null : (
+        <p className="warn" role="alert">
+          {error}
+        </p>
+      )}
     </>
   );
   if (view?.recording === true) {

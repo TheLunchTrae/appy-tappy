@@ -151,7 +151,7 @@ function Discovered({
         <div>
           <dt>Found, not checked yet</dt>
           <dd>
-            <span className="glyphs unchecked" aria-label={`Characters: ${found.unchecked.join(' ')}`}>
+            <span className="glyphs unchecked" role="img" aria-label={`Characters: ${found.unchecked.join(' ')}`}>
               {found.unchecked.map((character) => (
                 <span key={character} className="glyph" style={glyphStyle(ink)} aria-hidden="true">
                   {character}
@@ -238,7 +238,11 @@ export function RecordPanel(props: PanelProps) {
     <>
       {view === null || view.full === null ? null : <p className="warn">{view.full}</p>}
       {view === null || view.problem === null ? null : <p className="warn">{view.problem}</p>}
-      {error === null ? null : <p className="warn">{error}</p>}
+      {error === null ? null : (
+        <p className="warn" role="alert">
+          {error}
+        </p>
+      )}
     </>
   );
   if (view === null) {
@@ -508,7 +512,11 @@ export function ReviewSheet(props: SheetProps) {
               </div>
             </div>
           )}
-          {error === null ? null : <p className="warn">{error}</p>}
+          {error === null ? null : (
+            <p className="warn" role="alert">
+              {error}
+            </p>
+          )}
         </div>
         <div className="end">
           <button

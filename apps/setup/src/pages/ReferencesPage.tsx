@@ -137,17 +137,19 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
               </th>
             </tr>
           </thead>
-          <tbody>
-            {withReferences.map((app) => {
-              const { file } = app;
-              if (file === null) {
-                return null;
-              }
-              return [
-                <tr key={app.id} className="group">
-                  <td colSpan={4}>{file.name}</td>
-                </tr>,
-                ...file.references.map((reference) => {
+          {withReferences.map((app) => {
+            const { file } = app;
+            if (file === null) {
+              return null;
+            }
+            return (
+              <tbody key={app.id}>
+                <tr className="group">
+                  <th colSpan={4} scope="rowgroup">
+                    {file.name}
+                  </th>
+                </tr>
+                {file.references.map((reference) => {
                   const key = `${app.id}/${reference.id}`;
                   const used = readers(file, reference.id);
                   const changes = draftOfSaved(drafts, 'reference', reference.id, app.id);
@@ -206,22 +208,22 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                       </td>
                     </tr>
                   );
-                }),
-                ...draftRows(draftsOfApp(app.id)),
-              ];
-            })}
-            {orphans.length === 0 ? null : (
-              <>
-                <tr className="group">
-                  <td colSpan={4}>
-                    Drafts
-                    <small className="warn">Their application is no longer saved, or its file cannot be read.</small>
-                  </td>
-                </tr>
-                {draftRows(orphans)}
-              </>
-            )}
-          </tbody>
+                })}
+                {draftRows(draftsOfApp(app.id))}
+              </tbody>
+            );
+          })}
+          {orphans.length === 0 ? null : (
+            <tbody>
+              <tr className="group">
+                <th colSpan={4} scope="rowgroup">
+                  Drafts
+                  <small className="warn">Their application is no longer saved, or its file cannot be read.</small>
+                </th>
+              </tr>
+              {draftRows(orphans)}
+            </tbody>
+          )}
         </table>
       )}
     </main>

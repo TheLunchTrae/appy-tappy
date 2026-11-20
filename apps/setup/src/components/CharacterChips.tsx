@@ -28,6 +28,7 @@ export function CharacterChips({
   return (
     <span
       className={large ? 'glyphs large' : 'glyphs'}
+      role="img"
       aria-label={
         pending.length === 0
           ? `Characters: ${characters.join(' ')}`
@@ -62,6 +63,7 @@ export function MissingChips({
   return (
     <span
       className={large ? 'glyphs large missing' : 'glyphs missing'}
+      role="img"
       aria-label={`Missing characters: ${characters.join(' ')}`}
     >
       {characters.map((character) => (

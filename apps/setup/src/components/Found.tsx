@@ -286,7 +286,11 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
           </button>
         </div>
       )}
-      {error === null ? null : <p className="warn">{error}</p>}
+      {error === null ? null : (
+        <p className="warn" role="alert">
+          {error}
+        </p>
+      )}
       <div className="row">
         {rows.length === 0 ? null : (
           <button

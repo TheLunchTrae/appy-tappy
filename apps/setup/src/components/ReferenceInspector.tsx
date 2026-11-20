@@ -310,7 +310,11 @@ export function ReferenceInspector({
       {/* Scores are of the characters alone here, so they need no key by the check's kind. */}
       <ReadingDetailsBox ask={check.state.kind === 'set' ? explainReading : null} />
       <div className="sep" />
-      {teaching.error === null ? null : <p className="warn">{teaching.error}</p>}
+      {teaching.error === null ? null : (
+        <p className="warn" role="alert">
+          {teaching.error}
+        </p>
+      )}
       {refSave.waits === null ? null : (
         <p id={SAVE_WAITS_ID} className="note">
           {refSave.waits}

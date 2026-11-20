@@ -178,15 +178,15 @@ function AppRows({
   const columns = nowColumn ? 6 : 5;
   if (app.file === null) {
     return (
-      <>
+      <tbody>
         <tr className="group">
-          <td colSpan={columns}>
+          <th colSpan={columns} scope="rowgroup">
             {app.id}
             <small className="warn">{app.error ?? 'This application could not be read.'}</small>
-          </td>
+          </th>
         </tr>
         <ValueDraftRows list={drafts} nowColumn={nowColumn} rows={rows} />
-      </>
+      </tbody>
     );
   }
   const { file } = app;
@@ -198,9 +198,9 @@ function AppRows({
   const view = live?.kind === 'view' ? live.view : null;
   const size = view?.windowSize ?? null;
   return (
-    <>
+    <tbody>
       <tr className="group">
-        <td colSpan={columns}>
+        <th colSpan={columns} scope="rowgroup">
           <span className={running ? 'dot running' : 'dot'} />
           {app.file.name}
           <small>
@@ -227,7 +227,7 @@ function AppRows({
               </span>
             </div>
           )}
-        </td>
+        </th>
       </tr>
       {app.file.values.map((value) => {
         const summary = checkSummary(value.screen.check, file.references);
@@ -298,7 +298,7 @@ function AppRows({
         );
       })}
       <ValueDraftRows list={drafts} nowColumn={nowColumn} rows={rows} />
-    </>
+    </tbody>
   );
 }
 
@@ -452,45 +452,43 @@ export function ValuesPage({
               </th>
             </tr>
           </thead>
-          <tbody>
-            {apps.map((app) => (
-              <AppRows
-                key={app.id}
-                app={app}
-                automations={automations}
-                live={live.get(app.id) ?? null}
-                nowColumn={nowColumn}
-                confirming={confirming}
-                onConfirm={setConfirming}
-                onDelete={(value) => remove(app.id, value)}
-                onMarkChecked={() => {
-                  background(markAsChecked(app.id));
-                }}
-                onFix={(value) => {
-                  onChange({ app: app.id, value, how: 'fix' });
-                }}
-                onEdit={(value) => {
-                  onChange({ app: app.id, value, how: 'edit' });
-                }}
-                onRemoveFix={(value, size) => {
-                  background(unfix(app.id, value, size));
-                }}
-                drafts={valueDrafts(drafts, apps, app.id)}
-                rows={rows}
-              />
-            ))}
-            {orphans.length === 0 ? null : (
-              <>
-                <tr className="group">
-                  <td colSpan={nowColumn ? 6 : 5}>
-                    Drafts
-                    <small className="warn">Their application is no longer saved.</small>
-                  </td>
-                </tr>
-                <ValueDraftRows list={orphans} nowColumn={nowColumn} rows={rows} />
-              </>
-            )}
-          </tbody>
+          {apps.map((app) => (
+            <AppRows
+              key={app.id}
+              app={app}
+              automations={automations}
+              live={live.get(app.id) ?? null}
+              nowColumn={nowColumn}
+              confirming={confirming}
+              onConfirm={setConfirming}
+              onDelete={(value) => remove(app.id, value)}
+              onMarkChecked={() => {
+                background(markAsChecked(app.id));
+              }}
+              onFix={(value) => {
+                onChange({ app: app.id, value, how: 'fix' });
+              }}
+              onEdit={(value) => {
+                onChange({ app: app.id, value, how: 'edit' });
+              }}
+              onRemoveFix={(value, size) => {
+                background(unfix(app.id, value, size));
+              }}
+              drafts={valueDrafts(drafts, apps, app.id)}
+              rows={rows}
+            />
+          ))}
+          {orphans.length === 0 ? null : (
+            <tbody>
+              <tr className="group">
+                <th colSpan={nowColumn ? 6 : 5} scope="rowgroup">
+                  Drafts
+                  <small className="warn">Their application is no longer saved.</small>
+                </th>
+              </tr>
+              <ValueDraftRows list={orphans} nowColumn={nowColumn} rows={rows} />
+            </tbody>
+          )}
         </table>
       ) : null}
     </main>
