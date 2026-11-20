@@ -13,6 +13,7 @@ import { deleteValue, errorText, markChecked, removeFix } from '../lib/api.ts';
 import { usedBy } from '../lib/automation.ts';
 import { readingText } from '../lib/reading.ts';
 import { buildState, checkedText } from '../lib/build.ts';
+import { DeleteActions } from '../components/DeleteActions.tsx';
 import { Hint } from '../components/Hint.tsx';
 import { MARK_CHECKED_HINT } from '../lib/hints.ts';
 import { hex } from '../lib/pixels.ts';
@@ -268,52 +269,32 @@ function AppRows({
             ) : null}
             <td className="note">{usedByText(automations === null ? null : usedBy(automations, app.id, value.id))}</td>
             <td className="end">
-              {confirming === key ? (
-                <span className="confirm">
-                  {drafts.some((each) => each.def.kind === 'fix' && each.def.changes === value.id) ? (
-                    <small className="note">Its fix drafts go with it.</small>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn small"
-                    onClick={() => {
-                      onConfirm(null);
-                    }}
-                  >
-                    Keep
-                  </button>
-                  <button
-                    type="button"
-                    className="btn small danger"
-                    onClick={() => {
-                      onDelete(value.id);
-                    }}
-                  >
-                    Delete {value.name}
-                  </button>
-                </span>
-              ) : (
-                <span className="confirm">
-                  <button
-                    type="button"
-                    className="btn small"
-                    onClick={() => {
-                      onEdit(value);
-                    }}
-                  >
-                    Edit<span className="visually-hidden"> {value.name}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="btn small"
-                    onClick={() => {
-                      onConfirm(key);
-                    }}
-                  >
-                    Delete
-                  </button>
-                </span>
-              )}
+              <DeleteActions
+                name={value.name}
+                loses={
+                  drafts.some((each) => each.def.kind === 'fix' && each.def.changes === value.id)
+                    ? 'Its fix drafts go with it.'
+                    : undefined
+                }
+                actLabel="Delete value"
+                confirming={confirming === key}
+                onConfirm={(asking) => {
+                  onConfirm(asking ? key : null);
+                }}
+                onDelete={() => {
+                  onDelete(value.id);
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => {
+                    onEdit(value);
+                  }}
+                >
+                  Edit<span className="visually-hidden"> {value.name}</span>
+                </button>
+              </DeleteActions>
             </td>
           </tr>
         );

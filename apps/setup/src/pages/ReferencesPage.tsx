@@ -6,6 +6,7 @@ import { andList, readers, referenceCharacters } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
 import { originText } from '../lib/sharing.ts';
 import { CharacterChips } from '../components/CharacterChips.tsx';
+import { DeleteActions } from '../components/DeleteActions.tsx';
 import type { SavedRef } from '../lib/flow.ts';
 import { type Resumed, draftOfSaved, draftProblem, draftsOf } from '../lib/drafts.ts';
 import { labeledCharacters } from '../lib/captureDraft.ts';
@@ -169,63 +170,41 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                       </td>
                       <td className="note">{used.length === 0 ? 'No values yet' : andList(used)}</td>
                       <td className="end">
-                        {confirming === key ? (
-                          <span className="confirm">
+                        <DeleteActions
+                          name={reference.name}
+                          actLabel="Delete reference"
+                          title={used.length === 0 ? undefined : `${andList(used)} read with it`}
+                          confirming={confirming === key}
+                          onConfirm={(asking) => {
+                            setConfirming(asking ? key : null);
+                          }}
+                          onDelete={() => {
+                            background(remove(app.id, reference.id));
+                          }}
+                        >
+                          {changes === null ? (
                             <button
                               type="button"
                               className="btn small"
                               onClick={() => {
-                                setConfirming(null);
+                                onEdit({ app: app.id, reference });
                               }}
                             >
-                              Keep
+                              Edit<span className="visually-hidden"> {reference.name}</span>
                             </button>
-                            <button
-                              type="button"
-                              className="btn small danger"
-                              onClick={() => {
-                                background(remove(app.id, reference.id));
-                              }}
-                            >
-                              Delete {reference.name}
-                            </button>
-                          </span>
-                        ) : (
-                          <span className="confirm">
-                            {changes === null ? (
-                              <button
-                                type="button"
-                                className="btn small"
-                                onClick={() => {
-                                  onEdit({ app: app.id, reference });
-                                }}
-                              >
-                                Edit<span className="visually-hidden"> {reference.name}</span>
-                              </button>
-                            ) : (
-                              // Its draft holds the changes, so editing goes on from there rather than from the saved one.
-                              <button
-                                type="button"
-                                className="btn small"
-                                onClick={() => {
-                                  onFinish(changes);
-                                }}
-                              >
-                                Finish draft<span className="visually-hidden"> of {reference.name}</span>
-                              </button>
-                            )}
+                          ) : (
+                            // Its draft holds the changes, so editing goes on from there rather than from the saved one.
                             <button
                               type="button"
                               className="btn small"
-                              title={used.length === 0 ? undefined : `${andList(used)} read with it`}
                               onClick={() => {
-                                setConfirming(key);
+                                onFinish(changes);
                               }}
                             >
-                              Delete
+                              Finish draft<span className="visually-hidden"> of {reference.name}</span>
                             </button>
-                          </span>
-                        )}
+                          )}
+                        </DeleteActions>
                       </td>
                     </tr>
                   );

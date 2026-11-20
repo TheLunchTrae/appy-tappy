@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import type { AppSummary, AutomationSummary, DraftSummary } from '../lib/bindings.ts';
 import { deleteAutomation, errorText, setAutomationEnabled } from '../lib/api.ts';
 import { actionText } from '../lib/actions.ts';
 import { COMPARISON_NAMES, type ValueChoice, findValue, targetText, valueChoices } from '../lib/automation.ts';
+import { DeleteActions } from '../components/DeleteActions.tsx';
 import { Hint } from '../components/Hint.tsx';
 import { RuntimeWarning } from '../components/RuntimeWarning.tsx';
 import { NEEDS_RUNNING_HINT } from '../lib/hints.ts';
@@ -42,19 +43,6 @@ function Row({
   const { automation, problem } = summary;
   const { when } = automation;
   const choice = findValue(choices, when);
-  const keepRef = useRef<HTMLButtonElement>(null);
-  const deleteRef = useRef<HTMLButtonElement>(null);
-  // Pressing Delete or Keep swaps the two buttons, so focus moves to the one that took the pressed one's place.
-  // Only this row's own press moves it: another row's confirm or a refresh leaves focus where it is.
-  const focusNext = useRef<'keep' | 'delete' | null>(null);
-  useEffect(() => {
-    if (focusNext.current === 'keep' && confirming) {
-      keepRef.current?.focus();
-    } else if (focusNext.current === 'delete' && !confirming) {
-      deleteRef.current?.focus();
-    }
-    focusNext.current = null;
-  }, [confirming]);
   const app = apps.find((candidate) => candidate.id === when.app);
   const running = (app?.windows.length ?? 0) > 0;
   return (
@@ -110,48 +98,24 @@ function Row({
         </span>
       </td>
       <td className="end">
-        {confirming ? (
-          <span className="confirm">
-            <button
-              ref={keepRef}
-              type="button"
-              className="btn small"
-              onClick={() => {
-                focusNext.current = 'delete';
-                onConfirm(false);
-              }}
-            >
-              Keep
+        <DeleteActions
+          name={automation.name}
+          actLabel="Delete automation"
+          confirming={confirming}
+          onConfirm={onConfirm}
+          onDelete={onDelete}
+        >
+          {onFinishDraft === null ? (
+            <button type="button" className="btn small" onClick={onEdit}>
+              Edit<span className="visually-hidden"> {automation.name}</span>
             </button>
-            <button type="button" className="btn small danger" onClick={onDelete}>
-              Delete automation
+          ) : (
+            // Its draft holds the changes, so editing goes on from there rather than from the saved one.
+            <button type="button" className="btn small" onClick={onFinishDraft}>
+              Finish draft<span className="visually-hidden"> of {automation.name}</span>
             </button>
-          </span>
-        ) : (
-          <span className="confirm">
-            {onFinishDraft === null ? (
-              <button type="button" className="btn small" onClick={onEdit}>
-                Edit<span className="visually-hidden"> {automation.name}</span>
-              </button>
-            ) : (
-              // Its draft holds the changes, so editing goes on from there rather than from the saved one.
-              <button type="button" className="btn small" onClick={onFinishDraft}>
-                Finish draft<span className="visually-hidden"> of {automation.name}</span>
-              </button>
-            )}
-            <button
-              ref={deleteRef}
-              type="button"
-              className="btn small"
-              onClick={() => {
-                focusNext.current = 'keep';
-                onConfirm(true);
-              }}
-            >
-              Delete
-            </button>
-          </span>
-        )}
+          )}
+        </DeleteActions>
       </td>
     </tr>
   );
