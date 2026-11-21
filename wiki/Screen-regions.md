@@ -129,8 +129,9 @@ touch one another, is a blend when it is thin, with few pixels that have
 the color on every side, and a quarter of its pixels have both of those
 colors within two pixels. A blend goes to the nearest color, so each pixel
 of an edge goes to the side it is mostly of, and a stroke is as wide at any
-size and at any fraction of a pixel. A color between two others takes a
-blend only where it is close by. Thin gray text beside white text on black
+size and at any fraction of a pixel. A color that lies within two others
+takes a blend only where it is close by. Thin gray text beside white text
+on black
 stays text: the white's edge passes through the gray, and only the pieces
 along that edge are blends. A color with blends and nothing else but pieces
 of fewer than 4 pixels (`SPECK`) is left out whole, so a lone mark that

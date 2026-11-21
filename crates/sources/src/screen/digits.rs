@@ -349,13 +349,14 @@ impl Attempt {
             })
             .filter(|(_, own)| own.start < columns.end && columns.start < own.end)
             .collect();
-        let (Some(&(_, first)), Some(&(_, last))) = (known.first(), known.last()) else {
-            return false;
-        };
-        let covered = last
-            .end
-            .min(columns.end)
-            .saturating_sub(first.start.max(columns.start));
+        let covered = known
+            .iter()
+            .map(|&(_, own)| {
+                own.end
+                    .min(columns.end)
+                    .saturating_sub(own.start.max(columns.start))
+            })
+            .fold(0, u32::saturating_add);
         let all = columns.end.saturating_sub(columns.start);
         !known.iter().any(|&(character, _)| in_a_number(character))
             && covered.saturating_mul(4) >= all.saturating_mul(3)
@@ -3286,6 +3287,47 @@ mod tests {
                 read: read_text("80000?"),
             })
         );
+    }
+
+    #[test]
+    fn white_text_beside_light_gray_text_is_never_read_without_one_of_its_digits() {
+        // Anti-aliased white and light gray text on a dark background,
+        // without outlines. The two colors are close, so the thin strokes
+        // of a white digit share the gray's color along their edges, and
+        // lie between no two colors: a digit dropped as a blend would
+        // leave a wrong number.
+        let reader = taught(28, &["01234", "56789"]);
+        let plain = |ink| Colors {
+            ink,
+            outline: [20, 20, 20],
+            background: [20, 20, 20],
+        };
+        let texts = [
+            ("37", "100", 37100.0),
+            ("100", "37", 10037.0),
+            ("74", "17", 7417.0),
+        ];
+        let gray = [210, 210, 210];
+        let read = |texts: (&str, &str), colors: (Bgr, Bgr), height| {
+            let parts = [(texts.0, plain(colors.0), 4), (texts.1, plain(colors.1), 4)];
+            reader.read(&in_a_row(&parts, height), false)
+        };
+        for height in [12, 14, 16] {
+            for (first, second, value) in texts {
+                let texts = (first, second);
+                let shown = Ok(number(value));
+                assert_eq!(
+                    read(texts, (WHITE, gray), height),
+                    shown,
+                    "{texts:?} at {height}"
+                );
+                assert_eq!(
+                    read(texts, (gray, WHITE), height),
+                    shown,
+                    "{texts:?} at {height}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -245,7 +245,9 @@ impl Layers {
                     .unwrap_or(NO_LAYER)
             })
             .collect();
-        // The colors that lie between no two others, a [`bit`] to each.
+        // The colors that lie within no two others, a [`bit`] to each:
+        // the lightest of white, gray, and black is one, though it is
+        // close enough to the gray to count as a blend a little past it.
         let ends = (0..colors.len())
             .zip(&colors)
             .filter(|&(place, &color)| {
@@ -255,11 +257,11 @@ impl Layers {
                         .filter(move |&(other, _)| other != place)
                 };
                 !others().any(|(one, &first)| {
-                    others().any(|(other, &second)| one < other && between(color, first, second))
+                    others().any(|(other, &second)| one < other && within(color, first, second))
                 })
             })
             .fold(0_u32, |ends, (place, _)| ends | bit(place));
-        // A blend goes to the nearest color. One that lies between two
+        // A blend goes to the nearest color. One that lies within two
         // others has to be close by to take it: the edge of white text on
         // black passes through the color of gray text elsewhere in the
         // image, and is no part of that text.
@@ -813,10 +815,25 @@ fn unmixed(pixel: Rgb, own: Rgb, met: Rgb, background: Rgb) -> Option<u8> {
     Some(u8::try_from(part.clamp(0, i64::from(u8::MAX))).unwrap_or(u8::MAX))
 }
 
+/// Whether `color` is a blend of `one` and `other`, or a little past
+/// either as the color of an edge's pixel can be: [`blend`] with
+/// [`BLEND_SLACK`] past.
+fn between(color: Rgb, one: Rgb, other: Rgb) -> bool {
+    blend(color, one, other, BLEND_SLACK)
+}
+
+/// Whether `color` lies within `one` and `other`, as the color of a whole
+/// edge does and the lightest or darkest of three colors does not:
+/// [`blend`] with nothing past.
+fn within(color: Rgb, one: Rgb, other: Rgb) -> bool {
+    blend(color, one, other, 0)
+}
+
 /// Whether `color` is a blend of `one` and `other`: it lies about as far
 /// from `one` toward `other` in each of red, green, and blue that tells
-/// the two apart, no further than they are, and keeps what they share.
-fn between(color: Rgb, one: Rgb, other: Rgb) -> bool {
+/// the two apart, no further `past` either than that many parts of 256
+/// of the way between them, and keeps what they share.
+fn blend(color: Rgb, one: Rgb, other: Rgb, past: i32) -> bool {
     let channels = [
         (color.red, one.red, other.red),
         (color.green, one.green, other.green),
@@ -842,8 +859,8 @@ fn between(color: Rgb, one: Rgb, other: Rgb) -> bool {
         least = least.min(along);
         most = most.max(along);
     }
-    least >= BLEND_SLACK.saturating_neg()
-        && most <= BLEND_SLACK.saturating_add(256)
+    least >= past.saturating_neg()
+        && most <= past.saturating_add(256)
         && most.saturating_sub(least) <= BLEND_SLACK
 }
 
@@ -968,5 +985,48 @@ fn spread(
                 reached.push(next);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const fn rgb(red: u8, green: u8, blue: u8) -> Rgb {
+        Rgb { red, green, blue }
+    }
+
+    #[test]
+    fn a_pixel_at_a_rows_end_has_no_neighbor_in_the_next_row() {
+        let neighbors = |at| {
+            let mut all = Vec::new();
+            visit(3, at, |next| all.push(next));
+            all
+        };
+        // The first and the last pixel of the middle row of three.
+        assert_eq!(neighbors(3), [3, 4, 0, 6]);
+        assert_eq!(neighbors(5), [5, 4, 2, 8]);
+    }
+
+    #[test]
+    fn two_colors_that_differ_by_just_enough_in_a_channel_tell_how_far_a_blend_lies() {
+        // Red differs by `TELLING` between the two, so a color as far past
+        // one of them as a blend may lie is a blend, though it is further
+        // from the other than colors that share a channel may be.
+        let (one, other) = (rgb(0, 0, 0), rgb(TELLING, 0, 0));
+        assert!(between(rgb(60, 0, 0), one, other));
+        assert!(!between(rgb(61, 0, 0), one, other));
+    }
+
+    #[test]
+    fn three_colors_just_far_enough_apart_are_told_apart() {
+        // The layer's color and the one it meets are each `TELLING` from
+        // the background, in different channels.
+        let (own, met, background) = (rgb(TELLING, 0, 0), rgb(0, TELLING, 0), rgb(0, 0, 0));
+        assert_eq!(unmixed(own, own, met, background), Some(u8::MAX));
+        assert_eq!(unmixed(met, own, met, background), Some(0));
+        // A color nearer the background than that, at 47, says nothing.
+        assert_eq!(unmixed(own, rgb(47, 0, 0), met, background), None);
+        assert_eq!(unmixed(own, own, rgb(0, 47, 0), background), None);
     }
 }
