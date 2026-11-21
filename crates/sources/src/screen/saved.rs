@@ -278,6 +278,37 @@ impl<'app> Readers<'app> {
         }
     }
 
+    /// The reader of the reference `id` for a number that reads
+    /// `characters`, or every character for `None`: with its glyphs for
+    /// the characters both the reference and the number read, chosen here
+    /// once, so a read matches against no others.
+    ///
+    /// # Errors
+    ///
+    /// Returns what [`Self::reader`] does, and
+    /// [`SavedError::NoCharacters`] when the reference has learned none of
+    /// those characters.
+    pub fn reading(
+        &mut self,
+        id: &str,
+        characters: Option<&str>,
+        picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
+    ) -> Result<DigitReader, SavedError> {
+        let own = self
+            .references
+            .iter()
+            .find(|known| known.id == id)
+            .and_then(|known| known.characters.as_deref());
+        self.reader(id, picture)?
+            .clone()
+            .reading(own)
+            .and_then(|reader| reader.reading(characters))
+            .ok_or_else(|| SavedError::NoCharacters {
+                id: id.to_owned(),
+                characters: characters.or(own).unwrap_or_default().to_owned(),
+            })
+    }
+
     /// These readers, with `learned` as the reader of the reference `id`,
     /// which must be what [`reader`] learns from that reference's pictures.
     /// A value that reads with it then learns nothing again, and its
@@ -400,9 +431,8 @@ fn place(region: RegionDef, size: SizeDef) -> Result<(Region, Size), SavedError>
     }
 }
 
-/// A number check that reads with the reference `id` among `readers`: with
-/// only its glyphs for `characters`, or with all of them for `None`. The
-/// glyphs are chosen here, once, so a read matches against no others.
+/// A number check that reads `characters` with the reference `id` among
+/// `readers`, as [`Readers::reading`] chooses its glyphs.
 fn number_check(
     readers: &mut Readers<'_>,
     id: &str,
@@ -410,14 +440,7 @@ fn number_check(
     characters: Option<&str>,
     picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Result<Check, SavedError> {
-    let reader = readers
-        .reader(id, picture)?
-        .clone()
-        .reading(characters)
-        .ok_or_else(|| SavedError::NoCharacters {
-            id: id.to_owned(),
-            characters: characters.unwrap_or_default().to_owned(),
-        })?;
+    let reader = readers.reading(id, characters, picture)?;
     Ok(Check::Number { reader, whole })
 }
 
@@ -1012,6 +1035,7 @@ mod tests {
                 image: sample_name("counter", 1),
                 text: text.to_owned(),
             }],
+            characters: None,
         }
     }
 
@@ -1065,6 +1089,7 @@ mod tests {
             }),
             tolerance: 40,
             samples,
+            characters: None,
         };
         let value = ScreenDef {
             window_size: SizeDef {
@@ -1371,6 +1396,35 @@ mod tests {
             "its reference counter knows none of the characters it needs, \"%\""
         );
         assert!(error.source().is_none());
+        // A reference that reads only digits reads them for a number that
+        // names none, and a number reads none it leaves out.
+        let digits = || {
+            let mut reference = counter("O0");
+            reference.characters = Some("0123456789".to_owned());
+            reference
+        };
+        let read_digits = |characters: Option<&str>| {
+            build(
+                &number(characters),
+                &mut Readers::new(&[digits()]),
+                OFTEN,
+                from(&files),
+            )
+        };
+        assert_eq!(
+            read_digits(None)
+                .expect("builds")
+                .drawn
+                .check
+                .read(&rings(&[10])),
+            zero
+        );
+        assert_eq!(
+            read_digits(Some("O"))
+                .expect_err("the reference reads no letter")
+                .to_string(),
+            "its reference counter knows none of the characters it needs, \"O\""
+        );
         // A fix that reads with its own reference reads the same characters
         // of it.
         let mut fixed = number(Some("0"));

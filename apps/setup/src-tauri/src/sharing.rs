@@ -502,6 +502,7 @@ mod tests {
                     text: "11".to_owned(),
                 })
                 .collect(),
+            characters: None,
         }
     }
 

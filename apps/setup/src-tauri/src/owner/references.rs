@@ -49,6 +49,11 @@ pub(crate) struct ReferenceSettingsSpec {
     /// saving it removes.
     #[serde(default)]
     pub(crate) dropped: Vec<String>,
+    /// The characters the reference reads, or `None` for every character
+    /// it learns.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub(crate) characters: Option<String>,
 }
 
 /// How a saved reference is saved again, which decides the tolerance it
@@ -238,8 +243,8 @@ impl<H: Host> Owner<H> {
             .map(|picture| pixels::rgba(&picture, max_width))
     }
 
-    /// Saves the settings `spec` gives a saved reference, its name and its
-    /// text color and tolerance, and says where it is saved. Its samples
+    /// Saves the settings `spec` gives a saved reference, its name, the
+    /// characters it reads, and its text color and tolerance, and says where it is saved. Its samples
     /// stay as they are but for those `spec` leaves out, so this needs no
     /// screenshot and no picked window. The reference must still learn
     /// every sample it keeps with the new text color and tolerance.
@@ -256,7 +261,7 @@ impl<H: Host> Owner<H> {
             named_apart(&found.file, id, name)?;
             let changed = reference_of(found, id)?
                 .without(&spec.dropped)
-                .with_settings(name, spec.ink, spec.tolerance)
+                .with_settings(name, spec.characters.as_deref(), spec.ink, spec.tolerance)
                 .map_err(|error| error.to_string())?;
             let answer = SavedReferenceId {
                 app: app.clone(),
@@ -775,6 +780,7 @@ mod tests {
             ink,
             tolerance: 10,
             dropped: Vec::new(),
+            characters: None,
         };
         let red = before.ink;
         let save = |harness: &mut Harness, spec: ReferenceSettingsSpec| {
@@ -956,6 +962,7 @@ mod tests {
             ink,
             tolerance: 0,
             dropped: dropped.to_vec(),
+            characters: None,
         };
         harness
             .ask(|owner| owner.save_reference(&in_gray("")))

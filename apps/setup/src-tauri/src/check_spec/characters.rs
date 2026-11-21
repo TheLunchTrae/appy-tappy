@@ -22,8 +22,8 @@ use crate::words::sentence;
 
 use super::error::{Lesson, cant_learn};
 use super::{
-    Cut, Pictures, ReferenceRef, SpecError, contrast, cut, drawn, ink_rule, same_size, size_of,
-    to_region,
+    Cut, Pictures, ReferenceRef, SpecError, contrast, cut, drawn, expected_characters, ink_rule,
+    same_size, size_of, to_region,
 };
 
 /// The ID a reference is taught under before it is saved under its own.
@@ -88,6 +88,12 @@ pub(crate) struct CharactersSpec {
     /// out, which saving it removes.
     #[serde(default)]
     pub(crate) dropped: Vec<String>,
+    /// The characters the reference reads, or `None` for every character
+    /// it learns. The reference saves each once, in order, as
+    /// [`expected_characters`] lists them.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub(crate) characters: Option<String>,
 }
 
 /// A saved sample a reference cannot learn with the text color and
@@ -117,9 +123,10 @@ pub(crate) struct SavedReference {
 }
 
 impl SavedReference {
-    /// The reference as it is saved under the name `name`, with the text
-    /// color `ink`, or none to find its characters by contrast, and the
-    /// tolerance `tolerance`. Its samples stay as they are saved, so no
+    /// The reference as it is saved under the name `name`, reading
+    /// `characters`, or every character it learns for `None`, with the
+    /// text color `ink`, or none to find its characters by contrast, and
+    /// the tolerance `tolerance`. Its samples stay as they are saved, so no
     /// screenshot is needed, and it learns them back with the new text
     /// color and tolerance. Without a text color, the tolerance is the one
     /// [`contrast::fitted`] chooses from those samples: `tolerance` while
@@ -132,6 +139,7 @@ impl SavedReference {
     pub(crate) fn with_settings(
         self,
         name: &str,
+        characters: Option<&str>,
         ink: Option<ColorDef>,
         tolerance: u8,
     ) -> Result<ReferenceDef, SpecError> {
@@ -140,6 +148,7 @@ impl SavedReference {
         }
         let reference = ReferenceDef {
             name: name.to_owned(),
+            characters: expected_characters(characters.unwrap_or_default()),
             ink,
             tolerance: self.settled_tolerance(ink, tolerance),
             ..self.reference.clone()
@@ -476,6 +485,7 @@ impl CharactersSpec {
             ink: self.ink,
             tolerance: self.tolerance,
             samples,
+            characters: expected_characters(self.characters.as_deref().unwrap_or_default()),
         };
         let reader = learned(&reference, &pictures, self.labels.len(), &kept)?;
         Ok(Taught {

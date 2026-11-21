@@ -103,6 +103,7 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
                 image: sample_name("digits", 1),
                 text: "1".to_owned(),
             }],
+            characters: None,
         },
         pictures: vec![(
             sample_name("digits", 1),
@@ -156,6 +157,7 @@ fn characters(
         labels,
         recorded,
         dropped: Vec::new(),
+        characters: None,
     }
 }
 
@@ -420,6 +422,33 @@ fn characters_being_taught_read_as_their_saved_reference_does() {
 }
 
 #[test]
+fn a_reference_saves_the_characters_it_reads_listed_once_in_order() {
+    let reads = |list: Option<&str>| CharactersSpec {
+        characters: list.map(str::to_owned),
+        ..characters(left(), None, one(0), Vec::new())
+    };
+    let taught = |list| {
+        teach(&reads(list), session(&[screenshot()], None))
+            .expect("learns the 1")
+            .reference
+            .characters
+    };
+    assert_eq!(taught(Some(" %1 0%")), Some("01%".to_owned()));
+    assert_eq!(taught(Some(" \t")), None, "blank reads every character");
+    assert_eq!(taught(None), None);
+    let saved = digits(&digits_ref()).expect("saved");
+    let settings = |list| {
+        saved
+            .clone()
+            .with_settings("Digits", list, Some(RED), 0)
+            .expect("learns its samples")
+            .characters
+    };
+    assert_eq!(settings(Some("9 1")), Some("19".to_owned()));
+    assert_eq!(settings(None), None);
+}
+
+#[test]
 fn a_saved_reference_is_relearned_in_the_color_being_tried() {
     // The saved reference learned red characters. Tried in gray, its saved
     // sample is the gray half's shape, which the red square shows none of.
@@ -568,10 +597,14 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
     assert!(
         two.clone()
             .without(&named)
-            .with_settings("Digits", Some(RED), 0)
+            .with_settings("Digits", None, Some(RED), 0)
             .is_ok()
     );
-    assert!(two.clone().with_settings("Digits", Some(RED), 0).is_err());
+    assert!(
+        two.clone()
+            .with_settings("Digits", None, Some(RED), 0)
+            .is_err()
+    );
 
     // A picture that is gone cannot be learned, and can be left out.
     two.pictures.remove(1);
@@ -624,7 +657,7 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
     assert_eq!(
         saved
             .without(&[sample_name("digits", 1)])
-            .with_settings("Digits", Some(RED), 0),
+            .with_settings("Digits", None, Some(RED), 0),
         Err(SpecError::NoLabels)
     );
 }
@@ -750,7 +783,7 @@ fn a_saved_reference_that_loses_its_text_color_takes_a_tolerance_its_samples_rea
             shadowed().encode_png().expect("encodes"),
         )],
     };
-    let settings = |ink, tolerance| saved().with_settings("Digits", ink, tolerance);
+    let settings = |ink, tolerance| saved().with_settings("Digits", None, ink, tolerance);
     // The shadow between the strokes is ink at 40, so they read as one
     // character there.
     let by_contrast = settings(None, 40).expect("learns the strokes");
@@ -1067,6 +1100,7 @@ fn the_ui_describes_checks_in_camel_case_json() {
             }],
             recorded: Vec::new(),
             dropped: Vec::new(),
+            characters: None,
         }
     );
     let json = r#"{"kind":"number","region":{"x":0,"y":0,"width":2,"height":2},
@@ -1126,6 +1160,7 @@ fn a_new_reference_names_one_picture_per_label() {
                 image: "ref-digits-1.png".to_owned(),
                 text: "1".to_owned(),
             }],
+            characters: None,
         }
     );
     let pictures = taught.pictures;

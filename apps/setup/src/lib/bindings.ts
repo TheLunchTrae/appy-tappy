@@ -462,7 +462,13 @@ recorded: Array<RecordedLabel>,
  * The picture file names of the saved samples the reference leaves
  * out, which saving it removes.
  */
-dropped: Array<string>, }>;
+dropped: Array<string>,
+/**
+ * The characters the reference reads, or `None` for every character
+ * it learns. The reference saves each once, in order, as
+ * [`expected_characters`] lists them.
+ */
+characters?: string, }>;
 
 /**
  * How many times fall in each bar of a chart.
@@ -503,16 +509,16 @@ whole: boolean,
 /**
  * The characters the value needs of its reference, such as
  * `0123456789%`, or `None` for every character its reference
- * knows. A reference is a font that may know more than one value
- * shows, so each value says what it needs. The setup app also
- * shows which of them the reference has yet to learn.
+ * reads. A reference may read more than one value shows, so each
+ * value says what it needs. The setup app also shows which of
+ * them the reference has yet to learn.
  *
  * The value matches what it sees against these characters alone,
  * so a value that shows only digits cannot read a `0` as an `O`
  * its reference also knows. Whitespace does not count, as in a
  * label, and neither does a character the reference has yet to
- * learn. A fix that reads with its own reference reads these
- * characters of it.
+ * learn or does not read. A fix that reads with its own reference
+ * reads these characters of it.
  */
 characters?: string, } | { "kind": "barFill",
 /**
@@ -1658,8 +1664,10 @@ shapes: Array<RecordedShape>, }>;
  * characters from the background by contrast with the background, or by
  * their color when it has a text color.
  *
- * It is a font and no more: which of its characters a value needs is the
- * value's to say, in its number check.
+ * It reads only the characters it is made for, such as the digits and
+ * `%`, so text on screen with other characters can't pass for its own.
+ * Each value that reads with it may need fewer of them, in its number
+ * check.
  */
 export type ReferenceDef = DeepReadonly<{
 /**
@@ -1691,7 +1699,16 @@ tolerance: number,
 /**
  * The pictures it learns from.
  */
-samples: Array<SampleDef>, }>;
+samples: Array<SampleDef>,
+/**
+ * The characters it reads, such as `0123456789%`, or `None` for every
+ * character it learns. It still learns every character its pictures
+ * show, and one it learns but doesn't read still counts as a
+ * character, not as a shape it has yet to learn. A number check reads
+ * only the characters both it and its reference read. Whitespace does
+ * not count, as in a label.
+ */
+characters?: string, }>;
 
 /**
  * A saved reference of a saved application.
@@ -1750,7 +1767,12 @@ tolerance: number,
  * The picture file names of the saved samples it leaves out, which
  * saving it removes.
  */
-dropped: Array<string>, }>;
+dropped: Array<string>,
+/**
+ * The characters the reference reads, or `None` for every character
+ * it learns.
+ */
+characters?: string, }>;
 
 /**
  * A reference being taught to try on the live window before it is saved,
