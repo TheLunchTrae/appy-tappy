@@ -12,7 +12,7 @@ use appytappy_config::app_file::{
 use appytappy_config::names::sample_name;
 use appytappy_config::signal::Number;
 use appytappy_sources::screen::check::ImageMatch;
-use appytappy_sources::screen::digits::{InkRule, LearnError};
+use appytappy_sources::screen::digits::{self, LearnError};
 use appytappy_sources::screen::saved::{self, SavedError};
 
 use super::characters::{RecordedLabel, Taught, UnlearnedSample};
@@ -82,12 +82,64 @@ fn left() -> RegionDef {
     }
 }
 
+/// An 8 by 6 gray image with two red strokes, each 2 wide and 4 tall with
+/// gray all around it: two characters of one shape.
+fn page() -> Image {
+    let red = [0, 0, 255, 0];
+    let gray = [40, 40, 40, 0];
+    let blank = [gray; 8].concat();
+    let strokes = [gray, red, red, gray, gray, red, red, gray].concat();
+    Image::new(
+        Size {
+            width: 8,
+            height: 6,
+        },
+        [
+            blank.clone(),
+            strokes.clone(),
+            strokes.clone(),
+            strokes.clone(),
+            strokes,
+            blank,
+        ]
+        .concat(),
+    )
+    .expect("matching length")
+}
+
+/// The half of [`page`] with its first stroke.
+fn first() -> RegionDef {
+    RegionDef {
+        x: 0,
+        y: 0,
+        width: 4,
+        height: 6,
+    }
+}
+
+/// The half of [`page`] with its second stroke.
+fn second() -> RegionDef {
+    RegionDef {
+        x: 4,
+        y: 0,
+        width: 4,
+        height: 6,
+    }
+}
+
+/// The first half of [`page`] on its own, a narrower window.
+fn narrow() -> Image {
+    page()
+        .crop(Region::new(0, 0, 4, 6).expect("not empty"))
+        .expect("inside")
+}
+
 fn no_references(_reference: &ReferenceRef) -> Result<SavedReference, String> {
     Err("That reference is not saved.".to_owned())
 }
 
-/// The saved reference `digits` of the application `app`: red
-/// characters, the red square of [`screenshot`] being a `1`.
+/// The saved reference `digits` of the application `app`: the first
+/// stroke of [`page`] is a `1`.
 fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
     if (reference.app.as_str(), reference.id.as_str()) != ("app", "digits") {
         return no_references(reference);
@@ -97,8 +149,6 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: Some(RED),
-            tolerance: 0,
             samples: vec![SampleDef {
                 image: sample_name("digits", 1),
                 text: "1".to_owned(),
@@ -106,11 +156,7 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
         },
         pictures: vec![(
             sample_name("digits", 1),
-            screenshot()
-                .crop(Region::new(0, 0, 2, 2).expect("not empty"))
-                .expect("inside")
-                .encode_png()
-                .expect("encodes"),
+            narrow().encode_png().expect("encodes"),
         )],
     })
 }
@@ -151,8 +197,6 @@ fn characters(
         region,
         screenshot: 0,
         reference,
-        ink: Some(RED),
-        tolerance: 0,
         labels,
         recorded,
         dropped: Vec::new(),
@@ -394,14 +438,19 @@ fn a_number_is_saved_with_its_applications_reference() {
 
 #[test]
 fn characters_being_taught_read_as_their_saved_reference_does() {
-    let spec = characters(left(), None, one(0), Vec::new());
-    let taught = teach(&spec, session(&[screenshot()], None)).expect("learns the 1");
-    assert_eq!(taught.region, Region::new(0, 0, 2, 2).expect("not empty"));
-    assert_eq!(taught.window_size, screenshot().size());
-    let red_square = screenshot().crop(taught.region).expect("inside");
+    let spec = characters(first(), None, one(0), Vec::new());
+    let taught = teach(&spec, session(&[page()], None)).expect("learns the 1");
+    assert_eq!(taught.region, Region::new(0, 0, 4, 6).expect("not empty"));
+    assert_eq!(taught.window_size, page().size());
+    let stroke = digits::cut(&page(), taught.region).expect("inside");
     assert_eq!(
-        taught.reader.read(&red_square, false),
+        taught.reader.read(&stroke, false),
         Ok(Number::new(1.0).expect("finite"))
+    );
+    assert_eq!(
+        taught.reader.read(&page(), false),
+        Ok(Number::new(11.0).expect("finite")),
+        "one box teaches the shape wherever it shows"
     );
     // The file and its pictures give the runtime the same reader.
     let from_file = saved::reader(&taught.reference, |picture| {
@@ -415,21 +464,74 @@ fn characters_being_taught_read_as_their_saved_reference_does() {
     .expect("learns from the file");
     assert_eq!(from_file, taught.reader);
     // A saved reference teaches on its own, with no new label.
-    let saved_only = characters(left(), Some(digits_ref()), Vec::new(), Vec::new());
-    assert!(teach(&saved_only, session(&[screenshot()], None)).is_ok());
+    let saved_only = characters(first(), Some(digits_ref()), Vec::new(), Vec::new());
+    assert!(teach(&saved_only, session(&[page()], None)).is_ok());
+    // A box as tight as the stroke learns it too: the sample is cut with
+    // the pixels around the box, which are its background.
+    let tight = characters(
+        first(),
+        None,
+        vec![Label {
+            screenshot: 0,
+            region: Some(RegionDef {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 4,
+            }),
+            text: "1".to_owned(),
+        }],
+        Vec::new(),
+    );
+    let taught = teach(&tight, session(&[page()], None)).expect("learns the tight box");
+    let [(_, picture)] = taught.pictures.as_slice() else {
+        panic!("one sample, not {:?}", taught.pictures.len());
+    };
+    assert_eq!(
+        Image::decode_png(picture)
+            .ok()
+            .map(|picture| picture.size()),
+        Some(Size {
+            width: 4,
+            height: 6
+        })
+    );
+}
+
+/// The second stroke of [`page`], labeled `text`.
+fn second_box(text: &str) -> Vec<Label> {
+    vec![Label {
+        screenshot: 0,
+        region: Some(second()),
+        text: text.to_owned(),
+    }]
+}
+
+/// [`digits`], its saved picture of one stroke labeled as two characters,
+/// which no reference learns.
+fn miscounted(reference: &ReferenceRef) -> Result<SavedReference, String> {
+    let mut saved = digits(reference)?;
+    if let Some(sample) = saved.reference.samples.first_mut() {
+        "12".clone_into(&mut sample.text);
+    }
+    Ok(saved)
 }
 
 #[test]
-fn a_saved_reference_is_relearned_in_the_color_being_tried() {
-    // The saved reference learned red characters. Tried in gray, its saved
-    // sample is the gray half's shape, which the red square shows none of.
-    let gray = CharactersSpec {
-        ink: Some(GRAY),
-        ..characters(whole(), Some(digits_ref()), Vec::new(), Vec::new())
+fn a_saved_sample_the_reference_leaves_out_is_not_learned_or_saved() {
+    let shots = [page()];
+    let session = Session {
+        screenshots: &shots,
+        recording: None,
+        references: &miscounted,
     };
-    let error = teach(&gray, session(&[screenshot()], None)).expect_err("no gray in the sample");
+    let picture = sample_name("digits", 1);
+    // The saved sample teaches nothing, and a new box does not help: the
+    // save is refused over a picture no box shows.
+    let kept = characters(first(), Some(digits_ref()), second_box("2"), Vec::new());
+    let error = teach(&kept, session).expect_err("one stroke, two characters");
     assert!(
-        matches!(&error, SpecError::SavedLearn { text, .. } if text == "1"),
+        matches!(&error, SpecError::SavedLearn { text, .. } if text == "12"),
         "{error:?}"
     );
     // The reference is taught in its own editor, which lists the picture
@@ -437,46 +539,15 @@ fn a_saved_reference_is_relearned_in_the_color_being_tried() {
     // to open.
     assert_eq!(
         error.to_string(),
-        "Can't learn from its saved picture of \"1\": nothing in it stands out from its \
-         background, or has the reference's text color. Remove it under Saved pictures it \
-         can't learn, or change the text color."
+        "Can't learn from its saved picture of \"12\": it shows 1 character but the text has \
+         2. Characters that touch count as one. Remove it under Saved pictures it can't learn."
     );
     assert!(error.source().is_some());
-}
-
-/// The gray half of [`screenshot`], labeled `text`.
-fn gray_half(text: &str) -> Vec<Label> {
-    vec![Label {
-        screenshot: 0,
-        region: Some(RegionDef {
-            x: 2,
-            y: 0,
-            width: 2,
-            height: 2,
-        }),
-        text: text.to_owned(),
-    }]
-}
-
-#[test]
-fn a_saved_sample_the_reference_leaves_out_is_not_learned_or_saved() {
-    let shots = [screenshot()];
-    let picture = sample_name("digits", 1);
-    // In gray the saved red sample teaches nothing, and a new box does not
-    // help: the save is refused over a picture no box shows.
-    let gray = CharactersSpec {
-        ink: Some(GRAY),
-        ..characters(whole(), Some(digits_ref()), gray_half("2"), Vec::new())
-    };
-    assert!(matches!(
-        teach(&gray, session(&shots, None)),
-        Err(SpecError::SavedLearn { .. })
-    ));
     let dropped = CharactersSpec {
         dropped: vec![picture.clone()],
-        ..gray.clone()
+        ..kept.clone()
     };
-    let taught = teach(&dropped, session(&shots, None)).expect("learns the box alone");
+    let taught = teach(&dropped, session).expect("learns the box alone");
     assert_eq!(
         taught.reference.samples,
         [SampleDef {
@@ -489,66 +560,59 @@ fn a_saved_sample_the_reference_leaves_out_is_not_learned_or_saved() {
         panic!("one new picture, not {:?}", taught.pictures.len());
     };
     assert_eq!(name, &taught.reference.samples[0].image);
-    let gray_square = screenshot()
-        .crop(Region::new(2, 0, 2, 2).expect("not empty"))
+    let boxed = page()
+        .crop(Region::new(3, 0, 5, 6).expect("not empty"))
         .expect("inside");
     assert_eq!(
         Some(png),
-        gray_square.encode_png().ok().as_ref(),
-        "the new picture is the box, not the sample it replaces"
+        boxed.encode_png().ok().as_ref(),
+        "the new picture is the box with the pixels around it, not the sample it replaces"
     );
-    // The fit and the judging of more labels leave it out too.
+    // The judging of more labels leaves it out too.
     assert_eq!(
-        dropped.label_problems(session(&shots, None), &gray_half("2")),
+        dropped.label_problems(session, &second_box("2")),
         Ok(vec![None])
     );
-    assert!(
-        gray.label_problems(session(&shots, None), &gray_half("2"))
-            .is_err()
-    );
+    assert!(kept.label_problems(session, &second_box("2")).is_err());
     // A name the reference has no sample of leaves nothing out.
     let other = CharactersSpec {
         dropped: vec![sample_name("digits", 7)],
-        ..gray
+        ..kept
     };
-    assert!(teach(&other, session(&shots, None)).is_err());
+    assert!(teach(&other, session).is_err());
     // With every sample left out and nothing new, there is nothing to
     // learn from.
     let nothing = CharactersSpec {
         dropped: vec![picture],
-        ..characters(whole(), Some(digits_ref()), Vec::new(), Vec::new())
+        ..characters(first(), Some(digits_ref()), Vec::new(), Vec::new())
     };
-    assert_eq!(
-        teach(&nothing, session(&shots, None)).err(),
-        Some(SpecError::NoLabels)
-    );
+    assert_eq!(teach(&nothing, session).err(), Some(SpecError::NoLabels));
 }
 
 #[test]
 fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
     let saved = digits(&digits_ref()).expect("saved");
-    assert_eq!(saved.unlearned(Some(RED), 0), []);
+    assert_eq!(saved.unlearned(), []);
     let unlearned = |problem: &str| UnlearnedSample {
         image: sample_name("digits", 1),
         text: "1".to_owned(),
         problem: problem.to_owned(),
         missing: false,
     };
+    // A picture of one plain color shows no character.
+    let mut plain = saved.clone();
+    plain.pictures[0].1 = screenshot()
+        .crop(Region::new(0, 0, 2, 2).expect("not empty"))
+        .and_then(|red| red.encode_png().ok())
+        .expect("encodes");
     assert_eq!(
-        saved.unlearned(Some(GRAY), 0),
-        [unlearned(
-            "Nothing in it stands out from its background, or has the reference's text color."
-        )]
+        plain.unlearned(),
+        [unlearned("Nothing in it stands out from its background.")]
     );
-    // By contrast the plain red square shows no character either, and the
-    // settings saved for it fit no tolerance that helps.
-    assert_eq!(saved.unlearned(None, 40).len(), 1);
-    assert_eq!(saved.unlearned_with_settings(None, 40).len(), 1);
-    assert_eq!(saved.unlearned_with_settings(Some(RED), 0), []);
 
     // A sample after one that cannot be learned is judged without it: the
-    // second red square is a 1 like the first would be, were it learned
-    // as a 7.
+    // second stroke is a 1 like the first would be, were it learned as a
+    // 7.
     let second = sample_name("digits", 2);
     let mut two = saved.clone();
     two.reference.samples[0].text = "77".to_owned();
@@ -559,24 +623,19 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
     two.pictures
         .push((second.clone(), saved.pictures[0].1.clone()));
     let named: Vec<String> = two
-        .unlearned(Some(RED), 0)
+        .unlearned()
         .into_iter()
         .map(|sample| sample.image)
         .collect();
     assert_eq!(named, [sample_name("digits", 1)]);
     // Without the samples it names, the reference learns every sample.
-    assert!(
-        two.clone()
-            .without(&named)
-            .with_settings("Digits", Some(RED), 0)
-            .is_ok()
-    );
-    assert!(two.clone().with_settings("Digits", Some(RED), 0).is_err());
+    assert!(two.clone().without(&named).renamed("Digits").is_ok());
+    assert!(two.clone().renamed("Digits").is_err());
 
     // A picture that is gone cannot be learned, and can be left out.
     two.pictures.remove(1);
     assert_eq!(
-        two.unlearned(Some(RED), 0)
+        two.unlearned()
             .into_iter()
             .map(|sample| (sample.image, sample.problem, sample.missing))
             .collect::<Vec<_>>(),
@@ -607,8 +666,8 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
         }),
         Some(
             "Digits can't learn from its saved picture of \"77\": nothing in it stands out from \
-             its background, or has the reference's text color. Edit Digits and remove that \
-             picture under Saved pictures it can't learn, or change its text color."
+             its background. Edit Digits and remove that picture under Saved pictures it can't \
+             learn."
                 .to_owned()
         )
     );
@@ -622,144 +681,8 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
     );
     // A reference left with no sample has nothing to learn from.
     assert_eq!(
-        saved
-            .without(&[sample_name("digits", 1)])
-            .with_settings("Digits", Some(RED), 0),
+        saved.without(&[sample_name("digits", 1)]).renamed("Digits"),
         Err(SpecError::NoLabels)
-    );
-}
-
-/// A 5 by 5 screenshot, black but for two strokes of 200 with a shadow of
-/// 60 between them: two characters by contrast at the tolerances 60 to
-/// 199.
-fn shadowed() -> Image {
-    let blank = [0_u8; 5];
-    let strokes = [0, 200, 60, 200, 0];
-    let bgra = [blank, strokes, strokes, strokes, blank]
-        .concat()
-        .into_iter()
-        .flat_map(|gray| [gray, gray, gray, 0])
-        .collect();
-    Image::new(
-        Size {
-            width: 5,
-            height: 5,
-        },
-        bgra,
-    )
-    .expect("matching length")
-}
-
-#[test]
-fn a_reference_by_contrast_takes_a_tolerance_its_samples_read_with() {
-    let shots = [shadowed()];
-    let all = RegionDef {
-        x: 0,
-        y: 0,
-        width: 5,
-        height: 5,
-    };
-    let spec = |reference, ink, tolerance| CharactersSpec {
-        ink,
-        tolerance,
-        ..characters(
-            all,
-            reference,
-            vec![Label {
-                screenshot: 0,
-                region: None,
-                text: "11".to_owned(),
-            }],
-            Vec::new(),
-        )
-    };
-    let fitted = |spec: CharactersSpec| spec.contrast_tolerance(session(&shots, None));
-    assert_eq!(fitted(spec(None, None, 40)), Ok(128));
-    assert_eq!(fitted(spec(None, None, 100)), Ok(100), "it reads as it is");
-    assert_eq!(
-        fitted(spec(None, Some(RED), 40)),
-        Ok(40),
-        "a text color's tolerance is the user's to set"
-    );
-    // The saved reference's sample is one plain color, which shows no
-    // character by contrast, whatever the tolerance, so the box alone
-    // chooses it.
-    assert_eq!(fitted(spec(Some(digits_ref()), None, 40)), Ok(128));
-    assert_eq!(
-        fitted(CharactersSpec {
-            screenshot: 3,
-            ..spec(None, None, 40)
-        }),
-        Err(SpecError::NoScreenshot)
-    );
-    // The reference is saved without a text color, and reads by contrast.
-    let taught = teach(&spec(None, None, 128), session(&shots, None)).expect("learns the 1");
-    assert_eq!(taught.reference.ink, None);
-    assert_eq!(taught.reference.tolerance, 128);
-    assert_eq!(
-        taught.reader.read(&shadowed(), false),
-        Ok(Number::new(11.0).expect("finite"))
-    );
-    assert!(teach(&spec(None, None, 40), session(&shots, None)).is_err());
-    // A box as tight as the strokes learns them too: the sample is cut
-    // with the pixels around the box, which are its background.
-    let tight = CharactersSpec {
-        labels: vec![Label {
-            screenshot: 0,
-            region: Some(RegionDef {
-                x: 1,
-                y: 1,
-                width: 3,
-                height: 3,
-            }),
-            text: "11".to_owned(),
-        }],
-        ..spec(None, None, 128)
-    };
-    let taught = teach(&tight, session(&shots, None)).expect("learns the tight box");
-    let [(_, picture)] = taught.pictures.as_slice() else {
-        panic!("one sample, not {:?}", taught.pictures.len());
-    };
-    assert_eq!(
-        Image::decode_png(picture)
-            .ok()
-            .map(|picture| picture.size()),
-        Some(shadowed().size())
-    );
-}
-
-#[test]
-fn a_saved_reference_that_loses_its_text_color_takes_a_tolerance_its_samples_read_with() {
-    let white = ColorDef {
-        red: 200,
-        green: 200,
-        blue: 200,
-    };
-    let saved = || SavedReference {
-        reference: ReferenceDef {
-            ink: Some(white),
-            tolerance: 10,
-            samples: vec![SampleDef {
-                image: sample_name("digits", 1),
-                text: "11".to_owned(),
-            }],
-            ..digits(&digits_ref()).expect("saved").reference
-        },
-        pictures: vec![(
-            sample_name("digits", 1),
-            shadowed().encode_png().expect("encodes"),
-        )],
-    };
-    let settings = |ink, tolerance| saved().with_settings("Digits", ink, tolerance);
-    // The shadow between the strokes is ink at 40, so they read as one
-    // character there.
-    let by_contrast = settings(None, 40).expect("learns the strokes");
-    assert_eq!((by_contrast.ink, by_contrast.tolerance), (None, 128));
-    assert_eq!(settings(None, 100).map(|saved| saved.tolerance), Ok(100));
-    // A text color's tolerance is the user's to set.
-    assert_eq!(
-        settings(Some(white), 10).map(|saved| saved.tolerance),
-        Ok(10)
     );
 }
 
@@ -770,13 +693,13 @@ fn a_saved_sample_without_its_picture_says_how_to_recover() {
         saved.pictures.clear();
         Ok(saved)
     };
-    let screenshots = [screenshot()];
+    let screenshots = [page()];
     let session = Session {
         screenshots: &screenshots,
         recording: None,
         references: &bare,
     };
-    let spec = characters(left(), Some(digits_ref()), Vec::new(), Vec::new());
+    let spec = characters(first(), Some(digits_ref()), Vec::new(), Vec::new());
     assert_eq!(
         teach(&spec, session)
             .expect_err("a sample is gone")
@@ -787,11 +710,11 @@ fn a_saved_sample_without_its_picture_says_how_to_recover() {
     // Left out, it stops nothing.
     let without = CharactersSpec {
         dropped: vec![sample_name("digits", 1)],
-        ..characters(left(), Some(digits_ref()), one(0), Vec::new())
+        ..characters(first(), Some(digits_ref()), one(0), Vec::new())
     };
     assert!(teach(&without, session).is_ok());
     let gone = characters(
-        left(),
+        first(),
         Some(ReferenceRef {
             app: "app".to_owned(),
             id: "gone".to_owned(),
@@ -884,24 +807,13 @@ fn mistakes_come_back_as_errors_the_user_can_fix() {
 
 #[test]
 fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
-    let small = Image::new(
-        Size {
-            width: 2,
-            height: 2,
-        },
-        [0, 0, 255, 0].repeat(4),
-    )
-    .expect("matching length");
-    let screenshots = [screenshot(), small.clone()];
+    let small = narrow();
+    let screenshots = [page(), small.clone()];
     let now = std::time::Instant::now();
-    let region = Region::new(0, 0, 2, 2).expect("not empty");
+    let region = Region::new(0, 0, 4, 6).expect("not empty");
     let mut recording = Recording::new(
         Ticket::numbered(1),
         region,
-        InkRule::Color {
-            color: RED.into(),
-            tolerance: 0,
-        },
         (small.size(), Follows::Drawn),
         now,
     );
@@ -910,24 +822,24 @@ fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
         reading: 0,
         text: "1".to_owned(),
     }];
-    let labeled_both = characters(left(), None, [one(0), one(1)].concat(), Vec::new());
+    let labeled_both = characters(first(), None, [one(0), one(1)].concat(), Vec::new());
     let error = teach(&labeled_both, session(&screenshots, None)).expect_err("two sizes");
     assert_eq!(
         error.to_string(),
-        "Screenshot 2, which a box is on, is 2x2, but the reference reads on screenshot 1, \
-         which is 4x2. Delete its boxes, or draw them on a screenshot of that size."
+        "Screenshot 2, which a box is on, is 4x6, but the reference reads on screenshot 1, \
+         which is 8x6. Delete its boxes, or draw them on a screenshot of that size."
     );
-    let recorded_elsewhere = characters(left(), None, one(0), kept.clone());
+    let recorded_elsewhere = characters(first(), None, one(0), kept.clone());
     assert_eq!(
         teach(&recorded_elsewhere, session(&screenshots, Some(&recording)))
             .expect_err("recorded at another size")
             .to_string(),
-        "The recording is of a window of 2x2, but the reference reads on screenshot 1, \
-         which is 4x2. Use its settings, or discard the recording."
+        "The recording is of a window of 4x6, but the reference reads on screenshot 1, \
+         which is 8x6. Use its settings, or discard the recording."
     );
     let drawn_on_small = CharactersSpec {
         screenshot: 1,
-        ..characters(left(), None, one(1), kept)
+        ..characters(first(), None, one(1), kept)
     };
     assert!(
         teach(&drawn_on_small, session(&screenshots, Some(&recording))).is_ok(),
@@ -943,8 +855,8 @@ fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
         drawn_size(&image, &screenshots, 0)
             .expect_err("compared at another size")
             .to_string(),
-        "Screenshot 2, which a state is taken from, is 2x2, but the region was drawn on \
-         screenshot 1, which is 4x2. Take that state from a screenshot of that size."
+        "Screenshot 2, which a state is taken from, is 4x6, but the region was drawn on \
+         screenshot 1, which is 8x6. Take that state from a screenshot of that size."
     );
     assert_eq!(drawn_size(&image, &screenshots, 1), Ok(small.size()));
     assert!(
@@ -959,7 +871,7 @@ fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
 #[test]
 fn a_label_the_reference_cannot_learn_names_the_text() {
     let spec = characters(
-        whole(),
+        first(),
         None,
         vec![Label {
             screenshot: 0,
@@ -968,7 +880,7 @@ fn a_label_the_reference_cannot_learn_names_the_text() {
         }],
         Vec::new(),
     );
-    let error = teach(&spec, session(&[screenshot()], None)).expect_err("one blob, two characters");
+    let error = teach(&spec, session(&[page()], None)).expect_err("one stroke, two characters");
     assert_eq!(
         error.to_string(),
         "Can't learn from the box with the text \"12\": it shows 1 character but the text has \
@@ -979,22 +891,18 @@ fn a_label_the_reference_cannot_learn_names_the_text() {
     let now = std::time::Instant::now();
     let mut recording = Recording::new(
         Ticket::numbered(1),
-        Region::new(0, 0, 4, 2).expect("not empty"),
-        InkRule::Color {
-            color: RED.into(),
-            tolerance: 0,
-        },
-        (screenshot().size(), Follows::Drawn),
+        Region::new(0, 0, 4, 6).expect("not empty"),
+        (page().size(), Follows::Drawn),
         now,
     );
-    recording.offer(&screenshot(), now).expect("a reading");
+    recording.offer(&page(), now).expect("a reading");
     let kept = vec![RecordedLabel {
         reading: 0,
         text: "12".to_owned(),
     }];
-    let spec = characters(whole(), None, one(0), kept);
-    let error = teach(&spec, session(&[screenshot()], Some(&recording)))
-        .expect_err("one blob, two characters");
+    let spec = characters(first(), None, one(0), kept);
+    let error =
+        teach(&spec, session(&[page()], Some(&recording))).expect_err("one stroke, two characters");
     assert_eq!(
         error.to_string(),
         "Can't learn from the kept reading \"12\": it shows 1 character but the text has 2. \
@@ -1005,6 +913,10 @@ fn a_label_the_reference_cannot_learn_names_the_text() {
 #[test]
 fn a_failed_lesson_says_why_in_the_setup_apps_words() {
     for (error, says) in [
+        (
+            LearnError::NoInk,
+            "nothing in it stands out from its background.",
+        ),
         (
             LearnError::MoreCharacters {
                 found: 3,
@@ -1040,7 +952,6 @@ fn a_failed_lesson_says_why_in_the_setup_apps_words() {
 fn the_ui_describes_checks_in_camel_case_json() {
     // The owner's requests parse the other kinds; these are the numbers.
     let json = r#"{"region":{"x":1,"y":2,"width":3,"height":4},"screenshot":0,
-        "ink":{"red":1,"green":2,"blue":3},"tolerance":5,
         "labels":[{"screenshot":0,"text":"12"}]}"#;
     let spec: CharactersSpec = serde_json::from_str(json).expect("valid JSON");
     assert_eq!(
@@ -1054,12 +965,6 @@ fn the_ui_describes_checks_in_camel_case_json() {
             },
             screenshot: 0,
             reference: None,
-            ink: Some(ColorDef {
-                red: 1,
-                green: 2,
-                blue: 3
-            }),
-            tolerance: 5,
             labels: vec![Label {
                 screenshot: 0,
                 region: None,
@@ -1084,10 +989,10 @@ fn the_ui_describes_checks_in_camel_case_json() {
 
 #[test]
 fn reference_pictures_leave_every_saved_picture_untouched() {
-    let spec = characters(left(), None, [one(0), one(1)].concat(), Vec::new());
+    let spec = characters(first(), None, [one(0), one(1)].concat(), Vec::new());
     let taught = spec
         .teach(
-            session(&[screenshot(), screenshot()], None),
+            session(&[page(), page()], None),
             Some("digits"),
             "Digits",
             &["ref-digits-1.png", "ref-digits-2.png", "ref-digits-3.png"],
@@ -1105,14 +1010,9 @@ fn reference_pictures_leave_every_saved_picture_untouched() {
 
 #[test]
 fn a_new_reference_names_one_picture_per_label() {
-    let spec = characters(left(), None, one(0), Vec::new());
+    let spec = characters(first(), None, one(0), Vec::new());
     let taught = spec
-        .teach(
-            session(&[screenshot()], None),
-            Some("digits"),
-            "Digits",
-            &[],
-        )
+        .teach(session(&[page()], None), Some("digits"), "Digits", &[])
         .expect("valid characters");
     assert_eq!(
         taught.reference,
@@ -1120,8 +1020,6 @@ fn a_new_reference_names_one_picture_per_label() {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: Some(RED),
-            tolerance: 0,
             samples: vec![SampleDef {
                 image: "ref-digits-1.png".to_owned(),
                 text: "1".to_owned(),
@@ -1133,8 +1031,7 @@ fn a_new_reference_names_one_picture_per_label() {
     assert_eq!(pictures[0].0, "ref-digits-1.png");
     // A PNG keeps the colors and drops the unused fourth byte.
     let picture = Image::decode_png(&pictures[0].1).expect("a PNG");
-    let cropped = screenshot()
-        .crop(Region::new(0, 0, 2, 2).expect("not empty"))
+    let cropped = digits::cut(&page(), Region::new(0, 0, 4, 6).expect("not empty"))
         .expect("inside the screenshot");
     assert_eq!(picture.size(), cropped.size());
     let colors = |image: &Image| -> Vec<[u8; 3]> {
@@ -1236,13 +1133,10 @@ fn a_number_is_saved_with_the_characters_it_needs_listed_once_in_order() {
 
 #[test]
 fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
-    let spec = CharactersSpec {
-        tolerance: 3,
-        ..characters(left(), Some(digits_ref()), one(0), Vec::new())
-    };
+    let spec = characters(first(), Some(digits_ref()), one(0), Vec::new());
     // Without an ID of its own, it is taught under the saved one's.
     let taught = spec
-        .teach(session(&[screenshot()], None), None, "Red digits", &[])
+        .teach(session(&[page()], None), None, "Red digits", &[])
         .expect("valid characters");
     let reference = taught.reference;
     let images: Vec<&str> = reference
@@ -1251,10 +1145,7 @@ fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
         .map(|sample| sample.image.as_str())
         .collect();
     assert_eq!(images, ["ref-digits-1.png", "ref-digits-2.png"]);
-    assert_eq!(
-        (reference.name.as_str(), reference.tolerance),
-        ("Red digits", 3)
-    );
+    assert_eq!(reference.name, "Red digits");
     let names: Vec<&str> = taught
         .pictures
         .iter()
@@ -1281,8 +1172,8 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
         }
         Ok(saved)
     };
-    let spec = characters(left(), Some(digits_ref()), one(0), Vec::new());
-    let screenshots = [screenshot()];
+    let spec = characters(first(), Some(digits_ref()), one(0), Vec::new());
+    let screenshots = [page()];
     let session = Session {
         screenshots: &screenshots,
         recording: None,
@@ -1307,26 +1198,22 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
 #[test]
 fn recorded_readings_are_learned_and_saved_after_the_labels() {
     let now = std::time::Instant::now();
-    let region = Region::new(0, 0, 4, 2).expect("not empty");
+    let region = Region::new(0, 0, 4, 6).expect("not empty");
     let mut recording = Recording::new(
         Ticket::numbered(1),
         region,
-        InkRule::Color {
-            color: RED.into(),
-            tolerance: 0,
-        },
-        (screenshot().size(), Follows::Drawn),
+        (page().size(), Follows::Drawn),
         now,
     );
-    recording.offer(&screenshot(), now).expect("a reading");
+    recording.offer(&page(), now).expect("a reading");
     let recorded = |reading| {
         vec![RecordedLabel {
             reading,
             text: "1".to_owned(),
         }]
     };
-    let screenshots = [screenshot()];
-    let spec = characters(whole(), None, one(0), recorded(0));
+    let screenshots = [page()];
+    let spec = characters(first(), None, one(0), recorded(0));
     let taught = teach(&spec, session(&screenshots, Some(&recording))).expect("valid characters");
     let images: Vec<&str> = taught
         .reference
@@ -1343,17 +1230,17 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
             .map(drop)
             .err()
     };
-    let only_recorded = characters(whole(), None, Vec::new(), recorded(0));
+    let only_recorded = characters(first(), None, Vec::new(), recorded(0));
     assert_eq!(problem(&only_recorded, Some(&recording)), None);
     assert_eq!(problem(&only_recorded, None), Some(SpecError::NoRecording));
     assert_eq!(
         problem(
-            &characters(whole(), None, Vec::new(), recorded(1)),
+            &characters(first(), None, Vec::new(), recorded(1)),
             Some(&recording)
         ),
         Some(SpecError::NoRecording)
     );
-    let moved = characters(left(), None, Vec::new(), recorded(0));
+    let moved = characters(second(), None, Vec::new(), recorded(0));
     let error = problem(&moved, Some(&recording)).expect("another region");
     assert_eq!(error, SpecError::RecordedElsewhere);
     assert_eq!(
@@ -1366,34 +1253,30 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
 #[test]
 fn recorded_problems_judge_each_reading_after_the_saved_samples() {
     let now = std::time::Instant::now();
-    let region = Region::new(0, 0, 2, 2).expect("not empty");
+    let region = Region::new(0, 0, 4, 6).expect("not empty");
     let mut recording = Recording::new(
         Ticket::numbered(1),
         region,
-        InkRule::Color {
-            color: RED.into(),
-            tolerance: 0,
-        },
-        (screenshot().size(), Follows::Drawn),
+        (page().size(), Follows::Drawn),
         now,
     );
-    recording.offer(&screenshot(), now).expect("a reading");
+    recording.offer(&page(), now).expect("a reading");
     let as_text = |text: &str| {
         vec![RecordedLabel {
             reading: 0,
             text: text.to_owned(),
         }]
     };
-    // The saved reference took the red square for a 1.
-    let spec = characters(left(), Some(digits_ref()), Vec::new(), as_text("7"));
+    // The saved reference took the stroke for a 1.
+    let spec = characters(first(), Some(digits_ref()), Vec::new(), as_text("7"));
     let problems = spec
-        .recorded_problems(session(&[screenshot()], Some(&recording)))
+        .recorded_problems(session(&[page()], Some(&recording)))
         .expect("a valid spec");
     assert_eq!(problems.len(), 1);
     assert!(problems[0].is_some(), "{problems:?}");
-    let spec = characters(left(), Some(digits_ref()), Vec::new(), as_text("1"));
+    let spec = characters(first(), Some(digits_ref()), Vec::new(), as_text("1"));
     assert_eq!(
-        spec.recorded_problems(session(&[screenshot()], Some(&recording))),
+        spec.recorded_problems(session(&[page()], Some(&recording))),
         Ok(vec![None])
     );
 }

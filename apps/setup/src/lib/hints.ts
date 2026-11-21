@@ -46,9 +46,6 @@ export const REGION_HINT =
 /** The tolerance's scale for a check's colors. */
 export const TOLERANCE_HINT = `From 0, an exact match, up to ${LIMITS.maxTolerance}, which matches any color. Raise it if the check misses; lower it if it matches when it shouldn't.`;
 
-/** The tolerance's scale for a reference's text color. */
-export const INK_TOLERANCE_HINT = `From 0, only the exact color, up to ${LIMITS.maxTolerance}, which counts every pixel. Raise it if parts of characters go missing; lower it if the background counts as characters.`;
-
 /** A bar fill's two colors. */
 export const BAR_COLORS_HINT =
   "Pick a filled part of the bar for Filled color and an empty part for Empty color. Borders and labels inside the region don't count.";
@@ -69,17 +66,13 @@ export const RECORD_RESIZED_HINT =
 export const REFERENCE_HINT =
   'A reference knows what each character looks like in one font, learned from the boxes you draw on screenshots and the readings you record. Values that show the same font can share one, and each value chooses the characters it needs of it.';
 
-/** A reference's text color, which most references leave unset. */
-export const INK_HINT =
-  'A reference finds its characters by how they stand out from the background behind them, whatever their colors. Over a busy background, such as a scene that shows through behind the text, or for bold text with a thick outline, pick the text color instead: select a pixel inside a character, not on its edge or outline. Then only pixels within the tolerance of that color count as part of the characters.';
-
 /** The boxes a reference learns from. */
 export const BOXES_HINT =
   'Drag on any screenshot to draw a box tightly around some characters, then type exactly what it shows, such as 87% or 1,250. Draw as many as you like, several on one screenshot too. Press a box to select it; drag it to move it, drag a corner to resize it, or press Delete to remove it. Each box with text teaches the reference the characters in it. A reference you teach by itself reads and records at the box marked Reads here, the first in the list.';
 
 /** The saved pictures a reference can't learn. */
 export const UNLEARNED_HINT =
-  'A reference keeps a picture of every box and reading it learned from, and learns them all again each time it is saved. A picture stops teaching it when what counts as the characters changes: with another text color or tolerance, characters can touch, fall apart, or disappear. Removing a picture takes away only what that picture taught. If a character goes missing, draw a box around it on a screenshot.';
+  'A reference keeps a picture of every box and reading it learned from, and learns them all again each time it is saved. A picture teaches it nothing when its file is missing, or when it does not split into as many characters as its text has. Removing a picture takes away only what that picture taught. If a character goes missing, draw a box around it on a screenshot.';
 
 /** The characters a number value needs. */
 export const EXPECTED_HINT =
@@ -104,10 +97,6 @@ export const CHECK_KEYS_HINT =
 /** Why the reference editor offers Check characters before a save, and that the save does not wait for it. */
 export const CHECK_OFFER_HINT =
   'AppyTappy read these in text you added or kept without typing it, and keeping a text does not confirm its characters. It tends to misread a character the same way everywhere, and a reference that learns one wrong reads its values wrong. Check characters asks about each once. Saving does not wait for it.';
-
-/** What Reread reads again, and when that changes anything. */
-export const REREAD_HINT =
-  'Has the text reader read again the finds it could not read, and the flagged ones whose text you have not typed, with the text color and tolerance as they are set now. Your ticks and the text you typed stay. The same text color and tolerance read the same text, so Reread waits for you to change one of them, unless the text reader could not read a find at all.';
 
 /** The read interval's two waits. */
 export const READING_HINT = `AppyTappy reads a value only when its window draws something new. It waits the fastest read while a value changes, and up to the slowest read while it holds still. Each is ${LIMITS.fastestReadMs} to ${LIMITS.slowestReadMs} ms.`;
@@ -139,9 +128,9 @@ export const ORIGIN_HINT =
 export const IMPORT_ANTI_CHEAT_HINT =
   'AppyTappy presses keys into an application, and clicks while it runs, only once its anti-cheat is set to None, because anti-cheat can treat those keys and clicks as cheating. A file from someone else could say None for an application that has anti-cheat, so the file never sets this: you do. You can change it later on this page.';
 
-/** Why two characters a reference learned can look alike, and what changes that. */
+/** Why a reference can't tell two characters it learned apart, and what changes that. */
 export const LOOKALIKE_HINT =
-  'AppyTappy reads a character as the learned shape it matches, and forgives an edge that is a little off. When the shapes it learned for two characters are that close, it can read one as the other. This happens most with bold text that has a thick outline, found by how it stands out: the outline counts as part of each character and fills the holes in 0, 6, 8, and 9. A text color counts only the pixels of that color, so the holes stay open.';
+  'AppyTappy reads a character as the learned shape it matches, whatever its color or size, and forgives an edge that is a little off. When the shapes it learned for two characters are that close, it cannot say which one it sees, and reads neither. Most often one of the pictures has the wrong text: check each, and remove or retype the wrong one.';
 
 /** How to zoom a screenshot and move around it. */
 export const ZOOM_HINT =

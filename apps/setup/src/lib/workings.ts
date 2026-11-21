@@ -2,12 +2,9 @@
 
 import type { GlyphView, ReadingColor, StateView } from './bindings.ts';
 
-/**
- * How far a character is from a glyph, in the counts a read decides with: the cells apart, of the cells either sets,
- * and the cells that differ at all, which order glyphs with as many apart.
- */
+/** How far a character's shape is from a glyph's, in the number a read decides with: 0 for the same shape, to 1000. */
 export function distanceText(glyph: GlyphView): string {
-  return `${glyph.apart} of ${glyph.set} apart, ${glyph.differing} differ`;
+  return `${glyph.distance} apart`;
 }
 
 /** A share of `whole` as a whole percent, or null when there is nothing to share. */

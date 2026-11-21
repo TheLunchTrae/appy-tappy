@@ -21,10 +21,11 @@ The same setting adds debug details to the pages that read a window live.
   the frame it read was. Under it are the check's scores:
   - **Number:** each character read, how far it is from the closest
     character of the reference, and the closest other character. The distance
-    counts cells of the grid that a character is sampled onto: a cell is apart
-    when one of the two has it and the other has neither it nor a cell beside
-    it. A character reads while at most 1 in 32 of the cells either has are
-    apart, so a close second means the reference needs more samples of both.
+    runs from 0 for the same shape to 1000, and says how much ink one of
+    the two has where the other has none, in the place they differ most. A
+    character reads while the closest is at most 350 apart and no other
+    character is within 100 more, so a close second means that the
+    reference can't tell the two apart there.
     A character marked **left out** is one the value's characters do not
     name: it reads as text, and the read fails when it is a part of the
     number. When the number cannot be read, its reason appears above the

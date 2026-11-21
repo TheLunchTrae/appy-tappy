@@ -11,7 +11,7 @@
 //! [`screen::Image::encode_png_masked`] write the files that
 //! [`screen::Image::decode_png_masked`] reads, and
 //! [`screen::digits::DigitReader::shapes`] and
-//! [`screen::digits::DigitReader::ink_like`] are the shapes and the ink a
+//! [`screen::digits::DigitReader::tone`] are the shapes and the ink a
 //! read itself decides with, so what the setup app shows of a reading
 //! cannot differ from the reading. [`system::ScreenPixels`] serves only the
 //! MCP server. Code that only the setup app needs and that stands by

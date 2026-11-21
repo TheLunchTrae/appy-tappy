@@ -118,7 +118,7 @@ pub(crate) enum SpecError {
         picture: String,
     },
     /// The saved reference being edited cannot learn from one of its saved
-    /// samples with the text color and tolerance it is tried with.
+    /// samples.
     SavedLearn {
         /// The text the sample shows.
         text: String,
@@ -245,8 +245,7 @@ impl fmt::Display for SpecError {
             } => write!(
                 formatter,
                 "{reference} can't learn from its saved picture of \"{text}\": {} Edit \
-                 {reference} and remove that picture under Saved pictures it can't learn, or \
-                 change its text color.",
+                 {reference} and remove that picture under Saved pictures it can't learn.",
                 cant_learn(source)
             ),
             // The reference's own editor says these, where the picture
@@ -259,7 +258,7 @@ impl fmt::Display for SpecError {
             Self::SavedLearn { text, source } => write!(
                 formatter,
                 "Can't learn from its saved picture of \"{text}\": {} Remove it under Saved \
-                 pictures it can't learn, or change the text color.",
+                 pictures it can't learn.",
                 cant_learn(source)
             ),
             Self::Unreadable(why) => {
@@ -300,9 +299,7 @@ pub(crate) fn cant_learn(error: &LearnError) -> String {
         }
     };
     match error {
-        LearnError::NoInk => "nothing in it stands out from its background, or has the \
-                              reference's text color."
-            .to_owned(),
+        LearnError::NoInk => "nothing in it stands out from its background.".to_owned(),
         LearnError::TooManyCharacters => {
             format!("it shows more than {MAX_CHARACTERS} characters.")
         },

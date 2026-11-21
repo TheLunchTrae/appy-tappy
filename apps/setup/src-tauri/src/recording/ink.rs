@@ -127,38 +127,33 @@ impl Near {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_sources::screen::digits::{DigitReader, InkRule};
-    use appytappy_sources::screen::{Image, Rgb, Size};
+    use appytappy_sources::screen::digits::DigitReader;
+    use appytappy_sources::screen::{Image, Size};
 
     use super::*;
 
-    /// The line of a 6 by 7 image, white where `ink` says so and black
-    /// elsewhere, read with white as ink.
+    /// The line of a 6 by 7 drawing, white where `ink` says so and black
+    /// elsewhere, with a pixel of black all around it.
     fn line(ink: impl Fn(usize, usize) -> bool) -> Option<Line> {
-        let pixels = (0..7)
-            .flat_map(|y| (0..6).map(move |x| (x, y)))
-            .flat_map(|(x, y)| if ink(x, y) { [255; 4] } else { [0, 0, 0, 255] })
+        let pixels = (0..9_usize)
+            .flat_map(|y| (0..8_usize).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                let drawn = x
+                    .checked_sub(1)
+                    .zip(y.checked_sub(1))
+                    .is_some_and(|(x, y)| x < 6 && y < 7 && ink(x, y));
+                if drawn { [255; 4] } else { [0, 0, 0, 255] }
+            })
             .collect();
         let image = Image::new(
             Size {
-                width: 6,
-                height: 7,
+                width: 8,
+                height: 9,
             },
             pixels,
         )
         .expect("matching length");
-        let white = Rgb {
-            red: 255,
-            green: 255,
-            blue: 255,
-        };
-        Line::of(
-            &DigitReader::new(InkRule::Color {
-                color: white,
-                tolerance: 0,
-            })
-            .ink(&image),
-        )
+        Line::of(&DigitReader::new().ink(&image))
     }
 
     #[test]
@@ -202,15 +197,24 @@ mod tests {
         assert_eq!(black, [12, 22, 27, 32, 42], "the dot and the mark show");
     }
 
-    /// The rows of the line in ink drawn as `#`, one string a row.
+    /// The rows of the line in ink drawn as `#`, one string a row, counted
+    /// from the first string. The image has a pixel of background all
+    /// around the drawing.
     fn rows_in(drawn: &[&str]) -> Option<Range<u32>> {
+        let width = drawn[0].len();
+        let blank = ".".repeat(width);
         let size = Size {
-            width: u32::try_from(drawn[0].len()).expect("narrow"),
-            height: u32::try_from(drawn.len()).expect("short"),
+            width: u32::try_from(width.checked_add(2).expect("narrow")).expect("narrow"),
+            height: u32::try_from(drawn.len().checked_add(2).expect("short")).expect("short"),
         };
-        let pixels = drawn
-            .iter()
-            .flat_map(|row| row.bytes())
+        let pixels = std::iter::once(&blank.as_str())
+            .chain(drawn)
+            .chain(std::iter::once(&blank.as_str()))
+            .flat_map(|row| {
+                std::iter::once(b'.')
+                    .chain(row.bytes())
+                    .chain(std::iter::once(b'.'))
+            })
             .flat_map(|cell| {
                 if cell == b'#' {
                     [255; 4]
@@ -220,18 +224,8 @@ mod tests {
             })
             .collect();
         let image = Image::new(size, pixels).expect("matching length");
-        let white = Rgb {
-            red: 255,
-            green: 255,
-            blue: 255,
-        };
-        rows(
-            &DigitReader::new(InkRule::Color {
-                color: white,
-                tolerance: 0,
-            })
-            .ink(&image),
-        )
+        let rows = rows(&DigitReader::new().ink(&image))?;
+        Some(rows.start.checked_sub(1)?..rows.end.checked_sub(1)?)
     }
 
     #[test]

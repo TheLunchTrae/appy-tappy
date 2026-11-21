@@ -80,10 +80,6 @@ pub(crate) struct ReadingRisks {
     /// it may read one as the other: each pair once, in the order it
     /// learned them.
     pub(crate) lookalikes: Vec<(char, char)>,
-    /// Whether it finds its characters by contrast with a tolerance that
-    /// leaves an outline or a shadow of a sample out, so that it reads only
-    /// over backgrounds that hide it too.
-    pub(crate) hides_tone: bool,
 }
 
 /// The ID a value is tried under before it is saved under its own. It
@@ -292,7 +288,6 @@ impl<H: Host> Owner<H> {
             };
             Ok(Some(ReadingRisks {
                 lookalikes: taught.reader.lookalikes(),
-                hides_tone: spec.hides_a_tone(session)?,
             }))
         })
         .map_err(|error: SpecError| error.to_string())
@@ -329,8 +324,8 @@ mod tests {
     use crate::debug::workings::WorkingsView;
     use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
-        BAR, Harness, add_example_app, capturing, characters, frame_image, harness, harness_with,
-        near_twins, outlined, scratch_store, teaching, trial,
+        BAR, Harness, add_example_app, capturing, capturing_text, characters, frame_image, harness,
+        harness_with, near_twins, scratch_store, teaching, text_frame, trial,
     };
     use crate::reading::Reading;
     use crate::stores::SavedApp;
@@ -345,8 +340,7 @@ mod tests {
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         let spec = |screenshot: usize| -> CharactersSpec {
             serde_json::from_str(&format!(
-                r#"{{"region":{{"x":0,"y":0,"width":17,"height":8}},"screenshot":{screenshot},
-                    "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,
+                r#"{{"region":{{"x":0,"y":0,"width":76,"height":34}},"screenshot":{screenshot},
                     "labels":[{{"screenshot":{screenshot},"text":"861"}}]}}"#
             ))
             .expect("valid JSON")
@@ -355,7 +349,6 @@ mod tests {
             harness.ask(|owner| owner.reading_risks(&spec(0))),
             Ok(Some(ReadingRisks {
                 lookalikes: vec![('8', '6')],
-                hides_tone: false,
             })),
             "the bar matches neither block"
         );
@@ -373,38 +366,11 @@ mod tests {
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         // The region shows three characters, and the text has two.
         let spec: CharactersSpec = serde_json::from_str(
-            r#"{"region":{"x":0,"y":0,"width":17,"height":8},"screenshot":0,
-                "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+            r#"{"region":{"x":0,"y":0,"width":76,"height":34},"screenshot":0,
                 "labels":[{"screenshot":0,"text":"86"}]}"#,
         )
         .expect("valid JSON");
         assert_eq!(harness.ask(|owner| owner.reading_risks(&spec)), Ok(None));
-    }
-
-    #[test]
-    fn reading_risks_say_when_the_tolerance_leaves_an_outline_out() {
-        let mut harness = harness(false);
-        let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&outlined()));
-        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        let spec = |ink: &str| -> CharactersSpec {
-            serde_json::from_str(&format!(
-                r#"{{"region":{{"x":1,"y":1,"width":12,"height":6}},"screenshot":0,{ink}
-                    "tolerance":168,"labels":[{{"screenshot":0,"text":"11"}}]}}"#
-            ))
-            .expect("valid JSON")
-        };
-        let mut hides = |ink: &str| {
-            harness
-                .ask(|owner| owner.reading_risks(&spec(ink)))
-                .map(|risks| risks.map(|risks| risks.hides_tone))
-        };
-        assert_eq!(hides(""), Ok(Some(true)));
-        assert_eq!(
-            hides(r#""ink":{"red":255,"green":255,"blue":255},"#),
-            Ok(Some(false)),
-            "a text color counts only the fill"
-        );
     }
 
     #[test]
@@ -506,31 +472,24 @@ mod tests {
 
     #[test]
     fn a_live_frame_the_check_cannot_read_says_which_stage_failed() {
-        let (mut harness, mut handler, root) = capturing("live-stage");
-        // A reference taught that the screenshot's red half is a 1.
+        let (mut harness, mut handler, root) = capturing_text("live-stage");
+        // A reference taught that the screenshot's first stroke is a 1.
         let spec = characters(
-            r#"{"region":{"x":0,"y":0,"width":4,"height":2},"screenshot":0,
-                "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+            r#"{"region":{"x":0,"y":0,"width":4,"height":6},"screenshot":0,
                 "labels":[{"screenshot":0,"text":"1"}]}"#,
         );
         harness
             .ask(|owner| owner.set_characters(&teaching(spec.clone())))
             .expect("valid check");
         assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(1.0))));
-        let gray = Image::new(
-            Size {
-                width: 4,
-                height: 2,
-            },
-            [40, 40, 40, 0].repeat(8),
-        )
-        .expect("matching length");
+        let gray =
+            Image::new(text_frame().size(), [40, 40, 40, 0].repeat(48)).expect("matching length");
         harness.deliver(&mut handler, Ok(&gray));
         assert_eq!(
             harness.ask(Owner::reading),
             Err(
                 "Can't read on the live window now: nothing in its region stands out from the \
-                 background, or has the text color of its reference."
+                 background."
                     .to_owned()
             )
         );
@@ -594,7 +553,6 @@ mod tests {
     /// The reference `percent`, taught `379%` on screenshot 0, and the
     /// number `Charge` read with it in a region around the text.
     const PERCENT: &str = r#"{"region":{"x":6,"y":2,"width":18,"height":9},"screenshot":0,
-        "ink":{"red":255,"green":255,"blue":255},"tolerance":0,
         "labels":[{"screenshot":0,"text":"379%"}]}"#;
     const CHARGE: &str = r#"{"kind":"number","region":{"x":6,"y":2,"width":18,"height":9},
         "reference":{"app":"example","id":"percent"},"whole":false}"#;

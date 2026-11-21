@@ -34,12 +34,12 @@ function Characters({ workings }: { readonly workings: Extract<WorkingsView, { k
         })}
       </ul>
       <p className="note">
-        Each character read, how far it is from the closest character of the reference, in cells of the grid both are
-        sampled onto, and the closest other character. A cell is apart when one of the two sets it and the other sets
-        neither it nor a cell beside it. A character reads while at most 1 in 32 of the cells either sets are apart. A
-        close second means the reference needs more samples of both. A character the value leaves out reads as text: it
-        ends the number or comes before it, and the read fails when it is a part of the number. A read stops at the
-        first character after the number, so any after it are shown but not read.
+        Each character read, how far its shape is from the closest character of the reference, from 0 for the same shape
+        to 1000, and the closest other character. Color and size don't count. A character reads while it is at most 350
+        apart and no other character is within 100 more. A close second means the reference needs more samples of both.
+        A character the value leaves out reads as text: it ends the number or comes before it, and the read fails when
+        it is a part of the number. A read stops at the first character after the number, so any after it are shown but
+        not read.
       </p>
     </>
   );

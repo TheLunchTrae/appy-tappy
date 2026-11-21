@@ -1,6 +1,6 @@
-//! Text drawn for tests the way a game draws a counter: bold white strokes
-//! with a black outline on a colored background, anti-aliased, at any size
-//! and at any fraction of a pixel.
+//! Text drawn for tests the way a game draws a counter: bold strokes with
+//! an outline on a colored background, anti-aliased, at any size and at any
+//! fraction of a pixel, in any [`Colors`].
 //!
 //! The same character then lands on the pixel grid a little differently
 //! each time, as it does in an application that scales its interface or
@@ -19,14 +19,32 @@ const STROKE: f64 = 0.09;
 /// The outline's width, in digit heights.
 const OUTLINE: f64 = 0.05;
 
-/// The space between two characters' outlines, in digit heights.
+/// The space between two characters' outlines, in digit heights, unless a
+/// [`Pen`] says otherwise.
 const GAP: f64 = 0.12;
 
-/// The background's blue, green, and red.
-const BACKGROUND: [u32; 3] = [200, 120, 60];
+/// A color's blue, green, and red.
+pub(crate) type Bgr = [u8; 3];
 
-/// The brightness of the characters' own pixels.
-const INK: u32 = 255;
+/// The colors text is drawn in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Colors {
+    /// The characters' own pixels.
+    pub(crate) ink: Bgr,
+    /// The outline around each stroke.
+    pub(crate) outline: Bgr,
+    /// Everything else.
+    pub(crate) background: Bgr,
+}
+
+impl Colors {
+    /// White text with a black outline on orange.
+    pub(crate) const PLAIN: Self = Self {
+        ink: [255, 255, 255],
+        outline: [0, 0, 0],
+        background: [60, 120, 200],
+    };
+}
 
 /// A stroke's center line, from one point to another. In a glyph the
 /// points are in digit heights, across from the glyph's left and down from
@@ -56,6 +74,11 @@ pub(crate) struct Pen {
     pub(crate) at: (f64, f64),
     /// How each `%` is drawn.
     pub(crate) percent: Percent,
+    pub(crate) colors: Colors,
+    /// The space between two characters' outlines, in digit heights. Below
+    /// zero the outlines run into each other, as they do in a game that
+    /// sets its characters tight.
+    pub(crate) gap: f64,
 }
 
 impl Pen {
@@ -66,6 +89,8 @@ impl Pen {
             height,
             at: (across, height * 0.25),
             percent: Percent::Joined,
+            colors: Colors::PLAIN,
+            gap: GAP,
         }
     }
 }
@@ -276,7 +301,7 @@ pub(crate) fn draw(text: &str, pen: Pen, canvas: Size) -> Image {
         placed.extend(all.into_iter().map(|stroke| {
             stroke.map(|(x, y)| (x.mul_add(pen.height, across), y.mul_add(pen.height, down)))
         }));
-        let advance = 2.0_f64.mul_add(STROKE + OUTLINE, width) + GAP;
+        let advance = 2.0_f64.mul_add(STROKE + OUTLINE, width) + pen.gap;
         across = advance.mul_add(pen.height, across);
     }
     let mut bgra = Vec::new();
@@ -294,7 +319,11 @@ pub(crate) fn draw(text: &str, pen: Pen, canvas: Size) -> Image {
                 })
                 .copied()
                 .collect();
-            bgra.extend(pixel(&near, (left, top), pen.height));
+            bgra.extend(if near.is_empty() {
+                pen.colors.background
+            } else {
+                pixel(&near, (left, top), pen.height, pen.colors)
+            });
             bgra.push(u8::MAX);
         }
     }
@@ -302,10 +331,10 @@ pub(crate) fn draw(text: &str, pen: Pen, canvas: Size) -> Image {
 }
 
 /// The blue, green, and red of the pixel whose corner is (`left`, `top`):
-/// the mean of its sub-samples, each ink within a stroke, black within the
-/// outline around it, and background elsewhere.
-fn pixel(near: &[Stroke], (left, top): (f64, f64), height: f64) -> [u8; 3] {
-    let (mut ink, mut background, mut samples) = (0_u32, 0_u32, 0_u32);
+/// the mean of its sub-samples, each ink within a stroke, the outline's
+/// color within the outline around it, and background elsewhere.
+fn pixel(near: &[Stroke], (left, top): (f64, f64), height: f64, colors: Colors) -> Bgr {
+    let (mut sum, mut samples) = ([0_u32; 3], 0_u32);
     let offset = |index: u32| (f64::from(index) + 0.5) / f64::from(SAMPLES);
     for row in 0..SAMPLES {
         for column in 0..SAMPLES {
@@ -314,16 +343,21 @@ fn pixel(near: &[Stroke], (left, top): (f64, f64), height: f64) -> [u8; 3] {
                 .iter()
                 .map(|&stroke| distance(stroke, across, down))
                 .fold(f64::INFINITY, f64::min);
-            ink = ink.saturating_add(u32::from(nearest <= STROKE * height));
-            background =
-                background.saturating_add(u32::from(nearest > (STROKE + OUTLINE) * height));
+            let color = if nearest <= STROKE * height {
+                colors.ink
+            } else if nearest <= (STROKE + OUTLINE) * height {
+                colors.outline
+            } else {
+                colors.background
+            };
+            for (sum, channel) in sum.iter_mut().zip(color) {
+                *sum = sum.saturating_add(u32::from(channel));
+            }
             samples = samples.saturating_add(1);
         }
     }
-    BACKGROUND.map(|channel| {
-        ink.checked_mul(INK)
-            .zip(background.checked_mul(channel))
-            .and_then(|(ink, background)| ink.checked_add(background)?.checked_div(samples))
+    sum.map(|sum| {
+        sum.checked_div(samples)
             .and_then(|mean| u8::try_from(mean).ok())
             .expect("a mean of bytes")
     })

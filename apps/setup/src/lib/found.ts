@@ -1,8 +1,7 @@
 // Text found like a box a reference learns from: which finds to add, as what, and what stops them.
 
-import type { ColorDef, FoundView, Label } from './bindings.ts';
+import type { FoundView, Label } from './bindings.ts';
 import type { NewBox } from './boxes.ts';
-import { sameTextColor } from './check.ts';
 import type { Rect } from './region.ts';
 
 /** The user's choice for one find: whether to add it, and the text the user typed, which `typed` says is theirs. */
@@ -24,10 +23,6 @@ export interface FoundRow {
   readonly typed: boolean;
   /** Whether the text reader has not read it yet and the user typed nothing. */
   readonly reading: boolean;
-  /** Whether the text reader could not read it and the user typed nothing. */
-  readonly failed: boolean;
-  /** The text color, null for contrast, and the tolerance the text reader last read it with. */
-  readonly readWith: { readonly ink: ColorDef | null; readonly tolerance: number };
   /** Why it cannot be added as it is, found without asking the reference, or null. */
   readonly flag: string | null;
   /**
@@ -110,7 +105,6 @@ export function foundRows(
         flag = `${letter} is a letter, and the reference has learned none. Type what this shows.`;
       }
     }
-    const failed = !typed && find.text.kind === 'failed';
     const fits = reading || typed || fitsNeeds(guess, needs);
     return {
       index,
@@ -120,8 +114,6 @@ export function foundRows(
       text,
       typed,
       reading,
-      failed,
-      readWith: { ink: find.ink ?? null, tolerance: find.tolerance },
       flag: fits ? flag : null,
       fits,
     };
@@ -239,63 +231,18 @@ export function withoutFlagged(
   );
 }
 
-/** Why Reread waits while every find it would read again was last read with the text color and tolerance set now. */
-export const REREAD_SAME = 'Set a text color, or change its tolerance, to read them differently.';
-
-/**
- * What Reread would do with `rows`, or null when it has nothing to offer. It is for the listed finds the text reader
- * could not read and the ones `flags` flags whose text is its guess; text the user typed is theirs. Of those it
- * reads again, by index, each one whose read failed, since a failure may pass, and each one last read with another
- * text color or tolerance than `ink`, null for contrast, and `tolerance`, the ones set now. The same two read the
- * same text, so when it would read none again, `blocked` says what to change.
- */
-export function rereadOffer(
-  rows: readonly FoundRow[],
-  flags: ReadonlyMap<number, string>,
-  ink: ColorDef | null,
-  tolerance: number,
-): { readonly indexes: readonly number[]; readonly blocked: string | null } | null {
-  const offered = listed(rows).filter((row) => !row.typed && (row.failed || flags.has(row.index)));
-  if (offered.length === 0) {
-    return null;
-  }
-  const indexes = offered
-    .filter((row) => row.failed || row.readWith.tolerance !== tolerance || !sameTextColor(row.readWith.ink, ink))
-    .map((row) => row.index);
-  return { indexes, blocked: indexes.length === 0 ? REREAD_SAME : null };
-}
-
-/** A find the user passed over, and the text color it was read with, null for contrast. */
-export interface PassedFind {
-  readonly region: Rect;
-  readonly ink: ColorDef | null;
-}
-
 /**
  * `passed`, the finds by screenshot that a later search there skips, with each find of `rows` on screenshot
  * `screenshot` that is not added, ticked or not, listed or not: the finds the user passed over.
  */
 export function passOver(
-  passed: ReadonlyMap<number, readonly PassedFind[]>,
+  passed: ReadonlyMap<number, readonly Rect[]>,
   screenshot: number,
   rows: readonly FoundRow[],
-): ReadonlyMap<number, readonly PassedFind[]> {
-  const left = rows.filter((row) => !row.keep).map((row) => ({ region: row.region, ink: row.readWith.ink }));
+): ReadonlyMap<number, readonly Rect[]> {
+  const left = rows.filter((row) => !row.keep).map((row) => row.region);
   if (left.length === 0) {
     return passed;
   }
   return new Map(passed).set(screenshot, [...(passed.get(screenshot) ?? []), ...left]);
-}
-
-/**
- * The regions of the finds on screenshot `screenshot` that `passed` holds and that were read with the text color
- * `ink`, null for contrast: the ones a search there with `ink` skips. A find passed over as read with another text
- * color may read as other text now, so it is offered again.
- */
-export function skippedOn(
-  passed: ReadonlyMap<number, readonly PassedFind[]>,
-  screenshot: number,
-  ink: ColorDef | null,
-): readonly Rect[] {
-  return (passed.get(screenshot) ?? []).filter((find) => sameTextColor(find.ink, ink)).map((find) => find.region);
 }

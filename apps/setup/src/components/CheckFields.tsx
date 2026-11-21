@@ -9,7 +9,7 @@ import { BAR_COLORS_HINT } from '../lib/hints.ts';
 import { ColorField, ToleranceField } from './Fields.tsx';
 
 /** Where a picked color goes. */
-export type ColorTarget = 'ink' | 'filled' | 'empty' | 'color';
+export type ColorTarget = 'filled' | 'empty' | 'color';
 
 /** How each selection tool is used, shown under the tools. */
 const TOOL_HELP: Readonly<Record<SelectTool, string | null>> = {

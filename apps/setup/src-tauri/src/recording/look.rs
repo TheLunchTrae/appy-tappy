@@ -12,7 +12,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
-use appytappy_sources::screen::digits::{DigitReader, Shape};
+use appytappy_sources::screen::digits::{self, DigitReader, Shape, Tone};
 use appytappy_sources::screen::{Image, Region};
 
 use crate::owner::{Event, Message};
@@ -34,7 +34,9 @@ pub(crate) struct Job {
     pub(crate) sizes: Sizes,
     /// The recording's region, which the text it takes first is nearest to.
     pub(crate) near: Region,
-    /// What tells the characters' ink from background.
+    /// What tells text like the recording's from the rest of the frame.
+    pub(crate) tone: Tone,
+    /// Splits each run of text it finds into characters.
     pub(crate) reader: DigitReader,
 }
 
@@ -54,12 +56,12 @@ pub(crate) struct Seen {
 /// Each run of text `job`'s frame shows like the region's, nearest the
 /// region first.
 pub(crate) fn look(job: &Job) -> Vec<Seen> {
-    find::lines(&job.frame, &job.sizes, job.near, &job.reader)
+    find::lines(&job.frame, &job.sizes, job.near, job.tone)
         .into_iter()
         .map(|find::Spot { region, size }| Seen {
             spot: region,
             size,
-            reading: job.reader.cut(&job.frame, region).and_then(|crop| {
+            reading: digits::cut(&job.frame, region).and_then(|crop| {
                 let shapes = job.reader.shapes(&crop).ok()?.characters().to_vec();
                 Some((crop, shapes))
             }),
@@ -93,15 +95,14 @@ mod tests {
     use std::sync::mpsc;
 
     use appytappy_sources::screen::Rgb;
-    use appytappy_sources::screen::digits::InkRule;
 
     use super::*;
 
-    const RED: Rgb = Rgb {
+    const RED: Tone = Tone::Color(Rgb {
         red: 255,
         green: 0,
         blue: 0,
-    };
+    });
 
     #[test]
     fn a_look_that_panics_answers_that_it_failed_and_the_next_is_looked_over() {
@@ -115,10 +116,8 @@ mod tests {
             at: Instant::now(),
             sizes: Sizes::of(2),
             near: Region::new(0, 0, 2, 2).expect("not empty"),
-            reader: DigitReader::new(InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            }),
+            tone: RED,
+            reader: DigitReader::new(),
         };
         let (jobs, inbox) = mpsc::channel();
         let (sender, messages) = mpsc::channel();
@@ -160,6 +159,7 @@ mod tests {
             height: 6,
         };
         let frame = Image::new(size, pixels).expect("matching length");
+        let shown = frame.clone();
         let at = Instant::now();
         let (jobs, inbox) = mpsc::channel();
         let (sender, messages) = mpsc::channel();
@@ -169,10 +169,8 @@ mod tests {
             at,
             sizes: Sizes::of(4),
             near: Region::new(0, 0, 3, 6).expect("not empty"),
-            reader: DigitReader::new(InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            }),
+            tone: RED,
+            reader: DigitReader::new(),
         })
         .expect("open");
         drop(jobs);
@@ -200,7 +198,11 @@ mod tests {
                 example: 4
             }
         );
-        assert_eq!(crop.size(), seen.spot.size());
+        assert_eq!(
+            Some(crop),
+            digits::cut(&shown, seen.spot).as_ref(),
+            "the spot as a reader is given it"
+        );
         assert_eq!(shapes.len(), 1);
         assert!(messages.try_recv().is_err(), "and it ends with the owner");
     }

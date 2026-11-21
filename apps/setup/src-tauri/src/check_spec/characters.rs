@@ -9,9 +9,9 @@
 
 use std::io;
 
-use appytappy_config::app_file::{ColorDef, OriginDef, ReferenceDef, RegionDef, SampleDef};
+use appytappy_config::app_file::{OriginDef, ReferenceDef, RegionDef, SampleDef};
 use appytappy_config::names::sample_name;
-use appytappy_sources::screen::digits::{DigitReader, InkRule};
+use appytappy_sources::screen::digits::{self, DigitReader};
 use appytappy_sources::screen::saved::{self, SavedError};
 use appytappy_sources::screen::{Image, Region, Size};
 use serde::{Deserialize, Serialize};
@@ -21,10 +21,7 @@ use crate::screenshots::Shots;
 use crate::words::sentence;
 
 use super::error::{Lesson, cant_learn};
-use super::{
-    Cut, Pictures, ReferenceRef, SpecError, contrast, cut, drawn, ink_rule, same_size, size_of,
-    to_region,
-};
+use super::{Cut, Pictures, ReferenceRef, SpecError, drawn, same_size, size_of, to_region};
 
 /// The ID a reference is taught under before it is saved under its own.
 const UNSAVED: &str = "unsaved";
@@ -56,8 +53,7 @@ pub(crate) struct RecordedLabel {
 
 /// The characters a reference is being taught, as the UI describes them:
 /// the saved samples of `reference`, when it is saved, but for `dropped`,
-/// then `labels`, then `recorded`, their characters told from the
-/// background by `ink` and `tolerance`.
+/// then `labels`, then `recorded`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct CharactersSpec {
@@ -72,13 +68,6 @@ pub(crate) struct CharactersSpec {
     /// one.
     #[serde(default)]
     pub(crate) reference: Option<ReferenceRef>,
-    /// The reference's text color, or `None` when it finds its characters
-    /// by contrast.
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub(crate) ink: Option<ColorDef>,
-    /// The reference's tolerance, as `ReferenceDef` has it.
-    pub(crate) tolerance: u8,
     /// The labeled screenshots.
     pub(crate) labels: Vec<Label>,
     /// Readings of the session's recording, which must be of `region`.
@@ -90,8 +79,7 @@ pub(crate) struct CharactersSpec {
     pub(crate) dropped: Vec<String>,
 }
 
-/// A saved sample a reference cannot learn with the text color and
-/// tolerance it is tried with.
+/// A saved sample a reference cannot learn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct UnlearnedSample {
@@ -101,8 +89,7 @@ pub(crate) struct UnlearnedSample {
     pub(crate) text: String,
     /// Why the reference cannot learn it, as a sentence.
     pub(crate) problem: String,
-    /// Whether its picture is missing or cannot be decoded, which no text
-    /// color or tolerance helps.
+    /// Whether its picture is missing or cannot be decoded.
     pub(crate) missing: bool,
 }
 
@@ -117,43 +104,22 @@ pub(crate) struct SavedReference {
 }
 
 impl SavedReference {
-    /// The reference as it is saved under the name `name`, with the text
-    /// color `ink`, or none to find its characters by contrast, and the
-    /// tolerance `tolerance`. Its samples stay as they are saved, so no
-    /// screenshot is needed, and it learns them back with the new text
-    /// color and tolerance. Without a text color, the tolerance is the one
-    /// [`contrast::fitted`] chooses from those samples: `tolerance` while
-    /// every sample reads with it.
+    /// The reference as it is saved under the name `name`. Its samples
+    /// stay as they are saved, so no screenshot is needed.
     ///
     /// # Errors
     ///
     /// Returns [`SpecError::NoLabels`] for a reference with no sample, or
     /// why a sample cannot be learned.
-    pub(crate) fn with_settings(
-        self,
-        name: &str,
-        ink: Option<ColorDef>,
-        tolerance: u8,
-    ) -> Result<ReferenceDef, SpecError> {
+    pub(crate) fn renamed(self, name: &str) -> Result<ReferenceDef, SpecError> {
         if self.reference.samples.is_empty() {
             return Err(SpecError::NoLabels);
         }
         let reference = ReferenceDef {
             name: name.to_owned(),
-            ink,
-            tolerance: self.settled_tolerance(ink, tolerance),
             ..self.reference.clone()
         };
         learned(&reference, &[], 0, &self.pictures).map(|_reader| reference)
-    }
-
-    /// The tolerance [`Self::with_settings`] saves for `ink` and
-    /// `tolerance`.
-    fn settled_tolerance(&self, ink: Option<ColorDef>, tolerance: u8) -> u8 {
-        match ink {
-            Some(_) => tolerance,
-            None => contrast::fitted(&self.samples(), tolerance),
-        }
     }
 
     /// The reference without the samples whose pictures `dropped` names.
@@ -166,15 +132,14 @@ impl SavedReference {
         self
     }
 
-    /// The samples the reference cannot learn with the text color `ink`,
-    /// or none to find its characters by contrast, and `tolerance`, in
-    /// order. It learns them in order as `saved::reader` does, but leaves
+    /// The samples the reference cannot learn, in order. It learns them in
+    /// order as `saved::reader` does, but leaves
     /// out each one it cannot learn, so the ones after it are judged on the
     /// ones that worked: a reference without the samples this names learns
     /// every sample it has. A picture that is missing or cannot be decoded
     /// cannot be learned either.
-    pub(crate) fn unlearned(&self, ink: Option<ColorDef>, tolerance: u8) -> Vec<UnlearnedSample> {
-        let mut reader = DigitReader::new(ink_rule(ink, tolerance));
+    pub(crate) fn unlearned(&self) -> Vec<UnlearnedSample> {
+        let mut reader = DigitReader::new();
         self.reference
             .samples
             .iter()
@@ -203,32 +168,17 @@ impl SavedReference {
             .collect()
     }
 
-    /// [`Self::unlearned`] for the settings [`Self::with_settings`] saves
-    /// from `ink` and `tolerance`.
-    pub(crate) fn unlearned_with_settings(
-        &self,
-        ink: Option<ColorDef>,
-        tolerance: u8,
-    ) -> Vec<UnlearnedSample> {
-        self.unlearned(ink, self.settled_tolerance(ink, tolerance))
-    }
-
-    /// What may keep the reference from reading as its saved samples do,
-    /// which its editor warns about while it is taught: the pairs of
-    /// characters whose learned shapes match each other, and whether it
-    /// finds its characters by contrast with a tolerance that leaves an
-    /// outline or a shadow of a sample out, as [`contrast::hides_a_tone`]
-    /// describes.
+    /// The pairs of characters whose learned shapes match each other,
+    /// which may keep the reference from reading as its saved samples do:
+    /// its editor warns about them while it is taught.
     ///
     /// # Errors
     ///
     /// Returns why the reference cannot learn its samples: a picture that
     /// is missing or cannot be decoded, or one it cannot learn from.
-    pub(crate) fn risks(&self) -> Result<(Vec<(char, char)>, bool), SpecError> {
+    pub(crate) fn lookalikes(&self) -> Result<Vec<(char, char)>, SpecError> {
         let reader = learned(&self.reference, &[], 0, &self.pictures)?;
-        let hides_tone = self.reference.ink.is_none()
-            && contrast::hides_a_tone(&self.samples(), self.reference.tolerance);
-        Ok((reader.lookalikes(), hides_tone))
+        Ok(reader.lookalikes())
     }
 
     /// The picture of `sample`, when it is there and decodes.
@@ -238,16 +188,6 @@ impl SavedReference {
             .iter()
             .find(|(name, _)| *name == sample.image)?;
         Image::decode_png(png).ok()
-    }
-
-    /// Each sample's picture and the text it shows, in order. A sample
-    /// whose picture cannot be read is left out.
-    fn samples(&self) -> Vec<(Image, &str)> {
-        self.reference
-            .samples
-            .iter()
-            .filter_map(|sample| Some((self.picture(sample)?, sample.text.as_str())))
-            .collect()
     }
 }
 
@@ -338,11 +278,6 @@ pub(crate) struct Taught {
 }
 
 impl CharactersSpec {
-    /// How the reference tells ink from background.
-    fn ink_rule(&self) -> InkRule {
-        ink_rule(self.ink, self.tolerance)
-    }
-
     /// The region and the window size of the screenshot it was drawn on,
     /// which must hold it.
     ///
@@ -473,8 +408,6 @@ impl CharactersSpec {
             id: id.to_owned(),
             name: name.to_owned(),
             origin,
-            ink: self.ink,
-            tolerance: self.tolerance,
             samples,
         };
         let reader = learned(&reference, &pictures, self.labels.len(), &kept)?;
@@ -497,7 +430,7 @@ impl CharactersSpec {
         recorded: &'a [RecordedLabel],
     ) -> Result<Vec<(Image, &'a str)>, SpecError> {
         let labeled = self.labels.iter().map(|label| {
-            let image = label_image(session.screenshots, region, label, self.ink_rule())?;
+            let image = label_image(session.screenshots, region, label)?;
             Ok((image, label.text.as_str()))
         });
         let kept_readings = recorded.iter().map(|label| {
@@ -505,66 +438,6 @@ impl CharactersSpec {
             Ok((image.clone(), label.text.as_str()))
         });
         labeled.chain(kept_readings).collect()
-    }
-
-    /// The tolerance the reference these characters teach finds its
-    /// characters by contrast with, chosen from its samples as
-    /// [`contrast::fitted`] describes: the spec's own while every sample
-    /// reads with it. A reference with a text color keeps its tolerance,
-    /// which the user sets.
-    ///
-    /// # Errors
-    ///
-    /// Returns what [`Self::of_samples`] does.
-    pub(crate) fn contrast_tolerance(&self, session: Session<'_>) -> Result<u8, SpecError> {
-        if self.ink.is_some() {
-            return Ok(self.tolerance);
-        }
-        self.of_samples(session, |samples| contrast::fitted(samples, self.tolerance))
-    }
-
-    /// Whether the reference these characters teach finds its characters
-    /// by contrast with a tolerance that leaves an outline or a shadow of
-    /// one of its samples out, as [`contrast::hides_a_tone`] describes, so
-    /// that it reads only over backgrounds that hide it too. A reference
-    /// with a text color counts only that color, whatever is behind it.
-    ///
-    /// # Errors
-    ///
-    /// Returns what [`Self::of_samples`] does.
-    pub(crate) fn hides_a_tone(&self, session: Session<'_>) -> Result<bool, SpecError> {
-        if self.ink.is_some() {
-            return Ok(false);
-        }
-        self.of_samples(session, |samples| {
-            contrast::hides_a_tone(samples, self.tolerance)
-        })
-    }
-
-    /// What `of` makes of the samples the reference these characters teach
-    /// learns from, each a picture and the text it shows: the saved ones,
-    /// then the labeled screenshots, then the recorded readings. A saved
-    /// sample whose picture cannot be read is left out; teaching the
-    /// reference reports it.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`SpecError`] for an empty region, or a region,
-    /// screenshot, recorded reading, or saved reference that does not
-    /// exist, and for a labeled screenshot or a recording of another
-    /// window size.
-    fn of_samples<T>(
-        &self,
-        session: Session<'_>,
-        of: impl FnOnce(&[(Image, &str)]) -> T,
-    ) -> Result<T, SpecError> {
-        let (region, window_size) = self.drawn(session.screenshots)?;
-        self.same_sizes(session, window_size)?;
-        let saved = self.saved(session)?;
-        let mut samples: Vec<(Image, &str)> =
-            saved.iter().flat_map(SavedReference::samples).collect();
-        samples.extend(self.new_samples(session, region, &self.recorded)?);
-        Ok(of(&samples))
     }
 
     /// Fails unless every labeled screenshot, and the recording when a
@@ -626,7 +499,7 @@ impl CharactersSpec {
         found: &[Label],
     ) -> Result<Vec<Option<String>>, SpecError> {
         self.problems(session, found, |region, label| {
-            label_image(session.screenshots, region, label, self.ink_rule())
+            label_image(session.screenshots, region, label)
         })
     }
 
@@ -704,25 +577,21 @@ pub(crate) fn sample_problem_of(
     })
 }
 
-/// What `label` labels, as a reference that tells ink from background by
-/// `rule` is given it: its own region of its screenshot, or `region`.
-fn label_image(
-    screenshots: &dyn Shots,
-    region: Region,
-    label: &Label,
-    rule: InkRule,
-) -> Result<Image, SpecError> {
+/// What `label` labels, as a reference is given it to read
+/// ([`digits::cut`]): its own region of its screenshot, or `region`.
+fn label_image(screenshots: &dyn Shots, region: Region, label: &Label) -> Result<Image, SpecError> {
     let region = match label.region {
         Some(own) => to_region(own)?,
         None => region,
     };
-    cut(screenshots, region, label.screenshot, rule)
+    let image = screenshots
+        .get(label.screenshot)
+        .ok_or(SpecError::NoScreenshot)?;
+    digits::cut(image, region).ok_or(SpecError::Outside)
 }
 
 /// The pixels of reading `reading` of `recording`, which must be of
-/// `region`. The reference relearns them with its own text color and
-/// tolerance, like the labeled screenshots, so they need not match the
-/// recording's.
+/// `region`.
 fn recorded_image(
     recording: Option<&Recording>,
     region: Region,

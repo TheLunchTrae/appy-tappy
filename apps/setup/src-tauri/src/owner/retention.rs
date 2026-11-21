@@ -1,6 +1,7 @@
 //! Tests of what the setup app saves of a window's pictures: only the
-//! regions a reference, a state check, a fix, or a click needs, which read
-//! back as the runtime reads them.
+//! regions a reference, a state check, a fix, or a click needs, a
+//! reference's with the pixels around it, which read back as the runtime
+//! reads them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,16 +13,15 @@ use appytappy_sources::screen::saved::{self, SavedValue};
 use appytappy_sources::screen::{FrameHandler, Image, Size};
 
 use crate::stores::Stores;
-use appytappy_config::app_file::{ColorDef, RegionDef};
+use appytappy_config::app_file::RegionDef;
 
 use super::test_support::{
-    Harness, STATE, WINDOW, add_example_app, characters_in, frame_image, harness_with,
-    scratch_store, spec,
+    Harness, add_example_app, characters_in, harness_with, scratch_store, spec, text_frame,
 };
 use super::{ClickPictureView, FoundClick, Owner};
 use super::{FixSpec, ReferenceSaveSpec};
 
-/// The window at twice the size of [`WINDOW`].
+/// The window at another size than [`text_frame`]'s 8 by 6.
 const LARGER: Size = Size {
     width: 8,
     height: 4,
@@ -32,27 +32,36 @@ fn larger_image() -> Image {
     Image::new(LARGER, [0, 0, 255, 0].repeat(32)).expect("matching length")
 }
 
-/// A 4 by 2 frame with only its left column red and the rest gray, so the
-/// left 2 by 2 region shows a narrower character than [`frame_image`]'s.
+/// A gray frame of [`text_frame`]'s size with one red stroke, 1 wide and 4
+/// tall at x 1: a narrower character than [`text_frame`]'s first.
 fn narrow_image() -> Image {
-    let row = [[0, 0, 255, 0], [40; 4], [40; 4], [40; 4]].concat();
-    Image::new(WINDOW, [row.clone(), row].concat()).expect("matching length")
+    let pixels = (0..6_u32)
+        .flat_map(|y| (0..8_u32).map(move |x| (x, y)))
+        .flat_map(|(x, y)| {
+            if x == 1 && (1..5).contains(&y) {
+                [0, 0, 255, 0]
+            } else {
+                [40, 40, 40, 0]
+            }
+        })
+        .collect();
+    Image::new(text_frame().size(), pixels).expect("matching length")
 }
 
-/// The left 2 by 2 pixels of the window, where the number and the state
-/// show.
+/// The left half of the window, where the number shows.
 fn left() -> RegionDef {
     RegionDef {
         x: 0,
         y: 0,
-        width: 2,
-        height: 2,
+        width: 4,
+        height: 6,
     }
 }
 
-fn red() -> ColorDef {
-    serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON")
-}
+/// The state `Shown`: the 2 by 2 pixels of screenshot 0 that hold the top
+/// of [`text_frame`]'s first stroke.
+const STATE: &str = r#"{"kind":"state","region":{"x":1,"y":1,"width":2,"height":2},
+    "drawnOn":0,"states":[{"name":"Shown","screenshot":0}],"tolerance":0}"#;
 
 /// Every file under `folder`, as its path from there with `/` between the
 /// parts and its size when it is a picture, sorted.
@@ -94,11 +103,11 @@ fn with_everything_saved(name: &str) -> (Harness, FrameHandler, Stores, PathBuf,
     let mut harness = harness_with(false, Ok(stores.clone()));
     add_example_app(&mut harness);
     let mut handler = harness.pick();
-    harness.deliver(&mut handler, Ok(&frame_image()));
+    harness.deliver(&mut handler, Ok(&text_frame()));
     assert_eq!(harness.ask(Owner::screenshot), Ok(0));
 
     harness
-        .ask(|owner| owner.start_recording(characters_in(left(), red()), false))
+        .ask(|owner| owner.start_recording(characters_in(left()), false))
         .expect("records");
     harness.deliver(&mut handler, Ok(&narrow_image()));
     harness.stop_recording();
@@ -106,16 +115,15 @@ fn with_everything_saved(name: &str) -> (Harness, FrameHandler, Stores, PathBuf,
         app: "example".to_owned(),
         reference_name: "Digits".to_owned(),
         characters: serde_json::from_str(
-            r#"{"region":{"x":0,"y":0,"width":2,"height":2},"screenshot":0,
-                "reference":null,"ink":{"red":255,"green":0,"blue":0},"tolerance":0,
-                "labels":[{"screenshot":0,"text":"1"}],"recorded":[{"reading":0,"text":"7"}]}"#,
+            r#"{"region":{"x":0,"y":0,"width":4,"height":6},"screenshot":0,
+                "reference":null,"labels":[{"screenshot":0,"text":"1"}],"recorded":[{"reading":0,"text":"7"}]}"#,
         )
         .expect("valid JSON"),
     };
     harness
         .ask(|owner| owner.save_reference(&digits))
         .expect("saves the reference");
-    let count = r#"{"kind":"number","region":{"x":0,"y":0,"width":2,"height":2},
+    let count = r#"{"kind":"number","region":{"x":0,"y":0,"width":4,"height":6},
         "reference":{"app":"example","id":"digits"},"whole":true}"#;
     harness
         .ask(|owner| owner.save(&spec("example", "Count", count)))
@@ -183,7 +191,7 @@ fn read_on(value: &SavedValue, frame: &Image) -> Value {
 }
 
 #[test]
-fn each_saved_picture_holds_only_its_region() {
+fn each_saved_picture_holds_only_what_reads_its_region() {
     let (_harness, _handler, _stores, root, click) = with_everything_saved("retention-regions");
     let small = Some(Size {
         width: 2,
@@ -194,8 +202,14 @@ fn each_saved_picture_holds_only_its_region() {
         height: 4,
     });
     assert_eq!(click.image, "click-1.png");
-    // Nothing else is written, and each picture has its region's size, not
-    // its screenshot's 4 by 2 or 8 by 4.
+    // A reference's picture holds its region and the pixels around it,
+    // which tell a reader the background: here the column beside it.
+    let sample = Some(Size {
+        width: 5,
+        height: 6,
+    });
+    // Nothing else is written, and each other picture has its region's
+    // size, not its screenshot's 8 by 6 or 8 by 4.
     assert_eq!(
         files_under(&root),
         [
@@ -208,8 +222,8 @@ fn each_saved_picture_holds_only_its_region() {
                 "AppyTappy/apps/example/icon_visible-1.png".to_owned(),
                 small
             ),
-            ("AppyTappy/apps/example/ref-digits-1.png".to_owned(), small),
-            ("AppyTappy/apps/example/ref-digits-2.png".to_owned(), small),
+            ("AppyTappy/apps/example/ref-digits-1.png".to_owned(), sample),
+            ("AppyTappy/apps/example/ref-digits-2.png".to_owned(), sample),
             ("AppyTappy/clicks/click-1.png".to_owned(), small),
         ]
     );
@@ -225,11 +239,11 @@ fn what_is_saved_reads_as_the_runtime_reads_it() {
     // The reference's two samples, one from a labeled screenshot and one
     // from a recorded reading, each teach their character.
     let count = read_back(&stores, "count");
-    assert_eq!(read_on(&count, &frame_image()), number(1.0));
+    assert_eq!(read_on(&count, &text_frame()), number(1.0));
     assert_eq!(read_on(&count, &narrow_image()), number(7.0));
 
     let icon = read_back(&stores, "icon_visible");
-    assert_eq!(read_on(&icon, &frame_image()), state("Shown"));
+    assert_eq!(read_on(&icon, &text_frame()), state("Shown"));
     assert_eq!(
         read_on(&icon, &narrow_image()),
         Value::State(StateName::none())
@@ -249,8 +263,8 @@ fn what_is_saved_reads_as_the_runtime_reads_it() {
     );
     assert_eq!(read_on(&icon, &larger_image()), state("Shown"));
 
-    // The click picture is found where it was taken, on the gray half.
-    harness.deliver(&mut handler, Ok(&frame_image()));
+    // The click picture is found where it was taken, right of the stroke.
+    harness.deliver(&mut handler, Ok(&text_frame()));
     let wanted = ClickAtDef::Picture {
         image: click.image,
         window_size: SizeDef {

@@ -6,7 +6,7 @@ import { userEvent } from '@testing-library/user-event';
 import type { AppFile, ReadingRisks, ReferenceDef } from '../../src/lib/bindings.ts';
 import { RiskMark } from '../../src/components/RiskMark.tsx';
 
-const font: ReferenceDef = { id: 'font', name: 'Percent font', origin: { kind: 'byHand' }, tolerance: 40, samples: [] };
+const font: ReferenceDef = { id: 'font', name: 'Percent font', origin: { kind: 'byHand' }, samples: [] };
 const file: AppFile = {
   format: 1,
   name: 'Player',
@@ -41,20 +41,20 @@ test('a saved reference is marked once its risks answer, and an answer for what 
   const view = render(<RiskMark app="player" file={file} reference={font} />);
   expect(screen.queryByText(/May misread/u)).toBeNull();
   // The reference is saved again before the first answer arrives.
-  view.rerender(<RiskMark app="player" file={file} reference={{ ...font, tolerance: 10 }} />);
+  view.rerender(<RiskMark app="player" file={file} reference={{ ...font, name: 'Number font' }} />);
   expect(answers).toHaveLength(2);
   await act(async () => {
-    answers[0]?.resolve({ lookalikes: [['8', '6']], hidesTone: false });
+    answers[0]?.resolve({ lookalikes: [['8', '6']] });
     await Promise.resolve();
   });
   expect(screen.queryByText(/May misread/u)).toBeNull();
   await act(async () => {
-    answers[1]?.resolve({ lookalikes: [], hidesTone: true });
+    answers[1]?.resolve({ lookalikes: [['3', '5']] });
     await Promise.resolve();
   });
   expect(screen.getByText('May misread')).not.toBeNull();
   expect(screen.getByRole('tooltip', { hidden: true }).textContent).toBe(
-    "An outline or a shadow around the characters isn't part of what it learned. Edit it to see what to do.",
+    '3 and 5 have the same shape in what it learned. Edit it to see what to do.',
   );
 });
 
@@ -66,9 +66,7 @@ test('a check that fails is logged and leaves the reference unmarked, and the ne
   };
   try {
     let failing = true;
-    mockIPC(async () =>
-      failing ? Promise.reject('Its saved picture is missing.') : { lookalikes: [['8', '6']], hidesTone: false },
-    );
+    mockIPC(async () => (failing ? Promise.reject('Its saved picture is missing.') : { lookalikes: [['8', '6']] }));
     const view = render(<RiskMark app="player" file={file} reference={font} />);
     await act(async () => {
       await Promise.resolve();
@@ -77,9 +75,9 @@ test('a check that fails is logged and leaves the reference unmarked, and the ne
     expect(screen.queryByText('May misread')).toBeNull();
     // The reference is saved again without the picture it could not learn.
     failing = false;
-    view.rerender(<RiskMark app="player" file={file} reference={{ ...font, tolerance: 10 }} />);
+    view.rerender(<RiskMark app="player" file={file} reference={{ ...font, name: 'Number font' }} />);
     expect((await screen.findByRole('tooltip', { hidden: true })).textContent).toBe(
-      '8 and 6 look alike in what it learned. Edit it to see what to do.',
+      '8 and 6 have the same shape in what it learned. Edit it to see what to do.',
     );
   } finally {
     console.error = logged;
@@ -87,7 +85,7 @@ test('a check that fails is logged and leaves the reference unmarked, and the ne
 });
 
 test('the mark says why to someone who moves to it with the keyboard', async () => {
-  mockIPC(() => ({ lookalikes: [['8', '6']], hidesTone: false }));
+  mockIPC(() => ({ lookalikes: [['8', '6']] }));
   const user = userEvent.setup();
   render(<RiskMark app="player" file={file} reference={font} />);
   const about = await screen.findByRole('button', { name: 'About May misread' });
@@ -96,6 +94,6 @@ test('the mark says why to someone who moves to it with the keyboard', async () 
   await user.tab();
   expect(document.activeElement).toBe(about);
   expect(screen.getByRole('tooltip').textContent).toBe(
-    '8 and 6 look alike in what it learned. Edit it to see what to do.',
+    '8 and 6 have the same shape in what it learned. Edit it to see what to do.',
   );
 });

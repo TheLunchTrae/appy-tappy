@@ -4,7 +4,7 @@ import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
 import type { Editing, NeedsField } from '../lib/captureDraft.ts';
-import { type Built, type Draft, type ReferenceSaving, withTextColor, withoutSample } from '../lib/check.ts';
+import { type Built, type Draft, type ReferenceSaving, withoutSample } from '../lib/check.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers, readersNeed } from '../lib/reference.ts';
 import { neededPairs } from '../lib/useReadingRisks.ts';
@@ -106,16 +106,10 @@ interface Props {
   readonly file: AppFile | null;
   /** The value's steps, which wait while its reference is taught, or null for a reference made by itself. */
   readonly stepper: ReactNode;
-  /** Whether the text color is being picked from the picture. */
-  readonly pickingInk: boolean;
-  readonly canPick: boolean;
-  readonly onPickInk: (picking: boolean) => void;
   /** Each screenshot's pixels, and where each sits in the strip. */
   readonly full: ReadonlyMap<number, Picture>;
   readonly position: (index: number) => number;
   readonly setSelected: (index: number | null) => void;
-  /** The matching pixels' field. */
-  readonly preview: ReactNode;
   /** What saving the reference sends, or what it still needs. */
   readonly saving: Built<ReferenceSaving>;
   /** The try of the characters on the live window. */
@@ -142,13 +136,9 @@ export function ReferenceInspector({
   appName,
   file,
   stepper,
-  pickingInk,
-  canPick,
-  onPickInk,
   full,
   position,
   setSelected,
-  preview,
   saving,
   check,
   windowless,
@@ -185,10 +175,6 @@ export function ReferenceInspector({
       <ReferenceEditor
         name={editing.name}
         appName={appName}
-        ink={draft.ink}
-        tolerance={draft.tolerance}
-        picking={pickingInk}
-        canPick={canPick}
         saved={taught.saved}
         labeled={taught.labeled}
         recorded={taught.recorded}
@@ -196,21 +182,10 @@ export function ReferenceInspector({
         expected={teaching.needs}
         coverage={covered}
         lookalikes={neededPairs(teaching.risks.lookalikes, lookalikeNeeds)}
-        hidesTone={teaching.risks.hidesTone}
         risksProblem={teaching.risks.problem}
         readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
         onName={(name) => {
           setEditing((current) => (current === null ? null : { ...current, name }));
-        }}
-        onPick={() => {
-          onPickInk(!pickingInk);
-        }}
-        onNoTextColor={() => {
-          onPickInk(false);
-          setDraft((current) => withTextColor(current, null));
-        }}
-        onTolerance={(tolerance) => {
-          setDraft((current) => ({ ...current, tolerance }));
         }}
         needsField={needsField}
         onExpected={(needs) => {
@@ -244,7 +219,6 @@ export function ReferenceInspector({
               onCheck={checking ? null : guided.open}
               onFind={() => {
                 if (chosen !== null) {
-                  onPickInk(false);
                   setSelected(chosen.screenshot);
                   background(finder.search(chosen));
                 }
@@ -252,11 +226,9 @@ export function ReferenceInspector({
             />
           )
         }
-        preview={preview}
         unlearned={
           <UnlearnedPictures
             unlearned={teaching.unlearned}
-            hasTextColor={draft.ink !== null}
             removed={saved.length - taught.saved.length}
             onRemove={(image) => {
               setDraft((current) => withoutSample(current, image));

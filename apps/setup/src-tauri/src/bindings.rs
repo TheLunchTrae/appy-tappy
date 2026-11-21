@@ -41,7 +41,7 @@ use appytappy_config::action::{
 };
 use appytappy_config::anti_cheat::AntiCheatClass;
 use appytappy_config::app_file::{
-    AppFile, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef, is_label_character,
+    AppFile, MAX_STATES, OverlayModeDef, SizeDef, WindowDef, is_label_character,
 };
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef,
@@ -81,8 +81,8 @@ use crate::overlay::window::label;
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
     FoundClick, FoundView, ImportSpec, Live, ReadingRisks, RecordSpec, ReferenceSaveSpec,
-    ReferenceSettingsSpec, ReferenceTrial, SaveSpec, SavedReferenceId, SavedValue, SavingKind,
-    SharedView, TrialSpec,
+    ReferenceSettingsSpec, ReferenceTrial, SaveSpec, SavedReferenceId, SavedValue, SharedView,
+    TrialSpec,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::reading::Reading;
@@ -959,8 +959,8 @@ fn highest_of<S, T: Highest>(_read: fn(&S) -> Option<&T>) -> u64 {
     T::highest()
 }
 
-/// The highest tolerance the page offers: a color's, a reference's ink's,
-/// a selection's color match, a state check's, and a click picture's.
+/// The highest tolerance the page offers: a color's, a selection's color
+/// match, a state check's, and a click picture's.
 fn max_tolerance() -> u64 {
     let each = [
         highest_of(|check: &CheckSpec| match check {
@@ -969,15 +969,13 @@ fn max_tolerance() -> u64 {
             },
             CheckSpec::Number { .. } | CheckSpec::BarFill { .. } => None,
         }),
-        highest_of(|characters: &CharactersSpec| Some(&characters.tolerance)),
-        highest_of(|reference: &ReferenceDef| Some(&reference.tolerance)),
         highest_of(|selection: &SelectionSpec| Some(&selection.tolerance)),
         highest_of(|at: &ClickAtDef| match at {
             ClickAtDef::Picture { tolerance, .. } => Some(tolerance),
             ClickAtDef::Spot { .. } => None,
         }),
     ];
-    let highest = each.iter().copied().max().expect("five fields");
+    let highest = each.iter().copied().max().expect("three fields");
     assert!(
         each.iter().all(|&one| one == highest),
         "the tolerances differ in range; give the page a limit for each"

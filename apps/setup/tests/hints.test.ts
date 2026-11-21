@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { INK_TOLERANCE_HINT, READING_HINT, SHORTCUT_HINT, TOLERANCE_HINT } from '../src/lib/hints.ts';
+import { READING_HINT, SHORTCUT_HINT, TOLERANCE_HINT } from '../src/lib/hints.ts';
 
 // These hints are built from the generated limits and key lists. These tests pin the words the user reads.
 
@@ -16,8 +16,5 @@ test('the range hints name the ranges the save takes', () => {
   );
   expect(TOLERANCE_HINT).toBe(
     "From 0, an exact match, up to 255, which matches any color. Raise it if the check misses; lower it if it matches when it shouldn't.",
-  );
-  expect(INK_TOLERANCE_HINT).toBe(
-    'From 0, only the exact color, up to 255, which counts every pixel. Raise it if parts of characters go missing; lower it if the background counts as characters.',
   );
 });

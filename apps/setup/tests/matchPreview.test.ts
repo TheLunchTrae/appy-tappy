@@ -10,8 +10,6 @@ import {
   SELECTED_TINT,
   awaited,
   barLegend,
-  countIn,
-  inkLines,
   layersOf,
   nearLine,
   paint,
@@ -35,7 +33,6 @@ const SIZE = { width: 10, height: 6 };
 const WHOLE = { x: 0, y: 0, ...SIZE };
 
 const draft = (parts: Partial<PreviewDraft>): PreviewDraft => ({
-  ink: null,
   tolerance: 40,
   filled: null,
   empty: null,
@@ -51,54 +48,43 @@ const layer = (spans: Layer['spans'], count?: number): Layer => ({
 
 describe('plan', () => {
   test('has nothing to show on the live view, and says a screenshot is needed', () => {
-    expect(plan('ink', draft({ ink: WHITE }), null, null)).toEqual({
+    expect(plan('color', draft({ color: WHITE }), null)).toEqual({
       kind: 'blocked',
       why: 'Matching pixels show on a screenshot. Select one, or take one.',
     });
   });
 
-  test("looks for a reference's characters on the whole screenshot, whatever the region", () => {
-    expect(plan('ink', draft({ ink: WHITE, region: REGION }), 3, SIZE)).toEqual({
-      kind: 'ask',
-      request: { screenshot: 3, area: WHOLE, rule: { kind: 'ink', ink: WHITE, tolerance: 40 } },
-    });
-    expect(plan('ink', draft({ region: REGION }), 3, SIZE)).toEqual({
-      kind: 'ask',
-      request: { screenshot: 3, area: WHOLE, rule: { kind: 'contrast', region: REGION, tolerance: 40 } },
-    });
-    // Without a text color, the background comes from the selected box.
-    expect(plan('ink', draft({}), 3, SIZE)).toEqual({
-      kind: 'blocked',
-      why: 'Select a box on this screenshot to see what stands out from its background.',
-    });
-    expect(plan('ink', draft({ ink: WHITE }), 3, null).kind).toBe('blocked');
-  });
-
   test("looks for a bar's and a color check's pixels in the region", () => {
     const bar = draft({ filled: GREEN, empty: WHITE, region: REGION });
-    expect(plan('barFill', bar, 0, SIZE)).toEqual({
+    expect(plan('barFill', bar, 0)).toEqual({
       kind: 'ask',
       request: { screenshot: 0, area: REGION, rule: { kind: 'barFill', filled: GREEN, empty: WHITE } },
     });
-    expect(plan('barFill', { ...bar, empty: null }, 0, SIZE).kind).toBe('blocked');
-    expect(plan('barFill', { ...bar, filled: null }, 0, SIZE).kind).toBe('blocked');
-    expect(plan('barFill', { ...bar, region: null }, 0, SIZE).kind).toBe('blocked');
+    expect(plan('barFill', { ...bar, empty: null }, 0).kind).toBe('blocked');
+    expect(plan('barFill', { ...bar, filled: null }, 0).kind).toBe('blocked');
+    expect(plan('barFill', { ...bar, region: null }, 0).kind).toBe('blocked');
     const color = draft({ color: PINK, tolerance: 7, region: REGION });
-    expect(plan('color', color, 1, SIZE)).toEqual({
+    expect(plan('color', color, 1)).toEqual({
       kind: 'ask',
       request: { screenshot: 1, area: REGION, rule: { kind: 'color', color: PINK, tolerance: 7 } },
     });
-    expect(plan('color', { ...color, color: null }, 1, SIZE).kind).toBe('blocked');
-    expect(plan('color', { ...color, region: null }, 1, SIZE).kind).toBe('blocked');
+    expect(plan('color', { ...color, color: null }, 1).kind).toBe('blocked');
+    expect(plan('color', { ...color, region: null }, 1).kind).toBe('blocked');
   });
 });
 
 const request = (tolerance: number, screenshot = 0, area = WHOLE): PreviewRequest => ({
   screenshot,
   area,
-  rule: { kind: 'ink', ink: WHITE, tolerance },
+  rule: { kind: 'color', color: WHITE, tolerance },
 });
-const view = (count: number): MatchView => ({ kind: 'ink', ink: layer([[0, count]]) });
+const view = (count: number): MatchView => ({
+  kind: 'color',
+  near: layer([[0, count]]),
+  average: WHITE,
+  distance: 0,
+  matches: true,
+});
 
 describe('step', () => {
   const [a, b, c] = [request(10), request(20), request(30)];
@@ -292,7 +278,7 @@ describe('what shows while requests are out', () => {
     expect(tinted(NO_PREVIEW, request(10))).toBeNull();
     expect(tinted(idle, request(10, 1))).toBeNull();
     expect(tinted(idle, request(10, 0, REGION))).toBeNull();
-    expect(tinted(idle, { ...request(10), rule: { kind: 'color', color: WHITE, tolerance: 10 } })).toBeNull();
+    expect(tinted(idle, { ...request(10), rule: { kind: 'barFill', filled: WHITE, empty: GREEN } })).toBeNull();
   });
 
   test('says an answer is awaited until what shows is for the settings now', () => {
@@ -312,9 +298,7 @@ describe('tints', () => {
   const green = { red: 0, green: 255, blue: 0 };
 
   test('take whichever of magenta and green stands out more against the picked color', () => {
-    expect(tintsFor({ kind: 'ink', ink: GREEN, tolerance: 0 })).toEqual([{ color: magenta, striped: false }]);
-    expect(tintsFor({ kind: 'ink', ink: PINK, tolerance: 0 })).toEqual([{ color: green, striped: false }]);
-    expect(tintsFor({ kind: 'contrast', region: REGION, tolerance: 0 })).toEqual([{ color: magenta, striped: false }]);
+    expect(tintsFor({ kind: 'color', color: GREEN, tolerance: 0 })).toEqual([{ color: magenta, striped: false }]);
     expect(tintsFor({ kind: 'color', color: PINK, tolerance: 0 })).toEqual([{ color: green, striped: false }]);
   });
 
@@ -332,7 +316,6 @@ describe('tints', () => {
   test('pair with the layers of each kind of answer in order', () => {
     const [filled, empty, near] = [layer([[0, 1]]), layer([[1, 2]]), layer([[2, 3]])];
     expect(layersOf({ kind: 'barFill', filled, empty })).toEqual([filled, empty]);
-    expect(layersOf({ kind: 'ink', ink: near })).toEqual([near]);
     expect(layersOf({ kind: 'color', near, average: WHITE, distance: 0, matches: true })).toEqual([near]);
   });
 });
@@ -450,31 +433,6 @@ describe('selectedPixels', () => {
   });
 });
 
-describe('countIn', () => {
-  // Runs in a 10x6 rectangle: all of row 1, and the last pixel of row 2 through the first three of row 3.
-  const spans = [
-    [10, 20],
-    [29, 33],
-  ] as const;
-
-  test('counts the pixels of runs that lie in the region', () => {
-    // Columns 2 to 5 of rows 1 and 2: four from the first run, none from the second.
-    expect(countIn(spans, WHOLE, REGION)).toBe(4);
-    // Columns 0 to 2 of rows 2 and 3 hold the three pixels that start row 3.
-    expect(countIn(spans, WHOLE, { x: 0, y: 2, width: 3, height: 2 })).toBe(3);
-    expect(countIn(spans, WHOLE, { x: 9, y: 2, width: 1, height: 1 })).toBe(1);
-    expect(countIn(spans, WHOLE, WHOLE)).toBe(14);
-  });
-
-  test('places the runs where their rectangle is on the screenshot', () => {
-    const at = { x: 100, y: 50, width: 10, height: 6 };
-    expect(countIn(spans, at, { x: 102, y: 51, width: 4, height: 2 })).toBe(4);
-    expect(countIn(spans, at, REGION)).toBe(0);
-    // A region that reaches past the rectangle counts only what is inside it.
-    expect(countIn(spans, at, { x: 90, y: 40, width: 15, height: 12 })).toBe(5);
-  });
-});
-
 test('a share reads 0% and 100% only for none and for all', () => {
   expect(share(0, 200)).toBe('0%');
   expect(share(200, 200)).toBe('100%');
@@ -487,43 +445,6 @@ test('a share reads 0% and 100% only for none and for all', () => {
 });
 
 describe('what the tint shows, in words', () => {
-  test("counts a reference's characters in the region and elsewhere", () => {
-    // Three pixels in the region and two outside it.
-    const ink = layer([
-      [12, 15],
-      [40, 42],
-    ]);
-    expect(inkLines(ink, WHOLE, REGION, 'ink')).toEqual([
-      '3 of 8 pixels in the region (38%) count as characters, and 2 pixels elsewhere on the screenshot.',
-    ]);
-    expect(inkLines(ink, WHOLE, null, 'ink')).toEqual(['5 of 60 pixels on the screenshot (8%) count as characters.']);
-    // A region drawn on a larger screenshot does not lie on this one.
-    expect(inkLines(ink, WHOLE, { x: 8, y: 1, width: 4, height: 2 }, 'ink')).toEqual([
-      '5 of 60 pixels on the screenshot (8%) count as characters.',
-    ]);
-    expect(inkLines(layer([[12, 15]]), WHOLE, REGION, 'ink')).toEqual([
-      '3 of 8 pixels in the region (38%) count as characters, and none elsewhere on the screenshot.',
-    ]);
-  });
-
-  test('says when no pixel matches, when the whole region does, and when only pixels outside it do', () => {
-    expect(inkLines(layer([]), WHOLE, REGION, 'ink')).toEqual([
-      'No pixel on the screenshot counts as characters. Raise the tolerance, or pick the text color again.',
-    ]);
-    expect(inkLines(layer([]), WHOLE, REGION, 'contrast')).toEqual([
-      'No pixel on the screenshot counts as characters. Draw the box around some characters.',
-    ]);
-    expect(inkLines(layer([[0, 60]]), WHOLE, REGION, 'ink')).toEqual([
-      'Every pixel in the region counts as characters, and 52 pixels elsewhere on the screenshot. Lower the tolerance until only the characters do.',
-    ]);
-    expect(inkLines(layer([[40, 41]]), WHOLE, REGION, 'ink')).toEqual([
-      'No pixel in the region counts as characters; 1 pixel elsewhere on the screenshot does.',
-    ]);
-    expect(inkLines(layer(null, 30), WHOLE, REGION, 'ink')).toEqual([
-      'Too many separate areas match to tint them all, so none is tinted. 30 of 60 pixels on the screenshot (50%) count as characters. Lower the tolerance.',
-    ]);
-  });
-
   test("lists a bar's filled, empty, and other pixels", () => {
     const tints = tintsFor({ kind: 'barFill', filled: GREEN, empty: WHITE });
     expect(barLegend(layer([[0, 5]]), layer([[5, 7]]), REGION, tints)).toEqual({

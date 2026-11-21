@@ -19,7 +19,6 @@ import {
   selectedPixels,
   tinted,
 } from './matchPreview.ts';
-import type { Size } from './region.ts';
 import type { Selection } from './selection.ts';
 
 /** The preview as the capture screen shows it. */
@@ -49,7 +48,6 @@ export function useMatchPreview(
   target: PreviewTarget | null,
   draft: PreviewDraft,
   selected: number | null,
-  size: Size | null,
   unplaced: string | null,
 ): MatchPreview {
   const [wanted, setWanted] = useState<ReadonlySet<PreviewTarget>>(new Set());
@@ -62,22 +60,15 @@ export function useMatchPreview(
     ),
   );
   const on = target !== null && wanted.has(target);
-  const { ink, tolerance, filled, empty, color, region } = draft;
-  const width = size?.width ?? null;
-  const height = size?.height ?? null;
+  const { tolerance, filled, empty, color, region } = draft;
   const planned = useMemo(
     (): Plan | null =>
       !on
         ? null
         : unplaced !== null
           ? { kind: 'blocked', why: unplaced }
-          : plan(
-              target,
-              { ink, tolerance, filled, empty, color, region },
-              selected,
-              width === null || height === null ? null : { width, height },
-            ),
-    [on, target, unplaced, ink, tolerance, filled, empty, color, region, selected, width, height],
+          : plan(target, { tolerance, filled, empty, color, region }, selected),
+    [on, target, unplaced, tolerance, filled, empty, color, region, selected],
   );
   const request = planned?.kind === 'ask' ? planned.request : null;
   useEffect(() => {

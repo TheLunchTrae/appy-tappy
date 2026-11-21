@@ -345,10 +345,8 @@ pub struct ValueDef {
 /// The characters of one font, that number values read with.
 ///
 /// It learns them from pictures of text in that font. One reference serves
-/// every value drawn in its font, whatever the size: the reader scales each
-/// character to its line's height. It tells a picture's or a region's
-/// characters from the background by contrast with the background, or by
-/// their color when it has a text color.
+/// every value drawn in its font, whatever its size and color: the reader
+/// knows each character by its shape.
 ///
 /// It is a font and no more: which of its characters a value needs is the
 /// value's to say, in its number check.
@@ -364,25 +362,16 @@ pub struct ReferenceDef {
     /// leaves it out.
     #[serde(default)]
     pub origin: OriginDef,
-    /// The text color, for text over a scene that is no one color: the
-    /// characters are the pixels within `tolerance` of it. `None` finds the
-    /// characters by contrast instead: they are the pixels further than
-    /// `tolerance` from the background, so they may be of any colors.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
-    pub ink: Option<ColorDef>,
-    /// How far a pixel may be from `ink` and still be a character's, or
-    /// without `ink`, from the background and still be background.
-    pub tolerance: u8,
     /// The pictures it learns from.
     pub samples: Vec<SampleDef>,
 }
 
-/// A [`ReferenceDef`] as a file holds it: its keys, and `expects`, a list of
-/// characters that no reference has. That one key is read and forgotten, so
-/// the next save leaves it out; any other key the reference does not have
-/// is refused, as in every other part of the file. An error names it as the
-/// reference it reads.
+/// A [`ReferenceDef`] as a file holds it: its keys, and three that no
+/// reference has: `expects`, a list of characters, and `ink` and
+/// `tolerance`, a text color and how far a pixel may be from it. Those are
+/// read and forgotten, so the next save leaves them out; any other key the
+/// reference does not have is refused, as in every other part of the file.
+/// An error names it as the reference it reads.
 #[derive(Deserialize)]
 #[serde(rename = "ReferenceDef", deny_unknown_fields)]
 struct ReferenceKeys {
@@ -390,12 +379,13 @@ struct ReferenceKeys {
     name: String,
     #[serde(default)]
     origin: OriginDef,
-    #[serde(default)]
-    ink: Option<ColorDef>,
-    tolerance: u8,
     samples: Vec<SampleDef>,
     #[serde(default, rename = "expects")]
     _expects: IgnoredAny,
+    #[serde(default, rename = "ink")]
+    _ink: IgnoredAny,
+    #[serde(default, rename = "tolerance")]
+    _tolerance: IgnoredAny,
 }
 
 impl<'de> Deserialize<'de> for ReferenceDef {
@@ -405,8 +395,6 @@ impl<'de> Deserialize<'de> for ReferenceDef {
             id: keys.id,
             name: keys.name,
             origin: keys.origin,
-            ink: keys.ink,
-            tolerance: keys.tolerance,
             samples: keys.samples,
         })
     }
@@ -1187,12 +1175,6 @@ mod tests {
                 id: "percent".to_owned(),
                 name: "Percent".to_owned(),
                 origin: OriginDef::ByHand,
-                ink: Some(ColorDef {
-                    red: 255,
-                    green: 255,
-                    blue: 255,
-                }),
-                tolerance: 40,
                 samples: vec![SampleDef {
                     image: sample_name("percent", 1),
                     text: "87%".to_owned(),
@@ -1231,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reference_accepts_expects_and_refuses_unknown_keys() {
+    fn a_reference_forgets_three_keys_and_refuses_unknown_ones() {
         let file = dash();
         let json = file.to_json();
         let with_key = |key: &str| {
@@ -1243,21 +1225,11 @@ mod tests {
             assert_ne!(more, json);
             more
         };
-        assert_eq!(AppFile::parse(&with_key("expects")), Ok(file));
+        for forgotten in ["expects", "ink", "tolerance"] {
+            assert_eq!(AppFile::parse(&with_key(forgotten)), Ok(file.clone()));
+        }
         let refused = AppFile::parse(&with_key("inkColor")).expect_err("no such key");
         assert!(refused.to_string().contains("inkColor"), "{refused}");
-    }
-
-    #[test]
-    fn a_reference_s_text_color_is_left_out_until_chosen_and_round_trips() {
-        let mut file = dash();
-        let json = file.to_json();
-        assert!(json.contains("\"ink\": {"), "{json}");
-        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
-        file.references[0].ink = None;
-        let json = file.to_json();
-        assert!(!json.contains("ink"), "{json}");
-        assert_eq!(AppFile::parse(&json), Ok(file));
     }
 
     #[test]
@@ -1486,8 +1458,8 @@ mod tests {
         );
         assert_eq!(
             file.reference("percent")
-                .map(|reference| reference.tolerance),
-            Some(40)
+                .map(|reference| reference.name.as_str()),
+            Some("Percent")
         );
         assert!(file.reference("progress").is_none());
         assert_eq!(file.values[0].screen.check.states(), []);

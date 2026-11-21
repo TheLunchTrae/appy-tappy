@@ -29,8 +29,6 @@ test("referenceCharacters reads a reference's samples", () => {
       id: 'percent',
       name: 'Percent font',
       origin: { kind: 'byHand' } as const,
-      ink: white,
-      tolerance: 40,
       samples: [
         { image: 'ref-percent-1.png', text: '10%' },
         { image: 'ref-percent-2.png', text: '9' },
