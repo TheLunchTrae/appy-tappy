@@ -11,8 +11,7 @@ afterEach(cleanup);
 
 const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
-function editor(valueNeeds: readonly string[], onReads: (reads: readonly string[]) => void) {
-  const expected = valueNeeds.length > 0 ? valueNeeds : DIGITS;
+function editor(onReads: (reads: readonly string[]) => void) {
   return (
     <ReferenceEditor
       name="Percent font"
@@ -23,9 +22,7 @@ function editor(valueNeeds: readonly string[], onReads: (reads: readonly string[
       reads={DIGITS}
       onReads={onReads}
       readersLose={null}
-      valueNeeds={valueNeeds}
-      expected={expected}
-      coverage={coverage(expected, ['7', '8', '%', 'L', 'v'])}
+      coverage={coverage(DIGITS, ['7', '8', '%', 'L', 'v'])}
       lookalikes={[]}
       risksProblem={null}
       finding={[]}
@@ -35,32 +32,20 @@ function editor(valueNeeds: readonly string[], onReads: (reads: readonly string[
       record={null}
       unlearned={null}
       onName={() => {}}
-      needsField={valueNeeds.length > 0 ? 'editable' : 'hidden'}
-      onExpected={() => {}}
     />
   );
 }
 
-test('a reference made by itself chooses the characters it reads, and says what else it learned it does not read', async () => {
+test('a reference chooses the characters it reads, and says what else it learned it does not read', async () => {
   const chosen: (readonly string[])[] = [];
   render(
-    editor([], (reads) => {
+    editor((reads) => {
       chosen.push(reads);
     }),
   );
-  expect(screen.queryByText('Characters the value needs')).toBeNull();
   await userEvent.click(screen.getByRole('checkbox', { name: /Percent/u }));
   expect(chosen).toEqual([[...DIGITS, '%']]);
   expect(screen.getByText('Not among the characters it reads, so it reads none of these:')).toBeTruthy();
-});
-
-test('a reference taught for a value shows its own characters and the value’s apart', () => {
-  render(editor(['8', '%'], () => {}));
-  expect(screen.getByText('Characters it reads')).toBeTruthy();
-  expect(screen.getByText('Characters the value needs')).toBeTruthy();
-  // Each chooser has its own field for other characters.
-  const ids = screen.getAllByLabelText('Other characters').map((field) => field.id);
-  expect(new Set(ids).size).toBe(2);
 });
 
 test('a value that needs a character its reference does not read says so, and counts it as not missing', () => {
@@ -86,20 +71,15 @@ test('a value that needs a character its reference does not read says so, and co
       appName="Player"
       file={file}
       selected="digits"
-      hasRegion
       whole={false}
       characters={['1', '2', '%']}
       onSelect={() => {}}
-      onEdit={() => {}}
-      drafted={new Set()}
-      onNew={() => {}}
-      onRecord={() => {}}
       onWhole={() => {}}
       onCharacters={() => {}}
     />,
   );
   expect(screen.getByRole('status').textContent).toContain(
-    "Digit font doesn't read %, so this value can't either. Edit Digit font to read it",
+    "Digit font doesn't read %, so this value can't either. Edit Digit font on the References page to read it",
   );
   // The 2 is still to learn; the % is not, since teaching it would not make it read.
   const missing = document.querySelector('.missing-note')?.textContent ?? '';

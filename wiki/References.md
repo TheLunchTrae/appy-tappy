@@ -25,21 +25,20 @@ that stops.
 
 ## Make a reference
 
-Select **New reference** on the References page, or select
-**New reference from this region** while you
-[make a value](Values.md#make-a-value). From the References page, first choose
-the application the reference belongs to, or select **Add application**, then
-select **Capture this window**, as the first step of
-[making a value](Values.md#make-a-value) describes.
+Select **New reference** on the References page. A reference is made only
+here, on its own, never as a step of
+[making a value](Values.md#make-a-value): a value picks a reference that is
+saved already. First choose the application the reference belongs to, or
+select **Add application**, then select **Capture this window**, as the first
+step of [making a value](Values.md#make-a-value) describes.
 
 1. **Name it,** such as `Percent font`, with a name no other reference of
    the application has. Capitals of the letters A to Z don't count:
    `Percent font` and `percent font` are one name. Until it has a name,
    **Save reference** waits, and says `Name the reference.` above the button.
 2. **Choose the characters it reads,** under **Characters it reads**, as
-   [Characters it reads](#characters-it-reads) describes. A reference you
-   start from the References page starts with **Digits** turned on, and one
-   you start from a value starts with the characters the value needs.
+   [Characters it reads](#characters-it-reads) describes. A new reference
+   starts with **Digits** turned on.
 3. **Teach it the characters.** On a screenshot, drag to draw a box tightly
    around some characters, then type what the box shows, such as `87%`, in
    its row under **Boxes**. AppyTappy learns the shape of each character from
@@ -47,8 +46,7 @@ select **Capture this window**, as the first step of
    [find more like it](#find-more-like-it) on the same screenshot, or
    [record readings](#record-readings) to collect characters as they show.
    [**Characters still missing**](#what-it-has-learned) says which of the
-   characters it reads, or that the value needs when you teach it for a
-   value, are left to teach.
+   characters it reads are left to teach.
 4. **Save.** Select **Save reference**. A reference with characters still
    missing saves too: the editor says so next to the button, and you can
    teach them later. When some of its characters are AppyTappy's guesses
@@ -61,17 +59,15 @@ The box at the bottom of the panel shows what the reference reads on the
 live window, a few times a second. When it can't read the window, it says why
 instead, in the words
 [A number reads in setup but the automation does nothing](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
-explains. That box is the reference's own reading of the region you drew, at the
+explains. That box is the reference's own reading at its first box, at the
 window's size now, as [Window size](Values.md#window-size) describes for a
-value. It reads only the characters it reads. A reference you make or edit
-from a number reads here as that number will: only the characters the number
-needs, and without the digits after the decimal point when the number
-ignores them. The automation reads with
-the same reference, where its value's region is at the window's size.
+value. It reads only the characters it reads, with the digits after a
+decimal point. A value that reads with it reads only the characters that
+value needs, as [Characters a number needs](Values.md#characters-a-number-needs)
+describes, where its region is at the window's size.
 
 To teach a saved reference more, select **Edit** next to it on the References
-page, or **Edit** while you pick it for a value. From the References page the
-editor opens at once and finds the application's window itself.
+page. The editor opens at once and finds the application's window itself.
 [While the application isn't open](Values.md#while-the-application-isnt-open),
 you can still rename the reference, change
 [**Characters it reads**](#characters-it-reads), and save: its samples stay
@@ -105,10 +101,6 @@ but doesn't read shows under [**Characters it knows**](#what-it-has-learned),
 and stays a character to it, so it ends a number there rather than passing
 for a digit.
 
-When you teach a reference for a value that needs a character it doesn't
-read, saving it adds that character to **Characters it reads**, so the value
-can read it.
-
 When you turn off a character that a saved value needs, a note under
 **Characters it reads** names the value and the character, such as
 `Progress needs %, which it would no longer read.` Turn the character back
@@ -137,19 +129,12 @@ you like, on any screenshot, and several on one screenshot too.
 - **Delete.** Select **Delete** in the box's row, or press Delete while the
   box is selected on the screenshot.
 
-A reference you teach by itself reads the window, and
-[records](#record-readings), at its first box, whose row says
-**Reads here**. While you teach a reference for a value, it reads at the
-value's region instead, and no box says so.
+A reference reads the window, and [records](#record-readings), at its first
+box, whose row says **Reads here**.
 
 Every box goes on a screenshot of one window size, the size the reference
-reads at: the size of the screenshot its first box is on, or, while you teach
-a reference for a value, the size the value's region is drawn at. On a
-screenshot of another size, the editor says which size the boxes go on.
-
-While you teach a reference for a value, the screenshots show the boxes, not
-the value's region. The region is as you drew it when you go back to the
-value.
+reads at: the size of the screenshot its first box is on. On a screenshot of
+another size, the editor says which size the boxes go on.
 
 ## What it has learned
 
@@ -157,33 +142,26 @@ value.
 keeps up as you type what boxes show, add found text, keep recorded
 readings, or correct them.
 
-While you teach a reference for a value, the editor also shows
-**Characters the value needs**, the value's
-[**Characters it needs**](Values.md#characters-a-number-needs), and compares
-them with what the reference learned. You can change them there too: the
-value takes the change when you save the reference, and **Discard** leaves
-the value's list as it was. A [fix](Values.md#fix-a-value-at-one-size)
-needs the characters its value does, so its reference's editor shows the
-list without the choices; edit the value to change it.
+Each value says which of the reference's characters it needs, under
+[**Characters it needs**](Values.md#characters-a-number-needs), and the list
+of references a value picks from shows after **Missing** what the reference
+has yet to learn for it. Teach those here.
 
-- **Characters still missing** shows each needed character it has yet to
+The editor compares what it learned with
+[**Characters it reads**](#characters-it-reads).
+
+- **Characters still missing** shows each character it reads and has yet to
   learn, outlined. This is what is left to teach. Once it has them all, it
-  says so.
-- **Characters it knows** shows the needed characters it learned. Characters
-  it learned that the value does not need show below them. They are fine to
-  keep: another value in the same font can need them.
-
-A reference you make or edit from the References page is taught for no
-value, so it compares what it learned with
-[**Characters it reads**](#characters-it-reads) the same way, and so does
-one taught for a value that needs no characters. Characters it learned that
-it doesn't read show below the ones it reads.
+  says so. A reference that reads every character it learns has none.
+- **Characters it knows** shows the characters it reads that it learned.
+  Characters it learned that it doesn't read show below them, and it reads
+  none of those.
 
 When two characters have the same shape in what the reference learned,
-it can't tell one from the other, and reads neither. When the value needs
-at least one of them, a warning under **Characters it knows** names them.
-On the References page, it goes by what the values that read with the
-reference need. Most often a box or a reading has the wrong text: check
+it can't tell one from the other, and reads neither. When it reads at least
+one of them, a warning under **Characters it knows** names them. A reference
+that reads every character it learns goes by what the values that read with
+it need. Most often a box or a reading has the wrong text: check
 that the text typed for each is what it shows, and retype or remove the
 wrong one. Two characters that a font draws the same, such as `0` and `O`
 in some, stay alike; a value that
@@ -225,19 +203,15 @@ those too when a value shows that size: a reference reads other sizes
 than it learned, and reads a size best once it has learned from it.
 
 The list holds only the finds that may show the characters the reference
-[reads](#characters-it-reads), or, while you teach it for a value, the
-characters the value [needs](Values.md#characters-a-number-needs). A letter that is often read in
-place of a digit counts as that digit, so a value that needs digits still
-lists a
+[reads](#characters-it-reads). A letter that is often read in place of a
+digit counts as that digit, so a reference that reads digits still lists a
 find read as `12O5`, whose `O` may be a `0`. The list says how many finds it
 skipped. A find you ticked before its text was read is skipped the same way
 once the text shows other characters, so it leaves the list and is not
-added. A reference that reads every character it learns, taught for no
-value or for one that needs no characters, lists every find.
+added. A reference that reads every character it learns lists every find.
 
 1. **Tick the ones to add.** Each find in the list shows outlined on the
-   screenshot under the same number, with the text AppyTappy read. A skipped
-   find keeps its number, so the numbers can have gaps. A find starts unticked: tick the
+   screenshot under the same number, with the text AppyTappy read. A find starts unticked: tick the
    ones to add, or **Select all**, which also clears every tick. Fix any text
    it got wrong; typing a find's text ticks it.
 2. **Deal with the flagged ones.** A ticked find is flagged when it can't be
@@ -446,9 +420,9 @@ one of them: **Save reference** waits, and says
 `Remove the saved pictures it can't learn first.` Do one of these:
 
 - **Remove the picture.** Select **Remove** beside it. The reference loses
-  only what that picture taught it. If
-  [**Characters still missing**](#what-it-has-learned) then lists a
-  character, draw a box around it on a screenshot. The editor counts the
+  only what that picture taught it. If a character then leaves
+  [**Characters it knows**](#what-it-has-learned), draw a box around it on a
+  screenshot. The editor counts the
   pictures you removed, and **Put back** brings them all back. Saving the
   reference deletes them.
   A reference needs at least one picture, box, or kept reading, so draw a box
@@ -457,18 +431,16 @@ one of them: **Save reference** waits, and says
 A value that reads with the reference can show the same problem, such as
 `Percent font can't learn from its saved picture of "87%"`, or say that a
 saved picture is missing from the application's folder. Select
-**Edit Percent font** where the value picks its reference, and remove the
-picture there.
+**Edit** next to Percent font on the References page, and remove the picture
+there.
 
 ## Record readings
 
 Typing what a counter shows on screenshot after screenshot is slow when it
 shows many values. A reference can record instead, while you use the
 application, and collect the characters one place in the window shows: the
-value's region while you teach a reference for a value, or else the
-reference's first box. While you make a **Number** value,
-**Record readings** under **Characters** opens this recording on the value's
-region. The other checks
+reference's first box. Values don't record readings: a **Number** value
+reads with a reference taught here, and the other checks
 [record screenshots](Values.md#record-screenshots) instead.
 
 A recording keeps a reading when it shows a character shape that no kept
@@ -486,7 +458,7 @@ That helps when the stray shape showed in one reading only. A shape that
 shows in two different readings counts as a character, so an in-between
 shape that a counter draws at every change passes for one. The recording
 then keeps no cleaner reading, however long it records, and review cannot
-offer one. If a character stays under **Still missing**, or its only reading
+offer one. If a character never shows under **Found**, or its only reading
 cannot be typed, take a screenshot that shows the character without the
 stray shape and draw a box around it instead.
 
@@ -498,10 +470,9 @@ stray shape and draw a box around it instead.
    characters you need. AppyTappy reads each kept reading's text for you, and
    **Recording** says what that gives so far:
    - **Still missing** shows each character the reference
-     [reads](#characters-it-reads), or the value
-     [needs](Values.md#characters-a-number-needs), that nothing has shown
-     yet. Make the application show these. It shows unless the reference
-     reads every character it learns.
+     [reads](#characters-it-reads) that nothing has shown yet. Make the
+     application show these. It shows unless the reference reads every
+     character it learns.
    - **Found, not checked yet** shows the characters AppyTappy read in the
      kept readings. They are its guess until you check their readings in
      review: type in a reading's text, set its **Keep**, or select
@@ -670,11 +641,10 @@ It has limits, and review is where you deal with them:
 
 - **It can pick up other text.** A menu's label or a name in the same color
   and size is kept too. A reading whose text shows none of the characters the
-  reference [reads](#characters-it-reads), or the value
-  [needs](Values.md#characters-a-number-needs), starts with **Keep** cleared
-  and says so; set its **Keep** if you want it after all. A reading that mixes both,
-  such as `Lv 5`, starts kept, since its `5` may be the only one. So does
-  one that may be a number misread, such as `SOS` for `505`, when every
+  reference [reads](#characters-it-reads) starts with **Keep** cleared and
+  says so; set its **Keep** if you want it after all. A reading that mixes
+  both, such as `Lv 5`, starts kept, since its `5` may be the only one. So
+  does one that may be a number misread, such as `SOS` for `505`, when every
   character of it is a letter often read in place of a digit.
 - **It takes the text nearest the place first.** Each time it looks, it
   takes up to 32 pieces of text, starting with the ones nearest the place

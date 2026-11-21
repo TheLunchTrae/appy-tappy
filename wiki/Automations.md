@@ -69,8 +69,9 @@ application, it is chosen for you.
   application chosen.
 - **New value** makes a value for the chosen application, as
   [Make a value](Values.md#make-a-value) describes. It starts with that
-  application chosen. A number's reference is made there too, with
-  **New reference from this region**.
+  application chosen. A number picks one of the application's references,
+  which are made on the References page, as
+  [Make a reference](References.md#make-a-reference) describes.
   Saving the value brings you back to the automation with that value picked.
 
 Whichever you open, the automation keeps its name, condition, actions, and

@@ -52,7 +52,7 @@ export const BAR_COLORS_HINT =
 
 /** Where a recording of readings looks for characters. */
 export const RECORD_SCOPE_HINT =
-  "This place records only where the reference reads: its first box, or the value's region. The whole window also records text that stands out as the characters there do and is as tall as the text there, wherever the window shows it, so a stats panel or a second counter in the same font teaches the reference too. When the window shows the characters at another size as well, draw a box around some text of that size first: each box is one more example of a size to look for. It looks over the window twice a second, so text that flashes by faster can be missed, and it can pick up other text of that size, which you leave out in review.";
+  'This place records only where the reference reads: its first box. The whole window also records text that stands out as the characters there do and is as tall as the text there, wherever the window shows it, so a stats panel or a second counter in the same font teaches the reference too. When the window shows the characters at another size as well, draw a box around some text of that size first: each box is one more example of a size to look for. It looks over the window twice a second, so text that flashes by faster can be missed, and it can pick up other text of that size, which you leave out in review.';
 
 /** What the sizes of text are that a recording of the whole window looks for. */
 export const TEXT_SIZES_HINT =
@@ -84,7 +84,7 @@ export const READS_HINT =
 
 /** Finding more text like the selected box. */
 export const FIND_LIKE_HINT =
-  "Looks on the selected box's screenshot for other text that stands out as the text in the box does, at any size, and reads each as text. Text as tall as the box's comes first, and a find of another size says how tall it is. It lists only text that may show the characters the reference reads, or, for a reference you teach from a value, the ones the value needs. Each one you tick and add becomes a box, and a reference that learns a size reads it better. A later search on that screenshot skips the finds you didn't add from earlier lists, until you close the reference editor or select Show them again. Draw the box tightly around the text first, so its size is right.";
+  "Looks on the selected box's screenshot for other text that stands out as the text in the box does, at any size, and reads each as text. Text as tall as the box's comes first, and a find of another size says how tall it is. It lists only text that may show the characters the reference reads. Each one you tick and add becomes a box, and a reference that learns a size reads it better. A later search on that screenshot skips the finds you didn't add from earlier lists, until you close the reference editor or select Show them again. Draw the box tightly around the text first, so its size is right.";
 
 /** What the found text's list shows, and what each row's box and field do. */
 export const FOUND_HINT =

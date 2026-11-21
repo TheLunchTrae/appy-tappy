@@ -686,14 +686,6 @@ describe('what the capture screen holds of the check', () => {
     expect(openGuide([drawn], [], earlierOf(closed, 7, 3)).changes).toEqual([]);
   });
 
-  test("the reference's editor closing closes an open check and forgets every answer", () => {
-    const closed = heldStep(open, close);
-    for (const held of [open, closed, heldStep(open, leftOut)]) {
-      expect(heldStep(held, { kind: 'forget' })).toEqual(NOTHING_HELD);
-    }
-    expect(answersOf(open).size).toBeGreaterThan(0);
-  });
-
   test('remembers a reading left out until it is kept again, and drops one of another recording', () => {
     const held = heldStep(open, leftOut);
     expect([...leftOutOf(held, 3)]).toEqual([[1, { text: '18', ticked: true }]]);

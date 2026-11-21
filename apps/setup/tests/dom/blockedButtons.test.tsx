@@ -1,7 +1,6 @@
 import { afterEach, expect, mock, test } from 'bun:test';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
-import { ReferencePicker } from '../../src/components/ReferencePicker.tsx';
 import { SavedStates } from '../../src/components/ValueEdit.tsx';
 import type { ValueDef } from '../../src/lib/bindings.ts';
 import { EMPTY_DRAFT } from '../../src/lib/check.ts';
@@ -16,41 +15,6 @@ function described(name: string): string {
     .map((id) => document.getElementById(id)?.textContent ?? '')
     .join(' ');
 }
-
-test('without a region, the reference buttons say why and do nothing', () => {
-  const onNew = mock();
-  const onRecord = mock();
-  const picker = (hasRegion: boolean) => (
-    <ReferencePicker
-      appName="Player"
-      file={null}
-      selected={null}
-      hasRegion={hasRegion}
-      whole={false}
-      characters={[]}
-      onSelect={() => undefined}
-      onEdit={() => undefined}
-      drafted={new Set()}
-      onNew={onNew}
-      onRecord={onRecord}
-      onWhole={() => undefined}
-      onCharacters={() => undefined}
-    />
-  );
-  const view = render(picker(false));
-  for (const name of ['New reference from this region', 'Record readings']) {
-    fireEvent.click(screen.getByRole('button', { name }));
-    expect(described(name)).toBe('Draw the region first.');
-  }
-  expect(onNew).not.toHaveBeenCalled();
-  expect(onRecord).not.toHaveBeenCalled();
-
-  view.rerender(picker(true));
-  fireEvent.click(screen.getByRole('button', { name: 'New reference from this region' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Record readings' }));
-  expect(onNew).toHaveBeenCalledTimes(1);
-  expect(onRecord).toHaveBeenCalledTimes(1);
-});
 
 test('Take the states again says why it waits and does nothing until it can', () => {
   const value: ValueDef = {

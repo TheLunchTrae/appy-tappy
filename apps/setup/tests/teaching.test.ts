@@ -5,7 +5,6 @@ import {
   SAVE_AFTER_REVIEW,
   SAVE_AFTER_UNLEARNED,
   checkBackLabel,
-  draftHolds,
   referenceSave,
 } from '../src/lib/teaching.ts';
 
@@ -52,12 +51,4 @@ test("the character check's Back label follows the reviewed recording", () => {
   // Opened from a recording's review, the check goes back to it; otherwise to the screenshot.
   expect(checkBackLabel(true)).toBe('Back to review');
   expect(checkBackLabel(false)).toBe('Back to the screenshot');
-});
-
-test('a reference with a draft of changes is changed only by finishing the draft', () => {
-  const digits = { id: 'digits', name: 'Digits' };
-  expect(draftHolds(digits, new Set(['digits']))).toBe(
-    'Digits has a draft of changes. Finish it on the References page to change it.',
-  );
-  expect(draftHolds(digits, new Set(['letters']))).toBeNull();
 });

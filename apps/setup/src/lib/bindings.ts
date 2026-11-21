@@ -1710,17 +1710,8 @@ app: string,
  */
 characters: CharactersSpec,
 /**
- * The characters the number it is made for needs, or none for every
- * character it is taught.
- */
-needs: string,
-/**
- * Whether that number ignores digits after the decimal point.
- */
-whole: boolean,
-/**
- * The side of the window that number's region stays at, or `None`
- * for the side the region is nearest.
+ * The side of the window its region stays at, or `None` for the side
+ * the region is nearest.
  */
 pin: PinDef | null, }>;
 

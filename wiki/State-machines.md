@@ -2040,8 +2040,7 @@ owner drops a stop that carries another recording's number
 (`Owner::stop_recording`), one of the
 [stale-message guards](#how-to-read-this-page): a stop sent as one
 component goes can arrive after the recording that took its place started,
-as when the reference editor's recording of readings replaces a recording of
-looks. After a start the page reads the recording's state until a read
+as when the next flow's recording starts first. After a start the page reads the recording's state until a read
 answers (`keepsReading` in `apps/setup/src/lib/useRecorder.ts`), so a
 recording whose first read failed still shows with **Stop** and **Discard**,
 and then reads it while it still changes. That first read's failure is a
@@ -2128,14 +2127,13 @@ stateDiagram-v2
   (`Recording::resume`). The page sends the
   stopped recording's own choice of where to look, so only the others can
   differ. When any of them differs (`settingsDiffer`), **Use its
-  settings** shows. A reference taught by itself read at a box, and the
+  settings** shows. A reference reads at a box, and the
   [Reference boxes](#reference-boxes) machine keeps the ID of the box each
   new recording starts at (`recorded`). **Use its settings**
   puts that box back where the recording read, first in the list
   ([Reference boxes](#reference-boxes)), on its own screenshot when that has
-  the recording's size or else on the newest that has (`recordedPlace`). A
-  reference taught for a value reads at the value's region, which the editor
-  cannot change, so there the boxes stay. It never sets the draft's `region`.
+  the recording's size or else on the newest that has (`recordedPlace`). It
+  never sets the draft's `region`.
 - **Ended** is a stopped recording whose capture slot is **Ended**
   (`Recording::end`). Its problem says to change window, and **Record more**
   and a new **Record** are refused. Its readings stay for review, so a
@@ -2465,7 +2463,9 @@ stateDiagram-v2
   either size is unknown, such as a screenshot whose pixels did not arrive,
   the region stays as it is. This step records nothing.
 - **How** is **Characters** for a number that is not a fix: it picks the
-  reference, opens the reference editor, or records readings. For every
+  characters the value needs and one of the application's saved references.
+  It makes, edits, and records for no reference: a reference is set up only
+  in a reference's own capture, from the References page. For every
   other value it is **How to read it**: the check's fields, the reading on
   the live window, and the save.
 - **Check** (**Check and save**) exists for a number that is not a fix: the
@@ -2475,8 +2475,6 @@ stateDiagram-v2
 - A tab is ticked once its step has what it sets: a name and a region for
   **Where**, and a reference for **Characters**. No step blocks the next;
   the save button waits until the whole value can be saved.
-- While the reference editor is open, the tabs show **Characters** as the
-  current step and are disabled until the reference is saved or discarded.
 - A draft keeps `step`, so finishing a draft opens on the step it was saved
   on.
 
@@ -2499,7 +2497,6 @@ stateDiagram-v2
     NoneSelected --> Selected: draw a box, press a box, or select one in the list
     Selected --> Selected: select another box, or move, resize, or retype this one
     Selected --> NoneSelected: delete the selected box
-    Selected --> NoneSelected: the reference editor opens or closes
     NoneSelected --> Selected: Use its settings puts the reading box back
     Selected --> Selected: Use its settings puts the reading box back
 ```
@@ -2526,24 +2523,21 @@ stateDiagram-v2
   outlives its box reads as **NoneSelected**.
 - A box with no text teaches nothing (`boxLabels`). Added
   [found text](#found-text) becomes boxes with text.
-- The reference reads, and records, at the value's region when it is taught
-  for a value, or else at its first box (`readingOf` in
+- The reference reads, and records, at its first box (`readingOf` in
   `apps/setup/src/lib/check.ts`), whose row the list marks **Reads here**.
   Every box must be on a screenshot of that one's size; on a screenshot of
   another size the stage refuses a new box and says which size they go on
-  (`boxBlocked`). While the editor is open, the stage shows the boxes and
-  not the value's region, and nothing in the editor changes the draft's
-  `region`.
-- **A new recording** of a reference taught by itself sends `recorded` with
+  (`boxBlocked`). Nothing in the editor changes the draft's `region`.
+- **A new recording** of a reference sends `recorded` with
   the ID of the box it reads at. Deleting that box clears the ID, because a
   box drawn later can take a deleted box's ID.
-- **Use its settings** after a [recording](#recording) of a reference taught
-  by itself sends `restore`: the recorded box moves back to where it read and
+- **Use its settings** after a [recording](#recording) of a reference sends
+  `restore`: the recorded box moves back to where it read and
   to the top of the list, and is selected. When that box was deleted, a new
   box with no text takes its place, which reads there and teaches nothing,
   and becomes the recorded box.
-- Opening and closing the reference editor drops the boxes (`toReference`,
-  `fromReference`); a draft of a reference keeps them.
+- A reference's capture opens with no boxes (`EMPTY_DRAFT`), and a draft
+  of a reference keeps them.
 
 ### Recording looks
 
@@ -2570,10 +2564,10 @@ stateDiagram-v2
     Recording --> Ended: the window closes
     Paused --> Ended: the window closes
     Stopped --> Ended: the window closes
-    Recording --> None: the reference editor opens or records, a window is picked, or the flow closes
-    Paused --> None: the reference editor opens or records, a window is picked, or the flow closes
-    Stopped --> None: the reference editor opens or records, a window is picked, or the flow closes
-    Ended --> None: the reference editor opens, a window is picked, or the flow closes
+    Recording --> None: a window is picked, or the flow closes
+    Paused --> None: a window is picked, or the flow closes
+    Stopped --> None: a window is picked, or the flow closes
+    Ended --> None: a window is picked, or the flow closes
 ```
 
 - **Recording** crops each frame to the region and compares the crop with
@@ -2611,9 +2605,9 @@ stateDiagram-v2
   or a stop of the capture releases. While it records, rests, or is paused,
   the owner refuses to remove any screenshot, so the looks it knows and the
   screenshots that show them stay in step.
-- The reference editor records readings, so opening it discards a recording of
-  looks first (`openEditor` in `Capture.tsx`), and the owner replaces one when
-  a recording of readings starts.
+- Only a value's capture records looks, and only a reference's capture
+  records readings, so the two never share a capture. The owner still
+  replaces a recording of looks when a recording of readings starts.
 
 ### Value edit
 
@@ -2740,8 +2734,8 @@ stateDiagram-v2
   move or resize. A State check's selection fits the region without this
   check, so it keeps a pin chosen by hand and the control says when the two
   disagree.
-- The reference editor draws on the same screenshot for its own characters,
-  so a region drawn there leaves the choice alone.
+- A reference's capture draws boxes, not a value's region, so a box leaves
+  the choice alone.
 - A fix has no choice: it reads at its own region, and its value keeps its
   pin.
 - **Back to automatic** moves the focus to **Change**, which takes its
@@ -2885,11 +2879,10 @@ stateDiagram-v2
   hasn't offered. The owner counts the finds it left out that way
   (`passed`), and **Show them again** forgets the screenshot's and searches
   again from the box the shown search started from (`searchSkipped`).
-  Closing the reference editor forgets them all (`reset`). A find starts
-  unticked. It is listed when its text may show only characters the value
-  the reference is taught for needs, or else the characters the reference
-  reads, a lookalike digit counted as its digit (`fitsNeeds` with
-  `teachingNeeds`), or while it is being read or the user typed it. Answers to a search the user
+  Leaving the reference's capture forgets them all. A find starts
+  unticked. It is listed when its text may show only characters the
+  reference reads, a lookalike digit counted as its digit (`fitsNeeds` with
+  `Editing.reads`), or while it is being read or the user typed it. Answers to a search the user
   moved on from are ignored by the UI's turn. Picture callbacks end when
   the search is replaced or dismissed, or its editor closes, through the
   cleanup of their effect (`ask` in `useFound`); a late picture cannot
@@ -3225,9 +3218,9 @@ stateDiagram-v2
   never waits for it. It says "confirmed" because
   [review](#recording) counts a reading as checked once the user keeps it,
   which confirms none of its characters.
-- **The reference's editor closes** on **Discard** or a save. That closes
-  an open check and forgets `past` and `leftOut` (`forget`), so no answer
-  reaches the next reference's offer.
+- **The reference's editor closes** on **Discard** or a save, which leave
+  the reference's capture. Its check, `past`, and `leftOut` go with it, so
+  no answer reaches the next reference's offer.
 
 The check has no failure state of its own, and every turn is an edit the
 list of boxes, the list of finds, or review takes. Its one request asks
@@ -3394,9 +3387,9 @@ stateDiagram-v2
   deleted. The failure is logged and nothing is listed; the trial and the
   save say what is wrong, and a learn error on a saved sample says where
   the picture is removed.
-- The samples left out end with the editor: opening it on a reference and
-  leaving it clear `dropped` (`withoutTeaching`), and a save
-  writes the reference without them and closes the editor. A
+- The samples left out end with the reference's capture: a new capture
+  starts with `dropped` empty, and a save writes the reference without them
+  and leaves the capture. A
   [draft](Setup-app.md#drafts) reopens the saved pictures for review
   (`restoreSetup`), since even the same file name and label can now refer
   to different pixels.

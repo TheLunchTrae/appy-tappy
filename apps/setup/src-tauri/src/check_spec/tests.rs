@@ -700,8 +700,8 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
         }),
         Some(
             "Digits can't learn from its saved picture of \"77\": nothing in it stands out from \
-             its background. Edit Digits and remove that picture under Saved pictures it can't \
-             learn."
+             its background. Edit Digits on the References page and remove that picture under \
+             Saved pictures it can't learn."
                 .to_owned()
         )
     );

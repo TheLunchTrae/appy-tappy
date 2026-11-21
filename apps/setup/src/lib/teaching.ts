@@ -55,18 +55,3 @@ export function referenceSave(save: ReferenceSave): { readonly can: boolean; rea
 export function checkBackLabel(reviewing: boolean): string {
   return reviewing ? 'Back to review' : 'Back to the screenshot';
 }
-
-/**
- * Why the value's capture may not change the saved reference `chosen`, or null when it may. `drafted` holds the IDs
- * of the references that have a draft of changes. Such a reference changes only by finishing its draft, since
- * finishing the draft would undo a change made apart from it. This holds for every way into the reference's editor
- * from a value: Edit, and Record readings.
- */
-export function draftHolds(
-  chosen: { readonly id: string; readonly name: string },
-  drafted: ReadonlySet<string>,
-): string | null {
-  return drafted.has(chosen.id)
-    ? `${chosen.name} has a draft of changes. Finish it on the References page to change it.`
-    : null;
-}
