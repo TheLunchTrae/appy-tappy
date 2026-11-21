@@ -380,7 +380,7 @@ fn same_size(height: u32, sample: u32) -> bool {
 
 /// The ink of a find at `region` of `image` for the text reader, as
 /// `reader` tells it from the background in the pixels it is given of the
-/// region ([`DigitReader::cut`]), which a reference is given of the box the
+/// region ([`digits::cut`]), which a reference is given of the box the
 /// find becomes; `None` when it shows none or `region` reaches outside
 /// `image`.
 pub(crate) fn ink_line(image: &Image, region: Region, reader: &DigitReader) -> Option<Line> {

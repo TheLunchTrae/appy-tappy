@@ -56,8 +56,8 @@ const THIN: u32 = 8;
 const TELLING: u8 = 48;
 
 /// How far past either of two colors, or apart from channel to channel, a
-/// color may lie and still be a blend of the two, in 256ths of the way
-/// from one to the other.
+/// color may lie and still be a blend of the two, in parts of 256 of the
+/// way from one to the other.
 const BLEND_SLACK: i32 = 64;
 
 /// How far red, green, and blue may each be from a layer's color in a
@@ -609,7 +609,7 @@ fn between(color: Rgb, one: Rgb, other: Rgb) -> bool {
             continue;
         }
         let (color, one, other) = (i32::from(color), i32::from(one), i32::from(other));
-        // How far along, in 256ths.
+        // How far along, in parts of 256.
         let along = color
             .saturating_sub(one)
             .saturating_mul(256)

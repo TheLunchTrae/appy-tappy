@@ -10,17 +10,17 @@
 //! differ between machines.
 //!
 //! 1. **Layers.** The image is split into its few colors, each a layer
-//!    that may hold the text ([`layers`]). The steps below run on every
+//!    that may hold the text (`layers`). The steps below run on every
 //!    layer.
 //! 2. **Line.** The run of adjacent inked rows that holds the most ink
 //!    ([`Ink::line`]).
 //! 3. **Characters.** Runs of columns that hold ink in the line, left to
 //!    right. Characters must not touch.
 //! 4. **Shapes.** Each character is scaled to a grid by its own bounds, and
-//!    keeps how tall it is and where it starts in its line ([`shape`]).
+//!    keeps how tall it is and where it starts in its line (`shape`).
 //! 5. **Matching.** Each shape takes the character of the closest learned
-//!    glyph, if the two are within [`MATCH_WITHIN`] and no glyph of another
-//!    character is within [`CLEAR_BY`] more. Only the closest glyph is
+//!    glyph, if the two are within `MATCH_WITHIN` and no glyph of another
+//!    character is within `CLEAR_BY` more. Only the closest glyph is
 //!    asked, and a shape two characters are about as close to is neither:
 //!    a read fails rather than guess.
 //! 6. **The layer.** The layer the reader knows the most of is the text.

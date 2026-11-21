@@ -118,7 +118,7 @@ pub(crate) enum SpecError {
         picture: String,
     },
     /// The saved reference being edited cannot learn from one of its saved
-    /// samples with the text color and tolerance it is tried with.
+    /// samples.
     SavedLearn {
         /// The text the sample shows.
         text: String,

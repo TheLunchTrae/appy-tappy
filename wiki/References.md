@@ -13,8 +13,13 @@ characters each knows and the values that read with it. The list of
 references you pick from for a Number value also shows, after **Missing**,
 the characters that value needs and the reference has yet to learn.
 
-A reference reads its characters at any size, so a number drawn larger than
-the ones it learned from still reads.
+A reference knows each character by its shape alone. It keeps no color, so
+a number that turns from white to gold or red still reads, on another
+background too. It reads its characters at any size, so a number drawn
+larger or smaller than the ones it learned from still reads. One reference
+is enough for a font: teach it each character once.
+[What a reference can't learn](#what-a-reference-cant-learn) says where
+that stops.
 
 ## Make a reference
 
@@ -61,13 +66,11 @@ To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. From the References page the
 editor opens at once and finds the application's window itself.
 [While the application isn't open](Values.md#while-the-application-isnt-open),
-you can still rename the reference, change the tolerance of its
-[text color](#text-color), and save: its samples stay as
+you can still rename the reference and save: its samples stay as
 they are. Teaching it more needs a box on a screenshot, so screenshots and
 recording wait for the window. What it learned before stays; new boxes and
-readings add to it. Changing it, such as giving it a
-[text color](#text-color), changes how every value that reads with it reads,
-and the editor names them.
+readings add to it. Changing it changes how every value that reads with it
+reads, and the editor names them.
 
 ## Boxes
 
@@ -125,33 +128,29 @@ list without the choices; edit the value to change it.
   it learned that the value does not need show below them. They are fine to
   keep: another value in the same font can need them.
 
-When two characters look so alike in what the reference learned that it may
-read one as the other, and the value needs at least one of them, a warning
-under **Characters it knows** names them. On the References page, it goes by
-what the values that read with the reference need. By contrast, this happens
-most with bold text that has a thick outline: give it a
-[text color](#text-color). With a text color, lower the **Tolerance**, or
-pick the color again from the middle of a character.
+When two characters have the same shape in what the reference learned,
+it can't tell one from the other, and reads neither. When the value needs
+at least one of them, a warning under **Characters it knows** names them.
+On the References page, it goes by what the values that read with the
+reference need. Most often a box or a reading has the wrong text: check
+that the text typed for each is what it shows, and retype or remove the
+wrong one. Two characters that a font draws the same, such as `0` and `O`
+in some, stay alike; a value that
+[needs](Values.md#characters-a-number-needs) only one of them still reads
+it.
 
-A second warning there says that an outline or a shadow around the
-characters is close to the background color in what the reference learned
-from, so it isn't part of the shapes it learned. Over a background of
-another color it can count, and the number won't read, as when a game goes
-from one level or scene to the next: give the reference a
-[text color](#text-color), so only the inside of the characters counts.
+When AppyTappy can't check for that, the editor says **Can't check for
+characters that look alike.** and why, in place of the warning. No warning
+then doesn't mean that the reference has no such characters. The check
+runs again when a box or its text changes. A reference that can't learn
+from a box, a kept reading, or a saved picture has nothing to check yet:
+the reading says which one it can't learn from and why, and the warning
+waits until it can.
 
-When AppyTappy can't check for either of the two, the editor says **Can't
-check for characters that look alike.** and why, in place of the warnings.
-No warning then doesn't mean that the reference has neither problem. The
-check runs again when a box, the text color, or the tolerance changes. A
-reference that can't learn from a box, a kept reading, or a saved picture
-has nothing to check yet: the reading says which one it can't learn from and
-why, and the warnings wait until it can.
-
-The References page marks a saved reference that has either problem with
-**May misread** beside its name. The **?** beside the mark says which, and
+The References page marks a saved reference that has such characters with
+**May misread** beside its name. The **?** beside the mark names them, and
 **Edit** shows what to do. The mark shows a moment after the
-page does. Neither warning holds up **Save reference**.
+page does. The warning doesn't hold up **Save reference**.
 
 AppyTappy learns a character from a box, found text you add, or a kept
 reading, never because a value needs it. A reference you make or edit from
@@ -163,16 +162,17 @@ there, and neither does it when the value needs no characters.
 A screen often shows more numbers in the same font than the one you drew a
 box around, such as a stats panel. Select a box, and then select
 **Find more like it**. AppyTappy looks on the box's screenshot for other
-text that stands out as the text in the box does, at any size, away from
-the boxes that are there already, and reads each as text. It finds text on
-the same background as the box's; text on a panel of another color needs a
-box of its own first.
+text in the color of the text in the box, at any size, away from
+the boxes that are there already, and reads each as text. Text in another
+color needs a box of its own first. Where the text in the box is several
+colors, such as a gradient, it finds what stands out from the box's
+background instead.
 
 Text as tall as the text in the box comes first in the list, then text of
 other sizes, starting with the size nearest the box's. A find of another
 size says how tall its characters are, such as **Text 28 px tall**. Add
-those too when a value shows that size: a reference reads a size best once
-it has learned from it.
+those too when a value shows that size: a reference reads other sizes
+than it learned, and reads a size best once it has learned from it.
 
 While you teach a reference for a value, the list holds only the finds that
 may show the characters the value
@@ -196,15 +196,7 @@ characters, lists every find.
    two different characters. Type what it shows, or leave it out.
    **Deselect flagged**, which shows while a ticked find is flagged, clears
    the tick of every flagged find at once, so you can add the rest.
-3. **Reread, if the text color was off.** **Reread** shows while AppyTappy could
-   not read a find, or while a flagged find still has the text AppyTappy read.
-   It reads those finds again with the [text color](#text-color) and its
-   **Tolerance** as they are set now, and keeps your ticks and the text you
-   typed. The same two read the same text, so **Reread** waits, and says so,
-   until you change one of them, such as a tolerance that left parts of the
-   characters out. A find AppyTappy could not read at
-   all is read again whenever you select **Reread**.
-4. **Add them.** Select the button that says how many you add, such as
+3. **Add them.** Select the button that says how many you add, such as
    **Add 3 to the reference**. With none ticked it says **Add to the
    reference** and waits. Each becomes a [box](#boxes), which you can
    move, retype, or delete like one you drew. Until you add them,
@@ -223,8 +215,7 @@ added, and every find an earlier list on that screenshot had that you
 didn't add, including the lists you closed with **Not these** and the finds
 it skipped for showing characters the reference does not need. A list that
 leaves some out says how many; select **Show them again** to see them.
-A search with another text color than the one they were read with offers
-them too, and closing the reference editor forgets them.
+Closing the reference editor forgets them.
 
 ## Check characters one at a time
 
@@ -355,87 +346,49 @@ AppyTappy says so when the two differ:
   for each of its marks that has blank space on both sides. Some percent
   signs are three such marks: a ring, a slash, and a ring. Type a character
   for each mark, such as `87o/o`; the number still reads as 87. Anything else
-  that stands out from the background counts too, such as an icon or a
-  frame's edge, so draw the box around the number alone.
+  in the text's color counts too, such as an icon or a frame's edge, so draw
+  the box around the number alone.
 
-A reference knows a character as it looked beside the others in its box.
-A sign that reaches above or below the digits, such as the `,` in `1,234`,
-changes how every character beside it looks to AppyTappy. Draw boxes around
-readings that show the sign until they show every digit, and around readings
-without it too.
+AppyTappy takes the background from the pixels just around each box and
+region, and the characters from the color inside them that splits into as
+many characters as you typed. So a box whose text you typed as it shows
+teaches the reference, whatever colors the text and its outline have, and
+there is no color to pick or tolerance to set. A box drawn along the edge
+of a button or a panel teaches the text on it, not the panel.
 
-Small text takes more boxes. Where the characters are less than about 16
-pixels tall, draw boxes around several readings of each character, or
-[record](#record-readings) them.
+A reference reads one font. These it can't read, or reads less well:
 
-## Text color
+- **Another font.** Its characters are other shapes. Give it its own
+  reference, or teach this one boxes in that font too.
+- **Characters that touch.** They count as one.
+- **Text over a busy background,** such as a scene that shows through or a
+  panel with a pattern. The reference can't tell the characters from what
+  is behind them, and its boxes show more characters than you typed.
+- **Rotated or slanted text** that it learned upright.
+- **Very small marks.** A `.` only a pixel or two wide can fail to read
+  when the reference learned it more than twice as large. Draw a box
+  around a reading at the small size too.
+- **Text in the background's own color** reads only with an outline more
+  than a pixel wide around it.
 
-AppyTappy finds a reference's characters by how they stand out from the
-background behind them, so text in several colors reads as one: a gradient,
-an outline, a number that turns red when it is low. It takes the background
-from the pixels just around each box and region, and chooses how far a pixel must be
-from it to count from the boxes you type and the readings you keep, so there
-is nothing to set.
+A reference knows how tall a character is beside the others in its box, so
+it tells a `.` from a `0` and a `,` from a `'`. A box that shows a sign
+alone, such as `-`, teaches less than one that shows it beside digits.
 
-That needs a background that is nearly one color around the number. Where a
-scene shows through behind the text, or the panel behind it has a pattern,
-the reference can't tell the characters from what is behind them, and its
-boxes show more characters than you typed. Give it a text color instead:
-
-1. Open **Text color (optional)** at the bottom of the reference editor.
-2. Next to **Text color**, select **Pick**, then click inside a character on
-   a screenshot, not on its edge.
-3. **Tolerance** says how far a pixel's color may be from the text color and
-   still count: drag the slider or type a number. Raise it until the
-   characters are whole, and lower it if the background counts too.
-
-Only pixels near the text color count as characters then, whatever is behind
-them, so the text has to be drawn in one color. **Remove text color** goes
-back to finding the characters by contrast. A box that was drawn while the
-reference had a text color needs a little room around its text for that. If
-the reference then can't learn a box, draw it again. A saved picture whose
-text touches its edge can't be learned by contrast either, and has no box to
-draw again: put the text color back, or
-[remove the picture](#saved-pictures-it-cant-learn).
-
-An outline reads by contrast while the background behind the number stays
-much the same. Where the background changes, the outline counts as part of
-each character over one background and blends into another, so the
-characters change shape and the number stops reading: give such text a text
-color. The editor warns under
-[**Characters it knows**](#what-it-has-learned) when the boxes and readings
-the reference learned from leave an outline or a shadow out.
-
-A thick outline around bold text can't be read by contrast over any
-background. When AppyTappy finds the characters by contrast, the outline counts as
-part of each character, so the strokes are thicker, the holes in `0`, `6`,
-`8`, and `9` are small, and the reference can read one of them as another,
-such as `0` as `8`. Give such text a text color: pick the color inside a
-character, not on its outline, so that only the inside counts and the
-reference tells the digits apart. The editor warns about this under
-[**Characters it knows**](#what-it-has-learned). Without a text color, draw
-each box and the
-value's region around the whole character, outline included. A box that cuts
-through the outline leaves part of the character out.
-
-With or without a text color, turn on **Show matching pixels** to tint every
-pixel on the screenshot that counts as part of the characters. Without a
-text color, select a box first: the tint shows what stands out from that
-box's background. Under the switch, AppyTappy counts the tinted pixels in
-the box and on the rest of the screenshot. The tint is only a guide, as
-[Show matching pixels](Values.md#show-matching-pixels) describes.
+When two colors in a region each show characters the reference knows, and
+they say different text, the reference reads neither and says so. Draw the
+region around the one number.
 
 ## Saved pictures it can't learn
 
 A reference keeps a picture of every box and reading it learned from, and
 learns them all again each time you save it. No screenshot shows those
-pictures. A picture that taught the reference when you saved it can stop
-teaching it once you pick, change, or remove its text color, or change the
-text color's **Tolerance**: what counts as the characters changes, so the
-characters in the picture can touch, fall apart, or disappear.
+pictures. A picture teaches the reference nothing when its file is missing
+from the application's folder, or when it no longer splits into as many
+characters as its text has.
 
 The editor then lists each such picture under
-**Saved pictures it can't learn**, below **Text color (optional)**: the
+**Saved pictures it can't learn**: the
 picture, what you typed for it, and why the reference can't learn it. Its
 **?** says the same in short. The reference can't be saved while it keeps
 one of them: **Save reference** waits, and says
@@ -447,13 +400,8 @@ one of them: **Save reference** waits, and says
   character, draw a box around it on a screenshot. The editor counts the
   pictures you removed, and **Put back** brings them all back. Saving the
   reference deletes them.
-- **Change the text color**, or its tolerance, until the list is empty.
-  Without a text color, pick one: a picture cut for a text color learns
-  again with it. This doesn't help a picture that is missing from the
-  application's folder.
-
-A reference needs at least one picture, box, or kept reading, so draw a box
-before you save one whose pictures you removed.
+  A reference needs at least one picture, box, or kept reading, so draw a box
+  before you save one whose pictures you removed.
 
 A value that reads with the reference can show the same problem, such as
 `Percent font can't learn from its saved picture of "87%"`, or say that a
@@ -557,9 +505,9 @@ stray shape and draw a box around it instead.
    is off while review is open, since the reference has only the readings
    you kept: keep them to save them with the reference, or go **Back** to
    save without review's changes. To record more, keep
-   the place it reads and the [text color](#text-color) as they
-   were, on a screenshot of the same window size: if you changed them,
-   **Use its settings** puts them back. In a reference you teach by itself,
+   the place it reads as it
+   was, on a screenshot of the same window size: if you changed it,
+   **Use its settings** puts it back. In a reference you teach by itself,
    that moves the box it recorded at back to where it was and to the top of
    the list, or adds an empty box there if you deleted it. Or **Discard**
    the recording to start a new one. A recording with readings asks first,
@@ -610,14 +558,6 @@ readings you want, then select **Save reference**, which still works after
 the window closed: **Change window** drops everything you have not saved. To
 record more, open the window again and **Edit** the reference.
 
-A recording finds its shapes with the [text color](#text-color) and
-tolerance it was started with, and a reference learns the kept readings with
-the ones it has when you save. Keep them as they were until you save. With
-another text color or tolerance a kept reading can show other shapes than the recording counted:
-its text may not fit it anymore, which review and the save flag, and a shape
-the recording took for one it had may be in no kept reading. **Use its
-settings** puts the recording's own back.
-
 A recording is full once its region has shown more than 256 different shapes,
 more than a reference learns, and says so. It keeps nothing more. That many
 shapes mean the region shows more than the value, such as a picture behind
@@ -645,8 +585,8 @@ often elsewhere in the window too: a stats panel, a second counter, a score
 on a results screen. With **Look in** set to **The whole window**, a
 recording collects characters from all of it. The place the reference
 reads, its first box or the value's region, is the example: AppyTappy looks
-for text that stands out as the text in that place does and is as tall as
-it shows on its screenshot, anywhere in the window, and reads each piece like
+for text in the color the text in that place has when the recording
+starts, as tall as it shows on its screenshot, anywhere in the window, and reads each piece like
 the place itself. While it records, the window shows an
 outline around each piece it found the last time it looked, and **Recording
 the whole window** says in how many places that was.
@@ -695,6 +635,9 @@ It has limits, and review is where you deal with them:
 - **It finds the sizes it has an example of.** Text much larger or smaller
   than every example's is not collected. What the reference learns still
   reads at other sizes.
+- **It finds one color.** Text elsewhere in the window that turns another
+  color while it records is not collected. The place the reference reads
+  is read in any color.
 - **It reads text by itself on a line.** Text that touches other things in
   the same color, or a line of more than 24 characters, is skipped.
 

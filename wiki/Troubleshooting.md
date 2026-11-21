@@ -99,23 +99,16 @@ reason gives too:
   was when you drew the value, and windowed and fullscreen are different
   sizes. [Window size](Values.md#window-size) says how to resize the window
   or fix the value at this size.
-- **Nothing in its region stands out from the background, or has the text
-  color of its reference.** In the log: `no pixel in the region stands out
-  from its background, or has the reference's text color`. The region isn't
-  on the number now, or the number
-  is another color than the reference's [text color](References.md#text-color).
-  When
+- **Nothing in its region stands out from the background.** In the log:
+  `nothing in the region stands out from its background`. The region isn't
+  on the number now. When
   the log line says **where its region scales to**, the window isn't at a
   size the value was drawn at, and the scaled region can lie beside the
   number: [fix the value at this size](Values.md#fix-a-value-at-one-size).
-  Otherwise, for a reference with a text color,
-  [edit the reference](References.md#text-color): pick the color on the
-  middle of a character, or raise **Tolerance**.
 - **Its region shows more than 24 characters.** In the log: `the region
-  holds more than 24 characters`. Something else that stands
-  out from the background is in the region, or the background is too busy to
-  tell the characters from. Draw the region around the number alone, or
-  give the reference a [text color](References.md#text-color).
+  holds more than 24 characters`. Something else is in the region, or the
+  background is too busy to tell the characters from. Draw the region
+  around the number alone.
 - **A character has a shape the reference hasn't learned.** In the log: `a
   character has a shape the reference has not learned`. The message
   shows what it read, with a `?` for each character it couldn't, such as
@@ -124,10 +117,7 @@ reason gives too:
   it a little differently this time: draw a [box](References.md#boxes) around
   this reading on a screenshot, or [record](References.md#record-readings)
   the region until it reads. If it is another character, the reference hasn't
-  learned the one shown: draw a box around a reading with it. If the number
-  reads over one background and not over another, and its characters have
-  an outline or a shadow, give the reference a
-  [text color](References.md#text-color).
+  learned the one shown: draw a box around a reading with it.
   [What a reference can't learn](References.md#what-a-reference-cant-learn)
   lists the characters no box teaches.
 - **The number shows a character that isn't in Characters it needs.** In
@@ -136,6 +126,10 @@ reason gives too:
   [characters](Values.md#characters-a-number-needs) leave out a `-`, a `.`,
   a `,`, or a digit that is a part of the number: turn it on under
   **Characters it needs**.
+- **Its region reads as one text in one color and as another in another.**
+  In the log: `two colors in the region read as different text`. The
+  message shows both. Two pieces of text the reference knows are in the
+  region, in different colors. Draw the region around the number alone.
 - **It read characters that hold no number.** In the log: `the characters
   hold no number`. The message shows what it read, such as `%`. The region
   shows no digit now, or the region cuts the digits off.
@@ -154,9 +148,10 @@ screenshot of the window at the size you play at.
 
 [Edit its reference](References.md#make-a-reference) and draw more
 [boxes](References.md#boxes), or record more readings, so that every digit
-the number can show appears in at least one of them. Where the background
-behind the number is busy, give the reference a
-[text color](References.md#text-color).
+the number can show appears in at least one of them. Check the text typed
+for each box and reading too: one wrong label teaches a wrong character,
+and [**Characters it knows**](References.md#what-it-has-learned) warns when
+two characters have the same shape.
 [**Characters still missing**](References.md#what-it-has-learned) lists what
 is left to teach. If it reads a digit as a letter that looks like it, such as
 `0` as `O`, set the value's

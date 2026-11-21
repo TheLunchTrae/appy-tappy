@@ -6,8 +6,11 @@
 //! Its bounds and its ink are taken to a fraction of a pixel: a pixel on
 //! an anti-aliased edge is the character's by how much of it the character
 //! covers ([`Layers::share`]). Each cell holds how much of it is ink, not
-//! whether it is. Two shapes are as far apart as the ink only one of them
-//! has is of the ink either has.
+//! whether it is. Ink of one shape counts against the other where the
+//! other has none in that cell or a cell beside it, so an edge that is a
+//! cell off costs nothing. Two shapes are as far apart as the most such
+//! ink any eight cells by eight hold, so a stroke one character has and
+//! the other lacks counts in full however much ink the rest of them share.
 //!
 //! [`Layers::share`]: super::layers::Layers::share
 //!
@@ -220,9 +223,10 @@ impl Sample {
     }
 
     /// How far this character is from `other`, from 0 for the same shape
-    /// to [`FARTHEST`]: of the ink either has, the thousandths only one of
-    /// them has. Two characters whose places are [unlike](Place::unlike)
-    /// are [`FARTHEST`] apart whatever their shapes.
+    /// to [`FARTHEST`]: the most ink that only one of them has in any two
+    /// blocks by two, in thousandths of such a window that is all ink. Two
+    /// characters whose places are [unlike](Place::unlike) are
+    /// [`FARTHEST`] apart whatever their shapes.
     pub(super) fn distance(&self, other: &Self) -> u16 {
         if self.place.unlike(other.place) {
             return FARTHEST;
@@ -388,8 +392,9 @@ fn cover(share: impl Fn(u32, u32) -> u8, bounds: &Bounds, line: u32) -> [u8; CEL
 }
 const _: () = assert!(WHOLE == PIXEL * GRID as u64);
 
-/// Where a character starts and ends along one side, in [`PIXEL`]ths of a
-/// pixel: `inner` holds the pixels that are mostly its own, and `most` how
+/// Where a character starts and ends along one side, in fractions of a
+/// pixel, [`PIXEL`] to one: `inner` holds the pixels that are mostly its
+/// own, and `most` how
 /// much the pixels of each column or row of `outer`, which is `inner` and
 /// the one before and after it, are its own at most. An edge is as far out
 /// as its outermost pixels are the character's.
@@ -418,7 +423,7 @@ fn edges(outer: &Range<u32>, inner: &Range<u32>, most: &[u8]) -> (u64, u64) {
 }
 
 /// How the pixels of `outer` share the grid's cells along one side, where
-/// the character spans `span`, in [`PIXEL`]ths of a pixel, and the grid is
+/// the character spans `span`, in fractions of a pixel, and the grid is
 /// `side` of them long: each pixel, by its place in `outer`, with each
 /// cell it lies over and how much of the pixel's ink the cell holds, of
 /// [`WHOLE`], in order. The span is centered on the grid, and a pixel the
