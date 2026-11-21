@@ -32,7 +32,7 @@
 //!    outermost ones. One more layer holds the pixels of every color but
 //!    the background's, for text that is no one color, such as a gradient.
 
-use std::ops::Range;
+use std::ops::{BitOr, Range};
 
 use super::super::{Image, Rgb, Size};
 use super::ink::{Ink, index};
@@ -260,18 +260,20 @@ impl Layers {
                     others().any(|(other, &second)| one < other && within(color, first, second))
                 })
             })
-            .fold(0_u32, |ends, (place, _)| ends | bit(place));
+            .map(|(place, _)| bit(place))
+            .fold(0_u32, BitOr::bitor);
         // A blend goes to the nearest color. One that lies within two
-        // others has to be close by to take it: the edge of white text on
-        // black passes through the color of gray text elsewhere in the
-        // image, and is no part of that text.
+        // others has to touch it to take it: the edge of white on black
+        // passes through the color of gray text elsewhere in the image,
+        // or of the gray inside a white outline, and is no part of
+        // either.
         let color: Vec<u8> = (0..)
             .zip(pixels.iter().zip(&solid))
             .map(|(at, (&pixel, &solid_here))| {
                 if solid_here != NO_LAYER {
                     return solid_here;
                 }
-                nearest_to(pixel, ends | close_by(&solid, width, at)).unwrap_or(0)
+                nearest_to(pixel, ends | close_by(&solid, width, at, 1)).unwrap_or(0)
             })
             .collect();
         let mut edge = [0_u32; MAX_COLORS];
@@ -316,12 +318,12 @@ impl Layers {
         }
     }
 
-    /// The layers that hold ink, each with how many pixels of it, in the
-    /// order a read asks them: the colors from the one with the most ink,
-    /// the more common of two with as much, and then [`Layer::Every`]. The
-    /// background's color is counted with every pixel of it that other
-    /// colors close in, which is no fewer than its ink.
-    pub(super) fn all(&self) -> Vec<(Layer, u32)> {
+    /// The layers that hold ink, in the order a read asks them: the colors
+    /// from the one with the most ink, the more common of two with as much,
+    /// and then [`Layer::Every`]. The background's color is counted with
+    /// every pixel of it that other colors close in, which is no fewer than
+    /// its ink.
+    pub(super) fn all(&self) -> Vec<Layer> {
         let mut held = [0_u32; MAX_COLORS];
         for &layer in &self.inked {
             if let Some(count) = held.get_mut(usize::from(layer)) {
@@ -335,17 +337,13 @@ impl Layers {
             .map(|(place, count)| (count, place))
             .collect();
         colors.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        let every = colors
-            .iter()
-            .filter(|&&(_, place)| place != self.background)
-            .map(|&(count, _)| count)
-            .fold(0, u32::saturating_add);
-        let mut all: Vec<(Layer, u32)> = colors
+        let every = colors.iter().any(|&(_, place)| place != self.background);
+        let mut all: Vec<Layer> = colors
             .into_iter()
-            .map(|(count, place)| (Layer::Color(place), count))
+            .map(|(_, place)| Layer::Color(place))
             .collect();
-        if every > 0 {
-            all.push((Layer::Every, every));
+        if every {
+            all.push(Layer::Every);
         }
         all
     }
@@ -504,11 +502,10 @@ fn bit(place: usize) -> u32 {
         .unwrap_or(0)
 }
 
-/// Which colors have a pixel within [`MEETS`] of the one at `at`, a
+/// Which colors have a pixel within `reach` of the one at `at`, a
 /// [`bit`] to each. `placed` holds each pixel's color, in rows `width`
 /// long.
-fn close_by(placed: &[u8], width: usize, at: usize) -> u32 {
-    let reach = index(MEETS);
+fn close_by(placed: &[u8], width: usize, at: usize, reach: usize) -> u32 {
     let column = at.checked_rem(width).unwrap_or(0);
     let from = column.saturating_sub(reach);
     let across = column
@@ -623,7 +620,8 @@ fn mixed(
             .filter(|&(other, &(other_color, _))| {
                 other == end || (other != place && between(other_color, color, end_color))
             })
-            .fold(0_u32, |all, (other, _)| all | bit(other))
+            .map(|(other, _)| bit(other))
+            .fold(0_u32, BitOr::bitor)
     };
     let pairs: Vec<(u32, u32)> = others()
         .enumerate()
@@ -658,7 +656,7 @@ fn mixed(
     };
     // Whether a pixel has both colors of a pair close by.
     let beside = |at: usize| {
-        let met = close_by(placed, width, at);
+        let met = close_by(placed, width, at, index(MEETS));
         pairs
             .iter()
             .any(|&(one, other)| met & one != 0 && met & other != 0)

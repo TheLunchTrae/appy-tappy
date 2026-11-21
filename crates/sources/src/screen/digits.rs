@@ -24,12 +24,10 @@
 //!    asked, and a shape two characters are about as close to is neither:
 //!    a read fails rather than guess.
 //! 6. **The layer.** The text is a layer whose every character the reader
-//!    knows: not one that another matches more closely where both have
-//!    characters, as an outline is by the text it surrounds, then one
-//!    with a digit, then the one it knows the most of. Where another
-//!    layer it knows about as much of says otherwise, or other colors
-//!    show something of a character's size beside the number that no
-//!    layer knows as a sign, the read fails.
+//!    knows: one with a digit before one without, then the one it knows
+//!    the most of. Where another layer it knows about as much of says
+//!    otherwise, or other colors show something of a character's size
+//!    beside the number that no layer knows as a sign, the read fails.
 
 use std::cmp::Ordering;
 use std::error::Error;
@@ -141,8 +139,6 @@ enum Taken {
 #[derive(Debug, Clone)]
 struct Mark {
     bounds: Bounds,
-    /// How many of its pixels are ink.
-    ink: u32,
     place: Place,
 }
 
@@ -178,8 +174,6 @@ struct Attempt {
     sight: Sight,
     /// What it takes each character for, left to right.
     taken: Vec<Taken>,
-    /// How far the character it matched least well is from its glyph.
-    far: u16,
 }
 
 impl Attempt {
@@ -209,15 +203,12 @@ impl Attempt {
     /// The layer a read takes its characters from. It is one whose every
     /// character the reader knows: a contender, or a layer with a digit
     /// that shares no column with a contender, as a narrow number does
-    /// beside a wider sign in a color of its own. Of those it leaves the
-    /// ones that another matches more closely where both have characters,
-    /// by more than [`CLEAR_BY`]: an outline around the text can match
-    /// too, less well. Of the rest it takes one with a digit before one
-    /// without, and then the one the reader knows the most of. Without
-    /// such a layer it is the contender the reader knows the most of. The
-    /// earliest of equals wins. Where the reader knows no character of
-    /// any layer, it is the layer a lesson would learn from
-    /// ([`whole_text`]).
+    /// beside a wider sign in a color of its own. Of those it takes one
+    /// with a digit before one without, and then the one the reader knows
+    /// the most of. Without such a layer it is the contender the reader
+    /// knows the most of. The earliest of equals wins. Where the reader
+    /// knows no character of any layer, it is the layer a lesson would
+    /// learn from ([`whole_text`]).
     fn chosen<'a>(attempts: &'a [Self], layers: &Layers) -> Option<&'a Self> {
         let digit = |attempt: &Self| {
             attempt
@@ -230,7 +221,7 @@ impl Attempt {
             contenders.iter().any(|&other| std::ptr::eq(other, attempt))
                 || (digit(attempt) && !contenders.iter().any(|other| attempt.shares_columns(other)))
         };
-        let whole: Vec<&Self> = attempts
+        let mut whole = attempts
             .iter()
             .filter(|attempt| {
                 !attempt
@@ -238,13 +229,7 @@ impl Attempt {
                     .iter()
                     .any(|taken| matches!(taken, Taken::Unknown(_)))
             })
-            .filter(|attempt| counts(attempt))
-            .collect();
-        let outdone = |attempt: &Self| {
-            whole.iter().any(|other| {
-                other.far.saturating_add(CLEAR_BY) < attempt.far && attempt.shares_columns(other)
-            })
-        };
+            .filter(|attempt| counts(attempt));
         let most = |attempts: &mut dyn Iterator<Item = &'a Self>, digit: &dyn Fn(&Self) -> bool| {
             attempts.fold(None, |best: Option<&'a Self>, attempt| match best {
                 Some(best) if (digit(best), best.known()) >= (digit(attempt), attempt.known()) => {
@@ -253,11 +238,8 @@ impl Attempt {
                 _ => Some(attempt),
             })
         };
-        let chosen = most(
-            &mut whole.iter().copied().filter(|attempt| !outdone(attempt)),
-            &digit,
-        )
-        .or_else(|| most(&mut Self::contenders(attempts), &|_| false))?;
+        let chosen = most(&mut whole, &digit)
+            .or_else(|| most(&mut Self::contenders(attempts), &|_| false))?;
         if chosen.known() > 0 {
             return Some(chosen);
         }
@@ -267,13 +249,12 @@ impl Attempt {
         let of = |wanted: &dyn Fn(&Self) -> bool| attempts.iter().find(|attempt| wanted(attempt));
         let color = of(&|attempt| attempt.sight.layer != Layer::Every && !last(attempt));
         let every = of(&|attempt| attempt.sight.layer == Layer::Every);
-        let enclosed = of(&|attempt| attempt.sight.layer != Layer::Every && last(attempt));
         let plated = attempts.iter().any(|attempt| plate(layers, &attempt.sight));
         match (color, every) {
             (Some(color), Some(every)) if !plated && !whole_text(&color.sight, &every.sight) => {
                 Some(every)
             },
-            _ => color.or(every).or(enclosed),
+            _ => color.or(every),
         }
     }
 
@@ -337,29 +318,26 @@ impl Attempt {
     /// characters no number holds, which cover all but a quarter of the
     /// columns: a sign, with room for the outline around it.
     fn signs(&self, columns: &Range<u32>) -> bool {
-        let known: Vec<(char, &Range<u32>)> = self
-            .taken
-            .iter()
-            .zip(&self.sight.marks)
-            .filter_map(|(taken, mark)| match *taken {
-                Taken::Kept(character) | Taken::LeftOut(character) => {
-                    Some((character, &mark.bounds.columns))
-                },
-                Taken::Unknown(_) => None,
-            })
-            .filter(|(_, own)| own.start < columns.end && columns.start < own.end)
-            .collect();
-        let covered = known
-            .iter()
-            .map(|&(_, own)| {
-                own.end
-                    .min(columns.end)
-                    .saturating_sub(own.start.max(columns.start))
-            })
-            .fold(0, u32::saturating_add);
+        // The columns of `columns` that the characters the reader knows
+        // cover: those a number can hold, and the rest.
+        let (mut number, mut signs) = (0_u32, 0_u32);
+        for (taken, mark) in self.taken.iter().zip(&self.sight.marks) {
+            let (Taken::Kept(character) | Taken::LeftOut(character)) = *taken else {
+                continue;
+            };
+            let own = &mark.bounds.columns;
+            let covered = own
+                .end
+                .min(columns.end)
+                .saturating_sub(own.start.max(columns.start));
+            if in_a_number(character) {
+                number = number.saturating_add(covered);
+            } else {
+                signs = signs.saturating_add(covered);
+            }
+        }
         let all = columns.end.saturating_sub(columns.start);
-        !known.iter().any(|&(character, _)| in_a_number(character))
-            && covered.saturating_mul(4) >= all.saturating_mul(3)
+        number == 0 && signs.saturating_mul(4) >= all.saturating_mul(3)
     }
 
     /// The characters this layer holds as the reader made them out.
@@ -373,27 +351,12 @@ impl Attempt {
         }
         read
     }
-
-    /// The ink of the characters the reader matched, in pixels.
-    fn known_ink(&self) -> u32 {
-        self.taken
-            .iter()
-            .zip(&self.sight.marks)
-            .filter(|(taken, _)| !matches!(taken, Taken::Unknown(_)))
-            .map(|(_, mark)| mark.ink)
-            .fold(0, u32::saturating_add)
-    }
 }
 
 /// Whether `character` is one a number can hold.
 const fn in_a_number(character: char) -> bool {
     character.is_ascii_digit() || matches!(character, '-' | '.' | ',')
 }
-
-/// How many times the ink of a layer the ink of the characters matched in
-/// another may be before the layer is passed over: a layer with so little
-/// ink holds none of the text, only the blend along its edges.
-const INK_TO_COUNT: u32 = 4;
 
 /// Reads a number from glyphs learned from screenshots of the same
 /// counter.
@@ -649,22 +612,15 @@ impl DigitReader {
     fn attempts(&self, layers: &Layers) -> Result<Vec<Attempt>, ReadError> {
         let mut failure = ReadError::NoInk;
         let mut attempts: Vec<Attempt> = Vec::new();
-        let mut most_ink = 0_u32;
-        for (layer, ink) in layers.all() {
-            if ink.saturating_mul(INK_TO_COUNT) < most_ink {
-                continue;
-            }
+        for layer in layers.all() {
             match sight(layers, layer) {
                 Ok(sight) => {
-                    let (taken, apart): (Vec<Taken>, Vec<u16>) = sight
+                    let taken = sight
                         .marks
                         .iter()
                         .map(|mark| self.take_mark(layers, &sight, mark))
-                        .unzip();
-                    let far = apart.into_iter().max().unwrap_or(0);
-                    let attempt = Attempt { sight, taken, far };
-                    most_ink = most_ink.max(attempt.known_ink());
-                    attempts.push(attempt);
+                        .collect();
+                    attempts.push(Attempt { sight, taken });
                 },
                 Err(Segmentation::TooMany) => failure = ReadError::TooManyCharacters,
                 Err(Segmentation::NoInk) => {},
@@ -698,14 +654,14 @@ impl DigitReader {
     /// mark every glyph is [unlike](Place::unlike) is as far from each as
     /// any shape can be, so its shape is not sampled: most of what a layer
     /// that is not the text holds.
-    fn take_mark(&self, layers: &Layers, sight: &Sight, mark: &Mark) -> (Taken, u16) {
+    fn take_mark(&self, layers: &Layers, sight: &Sight, mark: &Mark) -> Taken {
         let unlike_all = self
             .glyphs
             .iter()
             .chain(&self.left_out)
             .all(|glyph| glyph.sample.place().unlike(mark.place));
         if unlike_all {
-            (Taken::Unknown(None), 0)
+            Taken::Unknown(None)
         } else {
             self.take(&sight.sample(layers, mark))
         }
@@ -719,9 +675,8 @@ impl DigitReader {
     /// Otherwise it is the closest glyph the value leaves out, when that
     /// matches. A left-out letter or symbol never wins over a kept glyph
     /// that matches, so a value of digits reads a `0` that is closer to
-    /// the font's `O` as `0`. With it comes how far the sample is from the
-    /// glyph it is taken for, and 0 when it is taken for none.
-    fn take(&self, sample: &Sample) -> (Taken, u16) {
+    /// the font's `O` as `0`.
+    fn take(&self, sample: &Sample) -> Taken {
         let kept = Ranked::among(&self.glyphs, sample);
         let digits = || {
             self.left_out
@@ -735,27 +690,24 @@ impl DigitReader {
         };
         // A glyph as far as any shape can be is no closer than another.
         let kept = || kept.best.filter(|kept| kept.distance < FARTHEST);
-        let unknown = || (Taken::Unknown(kept().map(|kept| kept.character)), 0);
+        let unknown = || Taken::Unknown(kept().map(|kept| kept.character));
         match ranked.best {
             Some(best) if ranked.reads() => {
                 let is_kept = self
                     .glyphs
                     .iter()
                     .any(|glyph| glyph.character == best.character);
-                let taken = if is_kept {
+                if is_kept {
                     Taken::Kept(best.character)
                 } else {
                     Taken::LeftOut(best.character)
-                };
-                (taken, best.distance)
+                }
             },
             Some(best) if best.matches() => unknown(),
             _ => Ranked::among(&self.left_out, sample)
                 .best
                 .filter(|left_out| left_out.matches())
-                .map_or_else(unknown, |left_out| {
-                    (Taken::LeftOut(left_out.character), left_out.distance)
-                }),
+                .map_or_else(unknown, |left_out| Taken::LeftOut(left_out.character)),
         }
     }
 
@@ -764,7 +716,7 @@ impl DigitReader {
     /// a character the value leaves out, among those. Of equals, the glyph
     /// learned first.
     fn score(&self, sample: &Sample) -> CharacterScore {
-        let (glyphs, left_out) = match self.take(sample).0 {
+        let (glyphs, left_out) = match self.take(sample) {
             Taken::LeftOut(_) => (&self.left_out, true),
             Taken::Kept(_) | Taken::Unknown(_) => (&self.glyphs, false),
         };
@@ -954,13 +906,6 @@ fn sight(layers: &Layers, layer: Layer) -> Result<Sight, Segmentation> {
         .into_iter()
         .map(|bounds| Mark {
             place: Place::of(&bounds, line),
-            ink: bounds
-                .rows
-                .clone()
-                .map(|y| ink.count(bounds.columns.clone(), y))
-                .fold(0, |sum, count| {
-                    sum.saturating_add(u32::try_from(count).unwrap_or(u32::MAX))
-                }),
             bounds,
         })
         .collect();
@@ -1021,7 +966,7 @@ fn lesson(layers: &Layers, expected: usize) -> Result<Sight, LearnError> {
     let mut closest: Option<(usize, LearnError)> = None;
     let (mut color, mut every, mut enclosed) = (None, None, None);
     let mut plated = false;
-    for (layer, _) in layers.all() {
+    for layer in layers.all() {
         let (count, sight) = match sight(layers, layer) {
             Ok(sight) => {
                 plated |= plate(layers, &sight);
@@ -1082,7 +1027,7 @@ fn plate(layers: &Layers, sight: &Sight) -> bool {
     };
     mark.bounds.columns == (1..width.saturating_sub(1))
         && mark.bounds.rows == (1..height.saturating_sub(1))
-        && layers.all().iter().any(|&(other, _)| {
+        && layers.all().into_iter().any(|other| {
             other != sight.layer && other != Layer::Every && !layers.is_background(other)
         })
 }
@@ -2056,6 +2001,11 @@ mod tests {
             reader.read(&draw(&[crowded.as_str()]), false),
             Err(ReadError::TooManyCharacters)
         );
+        let full = "#.".repeat(MAX_CHARACTERS);
+        assert_eq!(
+            reader.read(&draw(&[full.as_str(); 3]), false),
+            Ok(number(111_111_111_111_111_111_111_111.0))
+        );
     }
 
     /// A ring `width` pixels wide and 64 tall, of strokes 2 pixels wide.
@@ -2603,9 +2553,9 @@ mod tests {
     fn a_glyph_close_to_one_learned_for_its_character_adds_nothing() {
         // A block, and the same block with a corner pixel gone: under
         // `SAME_GLYPH` apart.
-        let chipped = block(&[(0, 0)]);
+        let chipped = block(32, &[(0, 0)]);
         let mut reader = DigitReader::new();
-        reader.learn(&block(&[]), "8").unwrap();
+        reader.learn(&block(32, &[]), "8").unwrap();
         reader.learn(&chipped, "8").unwrap();
         assert_eq!(reader.glyphs.len(), 1);
         // As another character it is another glyph, and the two look
@@ -2615,7 +2565,7 @@ mod tests {
         assert_eq!(reader.lookalikes(), [('8', '0')]);
         // A shape further off than that is another glyph of the same
         // character.
-        reader.learn(&block(&square(0, 0, 3)), "8").unwrap();
+        reader.learn(&block(32, &square(0, 0, 3)), "8").unwrap();
         assert_eq!(reader.glyphs.len(), 3);
     }
 
@@ -2756,12 +2706,13 @@ mod tests {
         }
     }
 
-    /// A block 32 pixels square, a pixel to each cell of the grid, but for
-    /// the pixels of `gone`, each given as its column and row.
-    fn block(gone: &[(usize, usize)]) -> Image {
-        let rows: Vec<String> = (0..32)
+    /// A block `side` pixels square, but for the pixels of `gone`, each
+    /// given as its column and row. One 32 pixels square has a pixel to
+    /// each cell of the grid.
+    fn block(side: usize, gone: &[(usize, usize)]) -> Image {
+        let rows: Vec<String> = (0..side)
             .map(|row| {
-                (0..32)
+                (0..side)
                     .map(|column| {
                         if gone.contains(&(column, row)) {
                             '.'
@@ -2791,23 +2742,125 @@ mod tests {
     }
 
     #[test]
-    fn lookalikes_name_each_pair_of_characters_once_in_the_order_learned() {
-        // A block, and two with two pixels of a corner gone, each too
-        // close to the whole block to tell from it.
-        let bar = draw(&["#"; 32]);
+    fn only_colors_with_ink_are_layers() {
+        // The outermost pixels are never ink, so the red in a corner is
+        // none, and neither is the black, which nothing closes in.
+        let image = in_three_colors(&["...", ".#.", "..."]);
+        let corner = paint(
+            &["r....", ".....", "..#..", ".....", "....."],
+            |cell| match cell {
+                '#' => WHITE,
+                'r' => [0, 0, 255],
+                _ => BLACK,
+            },
+        );
+        for image in [image, corner] {
+            let layers = Layers::new(&image);
+            let colors: Vec<Option<Rgb>> = layers
+                .all()
+                .into_iter()
+                .map(|layer| layers.color(layer))
+                .collect();
+            let white = Rgb {
+                red: 255,
+                green: 255,
+                blue: 255,
+            };
+            assert_eq!(colors, [Some(white), None]);
+        }
+    }
+
+    #[test]
+    fn a_character_with_more_inside_it_than_ink_is_learned_from_its_ink() {
+        // A box a pixel thick holds more black than it has white. The
+        // black inside is the background's color, so the box is the
+        // character, and a block that fills it is another.
+        let hollow = [
+            "#######", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#######",
+        ];
+        let mut reader = DigitReader::new();
+        reader.learn(&draw(&hollow), "0").unwrap();
+        assert_eq!(reader.read(&draw(&hollow), false), Ok(number(0.0)));
+        assert_eq!(
+            reader.read(&draw(&["#######"; 7]), false),
+            Err(ReadError::UnknownCharacter {
+                position: 0,
+                closest: None,
+                read: read_text("?"),
+            })
+        );
+    }
+
+    #[test]
+    fn the_runner_up_is_the_closest_other_character_and_the_earliest_of_equals() {
+        // A block, a bar that is nothing like it, and two blocks with
+        // two pixels of a corner gone, each as close to the whole block.
         let mut reader = DigitReader::new();
         for (image, character) in [
-            (block(&[]), "8"),
-            (block(&[(30, 31), (31, 31)]), "6"),
-            (bar, "1"),
-            (block(&[(0, 31), (1, 31)]), "6"),
+            (block(32, &[]), "8"),
+            (draw(&["#"; 32]), "1"),
+            (block(32, &[(30, 31), (31, 31)]), "6"),
+            (block(32, &[(0, 0), (1, 0)]), "3"),
         ] {
             reader.learn(&image, character).unwrap();
         }
-        assert_eq!(reader.glyphs.len(), 4);
-        assert_eq!(reader.lookalikes(), [('8', '6')]);
+        let scores = reader.explain(&block(32, &[])).unwrap();
+        let [score] = scores.as_slice() else {
+            panic!("one character, not {scores:?}");
+        };
+        assert_eq!(score.best.map(|best| best.character), Some('8'));
+        assert_eq!(score.runner_up.map(|next| next.character), Some('6'));
+    }
+
+    #[test]
+    fn lookalikes_name_each_pair_of_characters_once_in_the_order_learned() {
+        // A block, and three with two pixels of a corner gone, each too
+        // close to the whole block and to the others to tell from them.
+        let bar = draw(&["#"; 32]);
+        let mut reader = DigitReader::new();
+        for (image, character) in [
+            (block(32, &[(30, 31), (31, 31)]), "6"),
+            (block(32, &[]), "8"),
+            (bar, "1"),
+            (block(32, &[(0, 31), (1, 31)]), "6"),
+            (block(32, &[(0, 0), (1, 0)]), "3"),
+        ] {
+            reader.learn(&image, character).unwrap();
+        }
+        assert_eq!(reader.glyphs.len(), 5);
+        assert_eq!(reader.lookalikes(), [('6', '8'), ('6', '3'), ('8', '3')]);
         // Digits an application draws are not alike.
         assert_eq!(taught(28, &LABELS).lookalikes(), []);
+    }
+
+    #[test]
+    fn characters_just_far_enough_apart_to_read_are_no_lookalikes() {
+        // A block of four pixels to a cell, and one with a pixel gone from
+        // each of ten cells that lie around one: a tenth of the ink
+        // around it, which is as far as a read asks the next character
+        // to be.
+        let whole = block(64, &[]);
+        let pitted = block(
+            64,
+            &[
+                (20, 20),
+                (22, 20),
+                (24, 20),
+                (26, 20),
+                (28, 20),
+                (20, 22),
+                (22, 22),
+                (24, 22),
+                (26, 22),
+                (28, 22),
+            ],
+        );
+        let mut reader = DigitReader::new();
+        reader.learn(&whole, "8").unwrap();
+        reader.learn(&pitted, "6").unwrap();
+        assert_eq!(reader.lookalikes(), []);
+        assert_eq!(reader.read(&whole, false), Ok(number(8.0)));
+        assert_eq!(reader.read(&pitted, false), Ok(number(6.0)));
     }
 
     #[test]
@@ -3192,6 +3245,33 @@ mod tests {
     }
 
     #[test]
+    fn text_filled_with_a_color_between_its_outline_s_and_the_background_s_reads() {
+        // Gray with a white outline on near black. The outline's outer
+        // edge blends through the gray without touching the gray inside
+        // it, and is no part of the characters; and the strokes, though
+        // both other colors are close by, are too thick to be an edge.
+        let colors = Colors {
+            ink: [128, 128, 128],
+            outline: WHITE,
+            background: [20, 20, 20],
+        };
+        let reader = taught(28, &LABELS);
+        for height in [28, 40, 56] {
+            let pen = Pen {
+                colors,
+                ..pen(height, 0.3)
+            };
+            let image = draw_text("74.05%", pen, canvas(height));
+            assert_eq!(reader.read(&image, false), Ok(number(74.05)), "{height}");
+            assert_eq!(
+                DigitReader::new().learn(&image, "74.05%"),
+                Ok(()),
+                "{height}"
+            );
+        }
+    }
+
+    #[test]
     fn anti_aliased_text_of_a_color_between_two_others_is_text_beside_the_lighter_text() {
         // A gray "37" and a white "100" after it, on near black, both
         // anti-aliased and without an outline. The edge of the white text
@@ -3328,6 +3408,149 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `rows` with a margin, in white for `#`, gold for `g`, and red for
+    /// `r`, on black.
+    fn in_three_colors(rows: &[&str]) -> Image {
+        let rows = margined(rows);
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        paint(&rows, |cell| match cell {
+            '#' => WHITE,
+            'g' => [0, 215, 255],
+            'r' => [0, 0, 255],
+            _ => BLACK,
+        })
+    }
+
+    #[test]
+    fn a_digit_within_a_sign_s_columns_is_no_number_and_one_right_beside_it_is() {
+        // A bar taught as "1" and a cup five columns wide taught as "%".
+        let mut reader = DigitReader::new();
+        let taught = ["#.#...#", "#.#...#", "#.#...#", "#.#...#", "#.#####"];
+        reader.learn(&draw(&taught), "1%").unwrap();
+        // A red bar inside the gold cup is a mark of the sign, as the
+        // inside of a `0` is of the `0`, and no number of its own.
+        let inside = ["g.r.g", "g.r.g", "g.r.g", "g.r.g", "ggggg"];
+        assert_eq!(
+            reader.read(&in_three_colors(&inside), false),
+            Err(ReadError::NoNumber {
+                read: read_text("%")
+            })
+        );
+        // The same bar in the column right before the cup, or right
+        // after it, shares none of its columns, and is the number.
+        let before = ["rg...g", "rg...g", "rg...g", "rg...g", "rggggg"];
+        let after = ["g...gr", "g...gr", "g...gr", "g...gr", "gggggr"];
+        for rows in [before, after] {
+            assert_eq!(
+                reader.read(&in_three_colors(&rows), false),
+                Ok(number(1.0)),
+                "{rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sign_in_the_column_right_beside_a_digit_says_nothing_else_than_the_digit() {
+        // A bar taught as "1" and a corner two columns wide taught as
+        // "%": the reader knows as much of the one as of the other.
+        let mut reader = DigitReader::new();
+        let taught = ["#.#.", "#.#.", "#.#.", "#.#.", "#.##"];
+        reader.learn(&draw(&taught), "1%").unwrap();
+        let after = ["#r.", "#r.", "#r.", "#r.", "#rr"];
+        let before = ["r.#", "r.#", "r.#", "r.#", "rr#"];
+        for rows in [after, before] {
+            assert_eq!(
+                reader.read(&in_three_colors(&rows), false),
+                Ok(number(1.0)),
+                "{rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn text_of_another_color_counts_from_its_first_column_to_the_number_s_end() {
+        // A bar taught as "1" and a tick at the top of the line as "'".
+        let mut reader = DigitReader::new();
+        let taught = ["#.#", "#..", "#..", "#..", "#.."];
+        reader.learn(&draw(&taught), "1'").unwrap();
+        // A red block under the tick, from the tick's own column, is a
+        // character after the bar, where the tick is.
+        let under = ["#.#.", "#...", "#.rr", "#.rr", "#.rr"];
+        assert_eq!(
+            reader.read(&in_three_colors(&under), false),
+            Err(ReadError::UnknownCharacter {
+                position: 1,
+                closest: None,
+                read: read_text("1?'"),
+            })
+        );
+        // Under a dash that is no glyph, which is text after the number
+        // that needs none, it is not read either.
+        let after = ["#.#.##.", "#......", "#...rrr", "#...rrr", "#...rrr"];
+        assert_eq!(
+            reader.read(&in_three_colors(&after), false),
+            Ok(number(1.0))
+        );
+    }
+
+    #[test]
+    fn a_lesson_that_fits_no_color_blames_the_one_closest_to_the_text() {
+        // Five white bars and three red specks for two characters: the
+        // red is one character off, the white three, and both six.
+        let nearer = ["#.#.#.#.#.r.r.r", "#.#.#.#.#......", "#.#.#.#.#......"];
+        assert_eq!(
+            DigitReader::new().learn(&in_three_colors(&nearer), "12"),
+            Err(LearnError::MoreCharacters {
+                found: 3,
+                expected: 2
+            })
+        );
+        // Three white bars and a red speck are each one off: the color
+        // with the most ink is the one to blame.
+        let tied = ["#.#.#.r", "#.#.#..", "#.#.#.."];
+        assert_eq!(
+            DigitReader::new().learn(&in_three_colors(&tied), "12"),
+            Err(LearnError::MoreCharacters {
+                found: 3,
+                expected: 2
+            })
+        );
+    }
+
+    #[test]
+    fn a_digit_in_one_run_with_a_sign_of_its_color_fails_the_read() {
+        // A bar taught as "1", a box as "0", and a cup eight columns wide
+        // as "%".
+        let mut reader = DigitReader::new();
+        let taught = [
+            "#.#######.#......#",
+            "#.#.....#.#......#",
+            "#.#.....#.#......#",
+            "#.#.....#.#......#",
+            "#.#######.########",
+        ];
+        reader.learn(&draw(&taught), "10%").unwrap();
+        // Three white boxes, and after them a gold bar and a gold cup
+        // with a red speck between the two: one run of other colors that
+        // the gold's sign covers all but a fifth of. The bar in it is a
+        // digit the white number does not hold.
+        let rows = [
+            "#######.#######.#######..g.g......g",
+            "#.....#.#.....#.#.....#..g.g......g",
+            "#.....#.#.....#.#.....#..grg......g",
+            "#.....#.#.....#.#.....#..g.g......g",
+            "#######.#######.#######..g.gggggggg",
+        ];
+        assert_eq!(
+            reader.read(&in_three_colors(&rows), false),
+            Err(ReadError::UnknownCharacter {
+                position: 3,
+                closest: None,
+                read: read_text("000?"),
+            })
+        );
     }
 
     #[test]

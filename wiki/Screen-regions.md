@@ -130,10 +130,11 @@ the color on every side, and a quarter of its pixels have both of those
 colors within two pixels. A blend goes to the nearest color, so each pixel
 of an edge goes to the side it is mostly of, and a stroke is as wide at any
 size and at any fraction of a pixel. A color that lies within two others
-takes a blend only where it is close by. Thin gray text beside white text
-on black
-stays text: the white's edge passes through the gray, and only the pieces
-along that edge are blends. A color with blends and nothing else but pieces
+takes a blend only where it touches it: the outer edge of a white outline
+on black passes through the gray of the fill inside the outline, and is no
+part of the fill. Thin gray text beside white text on black stays text: the
+white's edge passes through the gray, and only the pieces along that edge
+are blends. A color with blends and nothing else but pieces
 of fewer than 4 pixels (`SPECK`) is left out whole, so a lone mark that
 small in such a color is not read.
 
@@ -155,12 +156,9 @@ them:
   (`Attempt::chosen`). A layer the reference knows less than half as much
   of as another is no contender: a speck that happens to match, or the
   inside of a `0`. A layer with a digit that shares no column with a
-  contender counts too: a `1` beside a wider `%` in a color of its own. An
-  outline around the text can match too, less well, so a layer is left
-  where another matches its characters more closely in the same columns,
-  by more than 100 (`CLEAR_BY`). Of the rest, a layer with a digit comes
-  before one without, and then the one with the most pixels across in the
-  characters it matched. Where two contenders read as different text, the
+  contender counts too: a `1` beside a wider `%` in a color of its own. A
+  layer with a digit comes before one without, and then the one with the
+  most pixels across in the characters it matched. Where two contenders read as different text, the
   read fails rather than choose (`ReadError::ColorsDisagree`). A read takes
   its number from one color, so where other colors show something as tall
   as half the line beside the number, which neither touches the number's
@@ -238,11 +236,18 @@ These limits follow:
   picture at the small size too.
 - Text of the background's color needs an outline more than one pixel
   wide to close it in.
+- Text filled with a color between its outline's and the background's,
+  such as gray with a white outline on black, reads from about 28 pixels
+  tall. Smaller, its strokes are as thin as the blend along an edge and are
+  left out, and those reads fail.
 - A stroke thinner than about a twentieth of its character's height fills
   less than a third of the square, so two characters that differ only by
   such a stroke can be within reach of each other. In so thin a font, a
   digit the reference never learned can read as one it did, so teach it
   every digit.
+- A mark alone in its color is its own text line, so how tall it is beside
+  the other colors' text does not count. Beside a sign in another color and
+  no number, a bar of a third color can read as a `1`.
 - A different font is different shapes. Each font takes its own reference,
   or more labeled pictures in the same one.
 
