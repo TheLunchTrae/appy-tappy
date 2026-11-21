@@ -6,11 +6,12 @@
 //! Its bounds and its ink are taken to a fraction of a pixel: a pixel on
 //! an anti-aliased edge is the character's by how much of it the character
 //! covers ([`Layers::share`]). Each cell holds how much of it is ink, not
-//! whether it is. Ink of one shape counts against the other where the
-//! other has none in that cell or a cell beside it, so an edge that is a
-//! cell off costs nothing. Two shapes are as far apart as the most such
-//! ink any eight cells by eight hold, so a stroke one character has and
-//! the other lacks counts in full however much ink the rest of them share.
+//! whether it is. Two shapes are compared by how much ink each has around
+//! every cell, in the [`AROUND`] cells each way. An edge that is blurred or
+//! a little off moves ink between neighboring cells and leaves about as
+//! much around each, while a stroke one character has and the other lacks
+//! leaves none there. Two shapes are as far apart as the one place they
+//! differ most, however much ink the rest of them share.
 //!
 //! [`Layers::share`]: super::layers::Layers::share
 //!
@@ -45,15 +46,18 @@ const LINE_SLACK: u8 = 8;
 /// As far apart as two shapes can be.
 pub(super) const FARTHEST: u16 = 1000;
 
-/// The cells along each side of a block: what one shape has and another
-/// does not is summed by block.
-const BLOCK: u32 = 4;
+/// How many cells each way from a cell its ink is summed over: a square
+/// of five cells by five, a little wider than a thin font's stroke. A
+/// wider one would let such a stroke go missing unseen, and a narrower one
+/// would take a blurred edge for a difference.
+const AROUND: usize = 2;
 
-/// The blocks along each side of the grid.
-const BLOCKS: u32 = GRID / BLOCK;
+/// The cells along each side of that square.
+const SQUARE: u32 = 5;
+const _: () = assert!(SQUARE as usize == 2 * AROUND + 1);
 
-/// The ink of a window of two blocks by two that is all ink.
-const WINDOW: u32 = (2 * BLOCK) * (2 * BLOCK) * u8::MAX as u32;
+/// The ink around a cell whose square is all ink.
+const ALL_AROUND: u32 = SQUARE * SQUARE * u8::MAX as u32;
 
 /// Which cells of a character's grid are at least half ink, one row of
 /// cells in the bits of each `u32`, from the top.
@@ -176,8 +180,8 @@ pub(super) struct Sample {
     /// How much of each cell is ink, from none at 0 to all of it at 255,
     /// row by row from the top.
     cover: [u8; CELLS],
-    /// The most ink of each cell and the eight around it.
-    near: [u8; CELLS],
+    /// The ink of each cell and those within [`AROUND`] of it, summed.
+    around: [u16; CELLS],
     place: Place,
 }
 
@@ -198,7 +202,7 @@ impl Sample {
     pub(super) fn of(share: impl Fn(u32, u32) -> u8, bounds: &Bounds, place: Place) -> Self {
         let cover = cover(share, bounds, place.line);
         Self {
-            near: near(&cover),
+            around: around(&cover),
             cover,
             place,
         }
@@ -223,92 +227,65 @@ impl Sample {
     }
 
     /// How far this character is from `other`, from 0 for the same shape
-    /// to [`FARTHEST`]: the most ink that only one of them has in any two
-    /// blocks by two, in thousandths of such a window that is all ink. Two
+    /// to [`FARTHEST`]: the most that the ink around any one cell differs
+    /// between them, in thousandths of a square that is all ink. Two
     /// characters whose places are [unlike](Place::unlike) are
     /// [`FARTHEST`] apart whatever their shapes.
     pub(super) fn distance(&self, other: &Self) -> u16 {
         if self.place.unlike(other.place) {
             return FARTHEST;
         }
-        // The ink of each that the other has none of there or beside
-        // it, summed over each block of cells.
-        let side = GRID as usize;
-        let mut blocks = [0_u32; (BLOCKS * BLOCKS) as usize];
-        let rows = self
-            .cover
-            .chunks(side)
-            .zip(self.near.chunks(side))
-            .zip(other.cover.chunks(side).zip(other.near.chunks(side)));
-        for (row, ((ink, near), (other_ink, other_near))) in rows.enumerate() {
-            let mut alone = [0_u8; GRID as usize];
-            let cells = ink.iter().zip(near).zip(other_ink.iter().zip(other_near));
-            for (alone, ((&ink, &near), (&other_ink, &other_near))) in alone.iter_mut().zip(cells) {
-                *alone = ink
-                    .saturating_sub(other_near)
-                    .max(other_ink.saturating_sub(near));
-            }
-            let across = blocks
-                .chunks_mut(BLOCKS as usize)
-                .nth(row.div_euclid(BLOCK as usize))
-                .unwrap_or_default();
-            for (sum, alone) in across.iter_mut().zip(alone.chunks(BLOCK as usize)) {
-                let alone: u32 = alone.iter().map(|&alone| u32::from(alone)).sum();
-                *sum = sum.saturating_add(alone);
-            }
-        }
-        // The most of it in any two blocks by two.
-        let across = BLOCKS as usize;
-        let most = blocks
-            .chunks(across)
-            .zip(blocks.chunks(across).skip(1))
-            .flat_map(|(upper, lower)| {
-                upper
-                    .windows(2)
-                    .zip(lower.windows(2))
-                    .map(|(upper, lower)| upper.iter().chain(lower).copied().sum::<u32>())
-            })
+        let most = self
+            .around
+            .iter()
+            .zip(&other.around)
+            .map(|(&ours, &theirs)| ours.abs_diff(theirs))
             .max()
             .unwrap_or(0);
-        let apart = most
+        let apart = u32::from(most)
             .saturating_mul(u32::from(FARTHEST))
-            .checked_div(WINDOW)
+            .checked_div(ALL_AROUND)
             .unwrap_or(0);
         u16::try_from(apart).unwrap_or(FARTHEST).min(FARTHEST)
     }
 }
 
-/// The most ink of each cell of `cover` and the eight cells around it.
-fn near(cover: &[u8; CELLS]) -> [u8; CELLS] {
+/// The ink of each cell of `cover` and the cells within [`AROUND`] of it,
+/// summed. Cells past the grid's edge hold none.
+fn around(cover: &[u8; CELLS]) -> [u16; CELLS] {
     let side = GRID as usize;
-    // The most of each cell and those left and right of it, then of those
-    // above and below.
-    let mut across = [0_u8; CELLS];
-    for (most, row) in across.chunks_mut(side).zip(cover.chunks(side)) {
-        for (x, most) in most.iter_mut().enumerate() {
-            let from = x.saturating_sub(1);
+    // Each cell with those left and right of it, then those sums with the
+    // ones above and below.
+    let mut across = [0_u16; CELLS];
+    for (sums, row) in across.chunks_mut(side).zip(cover.chunks(side)) {
+        for (x, sum) in sums.iter_mut().enumerate() {
+            let from = x.saturating_sub(AROUND);
             let cells = row
                 .iter()
                 .skip(from)
-                .take(x.saturating_add(2).saturating_sub(from));
-            *most = cells.copied().max().unwrap_or(0);
+                .take(x.saturating_add(AROUND + 1).saturating_sub(from));
+            *sum = cells.map(|&cell| u16::from(cell)).sum();
         }
     }
-    let mut near = [0_u8; CELLS];
-    for (y, most) in near.chunks_mut(side).enumerate() {
-        let from = y.saturating_sub(1);
+    let mut around = [0_u16; CELLS];
+    for (y, sums) in around.chunks_mut(side).enumerate() {
+        let from = y.saturating_sub(AROUND);
         let rows = across
             .chunks(side)
             .skip(from)
-            .take(y.saturating_add(2).saturating_sub(from));
+            .take(y.saturating_add(AROUND + 1).saturating_sub(from));
         for row in rows {
-            for (most, &cell) in most.iter_mut().zip(row) {
-                *most = (*most).max(cell);
+            for (sum, &cell) in sums.iter_mut().zip(row) {
+                *sum = sum.saturating_add(cell);
             }
         }
     }
-    near
+    around
 }
+const _: () = assert!(
+    ALL_AROUND <= u16::MAX as u32,
+    "the ink around a cell fits its sum"
+);
 
 /// How many times the grid's side a line's height is at most: a character
 /// smaller than that, such as a `.`, does not fill the grid, so a fraction

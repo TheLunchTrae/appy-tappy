@@ -1127,7 +1127,7 @@ code point. Its live check reads with the same glyphs, since `saved::build` choo
 them for both.
 
 A reference takes only the keys above. Any other key stops the file
-loading, as everywhere else in the file, with one exception: `expects`, a
+loading, as everywhere else in the file, but for three: `expects`, a
 list of characters, and `ink` and `tolerance`, a text color and how far a
 pixel may be from it, are read and forgotten, so the next save leaves those
 keys out (`ReferenceKeys` in `appytappy-config`). The exception is for the

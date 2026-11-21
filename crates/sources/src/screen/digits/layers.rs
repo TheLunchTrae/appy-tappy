@@ -13,10 +13,10 @@
 //!    its own.
 //!
 //!    The blend along an anti-aliased edge is no color of its own: a color
-//!    that lies between two more common ones, in pixels with others of
-//!    their color on few sides, is left out. So each pixel of an edge goes
-//!    to the side it is mostly of, and a stroke is as wide in its layer at
-//!    any size and at any fraction of a pixel.
+//!    that lies between two others, in pixels with others of their color
+//!    on few sides and with both of those colors close by, is left out. So
+//!    each pixel of an edge goes to the side it is mostly of, and a stroke
+//!    is as wide in its layer at any size and at any fraction of a pixel.
 //! 2. **Background.** The color most of the image's outermost pixels have
 //!    is the background. Its pixels are ink only where pixels of other
 //!    colors close them in, as an outline does, so white text with an
@@ -199,34 +199,26 @@ impl Layers {
                 found.push((color, thin));
             }
         }
-        // A thin color between two others is the blend along their edge,
-        // whichever of the three is the most common: an outline less than
-        // two pixels wide has fewer pixels of its own color than of its
-        // blends. The least common goes first.
-        for place in (0..found.len()).rev() {
-            let Some(&(color, thin)) = found.get(place) else {
-                continue;
-            };
-            let others = || {
-                found
-                    .iter()
-                    .enumerate()
-                    .filter(move |&(other, _)| other != place)
-                    .map(|(_, &(other, _))| other)
-            };
-            let blend = thin
-                && others().enumerate().any(|(skip, one)| {
-                    others()
-                        .skip(skip.saturating_add(1))
-                        .any(|other| between(color, one, other))
-                });
-            if blend {
-                found.remove(place);
+        // The place in `found` of each counted color the image has, and of
+        // each pixel.
+        let mut spots = vec![NO_LAYER; COUNTED];
+        for &(_, counted) in &common {
+            let color = mean(counted);
+            let place = found.iter().position(|&(one, _)| same(one, color));
+            if let (Some(place), Some(slot)) = (place, spots.get_mut(counted)) {
+                *slot = u8::try_from(place).unwrap_or(NO_LAYER);
             }
         }
+        let placed: Vec<u8> = counted
+            .iter()
+            .map(|&counted| spots.get(usize::from(counted)).copied().unwrap_or(NO_LAYER))
+            .collect();
+        let blends = blends(&found, &placed, width);
         let colors: Vec<Rgb> = found
             .into_iter()
-            .map(|(color, _)| color)
+            .zip(blends)
+            .filter(|&(_, blend)| !blend)
+            .map(|((color, _), _)| color)
             .take(MAX_COLORS)
             .collect();
         // The place of the color nearest each counted color, found once
@@ -479,6 +471,122 @@ impl Layers {
             .collect();
         Ink::new(inked, self.size)
     }
+}
+
+/// The bit that stands for the color at `place` among those found.
+fn bit(place: usize) -> u32 {
+    u32::try_from(place)
+        .ok()
+        .and_then(|place| 1_u32.checked_shl(place))
+        .unwrap_or(0)
+}
+
+/// For each pixel of the color at `place`, which colors have a pixel
+/// within [`MEETS`] of it, a [`bit`] to each. `placed` holds each pixel's
+/// color, in rows `width` long.
+fn meets(placed: &[u8], width: usize, place: usize) -> Vec<u32> {
+    let reach = index(MEETS);
+    let rows: Vec<&[u8]> = placed.chunks(width).collect();
+    let mut met = Vec::new();
+    for (y, row) in rows.iter().enumerate() {
+        for (x, _) in row
+            .iter()
+            .enumerate()
+            .filter(|&(_, &color)| usize::from(color) == place)
+        {
+            let from = x.saturating_sub(reach);
+            let across = x
+                .saturating_add(reach)
+                .saturating_add(1)
+                .saturating_sub(from);
+            let near = rows
+                .iter()
+                .skip(y.saturating_sub(reach))
+                .take(
+                    y.saturating_add(reach)
+                        .saturating_add(1)
+                        .saturating_sub(y.saturating_sub(reach)),
+                )
+                .flat_map(|row| row.iter().skip(from).take(across));
+            met.push(near.fold(0_u32, |met, &color| met | bit(usize::from(color))));
+        }
+    }
+    met
+}
+
+/// Which of the colors `found` in an image, each with whether it is thin,
+/// are the blend along an edge and no color of their own. `placed` holds
+/// each pixel's color, in rows `width` long.
+///
+/// A thin color between two others is the blend along their edge,
+/// whichever of the three is the most common: an outline less than two
+/// pixels wide has fewer pixels of its own color than of its blends. A
+/// blend lies where its two colors meet, so many of its pixels have both
+/// close by, or blends nearer each. Thin text of a color that happens to
+/// lie between the background's and that of other text does not. The
+/// least common color is judged first, and a blend is no end of another.
+fn blends(found: &[(Rgb, bool)], placed: &[u8], width: usize) -> Vec<bool> {
+    let mut blends = vec![false; found.len()];
+    for (place, &(color, thin)) in found.iter().enumerate().rev() {
+        let blend = thin && is_blend(found, &blends, placed, width, place, color);
+        if let Some(gone) = blends.get_mut(place) {
+            *gone = blend;
+        }
+    }
+    blends
+}
+
+/// Whether the thin color `color`, at `place` among `found`, is a blend
+/// of two of the others that are no `blends` themselves, as [`blends`]
+/// describes.
+fn is_blend(
+    found: &[(Rgb, bool)],
+    blends: &[bool],
+    placed: &[u8],
+    width: usize,
+    place: usize,
+    color: Rgb,
+) -> bool {
+    let others = || {
+        found
+            .iter()
+            .zip(blends)
+            .enumerate()
+            .filter(move |&(other, (_, &gone))| other != place && !gone)
+            .map(|(other, (&(color, _), _))| (other, color))
+    };
+    let mut pairs = others()
+        .enumerate()
+        .flat_map(|(skip, one)| {
+            others()
+                .skip(skip.saturating_add(1))
+                .map(move |other| (one, other))
+        })
+        .filter(|&((_, one), (_, other))| between(color, one, other))
+        .peekable();
+    if pairs.peek().is_none() {
+        return false;
+    }
+    // The colors toward `end`: `end`, and each color between it and this
+    // one, which is a blend nearer that end.
+    let toward = |(end, end_color): (usize, Rgb)| {
+        found
+            .iter()
+            .enumerate()
+            .filter(|&(other, &(other_color, _))| {
+                other == end || (other != place && between(other_color, color, end_color))
+            })
+            .fold(0_u32, |all, (other, _)| all | bit(other))
+    };
+    let met = meets(placed, width, place);
+    pairs.any(|(one, other)| {
+        let (one, other) = (toward(one), toward(other));
+        let beside = met
+            .iter()
+            .filter(|&&met| met & one != 0 && met & other != 0)
+            .count();
+        beside.saturating_mul(4) >= met.len()
+    })
 }
 
 /// Whether two colors are one color to a reader.

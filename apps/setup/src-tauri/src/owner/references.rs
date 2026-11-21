@@ -578,7 +578,7 @@ mod tests {
             app: "example".to_owned(),
             reference_name: "Twins".to_owned(),
             characters: serde_json::from_str(
-                r#"{"region":{"x":0,"y":0,"width":40,"height":18},"screenshot":0,
+                r#"{"region":{"x":0,"y":0,"width":76,"height":34},"screenshot":0,
                     "labels":[{"screenshot":0,"text":"861"}]}"#,
             )
             .expect("valid JSON"),

@@ -340,7 +340,7 @@ mod tests {
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         let spec = |screenshot: usize| -> CharactersSpec {
             serde_json::from_str(&format!(
-                r#"{{"region":{{"x":0,"y":0,"width":40,"height":18}},"screenshot":{screenshot},
+                r#"{{"region":{{"x":0,"y":0,"width":76,"height":34}},"screenshot":{screenshot},
                     "labels":[{{"screenshot":{screenshot},"text":"861"}}]}}"#
             ))
             .expect("valid JSON")
@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         // The region shows three characters, and the text has two.
         let spec: CharactersSpec = serde_json::from_str(
-            r#"{"region":{"x":0,"y":0,"width":40,"height":18},"screenshot":0,
+            r#"{"region":{"x":0,"y":0,"width":76,"height":34},"screenshot":0,
                 "labels":[{"screenshot":0,"text":"86"}]}"#,
         )
         .expect("valid JSON");

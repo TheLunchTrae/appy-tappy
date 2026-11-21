@@ -357,28 +357,28 @@ pub(super) fn found_text(search: u64, index: usize, text: Text) -> Message<FakeH
     }
 }
 
-/// A 40 by 18 frame with three marks of red on a gray background, each
-/// 16 tall: a 16 wide block at x 1, the same block less the 2 by 2 pixels
-/// of its top right corner at x 19, and a 2 wide bar at x 37.
+/// A 76 by 34 frame with three marks of red on a gray background, each
+/// 32 tall: a 32 wide block at x 1, the same block less the pixel of its
+/// top right corner at x 35, and a 4 wide bar at x 69.
 pub(super) fn near_twins() -> Image {
     let red = [0, 0, 255, 0];
     let gray = [40, 40, 40, 0];
-    let pixels = (0..18_u32)
+    let pixels = (0..34_u32)
         .flat_map(|y| {
-            (0..40_u32).flat_map(move |x| {
-                let tall = (1..17).contains(&y);
-                let block = tall && (1..17).contains(&x);
-                let corner = (33..35).contains(&x) && (1..3).contains(&y);
-                let twin = tall && (19..35).contains(&x) && !corner;
-                let bar = tall && (37..39).contains(&x);
+            (0..76_u32).flat_map(move |x| {
+                let tall = (1..33).contains(&y);
+                let block = tall && (1..33).contains(&x);
+                let corner = x == 66 && y == 1;
+                let twin = tall && (35..67).contains(&x) && !corner;
+                let bar = tall && (69..73).contains(&x);
                 if block || twin || bar { red } else { gray }
             })
         })
         .collect();
     Image::new(
         Size {
-            width: 40,
-            height: 18,
+            width: 76,
+            height: 34,
         },
         pixels,
     )

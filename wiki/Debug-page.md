@@ -23,8 +23,8 @@ The same setting adds debug details to the pages that read a window live.
     character of the reference, and the closest other character. The distance
     runs from 0 for the same shape to 1000, and says how much ink one of
     the two has where the other has none, in the place they differ most. A
-    character reads while the closest is at most 200 apart and no other
-    character is within 50 more, so a close second means that the
+    character reads while the closest is at most 350 apart and no other
+    character is within 100 more, so a close second means that the
     reference can't tell the two apart there.
     A character marked **left out** is one the value's characters do not
     name: it reads as text, and the read fails when it is a part of the

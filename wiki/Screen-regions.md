@@ -107,19 +107,25 @@ way (`digits::cut`), so a saved sample is its region and those pixels. The
 color most of those outermost pixels have is the background, and the
 outermost pixels themselves are never ink. So a region may be as tight as
 its text, even where a character fills it edge to edge, and text beside the
-region does not change the background while it covers less than half of
-the pixels around. On a side at the window's edge there is no pixel past
-the region, and the region's own outermost pixels stand in.
+region does not change the background while another color has more of
+the pixels around. A sample saved for a text color, which a reference once
+could have, holds its region alone: text that touches its edge there is
+cut short, and the setup app lists the sample among the
+[saved pictures the reference can't learn](Setup-app.md#saved-pictures-a-reference-cant-learn).
+On a side at the window's edge there is no pixel past the region, and the
+region's own outermost pixels stand in.
 
 The pixels are counted by color, to the nearest 16 of red, green, and
 blue. The most common color is the first, and each next most common one
 whose red, green, or blue is more than 40 from every color so far is
 another (`SAME_COLOR`), up to 12 (`MAX_COLORS`). A pixel has the color
 nearest its own. The blend along an anti-aliased edge is no color of its
-own: a color that lies between two more common ones, in pixels with few of
-their own color around them, is left out, so each pixel of an edge goes to
-the side it is mostly of and a stroke is as wide at any size and at any
-fraction of a pixel. A read is integers only and gives the same answer for
+own: a color that lies between two others, in pixels with few of their own
+color around them and with both of those colors close by, is left out, so
+each pixel of an edge goes to the side it is mostly of and a stroke is as
+wide at any size and at any fraction of a pixel. Thin text of a color that
+happens to lie between the background's and that of other text has no such
+text close by, and stays a color. A read is integers only and gives the same answer for
 the same pixels.
 
 Each color is a layer, and one more layer holds every color but the
@@ -136,12 +142,20 @@ them:
   together, the text is several colors, and every color together teaches
   it. The typed text chooses the layer, so a box whose text is typed as it
   shows always teaches when one layer splits into that many characters.
-- **A read** takes the layer the reference knows the most of
-  (`Attempt::chosen`), by the pixels across of the characters it matched. A
-  layer it knows less than half as much of as another is no contender: a
-  speck that happens to match, or the inside of a `0`. Where two contenders
-  read as different text, the read fails rather than choose
-  (`ReadError::ColorsDisagree`).
+- **A read** takes a layer whose every character the reference knows
+  (`Attempt::chosen`). An outline around the text can match too, less
+  well, so only the layers whose characters are about as close to their
+  glyphs as the closest layer's count, and of those it is the one with the
+  most pixels across in the characters it matched. A layer the reference
+  knows less than half as much of as another is no contender: a speck that
+  happens to match, or the inside of a `0`. Where two contenders read as
+  different text, the read fails rather than choose
+  (`ReadError::ColorsDisagree`). A read takes its number from one color, so
+  where other colors show something as tall as half the line beside the
+  number, which neither touches the number's ink nor lies within one of
+  its characters, the read fails at that place as for an unlearned shape
+  (`Attempt::beside`). A character in another color whose outline runs
+  into the number's outline is not seen that way.
 
 A color whose one mark fills the image from side to side and top to bottom,
 where another color has ink too, is a plate behind the text and not the
@@ -159,16 +173,17 @@ holds how much of it is ink (`screen/digits/shape.rs`). The same character
 has the same shape, within an edge's width, at any size and wherever it
 lands on the pixel grid.
 
-Two shapes are compared by where their ink differs. Ink that one shape has
-counts where the other has none in that cell or a cell beside it, so a
-moved or thicker edge counts nothing, and a stroke that one character has
-and the other lacks counts in full. That ink is summed in blocks of 4 cells
-by 4, and the distance between the shapes is the most any 2 blocks by 2
-hold, in thousandths of such a window that is all ink
-(`Sample::distance`): 0 for the same shape, 1000 at most. The one place two
-characters differ most decides, so the bar that tells an `8` from a `0`
-counts as much in a bold font as in a thin one, however much ink the rest
-of the two share.
+Two shapes are compared by how much ink each has around every cell, in
+the square of 5 cells by 5 centered on it (`AROUND`). An edge that is
+blurred, or a fraction of a pixel off, moves ink between neighboring cells
+and leaves about as much around each. A stroke that one character has and
+the other lacks leaves none there. The distance between the shapes is the
+most that this ink differs around any one cell, in thousandths of a square
+that is all ink (`Sample::distance`): 0 for the same shape, 1000 at most.
+The one place two characters differ most decides, however much ink the
+rest of the two share. In the font the tests draw, a digit 14 pixels tall
+or more is at most about 300 from its own glyph, learned at any size, and
+at least about 750 from every other digit's.
 
 Scaling a character by its own bounds makes a `.` as large as a `0`, so a
 shape also carries its place (`Place`): how tall the character is and how
@@ -178,13 +193,14 @@ more than twice as wide for its height as the other, are 1000 apart
 whatever their ink.
 
 A character takes the closest learned glyph's character when the glyph is
-at most 200 away (`MATCH_WITHIN`) and no glyph of another character is
-within 50 more (`CLEAR_BY`). Only the closest glyph is asked: a shape two
+at most 350 away (`MATCH_WITHIN`) and no glyph of another character is
+within 100 more (`CLEAR_BY`). Only the closest glyph is asked: a shape two
 characters are about as close to is neither, and the read fails rather
 than guess. A lesson keeps a new glyph of a character unless a learned
-glyph of that character is within 30 of it (`SAME_GLYPH`), so labeling the
-same text again adds nothing, and a reader holds at most 256 glyphs. Two
-learned glyphs of different characters within 200 of each other are
+glyph of that character is within 60 of it (`SAME_GLYPH`), so labeling the
+same text again adds little, and a reader holds at most 256 glyphs. Two
+learned glyphs of different characters within 100 of each other, so that
+neither is clearly closer to its own shape, are
 [lookalikes](References.md#what-it-has-learned), which the setup
 app warns about.
 
@@ -193,7 +209,9 @@ at any fraction of a pixel (`screen/digits/drawn.rs`). One reference
 learned from three labeled pictures reads that text in other fill and
 outline colors, on other backgrounds, and from under half the size it
 learned to three times it, and no read in the sweep gives a wrong number
-(`one_reference_reads_other_sizes_and_colors_and_never_a_wrong_number`).
+(`one_reference_reads_other_sizes_and_colors_and_never_a_wrong_number`). A
+reference that never learned one of the digits reads that digit as none
+(`a_digit_the_reference_never_learned_is_not_read_as_one_it_looks_like`).
 
 These limits follow:
 
@@ -205,6 +223,9 @@ These limits follow:
   fails the read. Teach the reference a picture at the small size too.
 - Text of the background's color needs an outline more than one pixel
   wide to close it in.
+- A stroke thinner than about a twentieth of its character's height fills
+  less than a third of the square, so two characters that differ only by
+  such a stroke can be within reach of each other.
 - A different font is different shapes. Each font takes its own reference,
   or more labeled pictures in the same one.
 
@@ -240,16 +261,17 @@ that flickers between two stages is two.
 [Troubleshooting](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
 says what the user does about each.
 
-On the fixture screenshots, each check takes microseconds per read on one CPU
-core: a number check and a bar fill take the most, a color check less, and a
-state check about a microsecond for each of its states. `mise run rust:bench`
+On the fixture screenshots, a number check takes a few hundred microseconds
+per read on one CPU core, since it reads its region once for each color,
+and each other check takes microseconds: a bar fill the most, a color check
+less, and a state check about a microsecond for each of its states. `mise run rust:bench`
 prints the current numbers.
 
 Windows has its own OCR engine, and `ocrs` is a pure-Rust neural OCR crate.
 The runtime uses neither. Windows OCR would make results depend on the Windows
 version and its language packs. `ocrs` keeps a neural network model in
 memory and runs it on the CPU for each read, to read text that a learned shape
-match reads in microseconds. The setup app uses `ocrs` only to guess the text of
+match reads in under a millisecond. The setup app uses `ocrs` only to guess the text of
 [recorded readings](Setup-app.md#recording) for the user to check.
 Reading with it at runtime stays an option for text the number check cannot
 read

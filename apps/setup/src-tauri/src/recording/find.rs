@@ -716,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn text_is_found_by_contrast_with_the_sample_s_background() {
+    fn text_of_no_one_color_is_found_by_what_is_unlike_the_sample_s_background() {
         // A panel 40 wide on a brighter scene. The sample and the text
         // below it each have a blue top half and a red bottom half.
         let pairs = [pair(2, 2, 8), pair(20, 20, 8)].concat();
@@ -743,9 +743,9 @@ mod tests {
             pixels,
         )
         .expect("matching length");
-        let by_contrast = DigitReader::new();
+        let unlearned = DigitReader::new();
         let place = region(0, 0, 12, 12);
-        let search = like(&image, place, &[], &[], &by_contrast).expect("the sample has ink");
+        let search = like(&image, place, &[], &[], &unlearned).expect("the sample has ink");
         assert_eq!(
             search
                 .finds
@@ -755,7 +755,7 @@ mod tests {
             [region(18, 18, 11, 12)],
             "the scene beside the panel is taller than text"
         );
-        let (tone, height) = sample(&image, place, &by_contrast).expect("the sample has ink");
+        let (tone, height) = sample(&image, place, &unlearned).expect("the sample has ink");
         assert_eq!(height, 8, "both tones of a character are one blob");
         assert_eq!(
             lines(&image, &Sizes::of(8), place, tone),
