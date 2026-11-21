@@ -137,9 +137,8 @@ impl Layers {
                 if let Some(count) = counts.get_mut(place) {
                     *count = count.saturating_add(1);
                 }
-                let beside = |row: &[u16], x: Option<usize>| {
-                    x.and_then(|x| row.get(x)) == Some(&color)
-                };
+                let beside =
+                    |row: &[u16], x: Option<usize>| x.and_then(|x| row.get(x)) == Some(&color);
                 if beside(row, x.checked_sub(1))
                     && beside(row, x.checked_add(1))
                     && beside(above, Some(x))
@@ -154,9 +153,8 @@ impl Layers {
         // itself, where the counted color holds one.
         let mean = |counted: usize| {
             let count = counts.get(counted).copied().unwrap_or(0);
-            let channel = |sum: u32| {
-                u8::try_from(sum.checked_div(count).unwrap_or(0)).unwrap_or(u8::MAX)
-            };
+            let channel =
+                |sum: u32| u8::try_from(sum.checked_div(count).unwrap_or(0)).unwrap_or(u8::MAX);
             let [red, green, blue] = sums.get(counted).copied().unwrap_or_default();
             Rgb {
                 red: channel(red),
@@ -217,9 +215,11 @@ impl Layers {
                     .map(|(_, &(other, _))| other)
             };
             let blend = thin
-                && others()
-                    .enumerate()
-                    .any(|(skip, one)| others().skip(skip.saturating_add(1)).any(|other| between(color, one, other)));
+                && others().enumerate().any(|(skip, one)| {
+                    others()
+                        .skip(skip.saturating_add(1))
+                        .any(|other| between(color, one, other))
+                });
             if blend {
                 found.remove(place);
             }
@@ -339,9 +339,12 @@ impl Layers {
     pub(super) fn ink(&self, layer: Layer) -> Ink {
         let background = self.background;
         let inked = match layer {
-            Layer::Color(place) if place == background => {
-                closed_in(index(self.size.width).max(1), &self.color, &self.open, background)
-            },
+            Layer::Color(place) if place == background => closed_in(
+                index(self.size.width).max(1),
+                &self.color,
+                &self.open,
+                background,
+            ),
             Layer::Color(place) => self.inked.iter().map(|&layer| layer == place).collect(),
             Layer::Every => self
                 .inked

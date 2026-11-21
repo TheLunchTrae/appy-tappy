@@ -25,13 +25,10 @@ import {
   EMPTY_DRAFT,
   firstWithPixels,
   fixDraft,
-  NEW_REFERENCE_TOLERANCE,
   onPicture,
   regionScreenshot,
-  toReference,
   withFixRegion,
   withState,
-  withTextColor,
 } from '../lib/check.ts';
 import { boxNumber } from '../lib/boxes.ts';
 import { type Placed, liveDrawFrame, regionFromLiveBox, regionOverFrame, useLiveDraw } from '../lib/liveDraw.ts';
@@ -155,12 +152,7 @@ function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restor
     step: 'where',
     mayMove: false,
     editing,
-    draft:
-      mode.kind === 'fix'
-        ? fixDraft(mode.value.screen.check)
-        : editing === null
-          ? EMPTY_DRAFT
-          : toReference(EMPTY_DRAFT, editing.existing),
+    draft: mode.kind === 'fix' ? fixDraft(mode.value.screen.check) : EMPTY_DRAFT,
   };
 }
 
@@ -502,7 +494,7 @@ export function Capture({
     }
     const color = colorAt(shownPicture, point.x, point.y);
     if (color !== null) {
-      setDraft((current) => (picking === 'ink' ? withTextColor(current, color) : { ...current, [picking]: color }));
+      setDraft((current) => ({ ...current, [picking]: color }));
       setPicking(null);
     }
   };
@@ -617,20 +609,18 @@ export function Capture({
       : null;
   // The preview is for the color fields the inspector shows now.
   const colorFields = step === 'how' && fixing === null && (draft.kind === 'barFill' || draft.kind === 'color');
-  // While a reference is taught, the region its pixels are counted in is the selected box on the screenshot shown.
+  // While a reference is taught, the box the screenshot shown has selected.
   const chosenOnShown = editing === null ? null : boxes.onShown;
-  const previewDraft = editing === null ? draft : { ...draft, region: chosenOnShown?.region ?? null };
   const preview = useMatchPreview(
-    editing !== null ? 'ink' : colorFields ? draft.kind : null,
-    previewDraft,
+    colorFields ? draft.kind : null,
+    draft,
     selected,
-    shownPicture,
     // An edited value's region is in the pixels of the size it was drawn at, and shows on no other.
     otherSize === null || edited === null
       ? null
       : `Select a screenshot at ${sizeText(edited.screen.windowSize)} to see the matching pixels of its region.`,
   );
-  const previewField = <MatchPreviewField preview={preview} region={previewDraft.region} />;
+  const previewField = <MatchPreviewField preview={preview} />;
   // An edited value's region sits on a screenshot of the size it was drawn at, and a bar is looked for on those.
   const detectBlocked =
     windowless ??
@@ -719,8 +709,7 @@ export function Capture({
   };
 
   // Opens the reference editor on the picked reference, or on a new one, and
-  // starts recording the value's region with that reference's text color and
-  // tolerance.
+  // starts recording the value's region.
   const recordReadings = async (): Promise<void> => {
     const existing = file?.references.find((reference) => reference.id === draft.reference) ?? null;
     if (existing !== null && draftHolds(existing, drafted) !== null) {
@@ -731,12 +720,7 @@ export function Capture({
     if (region === null || drawnOn === null) {
       return;
     }
-    await teaching.record(false, {
-      region,
-      drawnOn,
-      ink: existing?.ink ?? null,
-      tolerance: existing?.tolerance ?? NEW_REFERENCE_TOLERANCE,
-    });
+    await teaching.record(false, { region, drawnOn });
   };
 
   // Why the screenshot shown cannot be removed, or null when it can or the live view shows.
@@ -1307,15 +1291,9 @@ export function Capture({
           appName={choice.name}
           file={file}
           stepper={mode.kind === 'reference' ? null : stepper}
-          pickingInk={picking === 'ink'}
-          canPick={shownPicture !== null}
-          onPickInk={(on) => {
-            setPicking(on ? 'ink' : null);
-          }}
           full={full}
           position={position}
           setSelected={setSelected}
-          preview={previewField}
           saving={referenceSave ?? NO_REFERENCE_SAVE}
           check={check}
           windowless={windowless}

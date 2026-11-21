@@ -78,7 +78,7 @@ export function ReferencePicker(props: Props) {
                     <b>{reference.name}</b>
                     <small>{used === 0 ? 'No values yet' : `Used by ${used} ${used === 1 ? 'value' : 'values'}`}</small>
                   </span>
-                  <CharacterChips characters={referenceCharacters(reference)} ink={reference.ink} />
+                  <CharacterChips characters={referenceCharacters(reference)} />
                   <MissingNote characters={coverage(characters, referenceCharacters(reference)).missing} />
                 </button>
               );

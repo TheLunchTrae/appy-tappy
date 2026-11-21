@@ -496,7 +496,14 @@ mod tests {
         let bgra = (0..9)
             .flat_map(|pixel| if pixel == 4 { [255; 4] } else { [0, 0, 0, 255] })
             .collect();
-        let dot = Image::new(Size { width: 3, height: 3 }, bgra).unwrap();
+        let dot = Image::new(
+            Size {
+                width: 3,
+                height: 3,
+            },
+            bgra,
+        )
+        .unwrap();
         let read = DigitReader::new()
             .read(&dot, false)
             .expect_err("no glyph learned");

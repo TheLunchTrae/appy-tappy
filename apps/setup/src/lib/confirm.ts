@@ -163,7 +163,7 @@ export function placeKey(place: Pick<Place, 'source' | 'index'>): string {
 /**
  * A name for `place` as it joins a check: its {@link placeKey}, a space, and the shapes it shows. A place that
  * shows other shapes under the same key is another place to the check, such as a box drawn after one was deleted,
- * which can have that box's ID, or a find that was read again as other ink.
+ * which can have that box's ID.
  */
 function joinKey(place: Place): string {
   return [placeKey(place), ...place.characters.map((shown) => shown.shape)].join(' ');

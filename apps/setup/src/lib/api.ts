@@ -186,7 +186,7 @@ export async function explainReading(): Promise<ReadingDetails | null> {
 
 /**
  * Records the region of the picked window that `spec` names. With
- * `more`, goes on with the stopped recording, which needs the same region, ink and window size;
+ * `more`, goes on with the stopped recording, which needs the same region and window size;
  * otherwise starts a new one. Answers the recording's number, which going on keeps.
  */
 export async function startRecording(spec: RecordSpec, more: boolean): Promise<number> {
@@ -251,11 +251,9 @@ export async function captureOutline(application: string, width: number, height:
 }
 
 /**
- * The tolerance the reference `spec` teaches finds its characters by contrast with: `spec`'s own while every
- * sample reads with it, and otherwise one its samples read with, when there is one.
  * What may keep the reference `spec` teaches from reading as its samples do: the pairs of characters whose
- * learned shapes match each other, and whether its tolerance leaves an outline or a shadow out. Null for a
- * reference that can't learn one of its lessons, which its live check says.
+ * learned shapes match each other. Null for a reference that can't learn one of its lessons, which its live
+ * check says.
  */
 export async function readingRisks(spec: CharactersSpec): Promise<ReadingRisks | null> {
   return invoke<ReadingRisks | null>('reading_risks', { spec });
@@ -270,9 +268,8 @@ export async function savedReadingRisks(reference: ReferenceRef): Promise<Readin
 }
 
 /**
- * Finds text like what `region` of screenshot `screenshot` shows, as a reference with the text color `ink`,
- * or by contrast without one, and `tolerance` tells it from the region's background, at any size,
- * elsewhere on that screenshot and away from the finds `added` already and those an earlier search offered
+ * Finds text like what `region` of screenshot `screenshot` shows, as a reference tells it from the
+ * region's background, at any size, elsewhere on that screenshot and away from the finds `added` already and those an earlier search offered
  * that the user left out, `passed`, in place of any earlier search.
  */
 export async function findLike(screenshot: number, region: RegionDef, added: ReadonlyArray<RegionDef>, passed: ReadonlyArray<RegionDef>): Promise<FoundView> {
@@ -289,19 +286,13 @@ export async function foundPicture(search: number, index: number, maxWidth: numb
   return decodePicture(await invoke<ArrayBuffer>('found_picture', { search, index, maxWidth }));
 }
 
-/**
- * Has the text reader read finds `indexes` of search `search` again, as the text color `ink`, if any, and
- * `tolerance` tell their characters from the background,
- * and answers the search, or null when that search was replaced or forgotten.
- * Forgets the search.
- */
+/** Forgets the search. */
 export async function forgetFound(): Promise<void> {
   await invoke('forget_found');
 }
 
 /**
- * The characters the box `region` of screenshot `screenshot` shows, as the text color `ink`, if any, and
- * `tolerance` split them,
+ * The characters the box `region` of screenshot `screenshot` shows, as a reference splits them,
  * each with the name a find's or a recorded reading's character of the same shape has. None for an unknown
  * screenshot or a box that does not fit it.
  */
@@ -516,7 +507,7 @@ export async function saveReference(spec: ReferenceSaveSpec): Promise<SavedRefer
 }
 
 /**
- * Saves a saved reference's name, color, and tolerance, with its samples as they are but for those it leaves
+ * Saves a saved reference's name, with its samples as they are but for those it leaves
  * out, so it needs no screenshot.
  */
 export async function saveReferenceSettings(spec: ReferenceSettingsSpec): Promise<SavedReference> {
@@ -524,8 +515,8 @@ export async function saveReferenceSettings(spec: ReferenceSettingsSpec): Promis
 }
 
 /**
- * The saved pictures the saved reference `reference` can't learn with the text color `ink`, or by contrast
- * without one, and `tolerance`, saved as `saving` says without the pictures `dropped` names.
+ * The saved pictures the saved reference `reference` can't learn, saved without the pictures
+ * `dropped` names.
  */
 export async function unlearnedSamples(reference: ReferenceRef, dropped: ReadonlyArray<string>): Promise<ReadonlyArray<UnlearnedSample>> {
   return invoke<ReadonlyArray<UnlearnedSample>>('unlearned_samples', { reference, dropped });

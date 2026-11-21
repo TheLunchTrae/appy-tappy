@@ -409,8 +409,8 @@ impl Error for ShareError {
 mod tests {
     use appytappy_config::anti_cheat::AntiCheatClass;
     use appytappy_config::app_file::{
-        BuildDef, CheckedDef, FORMAT, FixDef, OverlayDef, OverlayModeDef, ReferenceDef,
-        RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
+        BuildDef, CheckedDef, FORMAT, FixDef, OverlayDef, OverlayModeDef, ReferenceDef, RegionDef,
+        SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
     use appytappy_config::window_match::WindowFacts;
     use appytappy_sources::screen::{Image, Size};

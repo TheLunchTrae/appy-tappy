@@ -1390,12 +1390,7 @@ mod tests {
             height: 32,
         };
         let follows = Follows::Scaled(PinDef::TopLeft);
-        let mut recording = Recording::new(
-            Ticket::numbered(1),
-            region,
-            (drawn, follows),
-            start,
-        );
+        let mut recording = Recording::new(Ticket::numbered(1), region, (drawn, follows), start);
         // As tall and narrower: pinned left, the region keeps its place,
         // which is past the right edge.
         let narrow = frame(12, 32, |_, _| true);
@@ -1549,42 +1544,18 @@ mod tests {
     #[test]
     fn it_records_only_the_same_region_window_and_scope() {
         let recording = recording(Instant::now());
-        assert!(recording.records(
-            region(),
-            size(),
-            Scope::Place
-        ));
+        assert!(recording.records(region(), size(), Scope::Place));
         let other_region = Region::new(1, 0, 7, 4).expect("not empty");
-        assert!(!recording.records(
-            other_region,
-            size(),
-            Scope::Place
-        ));
+        assert!(!recording.records(other_region, size(), Scope::Place));
         let other_size = Size {
             width: 9,
             height: 4,
         };
-        assert!(!recording.records(
-            region(),
-            other_size,
-            Scope::Place
-        ));
-        assert!(!recording.records(
-            region(),
-            size(),
-            Scope::Window
-        ));
+        assert!(!recording.records(region(), other_size, Scope::Place));
+        assert!(!recording.records(region(), size(), Scope::Window));
         let window = recording.across_window(RED, 4);
-        assert!(window.records(
-            region(),
-            size(),
-            Scope::Window
-        ));
-        assert!(!window.records(
-            region(),
-            size(),
-            Scope::Place
-        ));
+        assert!(window.records(region(), size(), Scope::Window));
+        assert!(!window.records(region(), size(), Scope::Place));
     }
 
     /// A 60 by 40 frame with ink inside each of `blocks`, as left, top,
@@ -1606,13 +1577,8 @@ mod tests {
             width: 60,
             height: 40,
         };
-        Recording::new(
-            Ticket::numbered(1),
-            region,
-            (size, Follows::Drawn),
-            started,
-        )
-        .across_window(RED, 8)
+        Recording::new(Ticket::numbered(1), region, (size, Follows::Drawn), started)
+            .across_window(RED, 8)
     }
 
     const STROKE: (u32, u32, u32, u32) = (2, 2, 3, 8);
@@ -1933,13 +1899,8 @@ mod tests {
             width: 60,
             height: 40,
         };
-        let mut recording = Recording::new(
-            Ticket::numbered(1),
-            region,
-            (drawn, follows),
-            start,
-        )
-        .across_window(RED, 8);
+        let mut recording = Recording::new(Ticket::numbered(1), region, (drawn, follows), start)
+            .across_window(RED, 8);
         recording.look_for([16]);
         assert_eq!(
             looked_over(&mut recording, &blocks(&[STROKE]), start),
@@ -2008,13 +1969,7 @@ mod tests {
             height: 40,
         };
         let follows = Follows::Scaled(PinDef::TopLeft);
-        Recording::new(
-            Ticket::numbered(1),
-            region,
-            (drawn, follows),
-            started,
-        )
-        .across_window(RED, 8)
+        Recording::new(Ticket::numbered(1), region, (drawn, follows), started).across_window(RED, 8)
     }
 
     #[test]
@@ -2074,13 +2029,8 @@ mod tests {
             width: 60,
             height: 40,
         };
-        let mut recording = Recording::new(
-            Ticket::numbered(1),
-            region,
-            (drawn, follows),
-            start,
-        )
-        .across_window(RED, 16);
+        let mut recording = Recording::new(Ticket::numbered(1), region, (drawn, follows), start)
+            .across_window(RED, 16);
         let half = frame(30, 20, |_, _| false);
         assert!(recording.look(&half, start).is_none());
         let job = recording.look(&half, after(start, 250)).expect("due");

@@ -418,9 +418,7 @@ mod tests {
     fn a_search_leaves_out_the_finds_passed_over() {
         let (mut harness, _handler) = searchable();
         let found = harness
-            .ask(|owner| {
-                owner.find_like(0, region(0, 0, 4, 5), &[], &[region(7, 0, 4, 5)])
-            })
+            .ask(|owner| owner.find_like(0, region(0, 0, 4, 5), &[], &[region(7, 0, 4, 5)]))
             .expect("found");
         let regions: Vec<RegionDef> = found.finds.iter().map(|find| find.region).collect();
         assert_eq!(regions, [region(0, 6, 4, 5)]);
@@ -635,8 +633,7 @@ mod tests {
         let [place] = regions[..] else {
             panic!("one find, the other panel's strokes: {regions:?}");
         };
-        let drawn =
-            harness.ask(move |owner: &mut Owner<FakeHost>| owner.box_characters(0, place));
+        let drawn = harness.ask(move |owner: &mut Owner<FakeHost>| owner.box_characters(0, place));
         assert_eq!(drawn.len(), 2, "its two strokes");
         assert_eq!(found.finds[0].characters, drawn);
         let crop = panels()

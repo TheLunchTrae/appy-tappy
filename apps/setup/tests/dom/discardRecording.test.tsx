@@ -22,7 +22,7 @@ const empty: RecordingView = {
   elapsedMs: 5000,
   full: null,
   problem: null,
-  settings: { region: { x: 4, y: 5, width: 20, height: 10 }, tolerance: 40, windowSize: size, scope: 'place' },
+  settings: { region: { x: 4, y: 5, width: 20, height: 10 }, windowSize: size, scope: 'place' },
   at: size,
   sizes: [],
   spots: [],

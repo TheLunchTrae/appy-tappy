@@ -663,11 +663,7 @@ mod tests {
 
     /// How tall the characters are that each of `regions` of `image`
     /// shows.
-    fn sample_heights(
-        image: &Image,
-        regions: &[Region],
-        reader: &DigitReader,
-    ) -> Vec<Option<u32>> {
+    fn sample_heights(image: &Image, regions: &[Region], reader: &DigitReader) -> Vec<Option<u32>> {
         regions
             .iter()
             .map(|&region| Some(sample(image, region, reader)?.1))

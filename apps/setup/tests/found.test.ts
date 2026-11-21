@@ -12,19 +12,13 @@ import {
   keepAll,
   keptFound,
   keptState,
-  rereadOffer,
-  REREAD_SAME,
-  listed,
   passOver,
   rowFlags,
-  skippedOn,
   withoutFlagged,
 } from '../src/lib/found.ts';
 
 const at = (x: number) => ({ x, y: 10, width: 30, height: 12 });
-// What the search read every find with.
-const white = { red: 255, green: 255, blue: 255 };
-const readWith = { ink: white, tolerance: 40, characters: [] };
+const readWith = { characters: [] };
 
 const view: FoundView = {
   id: 1,
@@ -204,33 +198,6 @@ describe('flagged finds', () => {
     expect(addBlocked(after, rowFlags(after, new Map()), true)).toBeNull();
     expect(withoutFlagged(after, rowFlags(after, new Map())).size).toBe(0);
   });
-
-  test('Reread is for the finds the reader failed on and the flagged guesses, not typed text', () => {
-    const gray = { red: 90, green: 90, blue: 90 };
-    // 1 is flagged but typed; 2 is a flagged guess; 3 failed, ticked or not.
-    expect(rereadOffer(rows, flags, gray, 40)).toEqual({ indexes: [2, 3], blocked: null });
-    // A find that shows characters the reference does not need is not listed, so it is not read again.
-    const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
-    const unlisted = foundRows(view, new Map(), [], digits);
-    expect(listed(unlisted).map((row) => row.index)).toEqual([1, 2, 3]);
-    expect(rereadOffer(unlisted, new Map([[0, 'Nope.']]), gray, 40)).toEqual({ indexes: [3], blocked: null });
-    // With nothing flagged or failed, there is nothing to offer.
-    const typedOver = foundRows(view, new Map([[3, { keep: true, text: '7', typed: true }]]), [], []);
-    expect(rereadOffer(typedOver, new Map(), gray, 40)).toBeNull();
-    // Contrast reads otherwise than the text color the finds were read with.
-    expect(rereadOffer(rows, flags, null, 40)).toEqual({ indexes: [2, 3], blocked: null });
-  });
-
-  test('Reread reads a guess again only with another color or tolerance, and a failed read whenever asked', () => {
-    // The same color and tolerance read the same text, so only the failed find is read again.
-    expect(rereadOffer(rows, flags, { ...white }, 40)).toEqual({ indexes: [3], blocked: null });
-    expect(rereadOffer(rows, flags, white, 41)).toEqual({ indexes: [2, 3], blocked: null });
-    expect(rereadOffer(rows, flags, { ...white, blue: 254 }, 40)).toEqual({ indexes: [2, 3], blocked: null });
-    // With no failed find, the flagged guess keeps Reread offered, and says what to change.
-    const guesses = rows.filter((row) => !row.failed);
-    expect(rereadOffer(guesses, flags, white, 40)).toEqual({ indexes: [], blocked: REREAD_SAME });
-    expect(rereadOffer(guesses, flags, white, 39)).toEqual({ indexes: [2], blocked: null });
-  });
 });
 
 describe('passOver', () => {
@@ -243,32 +210,21 @@ describe('passOver', () => {
     ),
   };
   const rows = foundRows(unfit, new Map([[0, { keep: true, text: '93.4', typed: true }]]), [], digits);
-  const passedAt = (x: number) => ({ region: at(x), ink: white });
 
   test('a later search skips every find that was not added, listed or not', () => {
     const passed = passOver(new Map(), view.screenshot, rows);
-    expect(passed.get(view.screenshot)).toEqual([passedAt(40), passedAt(80), passedAt(120)]);
-    expect(skippedOn(passed, view.screenshot, white)).toEqual([at(40), at(80), at(120)]);
+    expect(passed.get(view.screenshot)).toEqual([at(40), at(80), at(120)]);
   });
 
   test('passing over adds to what earlier searches passed over on the same screenshot only', () => {
     const earlier = new Map([
-      [view.screenshot, [passedAt(200)]],
-      [9, [passedAt(0)]],
+      [view.screenshot, [at(200)]],
+      [9, [at(0)]],
     ]);
     const passed = passOver(earlier, view.screenshot, rows);
-    expect(skippedOn(passed, view.screenshot, white)).toEqual([at(200), at(40), at(80), at(120)]);
-    expect(skippedOn(passed, 9, white)).toEqual([at(0)]);
-    expect(skippedOn(passed, 5, white)).toEqual([]);
-  });
-
-  test('a search with another text color offers again what was passed over as read with the old one', () => {
-    const red = { red: 255, green: 0, blue: 0 };
-    const passed = new Map([
-      [view.screenshot, [passedAt(0), { region: at(40), ink: null }, { region: at(80), ink: red }]],
-    ]);
-    expect(skippedOn(passed, view.screenshot, white)).toEqual([at(0)]);
-    expect(skippedOn(passed, view.screenshot, null)).toEqual([at(40)]);
+    expect(passed.get(view.screenshot)).toEqual([at(200), at(40), at(80), at(120)]);
+    expect(passed.get(9)).toEqual([at(0)]);
+    expect(passed.get(5)).toBeUndefined();
   });
 
   test('adding every find passes over none', () => {
@@ -278,7 +234,7 @@ describe('passOver', () => {
       [],
       [],
     );
-    const earlier = new Map([[view.screenshot, [passedAt(200)]]]);
+    const earlier = new Map([[view.screenshot, [at(200)]]]);
     expect(passOver(earlier, view.screenshot, all)).toBe(earlier);
   });
 });

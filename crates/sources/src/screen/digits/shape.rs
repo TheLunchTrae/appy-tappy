@@ -155,9 +155,8 @@ impl Place {
     /// than [`LINE_SLACK`], or one is more than twice as wide for its
     /// height as the other.
     pub(super) fn unlike(self, other: Self) -> bool {
-        let wide = |one: Self, other: Self| {
-            u64::from(one.size.0).saturating_mul(u64::from(other.size.1))
-        };
+        let wide =
+            |one: Self, other: Self| u64::from(one.size.0).saturating_mul(u64::from(other.size.1));
         let (ours, theirs) = (wide(self, other), wide(other, self));
         self.height.abs_diff(other.height) > LINE_SLACK
             || self.top.abs_diff(other.top) > LINE_SLACK
@@ -238,8 +237,7 @@ impl Sample {
         for (row, ((ink, near), (other_ink, other_near))) in rows.enumerate() {
             let mut alone = [0_u8; GRID as usize];
             let cells = ink.iter().zip(near).zip(other_ink.iter().zip(other_near));
-            for (alone, ((&ink, &near), (&other_ink, &other_near))) in alone.iter_mut().zip(cells)
-            {
+            for (alone, ((&ink, &near), (&other_ink, &other_near))) in alone.iter_mut().zip(cells) {
                 *alone = ink
                     .saturating_sub(other_near)
                     .max(other_ink.saturating_sub(near));
@@ -433,7 +431,10 @@ fn shared(outer: &Range<u32>, span: Range<u64>, side: u64) -> Vec<(usize, usize,
     let mut all = Vec::new();
     for (pixel, at) in outer.clone().enumerate() {
         let from = u64::from(at).saturating_mul(PIXEL).max(span.start);
-        let to = u64::from(at).saturating_add(1).saturating_mul(PIXEL).min(span.end);
+        let to = u64::from(at)
+            .saturating_add(1)
+            .saturating_mul(PIXEL)
+            .min(span.end);
         let Some(length) = to.checked_sub(from).filter(|&length| length > 0) else {
             continue;
         };

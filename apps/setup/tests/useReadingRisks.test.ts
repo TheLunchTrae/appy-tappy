@@ -28,18 +28,13 @@ test('a value is warned about the pairs with a character it reads, and every pai
   expect(neededPairs(pairs, [])).toEqual(pairs);
 });
 
-test('the warning names the pairs and the fix for how the reference finds its characters', () => {
-  expect(lookalikeWarning([], null, 40)).toBeNull();
-  expect(lookalikeWarning([['8', '6']], null, 40)).toBe(
-    '8 and 6 look alike in what it learned, so it may read one as the other. Text with a thick outline often does this. Pick a text color below, so only the inside of the characters counts.',
+test('the warning names the pairs and says to check the text typed for them', () => {
+  expect(lookalikeWarning([])).toBeNull();
+  expect(lookalikeWarning([['8', '6']])).toBe(
+    "8 and 6 have the same shape in what it learned, so it can't tell one from the other. Check that the text typed for each picture is what it shows. A value that needs both won't read them.",
   );
-  const white = { red: 255, green: 255, blue: 255 };
-  expect(lookalikeWarning(pairs.slice(0, 2), white, 40)).toBe(
-    'Some characters look alike in what it learned, so it may read one of each pair as the other: 8 and 6; 0 and 8. Try a lower tolerance, so less of the edge around the characters counts.',
-  );
-  // No tolerance is lower than none.
-  expect(lookalikeWarning([['8', '6']], white, 0)).toBe(
-    '8 and 6 look alike in what it learned, so it may read one as the other. Pick the text color again from the middle of a character, so less of its edge counts.',
+  expect(lookalikeWarning(pairs.slice(0, 2))).toBe(
+    "Some characters have the same shape in what it learned, so it can't tell one of each pair from the other: 8 and 6; 0 and 8. Check that the text typed for each picture is what it shows. A value that needs both won't read them.",
   );
 });
 
@@ -48,22 +43,20 @@ test('an answer shows only while the reference asks under the key it was asked u
     region: { x: 0, y: 0, width: 10, height: 10 },
     screenshot: 0,
     reference: null,
-    tolerance: 40,
     labels: [{ screenshot: 0, region: { x: 0, y: 0, width: 10, height: 10 }, text: '86' }],
     recorded: [],
     dropped: [],
   };
   const asked = riskKey(spec) ?? '';
-  const risks = { lookalikes: [['8', '6']], hidesTone: true, problem: null } as const;
+  const risks = { lookalikes: [['8', '6']], problem: null } as const;
   const answer = { key: asked, risks };
-  const none = { lookalikes: [], hidesTone: false, problem: null };
+  const none = { lookalikes: [], problem: null };
   expect(riskKey(null)).toBeNull();
   expect(riskKey({ ...spec })).toBe(asked);
   expect(risksArrived(answer, asked)).toEqual(risks);
   const relabeled = riskKey({ ...spec, labels: [{ ...spec.labels[0]!, text: '88' }] });
   expect(relabeled).not.toBe(asked);
   expect(risksArrived(answer, relabeled)).toEqual(none);
-  expect(risksArrived(answer, riskKey({ ...spec, ink: { red: 255, green: 0, blue: 0 } }))).toEqual(none);
   expect(risksArrived(answer, null)).toEqual(none);
 });
 
@@ -71,7 +64,6 @@ test('a check that failed says so under the key it was asked under, unlike a che
   const failed = risksFailed('That screenshot is gone. Take a new one and try again.');
   expect(failed).toEqual({
     lookalikes: [],
-    hidesTone: false,
     problem: "Can't check for characters that look alike. That screenshot is gone. Take a new one and try again.",
   });
   expect(risksArrived({ key: 'asked', risks: failed }, 'asked')).toEqual(failed);
@@ -80,27 +72,19 @@ test('a check that failed says so under the key it was asked under, unlike a che
 });
 
 test('a reference that cannot be taught is answered no risks and no problem, since its check says why', () => {
-  const none = { lookalikes: [], hidesTone: false, problem: null };
+  const none = { lookalikes: [], problem: null };
   expect(risksAnswered(null)).toEqual(none);
-  expect(risksAnswered({ lookalikes: [['8', '6']], hidesTone: true })).toEqual({
-    lookalikes: [['8', '6']],
-    hidesTone: true,
-    problem: null,
-  });
+  expect(risksAnswered({ lookalikes: [['8', '6']] })).toEqual({ lookalikes: [['8', '6']], problem: null });
 });
 
-test('a saved reference is marked for the pairs its values can misread and for a hidden outline', () => {
-  const none = { lookalikes: [], hidesTone: false };
-  expect(riskMark(none, [])).toBeNull();
-  expect(riskMark({ ...none, lookalikes: [['8', '6']] }, [])).toBe(
-    '8 and 6 look alike in what it learned. Edit it to see what to do.',
+test('a saved reference is marked for the pairs its values cannot tell apart', () => {
+  expect(riskMark({ lookalikes: [] }, [])).toBeNull();
+  expect(riskMark({ lookalikes: [['8', '6']] }, [])).toBe(
+    '8 and 6 have the same shape in what it learned. Edit it to see what to do.',
   );
   // No value that reads with it needs either character.
-  expect(riskMark({ ...none, lookalikes: [['8', '6']] }, ['1', '2'])).toBeNull();
-  expect(riskMark({ lookalikes: pairs, hidesTone: true }, ['0'])).toBe(
-    "Some characters look alike in what it learned. An outline or a shadow around the characters isn't part of what it learned. Edit it to see what to do.",
-  );
-  expect(riskMark({ ...none, hidesTone: true }, ['1'])).toBe(
-    "An outline or a shadow around the characters isn't part of what it learned. Edit it to see what to do.",
+  expect(riskMark({ lookalikes: [['8', '6']] }, ['1', '2'])).toBeNull();
+  expect(riskMark({ lookalikes: pairs }, ['0'])).toBe(
+    'Some characters have the same shape in what it learned. Edit it to see what to do.',
   );
 });

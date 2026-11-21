@@ -5,8 +5,8 @@ use appytappy_sources::screen::{FrameHandler, Image, Size};
 
 use crate::owner::ReferenceSaveSpec;
 use crate::owner::test_support::{
-    FakeHost, Harness, STATE, add_example_app, frame_image, harness_with, scratch_store, spec, text_frame,
-    with_saved_bar,
+    FakeHost, Harness, STATE, add_example_app, frame_image, harness_with, scratch_store, spec,
+    text_frame, with_saved_bar,
 };
 
 use super::*;

@@ -48,13 +48,8 @@ export interface Draft {
   readonly drawnOn: number | null;
   /** How a new value's pin is picked. It lives beside the region, since a region drawn anew changes both. */
   readonly pin: PinChoice;
-  /**
-   * A color's or a state's tolerance, or a reference's: how far a pixel may be from its text color and still be a
-   * character's or, without a text color, from the background and still be background.
-   */
+  /** A color's or a state's tolerance. */
   readonly tolerance: number;
-  /** The reference's text color, or null while it finds its characters by contrast with the background. */
-  readonly ink: Color | null;
   /** The boxes a reference learns from, each around characters on a screenshot, in the order they are listed. */
   readonly boxes: readonly Box[];
   /** What each reading kept from the recording shows, by reading index. */
@@ -80,19 +75,12 @@ export interface Draft {
   readonly characters: readonly string[];
 }
 
-/**
- * The tolerance a new reference starts with, and so a number check's. A reference that finds its characters by
- * contrast keeps it while its samples read with it, as {@link useContrastTolerance} says.
- */
-export const NEW_REFERENCE_TOLERANCE = 40;
-
 export const EMPTY_DRAFT: Draft = {
   kind: 'number',
   region: null,
   drawnOn: null,
   pin: AUTOMATIC,
-  tolerance: NEW_REFERENCE_TOLERANCE,
-  ink: null,
+  tolerance: 0,
   boxes: [],
   recorded: new Map(),
   dropped: [],
@@ -123,20 +111,13 @@ export function readingOf(draft: Draft): Drawn {
   return first === undefined ? { region: null, drawnOn: null } : { region: first.region, drawnOn: first.screenshot };
 }
 
-/** Whether two references' text colors are the same: one color, or none for either. */
-export function sameTextColor(a: Color | null, b: Color | null): boolean {
-  return a === null || b === null ? a === b : a.red === b.red && a.green === b.green && a.blue === b.blue;
-}
-
 /**
- * Whether `draft` would record other than the stopped recording's `settings`: another reading region, text color or
- * tolerance, or a region drawn on a screenshot whose window size `drawnSize` is not the recording's.
+ * Whether `draft` would record other than the stopped recording's `settings`: another reading region, or a region
+ * drawn on a screenshot whose window size `drawnSize` is not the recording's.
  */
 export function settingsDiffer(draft: Draft, settings: RecordingSettings, drawnSize: Size | null): boolean {
   return (
-    draft.tolerance !== settings.tolerance ||
     !sameRect(readingOf(draft).region, settings.region) ||
-    !sameTextColor(draft.ink, settings.ink ?? null) ||
     drawnSize?.width !== settings.windowSize.width ||
     drawnSize.height !== settings.windowSize.height
   );
@@ -149,21 +130,6 @@ export function settingsDiffer(draft: Draft, settings: RecordingSettings, drawnS
 export function newestOfSize(screenshots: readonly (readonly [number, Size])[], size: Size): number | null {
   const found = screenshots.findLast(([, each]) => each.width === size.width && each.height === size.height);
   return found?.[0] ?? null;
-}
-
-/** `draft` with the text color and tolerance of the stopped recording's `settings`, and its place as it is. */
-export function withRecordedInk(draft: Draft, settings: RecordingSettings): Draft {
-  return { ...draft, ink: settings.ink ?? null, tolerance: settings.tolerance };
-}
-
-/**
- * `draft`, a reference's, with the text color `color`, or finding its characters by contrast for null. Going from
- * one way to the other starts the tolerance over, since it measures another distance; picking the text color again
- * keeps it.
- */
-export function withTextColor(draft: Draft, color: Color | null): Draft {
-  const sameWay = (draft.ink === null) === (color === null);
-  return { ...draft, ink: color, tolerance: sameWay ? draft.tolerance : NEW_REFERENCE_TOLERANCE };
 }
 
 /**
@@ -334,8 +300,6 @@ export function reviewSpec(
     region,
     screenshot: drawnOn,
     reference,
-    ...(draft.ink === null ? {} : { ink: draft.ink }),
-    tolerance: draft.tolerance,
     labels: boxLabels(draft.boxes),
     recorded: kept,
     dropped: draft.dropped,
@@ -363,22 +327,20 @@ export function buildCharacters(draft: Draft, reference: ReferenceRef | null): B
 }
 
 /**
- * What saving a reference sends: the characters it is taught, or a saved reference's settings alone, which keep its
- * samples but for the ones it leaves out, and need no screenshot.
+ * What saving a reference sends: the characters it is taught, or a saved reference alone, which keeps its samples
+ * but for the ones it leaves out, and needs no screenshot.
  */
 export type ReferenceSaving =
   | { readonly kind: 'taught'; readonly characters: CharactersSpec }
   | {
       readonly kind: 'settings';
       readonly reference: ReferenceRef;
-      readonly ink: Color | null;
-      readonly tolerance: number;
       readonly dropped: readonly string[];
     };
 
 /**
  * What saving the reference `draft` teaches sends, or what it still needs. A saved reference with no place to read,
- * so with no box and no recording either, saves its settings: there is nothing new for it to learn.
+ * so with no box and no recording either, saves as it is: there is nothing new for it to learn.
  */
 export function buildReferenceSave(draft: Draft, reference: ReferenceRef | null): Built<ReferenceSaving> {
   const characters = buildCharacters(draft, reference);
@@ -386,10 +348,7 @@ export function buildReferenceSave(draft: Draft, reference: ReferenceRef | null)
     return { ok: true, spec: { kind: 'taught', characters: characters.spec } };
   }
   return reference !== null && readingOf(draft).region === null
-    ? {
-        ok: true,
-        spec: { kind: 'settings', reference, ink: draft.ink, tolerance: draft.tolerance, dropped: draft.dropped },
-      }
+    ? { ok: true, spec: { kind: 'settings', reference, dropped: draft.dropped } }
     : characters;
 }
 
@@ -423,7 +382,7 @@ interface CheckEntry<Kind extends CheckKind> {
 export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
   number: {
     label: 'Number',
-    tolerance: NEW_REFERENCE_TOLERANCE,
+    tolerance: 0,
     reads: 'number',
     build: (draft, region, app) => {
       if (draft.reference === null) {
@@ -444,7 +403,7 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
         name:
           `Number, read with ${reference.name}${check.whole ? ', whole only' : ''}` +
           (check.characters === undefined ? '' : `, needing ${expectedSet(check.characters).join('')}`),
-        colors: reference.ink === undefined ? [] : [reference.ink],
+        colors: [],
       };
     },
     kept: (check) => ({
@@ -624,25 +583,10 @@ export function withoutState(draft: Draft, index: number): Draft {
 }
 
 /**
- * `draft` opening the reference editor: its characters start as `existing`'s, or a new reference's, with no boxes or
- * recorded readings yet. The value's region stays, and the reference reads there.
+ * `draft` entering or leaving the reference editor: without the editor's boxes or readings, or the saved pictures it
+ * left out. The value's region stays, and the reference reads there.
  */
-export function toReference(draft: Draft, existing: ReferenceDef | null): Draft {
-  return {
-    ...draft,
-    ink: existing?.ink ?? null,
-    tolerance: existing?.tolerance ?? NEW_REFERENCE_TOLERANCE,
-    boxes: [],
-    recorded: new Map(),
-    dropped: [],
-  };
-}
-
-/**
- * `draft` leaving the reference editor for the value it was opened from, without the editor's boxes or readings, or
- * the saved pictures it left out.
- */
-export function fromReference(draft: Draft): Draft {
+export function withoutTeaching(draft: Draft): Draft {
   return { ...draft, boxes: [], recorded: new Map(), dropped: [] };
 }
 

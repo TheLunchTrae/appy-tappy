@@ -354,7 +354,6 @@ impl<H: Host> Owner<H> {
         self.with_session(|session| spec.recorded_problems(session))
             .map_err(|error| error.to_string())
     }
-
 }
 
 #[cfg(test)]
@@ -363,8 +362,8 @@ mod tests {
     use std::sync::mpsc;
 
     use appytappy_config::app_file::{PinDef, SizeChangesDef};
-    use appytappy_sources::screen::{FrameHandler, Size};
     use appytappy_sources::screen::settle::SETTLE;
+    use appytappy_sources::screen::{FrameHandler, Size};
 
     use crate::owner::messages::{Event, Message};
     use crate::owner::test_support::{
@@ -407,9 +406,7 @@ mod tests {
 
     /// Records the middle, 4 by 2, of the 6 by 4 frame, drawn on
     /// screenshot 0.
-    fn start_recording(
-        more: bool,
-    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
+    fn start_recording(more: bool) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         start_recording_from(0, more)
     }
 
@@ -1149,10 +1146,7 @@ mod tests {
         );
         let closed = "The captured window closed.";
         for more in [true, false] {
-            assert_eq!(
-                harness.ask(start_recording(more)),
-                Err(closed.to_owned())
-            );
+            assert_eq!(harness.ask(start_recording(more)), Err(closed.to_owned()));
         }
         let stopped = harness.recording().expect("kept for review");
         assert!(!stopped.recording);

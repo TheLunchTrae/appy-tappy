@@ -247,28 +247,33 @@ impl Attempt {
     /// or a symbol beside this layer's text, which is a label in another
     /// color.
     fn disagrees(&self, other: &Self) -> bool {
-        other.taken.iter().zip(&other.sight.marks).any(|(taken, mark)| {
-            let (Taken::Kept(character) | Taken::LeftOut(character)) = *taken else {
-                return false;
-            };
-            let columns = &mark.bounds.columns;
-            let mut here = self
-                .taken
-                .iter()
-                .zip(&self.sight.marks)
-                .filter(|(_, own)| {
-                    own.bounds.columns.start < columns.end && columns.start < own.bounds.columns.end
+        other
+            .taken
+            .iter()
+            .zip(&other.sight.marks)
+            .any(|(taken, mark)| {
+                let (Taken::Kept(character) | Taken::LeftOut(character)) = *taken else {
+                    return false;
+                };
+                let columns = &mark.bounds.columns;
+                let mut here = self
+                    .taken
+                    .iter()
+                    .zip(&self.sight.marks)
+                    .filter(|(_, own)| {
+                        own.bounds.columns.start < columns.end
+                            && columns.start < own.bounds.columns.end
+                    })
+                    .map(|(own, _)| *own)
+                    .peekable();
+                if here.peek().is_none() {
+                    return character.is_ascii_digit() || matches!(character, '-' | '.' | ',');
+                }
+                here.any(|own| match own {
+                    Taken::Kept(own) | Taken::LeftOut(own) => own != character,
+                    Taken::Unknown(_) => false,
                 })
-                .map(|(own, _)| *own)
-                .peekable();
-            if here.peek().is_none() {
-                return character.is_ascii_digit() || matches!(character, '-' | '.' | ',');
-            }
-            here.any(|own| match own {
-                Taken::Kept(own) | Taken::LeftOut(own) => own != character,
-                Taken::Unknown(_) => false,
             })
-        })
     }
 
     /// The characters this layer holds as the reader made them out.
@@ -589,7 +594,11 @@ impl DigitReader {
     fn attempt(&self, layers: &Layers) -> Result<Attempt, ReadError> {
         let mut attempts = self.attempts(layers)?;
         let chosen = Attempt::chosen(&attempts, layers)
-            .and_then(|chosen| attempts.iter().position(|attempt| std::ptr::eq(attempt, chosen)))
+            .and_then(|chosen| {
+                attempts
+                    .iter()
+                    .position(|attempt| std::ptr::eq(attempt, chosen))
+            })
             .ok_or(ReadError::NoInk)?;
         Ok(attempts.swap_remove(chosen))
     }
@@ -636,7 +645,11 @@ impl DigitReader {
         let kept = || kept.best.filter(|kept| kept.distance < FARTHEST);
         match ranked.best {
             Some(best) if ranked.reads() => {
-                if self.glyphs.iter().any(|glyph| glyph.character == best.character) {
+                if self
+                    .glyphs
+                    .iter()
+                    .any(|glyph| glyph.character == best.character)
+                {
                     Taken::Kept(best.character)
                 } else {
                     Taken::LeftOut(best.character)
@@ -1297,9 +1310,13 @@ impl ReadText {
     fn with_unknown_at(self, position: usize) -> Self {
         let mut read = Self::default();
         let known = || self.characters.iter().take(self.len).copied();
-        known().take(position).for_each(|character| read.push(character));
+        known()
+            .take(position)
+            .for_each(|character| read.push(character));
         read.push(Self::UNKNOWN);
-        known().skip(position).for_each(|character| read.push(character));
+        known()
+            .skip(position)
+            .for_each(|character| read.push(character));
         read
     }
 }
@@ -1777,7 +1794,6 @@ mod tests {
         assert!(number_text("3.", true).ended);
         assert!(!number_text("3.", false).ended);
     }
-
 
     fn scaled(rows: &[&str], scale: usize) -> Vec<String> {
         rows.iter()
@@ -2306,7 +2322,10 @@ mod tests {
             |cell| if cell == 'W' { WHITE } else { colors(cell) },
         );
         let ink = DigitReader::new().ink(&badge);
-        assert!(ink.at(3, 3) && !ink.at(1, 1), "white on dark in a gray window");
+        assert!(
+            ink.at(3, 3) && !ink.at(1, 1),
+            "white on dark in a gray window"
+        );
         // A lone mark that fills its image is the text: no other color
         // shows that it is a plate.
         let lone = paint(&["....", ".pp.", ".pp.", "...."], colors);
@@ -2347,7 +2366,12 @@ mod tests {
         let like = reader.tone(&scene, panel).unwrap().ink(&scene);
         // (column, row): the scene, its white pixel, the panel, and the
         // character.
-        for ((x, y), inked) in [((2, 1), false), ((1, 1), true), ((3, 3), false), ((4, 3), true)] {
+        for ((x, y), inked) in [
+            ((2, 1), false),
+            ((1, 1), true),
+            ((3, 3), false),
+            ((4, 3), true),
+        ] {
             assert_eq!(like.at(x, y), inked, "at {x}, {y}");
         }
         assert_eq!(like.size(), scene.size());
@@ -2548,7 +2572,10 @@ mod tests {
         // In any colors of its own. Text of the background's color is
         // only what its outline closes in, and outlines that run together
         // close in the background between two characters too.
-        for colors in SCHEMES.into_iter().filter(|colors| colors.ink != colors.background) {
+        for colors in SCHEMES
+            .into_iter()
+            .filter(|colors| colors.ink != colors.background)
+        {
             assert_eq!(
                 reader.read(&tight("70.93%", colors), false),
                 Ok(number(70.93)),
@@ -2563,7 +2590,13 @@ mod tests {
         let rows: Vec<String> = (0..16)
             .map(|row| {
                 (0..16)
-                    .map(|column| if gone.contains(&(column, row)) { '.' } else { '#' })
+                    .map(|column| {
+                        if gone.contains(&(column, row)) {
+                            '.'
+                        } else {
+                            '#'
+                        }
+                    })
                     .collect()
             })
             .collect();
@@ -2602,7 +2635,10 @@ mod tests {
     fn a_character_drawn_half_a_pixel_aside_still_reads() {
         // The 3 was learned from "12.34%", drawn from 3.1 pixels across.
         let reader = taught(16, &LABELS);
-        assert_eq!(reader.read(&drawn("23%", 16, 3.58), false), Ok(number(23.0)));
+        assert_eq!(
+            reader.read(&drawn("23%", 16, 3.58), false),
+            Ok(number(23.0))
+        );
     }
 
     #[test]
@@ -2783,7 +2819,11 @@ mod tests {
         ));
         let threes = reader.reading(Some("3")).unwrap();
         let scores = threes.explain(&nine).unwrap();
-        assert!(scores[0].best.is_some_and(|best| best.character == '3' && best.matches()));
+        assert!(
+            scores[0]
+                .best
+                .is_some_and(|best| best.character == '3' && best.matches())
+        );
         // A value of 3 alone does not take it for its 3.
         assert_eq!(
             threes.read(&nine, false),

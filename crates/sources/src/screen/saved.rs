@@ -1443,10 +1443,7 @@ mod tests {
             .expect("read with the reader handed in, with no picture");
         assert_eq!(built, from_pictures);
         // A reader for no reference the application has is not kept.
-        let mut unknown = Readers::new(&references).learned(
-            "other",
-            DigitReader::new(),
-        );
+        let mut unknown = Readers::new(&references).learned("other", DigitReader::new());
         assert!(matches!(
             build(&number, &mut unknown, OFTEN, from(&BTreeMap::new())),
             Err(SavedError::Missing { .. })

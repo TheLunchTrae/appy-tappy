@@ -72,20 +72,3 @@ export function hex(color: Color): string {
   const part = (channel: number): string => channel.toString(16).padStart(2, '0');
   return `#${part(color.red)}${part(color.green)}${part(color.blue)}`;
 }
-
-const BLACK: Color = { red: 0, green: 0, blue: 0 };
-const WHITE: Color = { red: 255, green: 255, blue: 255 };
-
-/**
- * The tile a character drawn in `ink` sits on: black under light text and white under dark text, so the character
- * has a WCAG contrast of at least 4.5 to 1 in any color. Only black and white leave no color short of that, and
- * only while the tile changes at a relative luminance from 0.175 to 0.183.
- */
-export function tileFor(ink: Color): Color {
-  const linear = (channel: number): number => {
-    const part = channel / 255;
-    return part <= 0.04045 ? part / 12.92 : ((part + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * linear(ink.red) + 0.7152 * linear(ink.green) + 0.0722 * linear(ink.blue);
-  return luminance < 0.179 ? WHITE : BLACK;
-}

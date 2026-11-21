@@ -62,7 +62,7 @@ macro_rules! with_commands {
             /// How the check reads the newest frame, for the debug details, or null without a check or a frame.
             commands::explain_reading() -> Option<ReadingDetails>;
             /// Records the region of the picked window that `spec` names. With
-            /// `more`, goes on with the stopped recording, which needs the same region, ink and window size;
+            /// `more`, goes on with the stopped recording, which needs the same region and window size;
             /// otherwise starts a new one. Answers the recording's number, which going on keeps.
             commands::start_recording(spec: RecordSpec, more: bool) -> U64AsNumber;
             /// Stops recording `recording`, of readings or of looks, keeping what it recorded, unless another recording
@@ -88,31 +88,24 @@ macro_rules! with_commands {
             /// What the runtime copies out of each frame of a saved application's window at `width` by `height`, and
             /// where each of its saved values reads there.
             commands::capture_outline(application: String, width: u32, height: u32) -> CaptureOutline;
-            /// The tolerance the reference `spec` teaches finds its characters by contrast with: `spec`'s own while every
-            /// sample reads with it, and otherwise one its samples read with, when there is one.
             /// What may keep the reference `spec` teaches from reading as its samples do: the pairs of characters whose
-            /// learned shapes match each other, and whether its tolerance leaves an outline or a shadow out. Null for a
-            /// reference that can't learn one of its lessons, which its live check says.
+            /// learned shapes match each other. Null for a reference that can't learn one of its lessons, which its live
+            /// check says.
             commands::reading_risks(spec: CharactersSpec) -> Option<ReadingRisks>;
             /// What may keep the saved reference `reference` from reading as its samples do, as `readingRisks` answers
             /// for one being taught. Rejects with why when the reference cannot learn its saved pictures.
             commands::saved_reading_risks(reference: ReferenceRef) -> ReadingRisks;
-            /// Finds text like what `region` of screenshot `screenshot` shows, as a reference with the text color `ink`,
-            /// or by contrast without one, and `tolerance` tells it from the region's background, at any size,
-            /// elsewhere on that screenshot and away from the finds `added` already and those an earlier search offered
+            /// Finds text like what `region` of screenshot `screenshot` shows, as a reference tells it from the
+            /// region's background, at any size, elsewhere on that screenshot and away from the finds `added` already and those an earlier search offered
             /// that the user left out, `passed`, in place of any earlier search.
             commands::find_like(screenshot: usize, region: RegionDef, added: Vec<RegionDef>, passed: Vec<RegionDef>) -> FoundView;
             /// The search and the text read for each find so far, or null without one.
             commands::found_state() -> Option<FoundView>;
             /// A find of search `search` at most `maxWidth` wide, or null for an unknown index or a replaced search.
             commands::found_picture(search: U64AsNumber, index: usize, max_width: u32) -> Pixels;
-            /// Has the text reader read finds `indexes` of search `search` again, as the text color `ink`, if any, and
-            /// `tolerance` tell their characters from the background,
-            /// and answers the search, or null when that search was replaced or forgotten.
             /// Forgets the search.
             commands::forget_found() -> ();
-            /// The characters the box `region` of screenshot `screenshot` shows, as the text color `ink`, if any, and
-            /// `tolerance` split them,
+            /// The characters the box `region` of screenshot `screenshot` shows, as a reference splits them,
             /// each with the name a find's or a recorded reading's character of the same shape has. None for an unknown
             /// screenshot or a box that does not fit it.
             commands::box_characters(screenshot: usize, region: RegionDef) -> Vec<CharacterView>;
@@ -206,11 +199,11 @@ macro_rules! with_commands {
             commands::delete_value(application: String, value: String) -> ();
             /// Saves a reference, over the one `spec.check.reference` names when it names one.
             commands::save_reference(spec: ReferenceSaveSpec) -> SavedReferenceId;
-            /// Saves a saved reference's name, color, and tolerance, with its samples as they are but for those it leaves
+            /// Saves a saved reference's name, with its samples as they are but for those it leaves
             /// out, so it needs no screenshot.
             commands::save_reference_settings(spec: ReferenceSettingsSpec) -> SavedReferenceId;
-            /// The saved pictures the saved reference `reference` can't learn with the text color `ink`, or by contrast
-            /// without one, and `tolerance`, saved as `saving` says without the pictures `dropped` names.
+            /// The saved pictures the saved reference `reference` can't learn, saved without the pictures
+            /// `dropped` names.
             commands::unlearned_samples(reference: ReferenceRef, dropped: Vec<String>) -> Vec<UnlearnedSample>;
             /// The saved picture `image` of the saved reference `reference` at most `maxWidth` wide, or null when there
             /// is none.

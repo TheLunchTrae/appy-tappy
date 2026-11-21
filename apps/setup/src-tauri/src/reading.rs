@@ -102,9 +102,9 @@ pub(crate) fn cant_read(error: &CheckError, reference: Option<&str>) -> String {
         CheckError::Number(ReadError::NoNumber { read }) => {
             format!("it read \"{read}\", which holds no number.")
         },
-        CheckError::Number(ReadError::ColorsDisagree { read, other }) => format!(
-            "its region reads as \"{read}\" in one color and as \"{other}\" in another."
-        ),
+        CheckError::Number(ReadError::ColorsDisagree { read, other }) => {
+            format!("its region reads as \"{read}\" in one color and as \"{other}\" in another.")
+        },
     }
 }
 
@@ -138,9 +138,9 @@ pub(crate) fn cant_read_saved(error: &CheckError, reference: Option<&str>) -> St
         CheckError::Number(ReadError::NoInk | ReadError::NoNumber { .. }) => {
             "If the number shows there now, edit the value to draw its region again."
         },
-        CheckError::Number(
-            ReadError::TooManyCharacters | ReadError::ColorsDisagree { .. },
-        ) => "Edit the value to draw its region around the number alone.",
+        CheckError::Number(ReadError::TooManyCharacters | ReadError::ColorsDisagree { .. }) => {
+            "Edit the value to draw its region around the number alone."
+        },
         CheckError::Number(ReadError::UnknownCharacter { .. }) => {
             "Teach it on the References page."
         },
@@ -184,9 +184,7 @@ mod tests {
 
     #[test]
     fn a_failed_read_says_why_and_what_to_do_in_the_setup_apps_words() {
-        let untaught = || {
-            DigitReader::new()
-        };
+        let untaught = || DigitReader::new();
         let mut reader = untaught();
         reader.learn(&image(&["#", "#", "#"]), "1").expect("learns");
         reader

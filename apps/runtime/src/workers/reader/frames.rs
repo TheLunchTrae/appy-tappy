@@ -956,9 +956,7 @@ mod tests {
         frames.handle(Ok(frame(&black, WINDOW)));
         assert_eq!(
             problems(&readings),
-            [
-                "value 0 cannot be read: nothing in the region stands out from its background"
-            ]
+            ["value 0 cannot be read: nothing in the region stands out from its background"]
         );
     }
 
@@ -1020,9 +1018,7 @@ mod tests {
         }
         assert_eq!(
             problems(&readings),
-            [
-                "value 0 cannot be read: nothing in the region stands out from its background"
-            ]
+            ["value 0 cannot be read: nothing in the region stands out from its background"]
         );
     }
 

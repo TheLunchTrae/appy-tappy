@@ -64,7 +64,11 @@ mod tests {
                     && x.checked_sub(1)
                         .and_then(|column| ink.get(column))
                         .is_some_and(|&ink| ink);
-                if inked { [0, 0, 255, 0] } else { [40, 40, 40, 0] }
+                if inked {
+                    [0, 0, 255, 0]
+                } else {
+                    [40, 40, 40, 0]
+                }
             })
             .collect();
         Image::new(

@@ -13,13 +13,11 @@ import {
   type ReferenceSaving,
   boxBlocked,
   findBlocked as findBlockedBy,
-  fromReference,
   readingOf,
   recordBlocked,
   recordedPlace,
   settingsDiffer,
-  toReference,
-  withRecordedInk,
+  withoutTeaching,
 } from './check.ts';
 import { progress } from './confirm.ts';
 import { discovery } from './discovery.ts';
@@ -28,7 +26,6 @@ import type { Picture } from './pixels.ts';
 import { knownCharacters } from './reference.ts';
 import type { useBoxes } from './useBoxes.ts';
 import { useCharacterCheck } from './useCharacterCheck.ts';
-import { useContrastTolerance } from './useContrastTolerance.ts';
 import { useReadingRisks } from './useReadingRisks.ts';
 import { useUnlearned } from './useUnlearned.ts';
 import { useFound } from './useFound.ts';
@@ -127,8 +124,6 @@ export function useReferenceTeaching({
   const { reviewing } = review;
   const guided = useCharacterCheck(finder, review, recorder, needs, {
     boxes: draft.boxes,
-    ink: draft.ink,
-    tolerance: draft.tolerance,
     recorded: draft.recorded,
     full,
     retype: boxes.retype,
@@ -144,21 +139,11 @@ export function useReferenceTeaching({
       });
     },
   });
-  // A reference without a text color takes a tolerance its samples read with. A recording keeps the tolerance it
-  // records with, which Record more needs, so the tolerance waits until the recording is saved or discarded.
   const taughtCharacters = saving?.ok === true && saving.spec.kind === 'taught' ? saving.spec.characters : null;
-  const fitted = useContrastTolerance(recording === null ? taughtCharacters : null, (tolerance) => {
-    setDraft((current) => ({ ...current, tolerance }));
-  });
-  // What may keep it from reading as its samples do, asked once the tolerance it depends on is fitted.
-  const risks = useReadingRisks(fitted ? taughtCharacters : null);
-  // The saved pictures a save would refuse, which the editor shows so they can be left out. A reference taught by
-  // contrast is judged with its fitted tolerance, like its risks.
-  const unlearned = useUnlearned(
-    saving?.ok === true ? saving.spec : null,
-    savedSamples ?? NO_SAMPLES,
-    fitted || (saving?.ok === true && saving.spec.kind === 'settings'),
-  );
+  // What may keep it from reading as its samples do.
+  const risks = useReadingRisks(taughtCharacters);
+  // The saved pictures a save would refuse, which the editor shows so they can be left out.
+  const unlearned = useUnlearned(saving?.ok === true ? saving.spec : null, savedSamples ?? NO_SAMPLES);
   // The check, like review, shows in place of the window's picture.
   const checking = guided.guide !== null;
   // The recording review shows. Review is open only on a recording, and one name decides everything review changes
@@ -175,9 +160,9 @@ export function useReferenceTeaching({
   // Starts a new recording of `from`'s region, or with `more` goes on with the stopped one.
   const record = async (
     more: boolean,
-    from: Pick<Draft, 'region' | 'ink' | 'tolerance' | 'drawnOn'> = { ...draft, ...reading },
+    from: Pick<Draft, 'region' | 'drawnOn'> = { ...draft, ...reading },
   ): Promise<void> => {
-    const { region, ink, tolerance, drawnOn } = from;
+    const { region, drawnOn } = from;
     if (region === null || drawnOn === null) {
       return;
     }
@@ -186,7 +171,7 @@ export function useReferenceTeaching({
     const scope = more ? (recording?.settings.scope ?? recordScope) : recordScope;
     // Each box is one more example of the text a recording of the whole window looks for.
     const examples = draft.boxes.map((box) => ({ region: box.region, screenshot: box.screenshot }));
-    await recorder.start({ app, pin, region, ink, tolerance, drawnOn, scope, examples }, more, () => {
+    await recorder.start({ app, pin, region, drawnOn, scope, examples }, more, () => {
       review.show(false);
       setSelected(null);
       stopPicking();
@@ -227,7 +212,6 @@ export function useReferenceTeaching({
     if (place !== null) {
       boxes.restore(place, settings.region);
     }
-    setDraft((current) => withRecordedInk(current, settings));
     recorder.clearCommandError();
     // The pressed button gives way to Record more, so focus moves to it.
     focusNext(focus.more);
@@ -236,7 +220,7 @@ export function useReferenceTeaching({
   // Opens the editor as `editing`, on a saved reference or on a new one read from the value's region.
   const open = (opened: Editing): void => {
     setEditing(opened);
-    setDraft((current) => toReference(current, opened.existing));
+    setDraft(withoutTeaching);
     boxes.select(null);
     stopPicking();
     setError(null);
@@ -250,7 +234,7 @@ export function useReferenceTeaching({
     boxes.select(null);
     finder.reset();
     guided.forget();
-    setDraft(fromReference);
+    setDraft(withoutTeaching);
   };
 
   const save = async (): Promise<void> => {
@@ -266,8 +250,6 @@ export function useReferenceTeaching({
         : saveReferenceSettings({
             ...named,
             reference: spec.reference,
-            ...(spec.ink === null ? {} : { ink: spec.ink }),
-            tolerance: spec.tolerance,
             dropped: spec.dropped,
           }));
       setError(null);

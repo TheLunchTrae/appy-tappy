@@ -101,8 +101,6 @@ test('closing the reference editor stops a late recording start without reviving
       {
         app: 'example',
         region: { x: 0, y: 0, width: 4, height: 2 },
-        ink: null,
-        tolerance: 40,
         drawnOn: 0,
         pin: null,
         scope: 'place',
@@ -152,7 +150,6 @@ test('closing the reference editor cancels a stop waiting for its final state', 
       settings: {
         region: { x: 0, y: 0, width: 4, height: 2 },
         windowSize: { width: 4, height: 2 },
-        tolerance: 40,
         scope: 'place',
       },
       readings: [],

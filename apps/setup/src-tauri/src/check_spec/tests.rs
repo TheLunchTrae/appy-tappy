@@ -681,9 +681,7 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
     );
     // A reference left with no sample has nothing to learn from.
     assert_eq!(
-        saved
-            .without(&[sample_name("digits", 1)])
-            .renamed("Digits"),
+        saved.without(&[sample_name("digits", 1)]).renamed("Digits"),
         Err(SpecError::NoLabels)
     );
 }
@@ -903,8 +901,8 @@ fn a_label_the_reference_cannot_learn_names_the_text() {
         text: "12".to_owned(),
     }];
     let spec = characters(first(), None, one(0), kept);
-    let error = teach(&spec, session(&[page()], Some(&recording)))
-        .expect_err("one stroke, two characters");
+    let error =
+        teach(&spec, session(&[page()], Some(&recording))).expect_err("one stroke, two characters");
     assert_eq!(
         error.to_string(),
         "Can't learn from the kept reading \"12\": it shows 1 character but the text has 2. \
@@ -1014,12 +1012,7 @@ fn reference_pictures_leave_every_saved_picture_untouched() {
 fn a_new_reference_names_one_picture_per_label() {
     let spec = characters(first(), None, one(0), Vec::new());
     let taught = spec
-        .teach(
-            session(&[page()], None),
-            Some("digits"),
-            "Digits",
-            &[],
-        )
+        .teach(session(&[page()], None), Some("digits"), "Digits", &[])
         .expect("valid characters");
     assert_eq!(
         taught.reference,

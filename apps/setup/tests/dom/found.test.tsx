@@ -19,7 +19,7 @@ const EXPECTED_PICTURE = {
 const found = (id: number, text: RecordedText = { kind: 'read', text: '12' }): FoundView => ({
   id,
   screenshot: 0,
-  finds: [{ region: BOX.region, text, tolerance: 40, characters: [] }],
+  finds: [{ region: BOX.region, text, characters: [] }],
   more: 0,
   passed: 0,
 });
@@ -57,33 +57,6 @@ test('a late picture from a replaced text search keeps the current search pictur
   expect(result.current.crops).toEqual(current);
 });
 
-test('rereading the same search still accepts its pending pictures', async () => {
-  const pending = Promise.withResolvers<ArrayBuffer>();
-  let pictures = 0;
-  mockIPC((command) => {
-    if (command === 'find_like') {
-      return found(1, { kind: 'failed', text: 'Read failed.' });
-    }
-    if (command === 'reread_found') {
-      return found(1);
-    }
-    if (command === 'found_picture') {
-      pictures += 1;
-      return pending.promise;
-    }
-    return undefined;
-  });
-  const { result } = renderHook(() => useFound(EMPTY_DRAFT, () => undefined, null, EMPTY, EMPTY));
-  await act(async () => result.current.search(BOX));
-  await act(async () => result.current.reread());
-  await act(async () => {
-    pending.resolve(picture());
-    await pending.promise;
-  });
-  expect(result.current.crops.get(0)).toEqual(EXPECTED_PICTURE);
-  expect(pictures).toBe(1);
-});
-
 test('a search stays under way until the newest one answers', async () => {
   const answers = [Promise.withResolvers<FoundView>(), Promise.withResolvers<FoundView>()];
   let searches = 0;
@@ -115,18 +88,11 @@ test('a search stays under way until the newest one answers', async () => {
   expect(result.current.searching).toBe(false);
 });
 
-test('a dismissal ends a search under way, and a reread waits for one', async () => {
+test('a dismissal ends a search under way', async () => {
   const late = Promise.withResolvers<FoundView>();
-  let searches = 0;
-  let rereads = 0;
   mockIPC((command) => {
     if (command === 'find_like') {
-      searches += 1;
-      return searches === 2 ? found(2, { kind: 'failed', text: 'Read failed.' }) : late.promise;
-    }
-    if (command === 'reread_found') {
-      rereads += 1;
-      return found(2);
+      return late.promise;
     }
     return command === 'found_picture' ? picture() : undefined;
   });
@@ -139,13 +105,4 @@ test('a dismissal ends a search under way, and a reread waits for one', async ()
     result.current.dismiss();
   });
   expect(result.current.searching).toBe(false);
-
-  await act(async () => result.current.search(BOX));
-  act(() => {
-    background(result.current.search(BOX));
-  });
-  expect(result.current.searching).toBe(true);
-  await act(async () => result.current.reread());
-  expect(rereads).toBe(0);
-  expect(result.current.searching).toBe(true);
 });

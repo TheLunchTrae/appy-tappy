@@ -169,7 +169,10 @@ impl<H: Host> Owner<H> {
         dropped: &[String],
     ) -> Result<Vec<UnlearnedSample>, String> {
         self.keep_reference(Some(reference));
-        Ok(self.saved_reference(reference)?.without(dropped).unlearned())
+        Ok(self
+            .saved_reference(reference)?
+            .without(dropped)
+            .unlearned())
     }
 
     /// What may keep the saved reference `reference` from reading as its
@@ -326,12 +329,13 @@ pub(super) fn and_list(names: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::anti_cheat::AntiCheatClass;
-    use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
     use crate::owner::SavedValue;
     use crate::owner::test_support::{
-        FakeHost, Harness, add_example_app, characters, harness_with, near_twins, scratch_store, spec, teaching, text_frame, trial,
+        FakeHost, Harness, add_example_app, characters, harness_with, near_twins, scratch_store,
+        spec, teaching, text_frame, trial,
     };
+    use appytappy_config::anti_cheat::AntiCheatClass;
+    use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
 
     use super::*;
 

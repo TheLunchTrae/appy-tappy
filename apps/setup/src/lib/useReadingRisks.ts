@@ -1,12 +1,10 @@
-// What may keep a reference from reading as its samples do, which the reference editor warns about: characters it may
-// read as each other, because the shapes it learned for them match each other, and an outline or a shadow that its
-// tolerance leaves out of its samples.
+// What may keep a reference from reading as its samples do, which the reference editor warns about: characters it
+// can't tell apart, because the shapes it learned for them match each other.
 
 import { useEffect, useRef, useState } from 'react';
 
 import type { CharactersSpec, ReadingRisks, ReferenceDef } from './bindings.ts';
 import { errorText, readingRisks, savedReadingRisks } from './api.ts';
-import type { Color } from './pixels.ts';
 import { ask } from './request.ts';
 
 /** Two characters whose learned shapes match each other. */
@@ -25,35 +23,20 @@ export function neededPairs(pairs: readonly Pair[], needs: readonly string[]): r
 }
 
 /**
- * What the reference editor says about `pairs`, the characters a reference with the text color `ink`, null for
- * contrast, and `tolerance` may read as each other, or null for none. The fix it names is the one that changes what
- * counts as the characters: a text color, with one a lower tolerance, and at none a color picked again.
+ * What the reference editor says about `pairs`, the characters a reference can't tell apart, or null for none. A
+ * wrong label is the usual cause, so it says to check the text first.
  */
-export function lookalikeWarning(pairs: readonly Pair[], ink: Color | null, tolerance: number): string | null {
+export function lookalikeWarning(pairs: readonly Pair[]): string | null {
   const [first, ...rest] = pairs;
   if (first === undefined) {
     return null;
   }
   const which =
     rest.length === 0
-      ? `${first[0]} and ${first[1]} look alike in what it learned, so it may read one as the other.`
-      : `Some characters look alike in what it learned, so it may read one of each pair as the other: ${pairs.map(([a, b]) => `${a} and ${b}`).join('; ')}.`;
-  let fix = 'Try a lower tolerance, so less of the edge around the characters counts.';
-  if (ink === null) {
-    fix =
-      'Text with a thick outline often does this. Pick a text color below, so only the inside of the characters counts.';
-  } else if (tolerance === 0) {
-    fix = 'Pick the text color again from the middle of a character, so less of its edge counts.';
-  }
-  return `${which} ${fix}`;
+      ? `${first[0]} and ${first[1]} have the same shape in what it learned, so it can't tell one from the other.`
+      : `Some characters have the same shape in what it learned, so it can't tell one of each pair from the other: ${pairs.map(([a, b]) => `${a} and ${b}`).join('; ')}.`;
+  return `${which} Check that the text typed for each picture is what it shows. A value that needs both won't read them.`;
 }
-
-/**
- * What the reference editor says of a reference whose tolerance leaves an outline or a shadow out of its samples. It
- * reads while the background hides that tone as the samples' does, and may not over another.
- */
-export const HIDDEN_TONE_WARNING =
-  "An outline or a shadow around the characters is close to the background color in what this reference learned from, so it isn't part of the shapes it learned. Over a background of another color it can count, and the number won't read. Pick a text color below, so only the inside of the characters counts.";
 
 /** A name for the risks `spec` asks for, which stays while nothing they depend on changes, or null for none. */
 export function riskKey(spec: CharactersSpec | null): string | null {
@@ -73,7 +56,7 @@ interface Answer {
 }
 
 /** What a reference risks before it is answered. */
-const NO_RISKS: ShownRisks = { lookalikes: [], hidesTone: false, problem: null };
+const NO_RISKS: ShownRisks = { lookalikes: [], problem: null };
 
 /** What the reference has been answered before it asks. */
 const NO_ANSWER: Answer = { key: '', risks: NO_RISKS };
@@ -93,7 +76,7 @@ export function risksFailed(error: unknown): ShownRisks {
 
 /**
  * The risks to show while the reference asks under `wanted`: those of `answer` when it was asked under that key, and
- * none otherwise, so an answer or a failure for samples, a region, or a text color since changed is dropped.
+ * none otherwise, so an answer or a failure for samples or a region since changed is dropped.
  */
 export function risksArrived(answer: Answer, wanted: string | null): ShownRisks {
   return answer.key === wanted ? answer.risks : NO_RISKS;
@@ -101,9 +84,9 @@ export function risksArrived(answer: Answer, wanted: string | null): ShownRisks 
 
 /**
  * What may keep the reference `spec` teaches from reading as its samples do, as the setup app answers for that spec,
- * or nothing while `spec` is null or the answer for it has not arrived. It asks again once a sample, the region, the
- * text color, or the tolerance changed and then rested. A request that fails says so in place of the risks, until
- * the next one answers; a reference that can't be taught is not a failure of the request.
+ * or nothing while `spec` is null or the answer for it has not arrived. It asks again once a sample or the region
+ * changed and then rested. A request that fails says so in place of the risks, until the next one answers; a
+ * reference that can't be taught is not a failure of the request.
  */
 export function useReadingRisks(spec: CharactersSpec | null): ShownRisks {
   const key = riskKey(spec);
@@ -143,15 +126,14 @@ export function useReadingRisks(spec: CharactersSpec | null): ShownRisks {
 export function riskMark(risks: ReadingRisks, needs: readonly string[]): string | null {
   const pairs = neededPairs(risks.lookalikes, needs);
   const [first] = pairs;
-  const reasons = [
-    first === undefined
-      ? null
-      : pairs.length === 1
-        ? `${first[0]} and ${first[1]} look alike in what it learned.`
-        : 'Some characters look alike in what it learned.',
-    risks.hidesTone ? "An outline or a shadow around the characters isn't part of what it learned." : null,
-  ].filter((reason) => reason !== null);
-  return reasons.length === 0 ? null : `${reasons.join(' ')} Edit it to see what to do.`;
+  if (first === undefined) {
+    return null;
+  }
+  const reason =
+    pairs.length === 1
+      ? `${first[0]} and ${first[1]} have the same shape in what it learned.`
+      : 'Some characters have the same shape in what it learned.';
+  return `${reason} Edit it to see what to do.`;
 }
 
 /** A saved reference's mark, and the key it was asked under. */

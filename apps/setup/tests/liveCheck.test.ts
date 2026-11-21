@@ -69,7 +69,6 @@ describe('trialOf', () => {
   test('gives another key to another spec, and to the same spec tried another way', () => {
     const key = keyOf(draft);
     expect(keyOf({ ...draft, boxes: [{ id: 1, screenshot: 0, region, text: '88%' }] })).not.toBe(key);
-    expect(keyOf({ ...draft, tolerance: draft.tolerance + 1 })).not.toBe(key);
     expect(keyOf(draft, 'check')).not.toBe(key);
   });
 

@@ -324,8 +324,8 @@ mod tests {
     use crate::debug::workings::WorkingsView;
     use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
-        BAR, Harness, add_example_app, capturing, capturing_text, characters, frame_image,
-        harness, harness_with, near_twins, scratch_store, teaching, text_frame, trial,
+        BAR, Harness, add_example_app, capturing, capturing_text, characters, frame_image, harness,
+        harness_with, near_twins, scratch_store, teaching, text_frame, trial,
     };
     use crate::reading::Reading;
     use crate::stores::SavedApp;
@@ -482,8 +482,8 @@ mod tests {
             .ask(|owner| owner.set_characters(&teaching(spec.clone())))
             .expect("valid check");
         assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(1.0))));
-        let gray = Image::new(text_frame().size(), [40, 40, 40, 0].repeat(48))
-            .expect("matching length");
+        let gray =
+            Image::new(text_frame().size(), [40, 40, 40, 0].repeat(48)).expect("matching length");
         harness.deliver(&mut handler, Ok(&gray));
         assert_eq!(
             harness.ask(Owner::reading),

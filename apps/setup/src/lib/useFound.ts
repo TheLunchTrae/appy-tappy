@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FoundView, ReferenceRef } from './bindings.ts';
-import { errorText, findLike, forgetFound, foundPicture, foundProblems, foundState, rereadFound } from './api.ts';
+import { errorText, findLike, forgetFound, foundPicture, foundProblems, foundState } from './api.ts';
 import { type Box, type NewBox, boxesOn } from './boxes.ts';
 import { type Draft, taughtSpec } from './check.ts';
 import {
@@ -16,11 +16,8 @@ import {
   foundRows,
   keepAll,
   keptFound,
-  type PassedFind,
   passOver,
-  rereadOffer,
   rowFlags,
-  skippedOn,
   withoutFlagged,
 } from './found.ts';
 import type { Picture } from './pixels.ts';
@@ -63,16 +60,6 @@ export interface Finder {
   readonly keepAll: (keep: boolean) => void;
   /** Leaves out every ticked find that is flagged. */
   readonly leaveOutFlagged: () => void;
-  /**
-   * Whether Reread is offered, and with `blocked` why it waits: every find it would read again was last read with
-   * the text color and tolerance the draft has now.
-   */
-  readonly rereadOffer: { readonly blocked: string | null } | null;
-  /**
-   * Has the text reader read again, with the text color and tolerance the draft has now, the finds it could not read
-   * and the flagged ones whose text is its guess and was read with another. Ticks and typed text stay.
-   */
-  readonly reread: () => Promise<void>;
   /** Adds the kept finds to the draft and forgets the search; a later search skips the rest. */
   readonly add: () => void;
   /** Forgets the search without adding any of it; a later search skips its finds. */
@@ -97,12 +84,12 @@ export function useFound(
   const [view, setView] = useState<FoundView | null>(null);
   const [edits, setEdits] = useState<ReadonlyMap<number, FoundEntry>>(new Map());
   // The finds each screenshot's searches offered that the user did not add, which a later search there skips.
-  const [passed, setPassed] = useState<ReadonlyMap<number, readonly PassedFind[]>>(new Map());
+  const [passed, setPassed] = useState<ReadonlyMap<number, readonly Rect[]>>(new Map());
   // The box the search shown started from, which Show them again searches from.
   const [sample, setSample] = useState<Box | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
-  // Each search, reread and dismissal begins a turn, so an answer sent before one is ignored.
+  // Each search and dismissal begins a turn, so an answer sent before one is ignored.
   const turn = useNewest();
   const [crops, setCrops] = useState<{ readonly id: number; readonly pictures: ReadonlyMap<number, Picture> }>({
     id: -1,
@@ -201,8 +188,6 @@ export function useFound(
   const checked = key === '' || problems.key === key;
   const flags = rowFlags(rows, checked ? problems.found : new Map());
 
-  const offer = rereadOffer(rows, flags, draft.ink, draft.tolerance);
-
   const forget = (): void => {
     turn.drop();
     setSearching(false);
@@ -223,7 +208,7 @@ export function useFound(
   };
 
   const find = async (sample: Box, skip: readonly Rect[]): Promise<void> => {
-    const { ink, tolerance, boxes } = draft;
+    const { boxes } = draft;
     const { screenshot, region } = sample;
     // The server leaves these out, so a search after adding or passing over finds offers the rest.
     const added = boxesOn(boxes, screenshot)
@@ -232,7 +217,7 @@ export function useFound(
     const current = turn.begin();
     setSearching(true);
     try {
-      const result = await findLike(screenshot, region, added, [...skip], ink, tolerance);
+      const result = await findLike(screenshot, region, added, [...skip]);
       if (current()) {
         setView(result);
         setSample(sample);
@@ -252,7 +237,7 @@ export function useFound(
     }
   };
 
-  const search = (sample: Box): Promise<void> => find(sample, skippedOn(passed, sample.screenshot, draft.ink));
+  const search = (sample: Box): Promise<void> => find(sample, passed.get(sample.screenshot) ?? []);
 
   const searchSkipped = async (): Promise<void> => {
     if (sample === null) {
@@ -285,27 +270,6 @@ export function useFound(
     },
     leaveOutFlagged: () => {
       setEdits((current) => new Map([...current, ...withoutFlagged(rows, flags)]));
-    },
-    rereadOffer: offer,
-    reread: async () => {
-      const again = offer?.indexes ?? [];
-      // A search under way replaces the one shown, so its finds are no longer the owner's to read again.
-      if (view === null || again.length === 0 || searching) {
-        return;
-      }
-      // The search's state read before this would show the finds as they were, and end the wait for their text.
-      const current = turn.begin();
-      try {
-        const result = await rereadFound(view.id, again, draft.ink, draft.tolerance);
-        if (current() && result !== null) {
-          setView(result);
-          setError(null);
-        }
-      } catch (error: unknown) {
-        if (current()) {
-          setError(errorText(error));
-        }
-      }
     },
     add: () => {
       if (view === null) {

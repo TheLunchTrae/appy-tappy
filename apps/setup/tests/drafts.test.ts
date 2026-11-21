@@ -19,7 +19,7 @@ import {
   shownOnStep,
   storeSetup,
 } from '../src/lib/captureDraft.ts';
-import { type Draft, EMPTY_DRAFT, fixDraft, fromReference, toReference } from '../src/lib/check.ts';
+import { type Draft, EMPTY_DRAFT, fixDraft, withoutTeaching } from '../src/lib/check.ts';
 import {
   DRAFT_FORMAT,
   draftOfSaved,
@@ -119,7 +119,6 @@ describe('what a draft keeps', () => {
   });
 
   test('a capture comes back with everything it set up, but for what belongs to a recording', () => {
-    const black = { red: 0, green: 0, blue: 0 };
     const region = { x: 3, y: 4, width: 20, height: 10 };
     // Every field of the check's draft, each away from what a new value starts with.
     const draft: Draft = {
@@ -128,7 +127,6 @@ describe('what a draft keeps', () => {
       drawnOn: 2,
       pin: { kind: 'byHand', pin: 'bottomRight' },
       tolerance: 7,
-      ink: black,
       boxes: [
         { id: 0, screenshot: 0, region, text: '12%' },
         { id: 3, screenshot: 2, region: { x: 1, y: 2, width: 3, height: 4 }, text: '99' },
@@ -183,7 +181,7 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(6);
+    expect(DRAFT_FORMAT).toBe(7);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -226,7 +224,6 @@ describe('the shape a draft keeps', () => {
       'empty',
       'filled',
       'ignoreBackground',
-      'ink',
       'kind',
       'pin',
       'reference',
@@ -524,8 +521,8 @@ describe("the characters a value needs, in its reference's editor", () => {
   test('change the value only when the reference is saved', () => {
     const editing = { ...startEditing('value', null, value), needs: ['1', '2', '%'] };
     // Discard leaves the editor for the value as it was.
-    expect(fromReference(toReference(value, null)).characters).toEqual(['1', '%']);
-    expect(withTaught(toReference(value, null), 'clock', editing)).toMatchObject({
+    expect(withoutTeaching(value).characters).toEqual(['1', '%']);
+    expect(withTaught(withoutTeaching(value), 'clock', editing)).toMatchObject({
       kind: 'number',
       reference: 'clock',
       characters: ['1', '2', '%'],

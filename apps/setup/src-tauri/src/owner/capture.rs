@@ -627,8 +627,8 @@ mod tests {
     use crate::owner::messages::Run;
     use crate::owner::run;
     use crate::owner::test_support::{
-        FakeHost, Harness, STATE, capturing_text, characters_in, frame_image,
-        harness, text_frame, trial,
+        FakeHost, Harness, STATE, capturing_text, characters_in, frame_image, harness, text_frame,
+        trial,
     };
     use crate::pixels;
     use crate::window_list::WindowFit;

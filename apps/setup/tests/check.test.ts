@@ -16,7 +16,6 @@ import {
   boxBlocked,
   findBlocked,
   fixDraft,
-  fromReference,
   onPicture,
   newestOfSize,
   recordBlocked,
@@ -28,15 +27,13 @@ import {
   reviewSpec,
   settingsDiffer,
   stateOn,
-  toReference,
   withoutSample,
+  withoutTeaching,
   withFixRegion,
-  withRecordedInk,
   withKind,
   withoutState,
   withState,
   withStateAt,
-  withTextColor,
   withStateStep,
 } from '../src/lib/check.ts';
 
@@ -249,8 +246,6 @@ describe('buildCharacters', () => {
         region,
         screenshot: 2,
         reference: null,
-        ink: red,
-        tolerance: CHECKS.number.tolerance,
         labels: [
           { screenshot: 2, region, text: '87%' },
           { screenshot: 0, region: other, text: '12%' },
@@ -264,7 +259,7 @@ describe('buildCharacters', () => {
   test("reads at the value's region while the value has one", () => {
     const value = { x: 9, y: 9, width: 20, height: 8 };
     const built = buildCharacters(
-      { ...EMPTY_DRAFT, region: value, drawnOn: 3, ink: red, boxes: [{ id: 0, screenshot: 1, region, text: '5' }] },
+      { ...EMPTY_DRAFT, region: value, drawnOn: 3, boxes: [{ id: 0, screenshot: 1, region, text: '5' }] },
       null,
     );
     expect(built.ok && [built.spec.region, built.spec.screenshot]).toEqual([value, 3]);
@@ -294,7 +289,7 @@ describe('buildCharacters', () => {
       ok: false,
       next: 'Draw a box around the characters on a screenshot.',
     });
-    expect(buildCharacters({ ...EMPTY_DRAFT, region, ink: red }, null)).toEqual({
+    expect(buildCharacters({ ...EMPTY_DRAFT, region }, null)).toEqual({
       ok: false,
       next: 'Draw a box around the characters on a screenshot.',
     });
@@ -310,31 +305,28 @@ describe('buildCharacters', () => {
   });
 
   test('a saved reference needs nothing new to be tried', () => {
-    const built = buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0, ink: red }, percent);
+    const built = buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0 }, percent);
     expect(built.ok && built.spec.reference).toEqual(percent);
   });
 });
 
-test('reviewSpec waits for the region, names the reference, and has a text color only when one is picked', () => {
+test('reviewSpec waits for the region and names the reference', () => {
   expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1 }, [], null)).toEqual({
     region,
     screenshot: 1,
     reference: null,
-    tolerance: CHECKS.number.tolerance,
     labels: [],
     recorded: [],
     dropped: [],
   });
-  expect(reviewSpec({ ...EMPTY_DRAFT, region, ink: red }, [], null)).toBeNull();
+  expect(reviewSpec({ ...EMPTY_DRAFT, region }, [], null)).toBeNull();
   const kept = [{ reading: 0, text: '5' }];
   // The saved pictures the editor left out go with every ask about the characters.
   const dropped = ['ref-percent-2.png'];
-  expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1, ink: red, dropped }, kept, percent)).toEqual({
+  expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1, dropped }, kept, percent)).toEqual({
     region,
     screenshot: 1,
     reference: percent,
-    ink: red,
-    tolerance: CHECKS.number.tolerance,
     labels: [],
     recorded: kept,
     dropped,
@@ -342,56 +334,41 @@ test('reviewSpec waits for the region, names the reference, and has a text color
 });
 
 test('withKind keeps the region and colors and resets the tolerance', () => {
-  const draft = withKind({ ...EMPTY_DRAFT, region, ink: red, tolerance: 99 }, 'color');
+  const draft = withKind({ ...EMPTY_DRAFT, region, color: red, tolerance: 99 }, 'color');
   expect(draft.kind).toBe('color');
   expect(draft.region).toEqual(region);
-  expect(draft.ink).toEqual(red);
+  expect(draft.color).toEqual(red);
   expect(draft.tolerance).toBe(CHECKS.color.tolerance);
 });
 
 describe('the reference editor', () => {
   const region = { x: 1, y: 2, width: 30, height: 10 };
   const taught = { x: 5, y: 6, width: 40, height: 12 };
-  const saved = {
-    id: 'percent',
-    name: 'Percent',
-    origin: { kind: 'byHand' } as const,
-    ink: red,
-    tolerance: 25,
-    samples: [{ image: 'ref-percent-1.png', text: '87%' }],
-  };
 
-  test("opens with the reference's characters and the value's region, and no boxes", () => {
-    const value = { ...EMPTY_DRAFT, region, ink: gray, boxes: [{ id: 0, screenshot: 0, region, text: '5' }] };
-    expect(toReference(value, saved)).toEqual({ ...value, ink: red, tolerance: 25, boxes: [] });
-    expect(toReference(value, null)).toEqual({ ...value, ink: null, tolerance: CHECKS.number.tolerance, boxes: [] });
-  });
-
-  test("leaves the value's region as it was, without the editor's boxes or readings", () => {
+  test("opens and closes with the value's region as it was, without boxes, readings, or pictures left out", () => {
     const editor = {
-      ...toReference({ ...EMPTY_DRAFT, region, drawnOn: 0 }, saved),
+      ...EMPTY_DRAFT,
+      region,
+      drawnOn: 0,
       boxes: [{ id: 0, screenshot: 3, region: taught, text: '100%' }],
       recorded: new Map([[0, '99%']]),
     };
-    expect(fromReference(editor)).toEqual({ ...editor, boxes: [], recorded: new Map() });
+    expect(withoutTeaching(editor)).toEqual({ ...editor, boxes: [], recorded: new Map() });
     // The saved pictures an editor left out stay with that editor.
     const left = withoutSample(editor, 'ref-percent-1.png');
     expect(left.dropped).toEqual(['ref-percent-1.png']);
     expect(withoutSample(left, 'ref-percent-1.png')).toBe(left);
-    expect(fromReference(left).dropped).toEqual([]);
-    expect(toReference(left, saved).dropped).toEqual([]);
+    expect(withoutTeaching(left).dropped).toEqual([]);
   });
 });
 
 describe('a stopped recording', () => {
   const settings = {
     region,
-    ink: red,
-    tolerance: 40,
     windowSize: { width: 1920, height: 1080 },
     scope: 'place' as const,
   };
-  const recorded = { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red, tolerance: 40 };
+  const recorded = { ...EMPTY_DRAFT, region, drawnOn: 0 };
   const big = { width: 1920, height: 1080 };
   const small = { width: 1280, height: 720 };
 
@@ -399,11 +376,8 @@ describe('a stopped recording', () => {
     expect(settingsDiffer({ ...recorded, region: { ...region } }, settings, { ...big })).toBe(false);
   });
 
-  test('offers its settings back for any other region, color, tolerance or window size', () => {
+  test('offers its settings back for any other region or window size', () => {
     expect(settingsDiffer({ ...recorded, region: { ...region, x: 2 } }, settings, big)).toBe(true);
-    expect(settingsDiffer({ ...recorded, ink: gray }, settings, big)).toBe(true);
-    expect(settingsDiffer({ ...recorded, ink: null }, settings, big)).toBe(true);
-    expect(settingsDiffer({ ...recorded, tolerance: 41 }, settings, big)).toBe(true);
     expect(settingsDiffer(recorded, settings, small)).toBe(true);
     expect(settingsDiffer(recorded, settings, null)).toBe(true);
   });
@@ -422,7 +396,7 @@ describe('a stopped recording', () => {
   // A reference taught by itself: no value's region, and it reads at its first box.
   const first = { id: 0, screenshot: 0, region, text: '87%' };
   const other = { id: 1, screenshot: 0, region: { ...region, y: 40 }, text: '12' };
-  const alone = { ...EMPTY_DRAFT, ink: red, tolerance: 40, boxes: [first, other] };
+  const alone = { ...EMPTY_DRAFT, boxes: [first, other] };
   const sizes = [
     [0, big],
     [1, small],
@@ -440,12 +414,12 @@ describe('a stopped recording', () => {
             { boxes: draft.boxes, selectedId: null, recordedId: boxId },
             { type: 'restore', screenshot: place, region: settings.region },
           );
-    return withRecordedInk({ ...draft, boxes }, settings);
+    return { ...draft, boxes };
   }
 
   test('using its settings in a reference taught by itself moves the reading box back and sets no region', () => {
-    // The reading box was moved, then deleted, and the color and tolerance changed.
-    const moved = { ...alone, ink: gray, tolerance: 12, boxes: [{ ...first, region: { ...region, x: 9 } }, other] };
+    // The reading box was moved, then deleted.
+    const moved = { ...alone, boxes: [{ ...first, region: { ...region, x: 9 } }, other] };
     const deleted = { ...alone, boxes: [other] };
     for (const changed of [moved, deleted]) {
       expect(settingsDiffer(changed, settings, big)).toBe(true);
@@ -470,9 +444,9 @@ describe('a stopped recording', () => {
   });
 
   test("using its settings in a reference taught from a value leaves the value's region and the boxes", () => {
-    const taughtFrom = { ...recorded, ink: gray, tolerance: 12, boxes: [other] };
+    const taughtFrom = { ...recorded, boxes: [other] };
     expect(recordedPlace(taughtFrom, settings, null, sizes)).toBeNull();
-    expect(usedSettings(taughtFrom, null)).toEqual({ ...taughtFrom, ink: red, tolerance: 40 });
+    expect(usedSettings(taughtFrom, null)).toEqual(taughtFrom);
   });
 });
 
@@ -589,15 +563,6 @@ test('finding more like it waits for a selected box', () => {
   expect(findBlocked(null)).toBe('Select a box around one sample first.');
 });
 
-test('a text color starts the tolerance over only when the reference goes to or from contrast', () => {
-  const byContrast = { ...EMPTY_DRAFT, tolerance: 72 };
-  const blue = { red: 0, green: 0, blue: 255 };
-  expect(withTextColor(byContrast, red)).toMatchObject({ ink: red, tolerance: 40 });
-  expect(withTextColor({ ...byContrast, ink: red }, blue)).toMatchObject({ ink: blue, tolerance: 72 });
-  expect(withTextColor({ ...byContrast, ink: red }, null)).toMatchObject({ ink: null, tolerance: 40 });
-  expect(withTextColor(byContrast, null)).toEqual(byContrast);
-});
-
 test('boxes go on screenshots of the size the reference reads at, once it has one', () => {
   const size = { width: 800, height: 600 };
   expect(boxBlocked(null, size)).toBeNull();
@@ -680,30 +645,23 @@ describe('fixDraft', () => {
 });
 
 describe('buildReferenceSave', () => {
-  test("saves a saved reference's settings alone while it has no place to read", () => {
+  test('saves a saved reference alone while it has no place to read', () => {
     // The region of a value whose window is not captured sits on no screenshot.
     const dropped = ['ref-percent-1.png'];
-    const windowless = { ...EMPTY_DRAFT, region, ink: red, tolerance: 40, dropped };
+    const windowless = { ...EMPTY_DRAFT, region, dropped };
     expect(buildReferenceSave(windowless, percent)).toEqual({
       ok: true,
-      spec: { kind: 'settings', reference: percent, ink: red, tolerance: 40, dropped },
+      spec: { kind: 'settings', reference: percent, dropped },
     });
   });
 
   test('teaches the characters once there is a place to read them', () => {
-    const draft = { ...EMPTY_DRAFT, ink: red, boxes: [{ id: 0, screenshot: 1, region, text: '5' }] };
+    const draft = { ...EMPTY_DRAFT, boxes: [{ id: 0, screenshot: 1, region, text: '5' }] };
     const built = buildReferenceSave(draft, percent);
     expect(built.ok && built.spec.kind).toBe('taught');
   });
 
-  test('a saved reference without a text color saves its settings without one', () => {
-    expect(buildReferenceSave(EMPTY_DRAFT, percent)).toEqual({
-      ok: true,
-      spec: { kind: 'settings', reference: percent, ink: null, tolerance: 40, dropped: [] },
-    });
-  });
-
   test('a new reference still says what it needs', () => {
-    expect(buildReferenceSave({ ...EMPTY_DRAFT, ink: red }, null).ok).toBe(false);
+    expect(buildReferenceSave({ ...EMPTY_DRAFT }, null).ok).toBe(false);
   });
 });

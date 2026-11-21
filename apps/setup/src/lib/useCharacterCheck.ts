@@ -21,7 +21,7 @@ import {
   withEdit,
 } from './confirm.ts';
 import { type FoundRow, listed } from './found.ts';
-import { type Color, type Picture, cropPicture } from './pixels.ts';
+import { type Picture, cropPicture } from './pixels.ts';
 import { type ReviewEntry, startEntry } from './review.ts';
 import { boxCharactersKey, useBoxCharacters } from './useBoxCharacters.ts';
 import type { Finder } from './useFound.ts';
@@ -351,9 +351,6 @@ export function heldStep(held: Held, event: HeldEvent): Held {
 /** What the check goes over besides the finds and the readings: the reference's boxes, and what it keeps. */
 export interface Taught {
   readonly boxes: readonly Box[];
-  /** The text color, or null for contrast, and the tolerance, which split a box into its characters. */
-  readonly ink: Color | null;
-  readonly tolerance: number;
   /** The readings the draft keeps, with their text. */
   readonly recorded: ReadonlyMap<number, string>;
   /** Each screenshot at its own pixels, once they arrive. */
@@ -399,8 +396,8 @@ export function useCharacterCheck(
 ): CharacterCheck {
   const [state, send] = useReducer(heldStep, NOTHING_HELD);
   const held = state.guide;
-  const { boxes, ink, tolerance, recorded, full } = taught;
-  const shown = useBoxCharacters(boxes, ink, tolerance);
+  const { boxes, recorded, full } = taught;
+  const shown = useBoxCharacters(boxes);
   const saved = useMemo(
     () => savedReadings(review.reviewing, review.keeping, recorded),
     [review.reviewing, review.keeping, recorded],
@@ -408,7 +405,7 @@ export function useCharacterCheck(
   const places = useMemo(() => {
     const drawn = boxes.map((box) => ({
       box,
-      characters: shown.get(boxCharactersKey(box, ink, tolerance)) ?? null,
+      characters: shown.get(boxCharactersKey(box)) ?? null,
     }));
     return checkPlaces(
       drawn,
@@ -418,7 +415,7 @@ export function useCharacterCheck(
       review.entries,
       saved,
     );
-  }, [boxes, ink, tolerance, shown, finder.view, finder.rows, recorder.view, review.entries, saved]);
+  }, [boxes, shown, finder.view, finder.rows, recorder.view, review.entries, saved]);
   const guide = held === null ? null : settle(held, places, needs);
   const boxCrops = useMemo(
     () =>

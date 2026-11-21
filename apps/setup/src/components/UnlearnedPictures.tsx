@@ -4,10 +4,8 @@ import { PictureCanvas } from './canvas.tsx';
 import { Hint } from './Hint.tsx';
 
 interface Props {
-  /** The saved pictures the reference can't learn as it finds its characters now. */
+  /** The saved pictures the reference can't learn. */
   readonly unlearned: Unlearned;
-  /** Whether the reference has a text color, which the user can change so a picture is learned again. */
-  readonly hasTextColor: boolean;
   /** How many of its saved pictures the editor has left out. */
   readonly removed: number;
   /** Leaves the saved picture with this file name out. */
@@ -18,16 +16,11 @@ interface Props {
 
 /**
  * The saved pictures a reference can't learn: each one's pixels, which no box or screenshot shows, what it was typed
- * as, why it teaches nothing now, and a way to leave it out. It shows nothing while every saved picture is learned
+ * as, why it teaches nothing, and a way to leave it out. It shows nothing while every saved picture is learned
  * and none is left out.
  */
-export function UnlearnedPictures({ unlearned, hasTextColor, removed, onRemove, onPutBack }: Props) {
+export function UnlearnedPictures({ unlearned, removed, onRemove, onPutBack }: Props) {
   const { samples, pictures } = unlearned;
-  // A missing picture teaches nothing whatever the text color. One cut for a text color learns again once it is picked.
-  const colorHelps = samples.some((sample) => !sample.missing);
-  const colorAdvice = hasTextColor
-    ? ', or change the text color or its tolerance until the list is empty'
-    : ', or pick a text color until the list is empty';
   if (samples.length === 0 && removed === 0) {
     return null;
   }
@@ -41,8 +34,7 @@ export function UnlearnedPictures({ unlearned, hasTextColor, removed, onRemove, 
         <>
           <p className="warn">
             It can't be saved while it keeps {samples.length === 1 ? 'this picture' : 'these pictures'}. Remove{' '}
-            {samples.length === 1 ? 'it' : 'them'}
-            {colorHelps ? colorAdvice : ''}.
+            {samples.length === 1 ? 'it' : 'them'}.
           </p>
           <ul className="box-list unlearned" aria-labelledby="unlearned-title">
             {samples.map((sample) => {
