@@ -35,9 +35,17 @@ export function knownCharacters(texts: Iterable<string>): readonly string[] {
   return [...found].toSorted(order);
 }
 
-/** The characters `reference` learned from its saved pictures. */
+/**
+ * The characters `reference` reads: those it learned from its saved pictures, of the characters it is made to read
+ * when it says, as the runtime reads with it.
+ */
 export function referenceCharacters(reference: ReferenceDef): readonly string[] {
-  return knownCharacters(reference.samples.map((sample) => sample.text));
+  const learned = knownCharacters(reference.samples.map((sample) => sample.text));
+  if (reference.characters === undefined) {
+    return learned;
+  }
+  const reads = labelCharacters(reference.characters);
+  return learned.filter((character) => reads.includes(character));
 }
 
 /** `file`'s values that read with the reference `id`, in their check or in a fix. */
@@ -55,14 +63,22 @@ export function readers(file: AppFile, id: string): readonly string[] {
 }
 
 /**
- * The characters `file`'s values that read with the reference `id` need between them, or none when one of them reads
- * every character the reference knows or no value reads with it. A fix reads the characters its value needs.
+ * The characters `file`'s values that read with the reference `id` need between them, of those the reference reads,
+ * or none for every character. A value that needs none needs every character the reference reads, which is every
+ * character when it does not say, and so is a reference no value reads with. A fix reads the characters its value
+ * needs.
  */
 export function readersNeed(file: AppFile, id: string): readonly string[] {
+  const own = file.references.find((reference) => reference.id === id)?.characters ?? '';
   const needs = readingValues(file, id).map(({ screen }) =>
     screen.check.kind === 'number' ? (screen.check.characters ?? '') : '',
   );
-  return needs.includes('') ? [] : knownCharacters(needs);
+  if (needs.length === 0 || needs.includes('')) {
+    return knownCharacters([own]);
+  }
+  const needed = knownCharacters(needs);
+  const reads = knownCharacters([own]);
+  return reads.length === 0 ? needed : needed.filter((character) => reads.includes(character));
 }
 
 /** `names` as a sentence's list: `A`, `A and B`, or `A, B and C`. */
