@@ -458,7 +458,7 @@ impl DigitReader {
         if let Some(other) = Attempt::contenders(&attempts).find(|other| chosen.disagrees(other)) {
             return Err(ReadError::ColorsDisagree {
                 read,
-                other: other.read(),
+                other: Box::new(other.read()),
             });
         }
         match chosen.beside(&layers, end) {
@@ -794,10 +794,12 @@ impl Attempt {
 
 /// The pixels of a window of size `window` that a reader is given to read
 /// `region`: `region` and the pixels around it, one on each side the
-/// window has one. A layer's outermost pixels are never ink, and say which
-/// color is the background, so a region may be as tight as its text. On a
-/// side at the window's edge, the region's own outermost pixels are the
-/// ones around it.
+/// window has one.
+///
+/// A layer's outermost pixels are never ink, and say which color is the
+/// background, so a region may be as tight as its text. On a side at the
+/// window's edge, the region's own outermost pixels are the ones around
+/// it.
 #[must_use]
 pub fn reads(region: Region, window: Size) -> Region {
     let grown = |start: u32, end: u32, most: u32| {
@@ -1443,8 +1445,9 @@ pub enum ReadError {
     ColorsDisagree {
         /// The characters in the color the read took.
         read: ReadText,
-        /// The characters in the other.
-        other: ReadText,
+        /// The characters in the other. Boxed so that a read's error stays
+        /// small beside its number.
+        other: Box<ReadText>,
     },
 }
 
@@ -1612,7 +1615,7 @@ mod tests {
             (
                 ReadError::ColorsDisagree {
                     read: read_text("12"),
-                    other: read_text("7"),
+                    other: Box::new(read_text("7")),
                 },
                 "two colors in the region read as different text",
                 ": it read `1 2` and `7`",
@@ -2096,9 +2099,16 @@ mod tests {
         // With a blue speck it does not know between them, it knows every
         // character of the red "2" alone, and the white "1" is a digit
         // where the red has none.
+        // The "1" of each row, and the "2" after the column between them.
+        let halves = |row: &str| -> (String, String) {
+            (row.chars().take(1).collect(), row.chars().skip(2).collect())
+        };
         let recolored: Vec<String> = TWELVE
             .iter()
-            .map(|row| format!("{}...{}", &row[..1], row[2..].replace('#', "r")))
+            .map(|row| {
+                let (one, two) = halves(row);
+                format!("{one}...{}", two.replace('#', "r"))
+            })
             .collect();
         let mut specked = recolored.clone();
         specked[4].replace_range(2..3, "b");
@@ -2107,13 +2117,16 @@ mod tests {
             read(&specked),
             Err(ReadError::ColorsDisagree {
                 read: read_text("2"),
-                other: read_text("1?2"),
+                other: Box::new(read_text("1?2")),
             })
         );
         // A red shape the reader does not know, between the two digits.
         let between: Vec<String> = TWELVE
             .iter()
-            .map(|row| format!("{}...rr...{}", &row[..1], &row[2..]))
+            .map(|row| {
+                let (one, two) = halves(row);
+                format!("{one}...rr...{two}")
+            })
             .collect();
         assert_eq!(
             read(&between),
@@ -2127,7 +2140,10 @@ mod tests {
         // text.
         let mut speck: Vec<String> = TWELVE
             .iter()
-            .map(|row| format!("{}.......{}", &row[..1], &row[2..]))
+            .map(|row| {
+                let (one, two) = halves(row);
+                format!("{one}.......{two}")
+            })
             .collect();
         speck[0].replace_range(4..5, "r");
         assert_eq!(read(&speck), Ok(number(12.0)));
@@ -2607,7 +2623,14 @@ mod tests {
     /// (`column`, `row`).
     fn square(column: usize, row: usize, side: usize) -> Vec<(usize, usize)> {
         (0..side)
-            .flat_map(|down| (0..side).map(move |across| (column + across, row + down)))
+            .flat_map(|down| {
+                (0..side).map(move |across| {
+                    (
+                        column.checked_add(across).expect("a small picture"),
+                        row.checked_add(down).expect("a small picture"),
+                    )
+                })
+            })
             .collect()
     }
 
@@ -2904,6 +2927,19 @@ mod tests {
     /// test.
     fn sweep(learned: u32, heights: &[u32]) -> (u32, u32) {
         let reader = taught(learned, &LABELS);
+        // Whether it reads `text`, which shows `value`, as `pen` draws it.
+        let reads = |text: &str, value: f64, pen: Pen, height: u32| {
+            let said = reader.read(&draw_text(text, pen, canvas(height)), false);
+            if let Ok(number) = said {
+                assert_eq!(
+                    number,
+                    self::number(value),
+                    "{text} at {height} pixels in {:?}, learned at {learned}",
+                    pen.colors
+                );
+            }
+            said.is_ok()
+        };
         let (mut read, mut shown) = (0_u32, 0_u32);
         for &height in heights {
             // Text of the background's own color is only its outline,
@@ -2912,30 +2948,23 @@ mod tests {
                 .into_iter()
                 .filter(|colors| height >= 28 || colors.ink != colors.background);
             for colors in schemes {
-                for (text, value, across) in [
+                let texts = [
                     ("74.05%", 74.05, 0.0),
                     ("13.96%", 13.96, 0.3),
                     ("100%", 100.0, 0.55),
                     ("8.2%", 8.2, 0.8),
-                ] {
+                ];
+                let pens = texts.map(|(text, value, across)| {
                     let pen = Pen {
                         colors,
                         ..pen(height, across)
                     };
-                    let said = reader.read(&draw_text(text, pen, canvas(height)), false);
-                    shown += 1;
-                    match said {
-                        Ok(number) => {
-                            assert_eq!(
-                                number,
-                                self::number(value),
-                                "{text} at {height} pixels in {colors:?}, learned at {learned}"
-                            );
-                            read += 1;
-                        },
-                        Err(_) => {},
-                    }
-                }
+                    reads(text, value, pen, height)
+                });
+                let count = |reads: &[bool]| u32::try_from(reads.len()).expect("few reads");
+                let passed: Vec<bool> = pens.into_iter().filter(|&read| read).collect();
+                shown = shown.checked_add(count(&pens)).expect("few reads");
+                read = read.checked_add(count(&passed)).expect("few reads");
             }
         }
         (read, shown)

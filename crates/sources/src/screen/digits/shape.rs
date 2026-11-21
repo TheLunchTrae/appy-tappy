@@ -53,9 +53,11 @@ const BLOCKS: u32 = GRID / BLOCK;
 const WINDOW: u32 = (2 * BLOCK) * (2 * BLOCK) * u8::MAX as u32;
 
 /// Which cells of a character's grid are at least half ink, one row of
-/// cells in the bits of each `u32`, from the top. Two characters with the
-/// same cells look alike to a reader, so [`DigitReader::shapes`] names a
-/// character's shape by them.
+/// cells in the bits of each `u32`, from the top.
+///
+/// Two characters with the same cells look alike to a reader, so
+/// [`DigitReader::shapes`] names a character's shape by them. Where a
+/// character stands in its line is no part of its shape.
 ///
 /// [`DigitReader::shapes`]: super::DigitReader::shapes
 pub type Shape = [u32; GRID as usize];
@@ -182,7 +184,7 @@ impl std::fmt::Debug for Sample {
             .debug_struct("Sample")
             .field("shape", &self.shape())
             .field("place", &self.place)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -398,13 +400,12 @@ fn edges(outer: &Range<u32>, inner: &Range<u32>, most: &[u8]) -> (u64, u64) {
             .and_then(|at| most.get(at))
             .map_or(0, |&share| u64::from(share))
     };
-    let full = u64::from(u8::MAX);
     // How far in the edge is: the first pixel's missing share, less the
     // share of the pixel before it.
     let inset = |first: Option<u32>, before: Option<u32>| {
-        (full.saturating_sub(share(first)).saturating_mul(PIXEL) / full)
+        (FULL.saturating_sub(share(first)).saturating_mul(PIXEL) / FULL)
             .cast_signed()
-            .saturating_sub((share(before).saturating_mul(PIXEL) / full).cast_signed())
+            .saturating_sub((share(before).saturating_mul(PIXEL) / FULL).cast_signed())
     };
     let last = inner.end.checked_sub(1);
     let start = u64::from(inner.start)

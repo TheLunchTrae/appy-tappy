@@ -210,7 +210,11 @@ mod tests {
         let pixels = std::iter::once(&blank.as_str())
             .chain(drawn)
             .chain(std::iter::once(&blank.as_str()))
-            .flat_map(|row| std::iter::once(b'.').chain(row.bytes()).chain([b'.']))
+            .flat_map(|row| {
+                std::iter::once(b'.')
+                    .chain(row.bytes())
+                    .chain(std::iter::once(b'.'))
+            })
             .flat_map(|cell| {
                 if cell == b'#' {
                     [255; 4]
