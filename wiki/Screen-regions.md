@@ -171,8 +171,8 @@ them:
 A color whose one mark fills the image from side to side and top to bottom,
 where another color has ink too, is a plate behind the text and not the
 text (`plate`): a region drawn along the edge of a button or a panel shows
-one, with more ink than its text. A plate is the last layer a lesson or a
-read takes.
+one, with more ink than its text. A plate is the last layer a lesson
+takes, and a read that knows none of the characters takes none.
 
 ### Matching
 
@@ -240,6 +240,9 @@ These limits follow:
   such as gray with a white outline on black, reads from about 28 pixels
   tall. Smaller, its strokes are as thin as the blend along an edge and are
   left out, and those reads fail.
+- An outline in a color between the fill's and the background's, such as
+  gray around white text on black, is itself the color of the blend along
+  the text's edges, and some of those reads fail at any size.
 - A stroke thinner than about a twentieth of its character's height fills
   less than a third of the square, so two characters that differ only by
   such a stroke can be within reach of each other. In so thin a font, a
