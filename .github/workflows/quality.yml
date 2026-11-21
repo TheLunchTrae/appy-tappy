@@ -99,7 +99,9 @@ jobs:
   mutants:
     name: mutants ${{ strategy.job-index }}/${{ strategy.job-total }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 60
+    # Room for a diff of several hundred mutants, which a rewrite of a
+    # module selects: a shard of 140 takes about 80 minutes.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       # The list's length sets the shard count; its values are not read.
