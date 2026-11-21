@@ -1,5 +1,7 @@
 import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useId, useRef } from 'react';
 
+import { focusIsFree } from '../lib/focus.ts';
+
 /**
  * The question's own elements and the flag it records for the control it replaces. A cell passes them to its
  * {@link Question} as they are.
@@ -19,48 +21,65 @@ export interface QuestionFocus<T extends HTMLElement> {
 }
 
 /**
- * Focus for a question that takes a control's place while `confirming`: it moves to the question's safe answer
- * when the question shows, and back to the control after an answer given in the question. Put `control` on the
- * control and pass `refs` to the {@link Question}.
+ * Focus for a question that takes a control's place while `showing`: it moves to the question's safe answer when
+ * the question shows, and back to the control after an answer given in the question. A question that shows by
+ * itself, with `asked` false, leaves the focus where the user has it. Put `control` on the control and pass `refs`
+ * to the {@link Question}.
  */
-export function useQuestion<T extends HTMLElement>(confirming: boolean): QuestionFocus<T> {
+export function useQuestion<T extends HTMLElement>(showing: boolean, asked = showing): QuestionFocus<T> {
   const control = useRef<T>(null);
   const keep = useRef<HTMLButtonElement>(null);
   const question = useRef<HTMLSpanElement>(null);
   const hadFocus = useRef(false);
   useEffect(() => {
-    if (confirming) {
-      keep.current?.focus();
+    if (showing) {
+      if (asked) {
+        keep.current?.focus();
+      }
     } else if (hadFocus.current) {
       hadFocus.current = false;
-      control.current?.focus();
+      // Focus the user moved meanwhile, as to another row's question, stays there.
+      if (focusIsFree()) {
+        control.current?.focus();
+      }
     }
-  }, [confirming]);
+  }, [showing, asked]);
   const refs: QuestionRefs = { keep, question, hadFocus };
   return { control, refs };
 }
 
-interface Props {
+interface Shared {
   readonly refs: QuestionRefs;
   /** The question itself, which names it for screen readers, such as `Remove Example?`. */
   readonly label: string;
   /** The safe answer's label; its button takes focus. */
   readonly keepLabel: string;
-  /** The other answer's label; its button does what the question asks about. */
-  readonly actLabel: string;
-  /** Whether the answer is under way, which locks both buttons. */
+  /** Whether the answer is under way, which locks the buttons. */
   readonly busy?: boolean;
   readonly onKeep: () => void;
-  readonly onAct: () => void;
   /** A third answer between the two, the one to pick most often, such as keeping the work for later. */
   readonly middle?: { readonly label: string; readonly onPress: () => void } | undefined;
   /** The warning, read with the question. */
   readonly children: ReactNode;
 }
 
+/** The other answer, whose button does what the question asks about. */
+interface Asks {
+  readonly actLabel: string;
+  readonly onAct: () => void;
+}
+
+/** No other answer: the warning says why the control does nothing, and the safe answer dismisses it. */
+interface Tells {
+  readonly actLabel?: undefined;
+  readonly onAct?: undefined;
+}
+
+type Props = Shared & (Asks | Tells);
+
 /**
  * A question in a control's place: a warning and two answers, the safe one first, or three with `middle` between
- * them. Escape is the same as keep.
+ * them. Without the other answer it only tells: the warning and the safe answer. Escape is the same as keep.
  */
 export function Question({ refs, label, keepLabel, actLabel, busy = false, onKeep, onAct, middle, children }: Props) {
   const warning = useId();
@@ -69,7 +88,7 @@ export function Question({ refs, label, keepLabel, actLabel, busy = false, onKee
     if (typeof act === 'function') {
       act();
     } else if (act) {
-      onAct();
+      onAct?.();
     } else {
       onKeep();
     }
@@ -111,21 +130,23 @@ export function Question({ refs, label, keepLabel, actLabel, busy = false, onKee
             {middle.label}
           </button>
         )}
-        <button
-          type="button"
-          className="btn small danger"
-          disabled={busy}
-          onKeyDown={escape}
-          onClick={(event) => {
-            // The question may show under the pointer, where the control was pressed. The later clicks of a
-            // double-click there are that press carried on, not an answer.
-            if (event.detail <= 1) {
-              answer(true);
-            }
-          }}
-        >
-          {actLabel}
-        </button>
+        {actLabel === undefined ? null : (
+          <button
+            type="button"
+            className="btn small danger"
+            disabled={busy}
+            onKeyDown={escape}
+            onClick={(event) => {
+              // The question may show under the pointer, where the control was pressed. The later clicks of a
+              // double-click there are that press carried on, not an answer.
+              if (event.detail <= 1) {
+                answer(true);
+              }
+            }}
+          >
+            {actLabel}
+          </button>
+        )}
       </span>
     </span>
   );

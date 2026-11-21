@@ -184,9 +184,13 @@ the reference.
 
 ### Why a number is not read
 
-A read fails at one of five stages, `ReadError` in `screen/digits.rs`, and
-its message says which, in the same words in the setup app and in the
-runtime's log:
+A read fails at one of five stages, `ReadError` in `screen/digits.rs`. The
+runtime's log says which in the read's own words. The setup app says it in
+its own, with the reference's name and, for a saved value, what to do about
+it (`cant_read` and `cant_read_saved` in
+`apps/setup/src-tauri/src/reading.rs`), and
+[Troubleshooting](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
+gives both wordings. The stages:
 
 - **No ink.** No pixel in the region stands out from its background, or has
   the reference's text color.

@@ -92,8 +92,12 @@ macro_rules! with_commands {
             /// sample reads with it, and otherwise one its samples read with, when there is one.
             commands::contrast_tolerance(spec: CharactersSpec) -> u8;
             /// What may keep the reference `spec` teaches from reading as its samples do: the pairs of characters whose
-            /// learned shapes match each other, and whether its tolerance leaves an outline or a shadow out.
-            commands::reading_risks(spec: CharactersSpec) -> ReadingRisks;
+            /// learned shapes match each other, and whether its tolerance leaves an outline or a shadow out. Null for a
+            /// reference that can't learn one of its lessons, which its live check says.
+            commands::reading_risks(spec: CharactersSpec) -> Option<ReadingRisks>;
+            /// What may keep the saved reference `reference` from reading as its samples do, as `readingRisks` answers
+            /// for one being taught. Rejects with why when the reference cannot learn its saved pictures.
+            commands::saved_reading_risks(reference: ReferenceRef) -> ReadingRisks;
             /// Finds text like what `region` of screenshot `screenshot` shows, as a reference with the text color `ink`,
             /// or by contrast without one, and `tolerance` tells it from the region's background, at any size,
             /// elsewhere on that screenshot and away from the finds `added` already and those an earlier search offered

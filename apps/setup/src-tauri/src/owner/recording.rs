@@ -642,10 +642,7 @@ mod tests {
         assert_eq!(problems[0], None);
         assert_eq!(
             problems[1].as_deref(),
-            Some(
-                "The region shows 1 characters but the text has 2; characters that touch count \
-                 as one."
-            ),
+            Some("It shows 1 character but the text has 2. Characters that touch count as one."),
             "one blob cannot be two characters"
         );
         assert_eq!(problems[2], None, "judged without the reading that failed");

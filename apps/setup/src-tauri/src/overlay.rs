@@ -26,6 +26,7 @@ use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use appytappy_config::app_file::{AppFile, OverlayDef, OverlayModeDef, PanelDef, SizeDef};
+use appytappy_sources::screen::check::CheckError;
 use appytappy_sources::screen::saved::{self, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{
@@ -35,7 +36,7 @@ use appytappy_sources::system::WindowPlace;
 use serde::Serialize;
 
 use crate::owner::{Event, Host, Message};
-use crate::reading::{Reading, at_size};
+use crate::reading::{Reading, at_size, cant_build, cant_read_saved, reference_of};
 use crate::stores::SavedApp;
 use crate::ticket::{Running, Ticket, Tickets};
 
@@ -69,8 +70,10 @@ pub(crate) enum ValueRead {
     Read(Reading),
     /// It is not read on a window of this size, and why.
     NotRead(Size, Unread),
-    /// The check could not read it, and why.
+    /// The frame cannot be read, and why.
     Unreadable(String),
+    /// Its check could not read its region, and why.
+    Failed(CheckError),
 }
 
 /// What a capture read on one frame.
@@ -170,6 +173,9 @@ struct Overlay<S> {
     values: Values,
     /// Each value's ID, in the same order.
     ids: Vec<String>,
+    /// The name of the reference each value reads its number with, in the
+    /// same order, for the value's messages: [`reference_of`].
+    references: Vec<Option<String>>,
     /// The window size whose values the capture reads, or `None` before a
     /// frame showed another.
     size: Option<Size>,
@@ -490,7 +496,7 @@ fn open<S>(
                 file.size_changes,
                 picture.clone(),
             )
-            .map_err(|error| format!("Cannot read: {error}."));
+            .map_err(|error| format!("Can't read: {}.", cant_build(&error)));
             (value.name.clone(), check)
         })
         .collect();
@@ -499,6 +505,11 @@ fn open<S>(
         mode,
         values,
         ids: file.values.iter().map(|value| value.id.clone()).collect(),
+        references: file
+            .values
+            .iter()
+            .map(|value| reference_of(&value.screen, &file.references).map(str::to_owned))
+            .collect(),
         size: None,
         now: None,
         window_match: file.window.to_match(),
@@ -664,7 +675,7 @@ fn read_all(
                     ValueRead::NotRead(size, Unread::Outside),
                     |image| match value.check(at).read(&image) {
                         Ok(value) => ValueRead::Read(value.into()),
-                        Err(error) => ValueRead::Unreadable(error.to_string()),
+                        Err(error) => ValueRead::Failed(error),
                     },
                 )
             })
@@ -706,11 +717,19 @@ fn view<S>(overlay: &Overlay<S>, minimized: bool) -> OverlayView {
                 (Err(problem), _) => (None, Some(problem.clone())),
                 (Ok(_), None) => (None, None),
                 (Ok(_), Some(ValueRead::Read(reading))) => (Some(reading.clone()), None),
-                (Ok(_), Some(ValueRead::NotRead(size, unread))) => {
-                    (None, Some(format!("Not read {}.", at_size(*size, *unread))))
-                },
+                (Ok(_), Some(ValueRead::NotRead(size, unread))) => (
+                    None,
+                    Some(format!("Can't read {}.", at_size(*size, *unread))),
+                ),
                 (Ok(_), Some(ValueRead::Unreadable(error))) => {
-                    (None, Some(format!("Cannot read: {error}.")))
+                    (None, Some(format!("Can't read: {error}.")))
+                },
+                (Ok(_), Some(ValueRead::Failed(error))) => {
+                    let reference = overlay.references.get(index).and_then(Option::as_deref);
+                    (
+                        None,
+                        Some(format!("Can't read: {}", cant_read_saved(error, reference))),
+                    )
                 },
             };
             ValueView {
@@ -751,6 +770,7 @@ pub(crate) fn windows<'file>(
 #[cfg(test)]
 mod tests {
     use appytappy_config::app_file::{ScreenDef, SizeChangesDef, WindowDef};
+    use appytappy_sources::screen::digits::ReadError;
     use appytappy_sources::screen::mask::Mask;
     use appytappy_sources::screen::settle::SETTLE;
     use appytappy_sources::screen::{Image, NoSession, OutsideWindow, Region};
@@ -808,6 +828,7 @@ mod tests {
             name: "Example App".to_owned(),
             mode: OverlayModeDef::Overlay,
             ids: values.iter().map(|_| "dot".to_owned()).collect(),
+            references: values.iter().map(|_| None).collect(),
             values: values.into(),
             size: Some(size),
             now: Some(size),
@@ -847,7 +868,7 @@ mod tests {
         assert_eq!(
             view(&overlay, false).values[0].problem.as_deref(),
             Some(
-                "Not read at 2 × 1, the window's size now: scaled to this window size, its states leave no pixel to \
+                "Can't read at 2 × 1, the window's size now: scaled to this window size, its states leave no pixel to \
                  compare."
             )
         );
@@ -872,6 +893,23 @@ mod tests {
                 .map(|copy| copy.from)
                 .collect::<Vec<_>>(),
             [Region::new(0, 0, 8, 4).expect("not empty")]
+        );
+    }
+
+    #[test]
+    fn a_number_that_fails_to_read_names_its_reference_and_the_next_step() {
+        let mut overlay = reading_at(vec![("Charge".to_owned(), Ok(sparse()))], DRAWN);
+        overlay.references = vec![Some("Digits".to_owned())];
+        overlay.latest = Some(vec![ValueRead::Failed(CheckError::Number(
+            ReadError::NoInk,
+        ))]);
+        assert_eq!(
+            view(&overlay, false).values[0].problem.as_deref(),
+            Some(
+                "Can't read: nothing in its region stands out from the background, or has the \
+                 text color of Digits. If the number shows there now, edit the value to draw its \
+                 region again."
+            )
         );
     }
 

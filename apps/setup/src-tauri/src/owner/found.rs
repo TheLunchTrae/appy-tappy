@@ -946,10 +946,7 @@ mod tests {
             .expect("the label is learned");
         assert_eq!(
             problems[0].as_deref(),
-            Some(
-                "The region shows 1 characters but the text has 2; characters that touch count \
-                 as one."
-            )
+            Some("It shows 1 character but the text has 2. Characters that touch count as one.")
         );
         assert_eq!(problems[1], None);
         assert_eq!(

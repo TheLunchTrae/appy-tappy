@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import type { FoundView } from '../src/lib/bindings.ts';
 import {
   addBlocked,
+  addLabel,
   askable,
   asLabels,
   fitsNeeds,
@@ -151,8 +152,8 @@ describe('adding found text', () => {
       { screenshot: 2, region: at(40), text: '1205' },
       { screenshot: 2, region: at(80), text: '60%' },
     ]);
-    const learned = flaggedFinds(asked, [null, 'The region shows 1 characters but the text has 4.', null]);
-    expect([...learned]).toEqual([[1, 'The region shows 1 characters but the text has 4.']]);
+    const learned = flaggedFinds(asked, [null, 'It shows 1 character but the text has 4.', null]);
+    expect([...learned]).toEqual([[1, 'It shows 1 character but the text has 4.']]);
     expect(addBlocked(rows, rowFlags(rows, learned), true)).toBe('Fix or leave out the flagged one to add them.');
     expect(addBlocked(rows, rowFlags(rows, new Map()), false)).toBe('Checking the text…');
     expect(addBlocked(rows, rowFlags(rows, new Map()), true)).toBeNull();
@@ -190,7 +191,7 @@ describe('flagged finds', () => {
     [2, { keep: true, text: '', typed: false }],
   ]);
   const rows = foundRows(read, edits, [], []);
-  const flags = rowFlags(rows, new Map([[1, 'The region shows 1 characters but the text has 4.']]));
+  const flags = rowFlags(rows, new Map([[1, 'It shows 1 character but the text has 4.']]));
 
   test("Deselect flagged leaves out each ticked find with a flag, its own or the reference's, and keeps its text", () => {
     expect([...flags.keys()]).toEqual([1, 2]);
@@ -280,4 +281,8 @@ describe('passOver', () => {
     const earlier = new Map([[view.screenshot, [passedAt(200)]]]);
     expect(passOver(earlier, view.screenshot, all)).toBe(earlier);
   });
+});
+
+test('the add button names no number while no find is ticked', () => {
+  expect(addLabel(0)).toBe('Add to the reference');
 });

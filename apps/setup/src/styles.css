@@ -13,8 +13,8 @@
   --holds: #5bc48a;
   --warn: #e8845b;
   --live: #e05555;
-  /* The dark tile a reference's characters sit on, so any ink color shows. */
-  --glyph: #14171c;
+  /* The tile a reference's characters sit on. Dark text takes a white tile instead, so any text color shows. */
+  --glyph: #000;
   color-scheme: dark;
   font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
@@ -352,21 +352,24 @@ select {
   vertical-align: middle;
 }
 
-.table tr:last-child td {
+/* A table's last row, which a group's heading is when the group has no rows. */
+.table tbody:last-child tr:last-child :is(td, th) {
   border-bottom: 0;
 }
 
-.table tr:last-child td:first-child {
+.table tbody:last-child tr:last-child :is(td, th):first-child {
   border-bottom-left-radius: 7px;
 }
 
-.table tr:last-child td:last-child {
+.table tbody:last-child tr:last-child :is(td, th):last-child {
   border-bottom-right-radius: 7px;
 }
 
-.table .group td {
+/* The heading of a group of rows, such as an application's values. */
+.table .group th {
   background: var(--raise);
-  font-weight: 600;
+  font-size: inherit;
+  color: var(--text);
 }
 
 .table .group small {
@@ -385,6 +388,12 @@ select {
 
 .table td.end {
   text-align: right;
+}
+
+/* A question in the actions column keeps to the column's end, as the buttons it replaces do. */
+.table td.end .confirm-none {
+  margin-left: auto;
+  align-items: flex-end;
 }
 
 .swatch {
@@ -2075,10 +2084,12 @@ div.match-answer {
   gap: 6px;
 }
 
-/* Characters only the text reader's guess shows: outlined, since the user has yet to check them. */
+/* Characters only the text reader's guess shows: outlined, since the user has yet to check them. A text color's
+   tile stays inside the dashes, which show on the panel. */
 .glyphs.unchecked .glyph {
   border: 1px dashed var(--muted);
   background: none;
+  background-clip: padding-box;
 }
 
 /* Text found like the selected box, to check before it teaches the reference. */
@@ -2523,9 +2534,10 @@ div.match-answer {
   font-variant-numeric: tabular-nums;
 }
 
+/* The dashes sit around the tile, on the panel, so they show beside a tile of either color. */
 .glyph.pending {
-  outline: 2px dashed var(--capture);
-  outline-offset: -2px;
+  border: 2px dashed var(--capture);
+  background-clip: padding-box;
 }
 
 .glyphs.large .glyph {
@@ -2971,6 +2983,29 @@ div.match-answer {
   background: transparent;
   border: 1px dashed var(--capture);
   color: var(--capture);
+}
+
+/* A saved reference that may not read as its samples do. */
+.pill.risk {
+  background: transparent;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+}
+
+/* The mark with the ? that says why. The name column is the table's first, so the explanation opens under the mark
+   toward the right, at a readable width. */
+.risk-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  vertical-align: middle;
+}
+
+.risk-mark > .hint-wrap > .tip {
+  right: auto;
+  width: min(320px, 80vw);
+  font-weight: 400;
 }
 
 tr.draft-row > td:not(.end):not(.row-actions) {

@@ -191,7 +191,7 @@ export function nowText(cell: NowCell, size: SizeDef): string {
     case 'unread':
       return cell.problem;
     case 'notDrawn':
-      return `Not read at ${sizeText(size)}, the window's size now`;
+      return `Can't read at ${sizeText(size)}, the window's size now`;
   }
 }
 

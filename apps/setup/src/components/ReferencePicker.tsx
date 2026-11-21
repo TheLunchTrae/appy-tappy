@@ -10,6 +10,9 @@ import { Hint } from './Hint.tsx';
 /** The id of the note that says the picked reference has a draft of changes, which Record readings points at. */
 const DRAFT_HOLDS_ID = 'reference-draft-holds';
 
+/** The id of the note that says a region has to be drawn, which the buttons that start from the region point at. */
+const NEEDS_REGION_ID = 'reference-needs-region';
+
 interface Props {
   readonly appName: string;
   /** The application's saved file, or null until it is read. */
@@ -41,6 +44,9 @@ export function ReferencePicker(props: Props) {
   const chosen = references.find((reference) => reference.id === selected) ?? null;
   const held = chosen === null ? null : draftHolds(chosen, props.drafted);
   const { characters } = props;
+  const recordWaits = [hasRegion ? null : NEEDS_REGION_ID, held === null ? null : DRAFT_HOLDS_ID].filter(
+    (id) => id !== null,
+  );
   return (
     <>
       <ExpectedCharacters expected={characters} onExpected={props.onCharacters} />
@@ -104,23 +110,36 @@ export function ReferencePicker(props: Props) {
           <button
             type="button"
             className="btn small"
-            disabled={!hasRegion}
-            title={hasRegion ? undefined : 'Draw the region first'}
-            onClick={props.onNew}
+            // Not disabled without a region, so it takes focus and a screen reader reads why.
+            aria-disabled={!hasRegion}
+            aria-describedby={hasRegion ? undefined : NEEDS_REGION_ID}
+            onClick={() => {
+              if (hasRegion) {
+                props.onNew();
+              }
+            }}
           >
             New reference from this region
           </button>
           <button
             type="button"
             className="btn small"
-            disabled={!hasRegion || held !== null}
-            title={hasRegion ? (held ?? undefined) : 'Draw the region first'}
-            aria-describedby={held === null ? undefined : DRAFT_HOLDS_ID}
-            onClick={props.onRecord}
+            aria-disabled={recordWaits.length > 0}
+            aria-describedby={recordWaits.length === 0 ? undefined : recordWaits.join(' ')}
+            onClick={() => {
+              if (recordWaits.length === 0) {
+                props.onRecord();
+              }
+            }}
           >
             Record readings
           </button>
         </div>
+        {hasRegion ? null : (
+          <span id={NEEDS_REGION_ID} className="note">
+            Draw the region first.
+          </span>
+        )}
         <span className="note">
           Record readings watches the region while you use {appName} and keeps each different reading, to teach{' '}
           {chosen === null ? 'a new reference' : chosen.name} its characters.

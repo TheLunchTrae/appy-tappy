@@ -357,6 +357,60 @@ pub(super) fn found_text(search: u64, index: usize, text: Text) -> Message<FakeH
     }
 }
 
+/// A 14 by 8 frame of two white blocks whose black outlines touch, on
+/// a dark blue background.
+pub(super) fn outlined() -> Image {
+    let pixels = (0..8_u32)
+        .flat_map(|y| {
+            (0..14_u32).flat_map(move |x| {
+                let inside = (2..6).contains(&y);
+                if inside && ((3..5).contains(&x) || (9..11).contains(&x)) {
+                    [255, 255, 255, 0]
+                } else if (1..7).contains(&y) && (2..12).contains(&x) {
+                    [0, 0, 0, 0]
+                } else {
+                    [90, 30, 10, 0]
+                }
+            })
+        })
+        .collect();
+    Image::new(
+        Size {
+            width: 14,
+            height: 8,
+        },
+        pixels,
+    )
+    .expect("matching length")
+}
+
+/// A 20 by 8 frame with three marks of red on a gray background, each
+/// 6 tall: a 5 wide block at x 1, the same block less its top right
+/// pixel at x 8, and a 1 wide bar at x 15.
+pub(super) fn near_twins() -> Image {
+    let red = [0, 0, 255, 0];
+    let gray = [40, 40, 40, 0];
+    let pixels = (0..8_u32)
+        .flat_map(|y| {
+            (0..20_u32).flat_map(move |x| {
+                let tall = (1..7).contains(&y);
+                let block = tall && (1..6).contains(&x);
+                let twin = tall && (8..13).contains(&x) && !(x == 12 && y == 1);
+                let bar = tall && x == 15;
+                if block || twin || bar { red } else { gray }
+            })
+        })
+        .collect();
+    Image::new(
+        Size {
+            width: 20,
+            height: 8,
+        },
+        pixels,
+    )
+    .expect("matching length")
+}
+
 /// A 4 by 2 frame: its left half red and its right half gray.
 pub(super) fn frame_image() -> Image {
     let red = [0, 0, 255, 0];

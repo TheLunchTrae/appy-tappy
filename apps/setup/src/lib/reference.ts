@@ -72,3 +72,13 @@ export function andList(names: readonly string[]): string {
   }
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1) ?? ''}`;
 }
+
+/** Why a reference that the values `names` read with cannot be deleted, or nothing when no value does. */
+export function keptByReaders(names: readonly string[]): string | undefined {
+  if (names.length === 0) {
+    return undefined;
+  }
+  return names.length === 1
+    ? `${andList(names)} reads with it. Point it at another reference first.`
+    : `${andList(names)} read with it. Point them at another reference first.`;
+}

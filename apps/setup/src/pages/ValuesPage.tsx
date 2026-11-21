@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   type AppSummary,
@@ -10,15 +10,17 @@ import {
   type ValueView,
 } from '../lib/bindings.ts';
 import { deleteValue, errorText, markChecked, removeFix } from '../lib/api.ts';
-import { usedBy } from '../lib/automation.ts';
+import { keptByAutomations, usedBy } from '../lib/automation.ts';
 import { readingText } from '../lib/reading.ts';
 import { buildState, checkedText } from '../lib/build.ts';
 import { DeleteActions } from '../components/DeleteActions.tsx';
 import { Hint } from '../components/Hint.tsx';
+import { Question, useQuestion } from '../components/Question.tsx';
 import { MARK_CHECKED_HINT } from '../lib/hints.ts';
 import { hex } from '../lib/pixels.ts';
 import { originText } from '../lib/sharing.ts';
 import { background } from '../lib/repeat.ts';
+import { focusIsFree, useRowGone } from '../lib/focus.ts';
 import {
   FIX_HINT,
   NOW_HINT,
@@ -53,16 +55,11 @@ function valueDrafts(drafts: readonly DraftSummary[] | null, apps: readonly AppS
   );
 }
 
+/** How many columns the table has, which the heading of each group of rows spans. */
+const COLUMNS = 6;
+
 /** A value or fix draft's rows, with as many cells as the table has columns. */
-function ValueDraftRows({
-  list,
-  nowColumn,
-  rows,
-}: {
-  readonly list: readonly Resumed[];
-  readonly nowColumn: boolean;
-  readonly rows: DraftRows;
-}) {
+function ValueDraftRows({ list, rows }: { readonly list: readonly Resumed[]; readonly rows: DraftRows }) {
   return list.map((resumed) => (
     <CaptureDraftRow
       key={resumed.id}
@@ -72,7 +69,7 @@ function ValueDraftRows({
         <>
           <td className="note">{setup === null ? '' : CHECKS[setup.draft.kind].label}</td>
           <td className="note">{setup?.draft.region === null || setup === null ? 'No region yet' : 'Region drawn'}</td>
-          {nowColumn ? <td className="note">Doesn&apos;t read</td> : null}
+          <td className="note">Doesn&apos;t read</td>
           <td className="note">Can&apos;t be used until finished</td>
         </>
       )}
@@ -89,17 +86,15 @@ function ValueDraftRows({
 interface AppRowsProps {
   readonly app: AppSummary;
   readonly automations: readonly AutomationSummary[] | null;
-  /** What its values read now, while the page shows a column for that. */
+  /** What its values read now, or null while it has no window to read. */
   readonly live: LiveApp | null;
-  /** Whether the page shows a column for what values read now. */
-  readonly nowColumn: boolean;
   readonly confirming: string | null;
   readonly onConfirm: (key: string | null) => void;
   readonly onDelete: (value: string) => Promise<void>;
   readonly onMarkChecked: () => void;
   readonly onFix: (value: ValueDef) => void;
   readonly onEdit: (value: ValueDef) => void;
-  readonly onRemoveFix: (value: string, size: SizeDef) => void;
+  readonly onRemoveFix: (value: string, size: SizeDef) => Promise<boolean>;
   /** Its value and fix drafts. */
   readonly drafts: readonly Resumed[];
   readonly rows: DraftRows;
@@ -110,29 +105,90 @@ interface NowProps {
   readonly cell: NowCell;
   readonly size: SizeDef;
   readonly onFix: () => void;
-  readonly onRemoveFix: () => void;
+  /** Removes the value's fix at `size`, and answers whether it did. */
+  readonly onRemoveFix: () => Promise<boolean>;
 }
 
 /** A value's reading at the window's size now, or why it has none, with a way to fix it at that size. A state
- * check that matches none of its states may be right, so it shows as a note, not a warning. */
+ * check that matches none of its states may be right, so it shows as a note, not a warning. Remove fix asks first,
+ * in its own place, about the fix at `size` alone. */
 function NowCellView({ value, cell, size, onFix, onRemoveFix }: NowProps) {
   const tone = { reading: undefined, waiting: undefined, noState: 'note', unread: 'warn', notDrawn: 'warn' }[cell.kind];
   const fixed = cell.kind !== 'notDrawn' && cell.kind !== 'waiting' && cell.from === 'fixed';
+  // The question is about the fix at `size`: the row gives the cell a key of the size, so a window that takes
+  // another size starts the cell again, and what it asked goes with it.
+  const [asking, setAsking] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  useEffect(() => {
+    // A question about a fix the cell reads from no more is not asked again when the cell reads from one later.
+    if (!fixed && !removing) {
+      setAsking(false);
+    }
+  }, [fixed, removing]);
+  const { control, refs } = useQuestion<HTMLButtonElement>(asking && fixed);
+  const fixButton = useRef<HTMLButtonElement>(null);
+  // Whether the question's answer removed the fix, until the focus it left behind is placed.
+  const removed = useRef(false);
+  useEffect(() => {
+    if (!removed.current || asking || fixed) {
+      return;
+    }
+    removed.current = false;
+    // The fix took Remove fix with it, which the question would give the focus back to.
+    if (focusIsFree()) {
+      fixButton.current?.focus();
+    }
+  }, [asking, fixed]);
+  const label = `Remove the fix of ${value.name} at ${sizeText(size)}?`;
   return (
     <span className="now">
       <span className={tone}>{nowText(cell, size)}</span>
       {fixed ? <small className="note">fixed at this size</small> : null}
       {offersFix(cell) ? (
         <>
-          <button type="button" className="btn small" onClick={onFix}>
+          <button ref={fixButton} type="button" className="btn small" onClick={onFix}>
             Fix at this size<span className="visually-hidden"> for {value.name}</span>
           </button>
           <Hint topic="Fix at this size">{FIX_HINT}</Hint>
         </>
       ) : null}
-      {fixed ? (
+      {fixed && asking ? (
+        <Question
+          refs={refs}
+          label={label}
+          keepLabel="Keep"
+          actLabel="Remove fix"
+          busy={removing}
+          onKeep={() => {
+            setAsking(false);
+          }}
+          onAct={() => {
+            setRemoving(true);
+            background(
+              onRemoveFix()
+                .then((worked) => {
+                  removed.current = worked;
+                })
+                .finally(() => {
+                  setRemoving(false);
+                  setAsking(false);
+                }),
+            );
+          }}
+        >
+          {label} Its drawing at that size is lost.
+        </Question>
+      ) : null}
+      {fixed && !asking ? (
         <>
-          <button type="button" className="btn small" onClick={onRemoveFix}>
+          <button
+            ref={control}
+            type="button"
+            className="btn small"
+            onClick={() => {
+              setAsking(true);
+            }}
+          >
             Remove fix<span className="visually-hidden"> of {value.name}</span>
           </button>
           <Hint topic="Remove fix">{REMOVE_FIX_HINT}</Hint>
@@ -163,7 +219,6 @@ function AppRows({
   app,
   automations,
   live,
-  nowColumn,
   confirming,
   onConfirm,
   onDelete,
@@ -175,18 +230,17 @@ function AppRows({
   rows,
 }: AppRowsProps) {
   const running = app.windows.length > 0;
-  const columns = nowColumn ? 6 : 5;
   if (app.file === null) {
     return (
-      <>
+      <tbody>
         <tr className="group">
-          <td colSpan={columns}>
+          <th colSpan={COLUMNS} scope="rowgroup">
             {app.id}
             <small className="warn">{app.error ?? 'This application could not be read.'}</small>
-          </td>
+          </th>
         </tr>
-        <ValueDraftRows list={drafts} nowColumn={nowColumn} rows={rows} />
-      </>
+        <ValueDraftRows list={drafts} rows={rows} />
+      </tbody>
     );
   }
   const { file } = app;
@@ -198,9 +252,9 @@ function AppRows({
   const view = live?.kind === 'view' ? live.view : null;
   const size = view?.windowSize ?? null;
   return (
-    <>
+    <tbody>
       <tr className="group">
-        <td colSpan={columns}>
+        <th colSpan={COLUMNS} scope="rowgroup">
           <span className={running ? 'dot running' : 'dot'} />
           {app.file.name}
           <small>
@@ -227,7 +281,7 @@ function AppRows({
               </span>
             </div>
           )}
-        </td>
+        </th>
       </tr>
       {app.file.values.map((value) => {
         const summary = checkSummary(value.screen.check, file.references);
@@ -248,25 +302,22 @@ function AppRows({
               {summary.name}
             </td>
             <td className="note">{regionText(value.screen)}</td>
-            {nowColumn ? (
-              <td>
-                {cell === null || size === null ? (
-                  <span className="note">{running ? '' : 'Not running'}</span>
-                ) : (
-                  <NowCellView
-                    value={value}
-                    cell={cell}
-                    size={size}
-                    onFix={() => {
-                      onFix(value);
-                    }}
-                    onRemoveFix={() => {
-                      onRemoveFix(value.id, size);
-                    }}
-                  />
-                )}
-              </td>
-            ) : null}
+            <td>
+              {cell === null || size === null ? (
+                <span className="note">{running ? '' : 'Not running'}</span>
+              ) : (
+                <NowCellView
+                  key={`${size.width}x${size.height}`}
+                  value={value}
+                  cell={cell}
+                  size={size}
+                  onFix={() => {
+                    onFix(value);
+                  }}
+                  onRemoveFix={() => onRemoveFix(value.id, size)}
+                />
+              )}
+            </td>
             <td className="note">{usedByText(automations === null ? null : usedBy(automations, app.id, value.id))}</td>
             <td className="end">
               <DeleteActions
@@ -277,6 +328,7 @@ function AppRows({
                     : undefined
                 }
                 actLabel="Delete value"
+                blocked={automations === null ? undefined : keptByAutomations(usedBy(automations, app.id, value.id))}
                 confirming={confirming === key}
                 onConfirm={(asking) => {
                   onConfirm(asking ? key : null);
@@ -297,8 +349,8 @@ function AppRows({
           </tr>
         );
       })}
-      <ValueDraftRows list={drafts} nowColumn={nowColumn} rows={rows} />
-    </>
+      <ValueDraftRows list={drafts} rows={rows} />
+    </tbody>
   );
 }
 
@@ -342,28 +394,30 @@ export function ValuesPage({
   const [confirming, setConfirming] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const live = useLiveValues(apps);
-  const nowColumn = live.size > 0;
 
-  const unfix = async (app: string, value: string, size: SizeDef): Promise<void> => {
+  // Answers whether the fix is removed; the page says why when it is not.
+  const unfix = async (app: string, value: string, size: SizeDef): Promise<boolean> => {
     try {
       await removeFix(app, value, size.width, size.height);
       setActionError(null);
+      // The question stays until the fix is gone, so its buttons take no press meanwhile.
       await onChanged();
+      return true;
     } catch (error: unknown) {
       setActionError(errorText(error));
+      return false;
     }
   };
 
+  const { heading, rowGone } = useRowGone<HTMLHeadingElement>();
+  // The row says why when this fails.
   const remove = async (app: string, value: string): Promise<void> => {
-    try {
-      await deleteValue(app, value);
-      setActionError(null);
-      // The question stays until the row is gone, so its buttons take no press meanwhile.
-      await onChanged();
-      setConfirming((current) => (current === `${app}/${value}` ? null : current));
-    } catch (error: unknown) {
-      setActionError(errorText(error));
-    }
+    await deleteValue(app, value);
+    setActionError(null);
+    // The question stays until the row is gone, so its buttons take no press meanwhile.
+    await onChanged();
+    setConfirming((current) => (current === `${app}/${value}` ? null : current));
+    rowGone();
   };
 
   const markAsChecked = async (app: string): Promise<void> => {
@@ -376,7 +430,6 @@ export function ValuesPage({
     }
   };
 
-  const headingRef = useRef<HTMLHeadingElement>(null);
   const rows: DraftRows = {
     apps: apps ?? [],
     onFinish,
@@ -384,8 +437,7 @@ export function ValuesPage({
       try {
         await onDeleteDraft(id);
         setActionError(null);
-        // The deleted row took the focused button with it.
-        headingRef.current?.focus();
+        rowGone();
       } catch (error: unknown) {
         setActionError(errorText(error));
       }
@@ -400,7 +452,7 @@ export function ValuesPage({
   return (
     <main className="page">
       <div className="page-head">
-        <h1 ref={headingRef} tabIndex={-1}>
+        <h1 ref={heading} tabIndex={-1}>
           Values
         </h1>
         <span className="lead">What AppyTappy reads from each application&apos;s window.</span>
@@ -440,57 +492,50 @@ export function ValuesPage({
               <th scope="col">Value</th>
               <th scope="col">Check</th>
               <th scope="col">Region</th>
-              {nowColumn ? (
-                <th scope="col">
-                  {nowHeading(live)}
-                  <Hint topic={nowHeading(live)}>{NOW_HINT}</Hint>
-                </th>
-              ) : null}
+              <th scope="col">
+                {nowHeading(live)}
+                <Hint topic={nowHeading(live)}>{NOW_HINT}</Hint>
+              </th>
               <th scope="col">Used by</th>
               <th scope="col">
                 <span className="note">Actions</span>
               </th>
             </tr>
           </thead>
-          <tbody>
-            {apps.map((app) => (
-              <AppRows
-                key={app.id}
-                app={app}
-                automations={automations}
-                live={live.get(app.id) ?? null}
-                nowColumn={nowColumn}
-                confirming={confirming}
-                onConfirm={setConfirming}
-                onDelete={(value) => remove(app.id, value)}
-                onMarkChecked={() => {
-                  background(markAsChecked(app.id));
-                }}
-                onFix={(value) => {
-                  onChange({ app: app.id, value, how: 'fix' });
-                }}
-                onEdit={(value) => {
-                  onChange({ app: app.id, value, how: 'edit' });
-                }}
-                onRemoveFix={(value, size) => {
-                  background(unfix(app.id, value, size));
-                }}
-                drafts={valueDrafts(drafts, apps, app.id)}
-                rows={rows}
-              />
-            ))}
-            {orphans.length === 0 ? null : (
-              <>
-                <tr className="group">
-                  <td colSpan={nowColumn ? 6 : 5}>
-                    Drafts
-                    <small className="warn">Their application is no longer saved.</small>
-                  </td>
-                </tr>
-                <ValueDraftRows list={orphans} nowColumn={nowColumn} rows={rows} />
-              </>
-            )}
-          </tbody>
+          {apps.map((app) => (
+            <AppRows
+              key={app.id}
+              app={app}
+              automations={automations}
+              live={live.get(app.id) ?? null}
+              confirming={confirming}
+              onConfirm={setConfirming}
+              onDelete={(value) => remove(app.id, value)}
+              onMarkChecked={() => {
+                background(markAsChecked(app.id));
+              }}
+              onFix={(value) => {
+                onChange({ app: app.id, value, how: 'fix' });
+              }}
+              onEdit={(value) => {
+                onChange({ app: app.id, value, how: 'edit' });
+              }}
+              onRemoveFix={(value, size) => unfix(app.id, value, size)}
+              drafts={valueDrafts(drafts, apps, app.id)}
+              rows={rows}
+            />
+          ))}
+          {orphans.length === 0 ? null : (
+            <tbody>
+              <tr className="group">
+                <th colSpan={COLUMNS} scope="rowgroup">
+                  Drafts
+                  <small className="warn">Their application is no longer saved.</small>
+                </th>
+              </tr>
+              <ValueDraftRows list={orphans} rows={rows} />
+            </tbody>
+          )}
         </table>
       ) : null}
     </main>

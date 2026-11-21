@@ -12,7 +12,7 @@ use crate::pixels;
 use crate::stores::SavedApp;
 
 use super::host::Host;
-use super::{Changed, Edit, Owner};
+use super::{Changed, Edit, Owner, ReadingRisks};
 
 /// A reference to save, as the UI describes it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -137,7 +137,7 @@ impl<H: Host> Owner<H> {
     ) -> Result<SavedReferenceId, String> {
         let name = spec.reference_name.trim();
         if name.is_empty() {
-            return Err("Name the reference first.".to_owned());
+            return Err("Name the reference.".to_owned());
         }
         let editing = spec.characters.reference.as_ref();
         if let Some(editing) = editing
@@ -201,6 +201,23 @@ impl<H: Host> Owner<H> {
         })
     }
 
+    /// What may keep the saved reference `reference` from reading as its
+    /// samples do, as [`Owner::reading_risks`] answers for one being
+    /// taught, for the References page to mark it.
+    pub(crate) fn saved_reading_risks(
+        &self,
+        reference: &ReferenceRef,
+    ) -> Result<ReadingRisks, String> {
+        let (lookalikes, hides_tone) = self
+            .saved_reference(reference)?
+            .risks()
+            .map_err(|error| error.to_string())?;
+        Ok(ReadingRisks {
+            lookalikes,
+            hides_tone,
+        })
+    }
+
     /// The pixels of the picture `image` of a sample of the saved reference
     /// `reference`, at most `max_width` wide; `None` when the reference
     /// has no such sample or its picture cannot be read.
@@ -232,7 +249,7 @@ impl<H: Host> Owner<H> {
     ) -> Result<SavedReferenceId, String> {
         let name = spec.reference_name.trim();
         if name.is_empty() {
-            return Err("Name the reference first.".to_owned());
+            return Err("Name the reference.".to_owned());
         }
         let ReferenceRef { app, id } = &spec.reference;
         self.update_app(app, Changed::Values, |_owner, found| {
@@ -344,11 +361,12 @@ pub(super) fn and_list(names: &[&str]) -> String {
 mod tests {
     use appytappy_config::anti_cheat::AntiCheatClass;
     use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
+    use appytappy_sources::screen::Image;
 
     use crate::owner::SavedValue;
     use crate::owner::test_support::{
-        FakeHost, Harness, add_example_app, characters, frame_image, harness_with, scratch_store,
-        spec, teaching, trial,
+        FakeHost, Harness, add_example_app, characters, frame_image, harness_with, near_twins,
+        outlined, scratch_store, spec, teaching, trial,
     };
 
     use super::*;
@@ -392,7 +410,7 @@ mod tests {
         };
         assert_eq!(
             harness.ask(save(reference("example", " ", None))),
-            Err("Name the reference first.".to_owned())
+            Err("Name the reference.".to_owned())
         );
         assert_eq!(
             harness.ask(save(reference("missing", "Digits", None))),
@@ -581,6 +599,112 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_reference_says_what_may_keep_it_from_reading_without_a_window() {
+        let (stores, root) = scratch_store("references-risks");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&near_twins()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // The block is an 8, its twin a 6, and the bar a 1.
+        let twins = ReferenceSaveSpec {
+            app: "example".to_owned(),
+            reference_name: "Twins".to_owned(),
+            characters: serde_json::from_str(
+                r#"{"region":{"x":0,"y":0,"width":17,"height":8},"screenshot":0,
+                    "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+                    "labels":[{"screenshot":0,"text":"861"}]}"#,
+            )
+            .expect("valid JSON"),
+        };
+        let saved = harness
+            .ask(|owner| owner.save_reference(&twins))
+            .expect("saves");
+        harness.ask(Owner::stop);
+        let risks = |id: &str| {
+            let reference = ReferenceRef {
+                app: "example".to_owned(),
+                id: id.to_owned(),
+            };
+            move |owner: &mut Owner<FakeHost>| owner.saved_reading_risks(&reference)
+        };
+        assert_eq!(
+            harness.ask(risks(&saved.reference)),
+            Ok(ReadingRisks {
+                lookalikes: vec![('8', '6')],
+                hides_tone: false,
+            })
+        );
+        assert_eq!(
+            harness.ask(risks("gone")),
+            Err("Example App no longer has that reference.".to_owned())
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_saved_reference_hides_a_tone_only_by_contrast_and_only_when_its_samples_do() {
+        let (stores, root) = scratch_store("references-hidden-tone");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut hides = |frame: &Image, name: &str, characters: &str| {
+            let mut handler = harness.pick();
+            harness.deliver(&mut handler, Ok(frame));
+            let screenshot = harness.ask(Owner::screenshot).expect("a frame arrived");
+            let spec = ReferenceSaveSpec {
+                app: "example".to_owned(),
+                reference_name: name.to_owned(),
+                characters: serde_json::from_str(
+                    &characters.replace("SHOT", &screenshot.to_string()),
+                )
+                .expect("valid JSON"),
+            };
+            let saved = harness
+                .ask(|owner| owner.save_reference(&spec))
+                .expect("saves");
+            harness.ask(Owner::stop);
+            let reference = ReferenceRef {
+                app: "example".to_owned(),
+                id: saved.reference,
+            };
+            harness
+                .ask(|owner| owner.saved_reading_risks(&reference))
+                .map(|risks| risks.hides_tone)
+        };
+        let outlined_spec = |ink: &str| {
+            format!(
+                r#"{{"region":{{"x":1,"y":1,"width":12,"height":6}},"screenshot":SHOT,{ink}
+                    "tolerance":168,"labels":[{{"screenshot":SHOT,"text":"11"}}]}}"#
+            )
+        };
+        assert_eq!(
+            hides(&outlined(), "Outlined", &outlined_spec("")),
+            Ok(true),
+            "its tolerance leaves the black outline out"
+        );
+        assert_eq!(
+            hides(
+                &outlined(),
+                "Filled",
+                &outlined_spec(r#""ink":{"red":255,"green":255,"blue":255},"#)
+            ),
+            Ok(false),
+            "a text color counts only the fill, whatever contrast would leave out"
+        );
+        assert_eq!(
+            hides(
+                &near_twins(),
+                "Plain",
+                r#"{"region":{"x":0,"y":0,"width":17,"height":8},"screenshot":SHOT,
+                    "tolerance":40,"labels":[{"screenshot":SHOT,"text":"861"}]}"#
+            ),
+            Ok(false),
+            "nothing around its characters is left out"
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
     fn names_are_told_apart_by_what_they_say_not_by_the_ids_they_make() {
         let (stores, root) = scratch_store("reference-names");
         let mut harness = harness_with(false, Ok(stores));
@@ -658,7 +782,7 @@ mod tests {
         };
         assert_eq!(
             save(&mut harness, settings("digits", " ", red)),
-            Err("Name the reference first.".to_owned())
+            Err("Name the reference.".to_owned())
         );
         assert_eq!(
             save(&mut harness, settings("digits", "other", red)),

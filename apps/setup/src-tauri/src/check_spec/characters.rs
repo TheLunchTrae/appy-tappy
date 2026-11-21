@@ -20,6 +20,7 @@ use crate::recording::Recording;
 use crate::screenshots::Shots;
 use crate::words::sentence;
 
+use super::error::{Lesson, cant_learn};
 use super::{
     Cut, Pictures, ReferenceRef, SpecError, contrast, cut, drawn, ink_rule, same_size, size_of,
     to_region,
@@ -143,7 +144,7 @@ impl SavedReference {
             tolerance: self.settled_tolerance(ink, tolerance),
             ..self.reference.clone()
         };
-        learned(&reference, &[], &self.pictures).map(|_reader| reference)
+        learned(&reference, &[], 0, &self.pictures).map(|_reader| reference)
     }
 
     /// The tolerance [`Self::with_settings`] saves for `ink` and
@@ -187,7 +188,7 @@ impl SavedReference {
                                 reader = trial;
                                 return None;
                             },
-                            Err(error) => sentence(&error.to_string()),
+                            Err(error) => sentence(&cant_learn(&error)),
                         }
                     },
                     None => "Its picture is missing or can't be opened.".to_owned(),
@@ -210,6 +211,24 @@ impl SavedReference {
         tolerance: u8,
     ) -> Vec<UnlearnedSample> {
         self.unlearned(ink, self.settled_tolerance(ink, tolerance))
+    }
+
+    /// What may keep the reference from reading as its saved samples do,
+    /// which its editor warns about while it is taught: the pairs of
+    /// characters whose learned shapes match each other, and whether it
+    /// finds its characters by contrast with a tolerance that leaves an
+    /// outline or a shadow of a sample out, as [`contrast::hides_a_tone`]
+    /// describes.
+    ///
+    /// # Errors
+    ///
+    /// Returns why the reference cannot learn its samples: a picture that
+    /// is missing or cannot be decoded, or one it cannot learn from.
+    pub(crate) fn risks(&self) -> Result<(Vec<(char, char)>, bool), SpecError> {
+        let reader = learned(&self.reference, &[], 0, &self.pictures)?;
+        let hides_tone = self.reference.ink.is_none()
+            && contrast::hides_a_tone(&self.samples(), self.reference.tolerance);
+        Ok((reader.lookalikes(), hides_tone))
     }
 
     /// The picture of `sample`, when it is there and decodes.
@@ -236,10 +255,12 @@ impl SavedReference {
 /// and those `kept` from the saved reference it adds to, as `saved::reader`
 /// learns it. Every caller teaches the reference in its own editor, so a
 /// problem with a kept sample points at the editor's list of saved
-/// pictures, which shows the picture no box does.
+/// pictures, which shows the picture no box does. The first `boxes` of
+/// `new` are boxes, and the rest kept readings.
 fn learned(
     reference: &ReferenceDef,
     new: &[(String, Vec<u8>)],
+    boxes: usize,
     kept: &[(String, Vec<u8>)],
 ) -> Result<DigitReader, SpecError> {
     saved::reader(reference, |picture| {
@@ -258,18 +279,24 @@ fn learned(
                 .map(|sample| sample.text.clone())
         };
         match &error {
-            SavedError::Learn { name, source } => match text_of(name) {
-                Some(text) if new.iter().any(|(new_name, _)| new_name == name) => {
-                    SpecError::Learn {
+            SavedError::Learn { name, source } => {
+                let added = new.iter().position(|(new_name, _)| new_name == name);
+                match (text_of(name), added) {
+                    (Some(text), Some(position)) => SpecError::Learn {
+                        lesson: if position < boxes {
+                            Lesson::Box
+                        } else {
+                            Lesson::Reading
+                        },
                         text,
                         source: source.clone(),
-                    }
-                },
-                Some(text) => SpecError::SavedLearn {
-                    text,
-                    source: source.clone(),
-                },
-                None => error.into(),
+                    },
+                    (Some(text), None) => SpecError::SavedLearn {
+                        text,
+                        source: source.clone(),
+                    },
+                    (None, _) => error.into(),
+                }
             },
             // `saved::reader` only asks for the pictures the samples name.
             SavedError::Missing { name, .. } | SavedError::Picture { name, .. } => {
@@ -450,7 +477,7 @@ impl CharactersSpec {
             tolerance: self.tolerance,
             samples,
         };
-        let reader = learned(&reference, &pictures, &kept)?;
+        let reader = learned(&reference, &pictures, self.labels.len(), &kept)?;
         Ok(Taught {
             region,
             window_size,
@@ -627,7 +654,7 @@ impl CharactersSpec {
                         reader = trial;
                         None
                     },
-                    Err(error) => Some(sentence(&error.to_string())),
+                    Err(error) => Some(sentence(&cant_learn(&error))),
                 }
             })
             .collect())

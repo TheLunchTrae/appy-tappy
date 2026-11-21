@@ -27,7 +27,8 @@ select **Capture this window**, as the first step of
 
 1. **Name it,** such as `Percent font`, with a name no other reference of
    the application has. Capitals of the letters A to Z don't count:
-   `Percent font` and `percent font` are one name.
+   `Percent font` and `percent font` are one name. Until it has a name,
+   **Save reference** waits, and says `Name the reference.` above the button.
 2. **Teach it the characters.** On a screenshot, drag to draw a box tightly
    around some characters, then type what the box shows, such as `87%`, in
    its row under **Boxes**. AppyTappy learns the shape of each character from
@@ -139,6 +140,19 @@ another color it can count, and the number won't read, as when a game goes
 from one level or scene to the next: give the reference a
 [text color](#text-color), so only the inside of the characters counts.
 
+When AppyTappy can't check for either of the two, the editor says **Can't
+check for characters that look alike.** and why, in place of the warnings.
+No warning then doesn't mean that the reference has neither problem. The
+check runs again when a box, the text color, or the tolerance changes. A
+reference that can't learn from a box, a kept reading, or a saved picture
+has nothing to check yet: the reading says which one it can't learn from and
+why, and the warnings wait until it can.
+
+The References page marks a saved reference that has either problem with
+**May misread** beside its name. The **?** beside the mark says which, and
+**Edit** shows what to do. The mark shows a moment after the
+page does. Neither warning holds up **Save reference**.
+
 AppyTappy learns a character from a box, found text you add, or a kept
 reading, never because a value needs it. A reference you make or edit from
 the References page is taught for no value, so nothing shows as missing
@@ -191,7 +205,8 @@ characters, lists every find.
    characters out. A find AppyTappy could not read at
    all is read again whenever you select **Reread**.
 4. **Add them.** Select the button that says how many you add, such as
-   **Add 3 to the reference**. Each becomes a [box](#boxes), which you can
+   **Add 3 to the reference**. With none ticked it says **Add to the
+   reference** and waits. Each becomes a [box](#boxes), which you can
    move, retype, or delete like one you drew. Until you add them,
    **Characters it knows** outlines the characters only the finds would
    teach, and they still count under **Characters still missing**.
@@ -547,7 +562,10 @@ stray shape and draw a box around it instead.
    **Use its settings** puts them back. In a reference you teach by itself,
    that moves the box it recorded at back to where it was and to the top of
    the list, or adds an empty box there if you deleted it. Or **Discard**
-   the recording to start a new one.
+   the recording to start a new one. A recording with readings asks first,
+   since its readings go with any text you typed and any readings you kept
+   in review: **Discard recording** drops them, and **Keep recording**
+   leaves everything as it is.
    Changing window also discards it.
 
 A digit, a sign such as `%` or `.`, and a letter are collected the same way.
@@ -698,4 +716,6 @@ you made it by hand with boxes on screenshots you took:
 
 Select **Delete** next to a reference, then **Delete reference** to confirm.
 A reference that a value reads with, at every size or in a fix at one size,
-cannot be deleted: AppyTappy names the values to change or delete first.
+cannot be deleted: **Delete** says **Can't delete** with the reference's name
+and the values to point at another reference first, in the reference's row,
+and **OK** closes that.

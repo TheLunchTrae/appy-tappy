@@ -64,9 +64,8 @@ export function teachingSheet(teaching: Teaching): { readonly actions: ReactNode
         settingsChanged={teaching.settingsChanged}
         recordBlocked={teaching.recordBlocked}
         recordMore={teaching.focus.more}
-        onDiscard={() => {
-          background(teaching.discard());
-        }}
+        readings={reviewed.readings.length}
+        onDiscard={teaching.discard}
         onUseSettings={teaching.useSettings}
         onRecordMore={() => {
           background(teaching.record(true));
@@ -198,6 +197,7 @@ export function ReferenceInspector({
         coverage={covered}
         lookalikes={neededPairs(teaching.risks.lookalikes, lookalikeNeeds)}
         hidesTone={teaching.risks.hidesTone}
+        risksProblem={teaching.risks.problem}
         readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
         onName={(name) => {
           setEditing((current) => (current === null ? null : { ...current, name }));
@@ -289,9 +289,7 @@ export function ReferenceInspector({
             onStop={() => {
               background(teaching.stop());
             }}
-            onDiscard={() => {
-              background(teaching.discard());
-            }}
+            onDiscard={teaching.discard}
             onReview={() => {
               review.show(true);
             }}
@@ -310,7 +308,11 @@ export function ReferenceInspector({
       {/* Scores are of the characters alone here, so they need no key by the check's kind. */}
       <ReadingDetailsBox ask={check.state.kind === 'set' ? explainReading : null} />
       <div className="sep" />
-      {teaching.error === null ? null : <p className="warn">{teaching.error}</p>}
+      {teaching.error === null ? null : (
+        <p className="warn" role="alert">
+          {teaching.error}
+        </p>
+      )}
       {refSave.waits === null ? null : (
         <p id={SAVE_WAITS_ID} className="note">
           {refSave.waits}

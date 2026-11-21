@@ -16,6 +16,7 @@ use appytappy_sources::screen::digits::{InkRule, LearnError};
 use appytappy_sources::screen::saved::{self, SavedError};
 
 use super::characters::{RecordedLabel, Taught, UnlearnedSample};
+use super::error::cant_learn;
 use super::*;
 use crate::recording::Recording;
 use crate::recording::follow::Follows;
@@ -317,7 +318,7 @@ fn what_the_saved_form_breaks_comes_back_in_the_pages_words() {
     // The page has no words of its own for the rest.
     assert_eq!(
         SpecError::from(saved::SavedError::SameSize).to_string(),
-        "AppyTappy could not read this value as saved: it is drawn at this size already."
+        "AppyTappy can't read this value as saved: it is drawn at this size already."
     );
 }
 
@@ -436,8 +437,8 @@ fn a_saved_reference_is_relearned_in_the_color_being_tried() {
     // to open.
     assert_eq!(
         error.to_string(),
-        "Can't learn from its saved picture of \"1\": no pixel in the region stands out from \
-         its background, or has the reference's text color. Remove it under Saved pictures it \
+        "Can't learn from its saved picture of \"1\": nothing in it stands out from its \
+         background, or has the reference's text color. Remove it under Saved pictures it \
          can't learn, or change the text color."
     );
     assert!(error.source().is_some());
@@ -536,8 +537,7 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
     assert_eq!(
         saved.unlearned(Some(GRAY), 0),
         [unlearned(
-            "No pixel in the region stands out from its background, or has the reference's \
-             text color."
+            "Nothing in it stands out from its background, or has the reference's text color."
         )]
     );
     // By contrast the plain red square shows no character either, and the
@@ -583,8 +583,7 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
         [
             (
                 sample_name("digits", 1),
-                "The region shows 1 characters but the text has 2; characters that touch count \
-                 as one."
+                "It shows 1 character but the text has 2. Characters that touch count as one."
                     .to_owned(),
                 false
             ),
@@ -607,9 +606,9 @@ fn the_saved_samples_a_reference_cannot_learn_are_named_with_why() {
             source: LearnError::NoInk,
         }),
         Some(
-            "Digits can't learn from its saved picture of \"77\": no pixel in the region stands \
-             out from its background, or has the reference's text color. Edit Digits and remove \
-             that picture under Saved pictures it can't learn, or change its text color."
+            "Digits can't learn from its saved picture of \"77\": nothing in it stands out from \
+             its background, or has the reference's text color. Edit Digits and remove that \
+             picture under Saved pictures it can't learn, or change its text color."
                 .to_owned()
         )
     );
@@ -970,13 +969,71 @@ fn a_label_the_reference_cannot_learn_names_the_text() {
         Vec::new(),
     );
     let error = teach(&spec, session(&[screenshot()], None)).expect_err("one blob, two characters");
-    assert!(matches!(&error, SpecError::Learn { text, .. } if text == "12"));
-    assert!(
-        error
-            .to_string()
-            .starts_with("Could not learn from \"12\": ")
+    assert_eq!(
+        error.to_string(),
+        "Can't learn from the box with the text \"12\": it shows 1 character but the text has \
+         2. Characters that touch count as one."
     );
     assert!(error.source().is_some());
+    // A kept reading comes after the boxes, and the words say which it is.
+    let now = std::time::Instant::now();
+    let mut recording = Recording::new(
+        Ticket::numbered(1),
+        Region::new(0, 0, 4, 2).expect("not empty"),
+        InkRule::Color {
+            color: RED.into(),
+            tolerance: 0,
+        },
+        (screenshot().size(), Follows::Drawn),
+        now,
+    );
+    recording.offer(&screenshot(), now).expect("a reading");
+    let kept = vec![RecordedLabel {
+        reading: 0,
+        text: "12".to_owned(),
+    }];
+    let spec = characters(whole(), None, one(0), kept);
+    let error = teach(&spec, session(&[screenshot()], Some(&recording)))
+        .expect_err("one blob, two characters");
+    assert_eq!(
+        error.to_string(),
+        "Can't learn from the kept reading \"12\": it shows 1 character but the text has 2. \
+         Characters that touch count as one."
+    );
+}
+
+#[test]
+fn a_failed_lesson_says_why_in_the_setup_apps_words() {
+    for (error, says) in [
+        (
+            LearnError::MoreCharacters {
+                found: 3,
+                expected: 2,
+            },
+            "it shows 3 characters but the text has 2. A character drawn as separate marks side \
+             by side, as some percent signs are, counts once for each mark, and so does \
+             anything else that stands out as the characters do.",
+        ),
+        (
+            LearnError::Conflict {
+                learned: '"',
+                new: '\'',
+            },
+            "a character given as \"'\" has the same shape as one learned as \"\"\". Change the \
+             text of one of them, or leave one out.",
+        ),
+        (
+            LearnError::Full,
+            "the reference holds 256 character shapes already, the most one can hold. Remove \
+             boxes, readings, or saved pictures it doesn't need.",
+        ),
+        (
+            LearnError::TooManyCharacters,
+            "it shows more than 24 characters.",
+        ),
+    ] {
+        assert_eq!(cant_learn(&error), says);
+    }
 }
 
 #[test]
@@ -1402,11 +1459,21 @@ fn saved_checks_keep_their_settings() {
     );
     assert_eq!(
         SpecError::Picture.to_string(),
-        "A picture of the region could not be saved."
+        "AppyTappy can't save a picture of the region. Try again."
+    );
+    // Names and characters show as typed, in plain quotes.
+    assert_eq!(
+        SpecError::NothingSelected("C:\\Live".to_owned()).to_string(),
+        "Nothing in the region is selected for the state \"C:\\Live\". Select it again, clear its selection, or stop ignoring the background."
     );
     assert_eq!(
-        SpecError::NothingSelected("Live".to_owned()).to_string(),
-        "Nothing in the region is selected for the state \"Live\". Select it again, clear its selection, or stop ignoring the background."
+        SpecError::NoCharacters {
+            reference: "Digits".to_owned(),
+            characters: "\\'".to_owned(),
+        }
+        .to_string(),
+        "Digits knows none of the characters this value needs, \"\\'\". Teach it one of them, \
+         or change the characters the value needs."
     );
     assert_eq!(
         SpecError::OtherApplication.to_string(),

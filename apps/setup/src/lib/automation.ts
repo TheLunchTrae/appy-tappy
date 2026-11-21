@@ -16,6 +16,7 @@ import {
   type WhenDef,
 } from './bindings.ts';
 import { CHECKS, type ValueKind } from './check.ts';
+import { andList } from './reference.ts';
 import { typedNumber } from './text.ts';
 
 /** A saved value an automation can watch. */
@@ -81,6 +82,16 @@ export function usedBy(automations: readonly AutomationSummary[], app: string, v
   return automations
     .filter(({ automation }) => automation.when.app === app && automation.when.value === value)
     .map(({ automation }) => automation.name);
+}
+
+/** Why a value that the automations `names` watch cannot be deleted, or nothing when no automation does. */
+export function keptByAutomations(names: readonly string[]): string | undefined {
+  if (names.length === 0) {
+    return undefined;
+  }
+  return names.length === 1
+    ? `${andList(names)} uses it. Change or delete that automation first.`
+    : `${andList(names)} use it. Change or delete those automations first.`;
 }
 
 /** An automation as the editor holds it. */

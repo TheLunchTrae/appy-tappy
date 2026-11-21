@@ -66,7 +66,7 @@ afterEach(async () => {
   clearMocks();
 });
 
-test('closing the last window removes its live reading and leaves the saved value', async () => {
+test('closing the last window removes its live reading and leaves the saved value and the column', async () => {
   mockIPC((command, args) => {
     if (command !== 'live_values') {
       return undefined;
@@ -86,6 +86,8 @@ test('closing the last window removes its live reading and leaves the saved valu
   });
   expect(screen.queryAllByRole('columnheader', { name: /640 × 480 now/ })).toHaveLength(0);
   expect(screen.getAllByRole('cell', { name: 'Playback icon' })).toHaveLength(1);
+  expect(screen.getAllByRole('columnheader', { name: /At the window's size now/ })).toHaveLength(1);
+  expect(screen.getAllByRole('cell', { name: 'Not running' })).toHaveLength(1);
 });
 
 test('a new Values page waits for the old page to release its pending captures', async () => {

@@ -23,16 +23,28 @@ export const SAVE_AFTER_UNLEARNED = "Remove the saved pictures it can't learn fi
 export const SAVE_AFTER_REVIEW =
   "Keep the readings to save them with the reference, or go back to the screenshot to save without review's changes. Saving ends the recording.";
 
+/** What a reference's editor and its draft say while it has no name. */
+export const NAME_THE_REFERENCE = 'Name the reference.';
+
 /**
- * Whether the reference can be saved now, and what the editor says when it waits for review. Saving ends the
+ * Whether the reference can be saved now, and what the editor says when it waits. Saving ends the
  * recording, and the reference learns the readings the last Keep put on it: what review changed since, and what a
  * character check opened from review answered, would go with the recording. So while review is open the save waits
  * for Keep, or for the way back to the screenshot. A reference that keeps a saved picture it can't learn would be
- * refused, so its save waits until the picture is removed or learned again, and says so.
+ * refused, so its save waits until the picture is removed or learned again, and says so. A reference without a name
+ * says so too. The reading box says what the characters still need and why a try failed, and a save under way ends
+ * by itself, so those waits say nothing here.
  */
 export function referenceSave(save: ReferenceSave): { readonly can: boolean; readonly waits: string | null } {
-  const ready = save.named && save.built && save.tried && !save.busy;
-  const waits = save.reviewing ? SAVE_AFTER_REVIEW : save.unlearned > 0 ? SAVE_AFTER_UNLEARNED : null;
+  const ready = save.built && save.tried && !save.busy;
+  let waits: string | null = null;
+  if (save.reviewing) {
+    waits = SAVE_AFTER_REVIEW;
+  } else if (save.unlearned > 0) {
+    waits = SAVE_AFTER_UNLEARNED;
+  } else if (!save.named) {
+    waits = NAME_THE_REFERENCE;
+  }
   return { can: ready && waits === null, waits };
 }
 

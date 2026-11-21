@@ -33,6 +33,8 @@ interface Props {
   readonly lookalikes: readonly (readonly [string, string])[];
   /** Whether its tolerance leaves an outline or a shadow out of what it learned. */
   readonly hidesTone: boolean;
+  /** Why those two could not be checked, or null. */
+  readonly risksProblem: string | null;
   /** The texts of found text not added yet, whose new characters are outlined. */
   readonly finding: readonly string[];
   /** The values that read with the saved reference. */
@@ -74,8 +76,8 @@ function learnedNote(saved: number, labeled: number, recorded: number): string {
 }
 
 /**
- * The text color, folded away since most references need none. It stays open for a reference that has one, which
- * also shows the tolerance and the way back to contrast.
+ * The text color, folded away since most references need none. It opens for a reference that has one, which also
+ * shows the tolerance and the way back to contrast, and the user can fold it again.
  */
 function TextColor(
   props: Pick<Props, 'ink' | 'tolerance' | 'picking' | 'canPick' | 'onPick' | 'onNoTextColor' | 'onTolerance'>,
@@ -205,6 +207,7 @@ export function ReferenceEditor(props: Props) {
           {learnedNote(saved.length, labeled.length, recorded.length)}
           {pending.length === 0 ? '' : ' Outlined characters come from the found text, once you add it.'}
         </span>
+        {props.risksProblem === null ? null : <p className="warn">{props.risksProblem}</p>}
         {props.hidesTone ? <p className="warn">{HIDDEN_TONE_WARNING}</p> : null}
         {lookalike === null ? null : (
           <div className="row">

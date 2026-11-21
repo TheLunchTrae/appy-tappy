@@ -24,7 +24,7 @@ use appytappy_sources::screen::{FrameMeaning, Image, Size};
 use serde::{Deserialize, Serialize};
 
 use crate::check_spec::{self, CharactersSpec, CheckSpec, SpecError, expected_characters};
-use crate::reading::at_size;
+use crate::reading::{at_size, cant_read};
 
 use super::Owner;
 use super::host::Host;
@@ -175,7 +175,7 @@ impl LiveCheck {
                 .unread
                 .filter(|(unread_at, _)| *unread_at == other)
                 .map_or(Ok(None), |(_, unread)| Err(not_read(other, unread))),
-            FrameMeaning::Unreadable(outside) => Err(on_window(&outside)),
+            FrameMeaning::Unreadable(outside) => Err(on_window(&format!("{outside}."))),
         }
     }
 
@@ -188,18 +188,19 @@ impl LiveCheck {
         check
             .read(&region)
             .map(Some)
-            .map_err(|error| on_window(&error))
+            .map_err(|error| on_window(&cant_read(&error, None)))
     }
 }
 
 /// That a value is not read on a window of `size`, and why, as a sentence.
 fn not_read(size: Size, unread: Unread) -> String {
-    format!("Not read {}.", at_size(size, unread))
+    format!("Can't read {}.", at_size(size, unread))
 }
 
-/// That the newest frame cannot be read, and why, as a sentence.
-fn on_window(error: &dyn std::fmt::Display) -> String {
-    format!("Not read on the live window now: {error}.")
+/// That the newest frame cannot be read, as a sentence that ends with
+/// `why`, which has its full stop.
+fn on_window(why: &str) -> String {
+    format!("Can't read on the live window now: {why}")
 }
 
 impl<H: Host> Owner<H> {
@@ -271,14 +272,28 @@ impl<H: Host> Owner<H> {
     }
 
     /// What may keep the reference `spec` teaches from reading as its
-    /// samples do.
-    pub(crate) fn reading_risks(&mut self, spec: &CharactersSpec) -> Result<ReadingRisks, String> {
+    /// samples do, or `None` for a reference that can't learn one of its
+    /// lessons: it has no shapes to compare, and its live check says which
+    /// lesson and why.
+    pub(crate) fn reading_risks(
+        &mut self,
+        spec: &CharactersSpec,
+    ) -> Result<Option<ReadingRisks>, String> {
         self.keep_reference(spec.reference.as_ref());
         self.with_session(|session| {
-            Ok(ReadingRisks {
-                lookalikes: spec.teach(session, None, TAUGHT, &[])?.reader.lookalikes(),
+            let taught = match spec.teach(session, None, TAUGHT, &[]) {
+                Ok(taught) => taught,
+                Err(
+                    SpecError::Learn { .. }
+                    | SpecError::SavedLearn { .. }
+                    | SpecError::MissingPicture { .. },
+                ) => return Ok(None),
+                Err(error) => return Err(error),
+            };
+            Ok(Some(ReadingRisks {
+                lookalikes: taught.reader.lookalikes(),
                 hides_tone: spec.hides_a_tone(session)?,
-            })
+            }))
         })
         .map_err(|error: SpecError| error.to_string())
     }
@@ -315,66 +330,12 @@ mod tests {
     use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
         BAR, Harness, add_example_app, capturing, characters, frame_image, harness, harness_with,
-        scratch_store, teaching, trial,
+        near_twins, outlined, scratch_store, teaching, trial,
     };
     use crate::reading::Reading;
     use crate::stores::SavedApp;
 
     use super::*;
-
-    /// A 20 by 8 frame with three marks of red on a gray background, each
-    /// 6 tall: a 5 wide block at x 1, the same block less its top right
-    /// pixel at x 8, and a 1 wide bar at x 15.
-    fn near_twins() -> Image {
-        let red = [0, 0, 255, 0];
-        let gray = [40, 40, 40, 0];
-        let pixels = (0..8_u32)
-            .flat_map(|y| {
-                (0..20_u32).flat_map(move |x| {
-                    let tall = (1..7).contains(&y);
-                    let block = tall && (1..6).contains(&x);
-                    let twin = tall && (8..13).contains(&x) && !(x == 12 && y == 1);
-                    let bar = tall && x == 15;
-                    if block || twin || bar { red } else { gray }
-                })
-            })
-            .collect();
-        Image::new(
-            Size {
-                width: 20,
-                height: 8,
-            },
-            pixels,
-        )
-        .expect("matching length")
-    }
-
-    /// A 14 by 8 frame of two white blocks whose black outlines touch, on
-    /// a dark blue background.
-    fn outlined() -> Image {
-        let pixels = (0..8_u32)
-            .flat_map(|y| {
-                (0..14_u32).flat_map(move |x| {
-                    let inside = (2..6).contains(&y);
-                    if inside && ((3..5).contains(&x) || (9..11).contains(&x)) {
-                        [255, 255, 255, 0]
-                    } else if (1..7).contains(&y) && (2..12).contains(&x) {
-                        [0, 0, 0, 0]
-                    } else {
-                        [90, 30, 10, 0]
-                    }
-                })
-            })
-            .collect();
-        Image::new(
-            Size {
-                width: 14,
-                height: 8,
-            },
-            pixels,
-        )
-        .expect("matching length")
-    }
 
     #[test]
     fn reading_risks_name_the_learned_shapes_that_match_each_other() {
@@ -392,16 +353,32 @@ mod tests {
         };
         assert_eq!(
             harness.ask(|owner| owner.reading_risks(&spec(0))),
-            Ok(ReadingRisks {
+            Ok(Some(ReadingRisks {
                 lookalikes: vec![('8', '6')],
                 hides_tone: false,
-            }),
+            })),
             "the bar matches neither block"
         );
         assert_eq!(
             harness.ask(|owner| owner.reading_risks(&spec(9))),
             Err("That screenshot is gone. Take a new one and try again.".to_owned())
         );
+    }
+
+    #[test]
+    fn a_reference_that_cant_learn_a_label_is_answered_no_risks_and_no_failure() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&near_twins()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // The region shows three characters, and the text has two.
+        let spec: CharactersSpec = serde_json::from_str(
+            r#"{"region":{"x":0,"y":0,"width":17,"height":8},"screenshot":0,
+                "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+                "labels":[{"screenshot":0,"text":"86"}]}"#,
+        )
+        .expect("valid JSON");
+        assert_eq!(harness.ask(|owner| owner.reading_risks(&spec)), Ok(None));
     }
 
     #[test]
@@ -420,12 +397,12 @@ mod tests {
         let mut hides = |ink: &str| {
             harness
                 .ask(|owner| owner.reading_risks(&spec(ink)))
-                .map(|risks| risks.hides_tone)
+                .map(|risks| risks.map(|risks| risks.hides_tone))
         };
-        assert_eq!(hides(""), Ok(true));
+        assert_eq!(hides(""), Ok(Some(true)));
         assert_eq!(
             hides(r#""ink":{"red":255,"green":255,"blue":255},"#),
-            Ok(false),
+            Ok(Some(false)),
             "a text color counts only the fill"
         );
     }
@@ -552,8 +529,8 @@ mod tests {
         assert_eq!(
             harness.ask(Owner::reading),
             Err(
-                "Not read on the live window now: no pixel in the region stands out from its \
-                 background, or has the reference's text color."
+                "Can't read on the live window now: nothing in its region stands out from the \
+                 background, or has the text color of its reference."
                     .to_owned()
             )
         );
@@ -623,8 +600,8 @@ mod tests {
         "reference":{"app":"example","id":"percent"},"whole":false}"#;
 
     /// What the live box says of `379%` read without the `7`.
-    const NO_SEVEN: &str = "Not read on the live window now: the value leaves out a character \
-        its number holds: it read `3 7 9 %`.";
+    const NO_SEVEN: &str = "Can't read on the live window now: the number shows a character \
+        that isn't in Characters it needs. It read \"3 7 9 %\".";
 
     /// A harness whose application `example` changes size as `size_changes`
     /// say, with a window that shows `379%` at [`DRAWN`] on screenshot 0 and
@@ -803,7 +780,7 @@ mod tests {
 
     /// What the live box says at a window a column wider than [`DRAWN`]
     /// when the application's window changes size rarely.
-    const A_COLUMN_WIDER: &str = "Not read at 25 × 12, the window's size now: it is read only \
+    const A_COLUMN_WIDER: &str = "Can't read at 25 × 12, the window's size now: it is read only \
         at the window sizes it was drawn at.";
 
     #[test]
@@ -868,7 +845,7 @@ mod tests {
         // Its text still shows inside the region as drawn, which is not
         // read all the same.
         harness.wait(SETTLE / 2);
-        let unread = "Not read at 25 × 12, the window's size now: it is read only at the window \
+        let unread = "Can't read at 25 × 12, the window's size now: it is read only at the window \
                       sizes it was drawn at.";
         assert_eq!(harness.ask(Owner::reading), Err(unread.to_owned()));
         assert_eq!(

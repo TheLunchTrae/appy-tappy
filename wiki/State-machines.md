@@ -139,8 +139,17 @@ it was about has gone. These guards reject stale state and messages:
   spec: the region, the samples, the text color, and the tolerance
   (`riskKey` in `apps/setup/src/lib/useReadingRisks.ts`). An answer under
   another key than the reference asks under now is not shown
-  (`risksArrived`), and a change of key clears the answer, so one for a
-  reference saved again under the same ID never shows.
+  (`risksArrived`), and neither is a failure under one. A change of key
+  clears the answer, so one for a reference saved again under the same ID
+  never shows.
+- **Saved reference mark keys.** The
+  [mark of a saved reference](#saved-reference-marks) on the References page
+  is asked for under a key made of its application's ID, the reference as
+  the application's file has it, and the characters the values that read
+  with it need (`useSavedRiskMark` in
+  `apps/setup/src/lib/useReadingRisks.ts`). A change of key cancels the ask
+  before it, so its answer is dropped, and a mark shows only under the key
+  it was asked under.
 - **Pointer IDs.** A region drag keeps the ID of the pointer that started it
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
@@ -1928,7 +1937,7 @@ stateDiagram-v2
   An answer replaces what the box shows: a reading, no reading while the
   window's size settles, why the frame cannot be read, or that the value is
   not read at the window's size now, such as
-  `Not read at 1280 × 720, the window's size now: …`. The check stays set
+  `Can't read at 1280 × 720, the window's size now: …`. The check stays set
   through that answer, an edit's included, so frames of a size the value is
   read at answer a reading with no new trial.
 - **Failed** (`error`). The owner refused the check, such as a label its
@@ -2957,23 +2966,124 @@ stateDiagram-v2
 ### Delete question
 
 A saved value's, reference's, or automation's row
-(`apps/setup/src/components/DeleteActions.tsx`) shows its buttons, asks, or
-deletes. The page holds which row asks (`confirming`), and the row holds
-whether its delete is on its way (`deleting`).
+(`apps/setup/src/components/DeleteActions.tsx`) shows its buttons, asks,
+deletes, or says why it cannot be deleted. The page holds which row asks
+(`confirming`) and why an item in use cannot be deleted (`blocked`), and the
+row holds whether its delete is on its way (`deleting`) and why the delete
+failed (`refused`).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Buttons
     Buttons --> Asking: Delete
+    Buttons --> Telling: Delete on an item in use
     Asking --> Buttons: Keep, Escape, or Delete on another row
+    Asking --> Telling: something starts to use the item
     Asking --> Deleting: the answer that deletes
     Deleting --> [*]: the item is deleted and the page has read its files again
-    Deleting --> Asking: the delete fails, and the page says why
+    Deleting --> Telling: the delete fails
     Deleting --> Buttons: Delete on another row, while the delete carries on
+    Buttons --> Telling: a delete that carried on fails
+    Telling --> Buttons: OK or Escape, and for an item in use Delete on another row
 ```
 
 - The question takes the buttons' place (`Question`), and focus moves to
   **Keep**. **Keep** and Escape put focus back on **Delete**.
+- `Telling` shows in the same place, with the reason and **OK** alone, which
+  takes the focus. The page knows a reference is in use from the values that
+  read with it (`keptByReaders`), and a value from the automations that
+  watch it (`keptByAutomations`), once the automations are read. The owner
+  refuses the same deletes, and any delete that fails shows what the owner
+  answered, after **Can't delete** and the item's name. **OK** and Escape
+  put focus back on **Delete**, and a refusal goes with them, so **Delete**
+  asks again.
+- A delete carries on when **Delete** on another row moves the question
+  there. The row shows its buttons meanwhile, and its answers stay disabled
+  if **Delete** asks again before the delete settles. When that delete
+  fails, the row says why in its buttons' place, whichever row the page asks
+  about by then, and stays `Telling` until **OK** or Escape: the refusal is
+  the row's own (`refused`), so the other row's question keeps its place.
+- A refusal takes focus to **OK** only while focus is still in the question
+  or nothing holds it, as after the locked answer that held it. Focus the
+  user moved during the delete, as to another row's question, stays there
+  (`focusIsFree` in `apps/setup/src/lib/focus.ts`).
+- A delete that works moves focus to the page's heading once the row is
+  gone, when the row's buttons held the focus (`useRowGone`). Focus that is
+  elsewhere by then, as in another row's question, stays there. It also
+  clears what the page said about an earlier failure, such as a draft that
+  could not be deleted.
+
+### Remove fix question
+
+A value's cell for the window's size now (`NowCellView` in
+`apps/setup/src/pages/ValuesPage.tsx`) shows **Remove fix** while the value
+reads from a fix at that size. The cell holds whether it asks (`asking`) and
+whether the removal is on its way (`removing`), and its row gives it a key
+of the window's size, so the cell and what it holds start again when the
+window takes another size.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Button
+    Button --> Asking: Remove fix
+    Asking --> Button: Keep or Escape
+    Asking --> Removing: the answer that removes
+    Removing --> [*]: the fix is removed and the page has read its files again
+    Removing --> Button: the removal fails, and the page says why
+    Asking --> [*]: the window takes a size the value has no fix at
+    Asking --> Button: the window takes another size the value has a fix at
+    Removing --> [*]: the window takes a size the value has no fix at
+    Removing --> Button: the window takes another size the value has a fix at
+```
+
+`[*]` is the cell without **Remove fix**, which shows again as `Button` when
+the value reads from a fix.
+
+- The question is about the fix at the size it was asked at. A window that
+  takes another size closes it, also when the value has a fix at the new
+  size: **Remove fix** there asks about that fix.
+- A size change during the removal closes the question too. The removal it
+  sent carries on for the size it was asked at: when it fails, the page
+  says why, and when it works, the fix is gone the next time the window has
+  that size. The focus the question held is not moved.
+
+- The question takes the place of **Remove fix** (`Question`), and focus
+  moves to **Keep**. **Keep** and Escape put focus back on **Remove fix**.
+- While `Removing`, the answers are disabled, so one answer sends one
+  removal. The question stays until the page has read the files again.
+- A removal that works takes **Remove fix** with it, so focus moves to
+  **Fix at this size** in the same cell, unless the user has put it
+  elsewhere meanwhile. A removal that fails puts focus back on
+  **Remove fix**.
+
+### Discard recording question
+
+Each button that discards a [recording](#recording) of readings
+(`DiscardRecording` in `apps/setup/src/components/Recording.tsx`) is
+**Discard** in the recording part, while it records and once it stopped, and
+**Discard recording** in review's bar. The button holds whether it asks
+(`asking`) and whether the discard is on its way (`discarding`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Button
+    Button --> [*]: Discard, and the recording has no readings
+    Button --> Asking: Discard, and the recording has readings
+    Asking --> Button: Keep recording or Escape
+    Asking --> Discarding: Discard recording
+    Discarding --> [*]: the recording is discarded
+    Discarding --> Button: the discard fails, and the recording part says why
+```
+
+- A recording with no readings has nothing to lose: review's edits and the
+  kept readings are of its readings. It discards at once.
+- The question takes the button's place (`Question`), and focus moves to
+  **Keep recording**, which leaves a recording that is under way recording.
+  **Keep recording** and Escape put focus back on the button.
+- While `Discarding`, the answers are disabled, so one answer sends one
+  discard. A discard that works moves focus to the recording part's title
+  (`discarded` in `apps/setup/src/lib/useReview.ts`), and one that fails
+  puts it back on the button.
 - The answer that deletes ignores the later clicks of a double-click, since
   the question may show under the pointer where **Delete** was pressed. Key
   presses and single clicks answer.
@@ -3257,7 +3367,9 @@ a shadow its tolerance leaves out, as
 now (`riskKey`), or none, and the last answer with the key it was asked
 under. The owner keeps nothing for it; each request is one `reading_risks`
 command, which teaches the reference, compares its shapes, and looks at its
-samples.
+samples. For a reference that can't learn one of its lessons, a box, a kept
+reading, or a saved picture, the command answers no risks rather than
+failing.
 
 ```mermaid
 stateDiagram-v2
@@ -3290,9 +3402,58 @@ stateDiagram-v2
   it need between them (`readersNeed`), and every pair when one of them needs
   none or none reads with it. It warns about no pair when none is left. It
   also warns when the answer says the tolerance leaves an outline or a
-  shadow out, whatever the value needs.
-- **Unanswered** is a failed request. The failure is logged and no warning
-  shows; the reference's own messages say what is wrong with its samples.
+  shadow out, whatever the value needs. The answer for a reference that
+  can't learn a lesson warns about nothing (`risksAnswered`): it has no
+  shapes to compare, and the reading of its
+  [live check](#live-check) says which lesson it can't learn and why, so the
+  editor says it once.
+- **Unanswered** is a failed request, such as one for a screenshot that is
+  gone. The failure is logged, and the editor says that it can't check for
+  characters that look alike, and why (`risksFailed`), in place of the
+  warnings, so a failed check does not look like a check that found nothing.
+  The failure is kept under the key it was asked under, like an answer, so
+  it goes when the key changes.
+
+### Saved reference marks
+
+The References page marks each saved reference that may not read as its
+samples do, for the same two reasons its editor warns about under
+[Reading risks](#reading-risks) (`RiskMark` in
+`apps/setup/src/components/RiskMark.tsx`, `useSavedRiskMark` in
+`apps/setup/src/lib/useReadingRisks.ts`). Each row has its own state: the key
+it asks under now, and the last mark with the key it was asked under. The
+owner keeps nothing for it; each request is one `saved_reading_risks`
+command, which learns the reference from its saved pictures.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Asking: the row shows
+    Asking --> Marked: the answer names a risk for what its values need
+    Asking --> Unmarked: the answer names none, or the request fails
+    Marked --> Asking: the reference or what its values need changes
+    Unmarked --> Asking: the reference or what its values need changes
+    Asking --> Asking: the reference or what its values need changes
+    Asking --> [*]: the row goes
+    Marked --> [*]: the row goes
+    Unmarked --> [*]: the row goes
+```
+
+- **Asking** has a request out and shows no mark. The page shows before the
+  first request is sent, since the effect that sends it runs after the row
+  is drawn, and the rows ask one after another on the owner's thread.
+- **Marked** shows **May misread** and a **?** that says the reasons to the
+  pointer and the keyboard (`Hint`, `riskMark`): a pair of
+  characters with one that the values reading with the reference need, or
+  any pair when one of them needs none or none reads with it, and an outline
+  or a shadow its tolerance leaves out.
+- **Unmarked** shows nothing: the reference has neither risk, or the request
+  failed. A failure is logged and is not a state of its own, since a
+  reference that can't learn its saved pictures says so in its editor and on
+  each value that reads with it.
+- A change to the reference in its application's file, such as a save from
+  its editor, or to what its values need, changes the key. The ask under the
+  old key is canceled (`ask`), so an answer for the reference as it was is
+  dropped, and the mark goes until the new answer arrives.
 
 ### Saved pictures a reference can't learn
 

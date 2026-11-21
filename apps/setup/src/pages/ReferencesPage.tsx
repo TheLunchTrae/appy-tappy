@@ -1,11 +1,13 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 
 import type { AppSummary, DraftSummary } from '../lib/bindings.ts';
 import { deleteReference, errorText } from '../lib/api.ts';
-import { andList, readers, referenceCharacters } from '../lib/reference.ts';
+import { andList, keptByReaders, readers, referenceCharacters } from '../lib/reference.ts';
 import { originText } from '../lib/sharing.ts';
+import { useRowGone } from '../lib/focus.ts';
 import { CharacterChips } from '../components/CharacterChips.tsx';
 import { DeleteActions } from '../components/DeleteActions.tsx';
+import { RiskMark } from '../components/RiskMark.tsx';
 import type { SavedRef } from '../lib/flow.ts';
 import { type Resumed, draftOfSaved, draftProblem, draftsOf } from '../lib/drafts.ts';
 import { labeledCharacters } from '../lib/captureDraft.ts';
@@ -29,25 +31,22 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const { heading, rowGone } = useRowGone<HTMLHeadingElement>();
+  // The row says why when this fails.
   const remove = async (app: string, reference: string): Promise<void> => {
-    try {
-      await deleteReference(app, reference);
-      setDeleteError(null);
-      // The question stays until the row is gone, so its buttons take no press meanwhile.
-      await onChanged();
-      setConfirming((current) => (current === `${app}/${reference}` ? null : current));
-    } catch (error: unknown) {
-      setDeleteError(errorText(error));
-    }
+    await deleteReference(app, reference);
+    setDeleteError(null);
+    // The question stays until the row is gone, so its buttons take no press meanwhile.
+    await onChanged();
+    setConfirming((current) => (current === `${app}/${reference}` ? null : current));
+    rowGone();
   };
 
-  const headingRef = useRef<HTMLHeadingElement>(null);
   const removeDraft = async (id: string): Promise<void> => {
     try {
       await onDeleteDraft(id);
       setDeleteError(null);
-      // The deleted row took the focused button with it.
-      headingRef.current?.focus();
+      rowGone();
     } catch (error: unknown) {
       setDeleteError(errorText(error));
     }
@@ -91,7 +90,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
   return (
     <main className="page">
       <div className="page-head">
-        <h1 ref={headingRef} tabIndex={-1}>
+        <h1 ref={heading} tabIndex={-1}>
           References
         </h1>
         <span className="lead">
@@ -117,8 +116,9 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
         <div className="empty">
           <h2>No references yet</h2>
           <p>
-            A reference is how AppyTappy knows an application&apos;s characters: their color and the shape of each
-            digit. Make one here, or from a number value&apos;s region while you set the value up.
+            A reference is how AppyTappy knows an application&apos;s characters: the shape of each digit and sign, and a
+            text color when the text needs one. Make one here, or from a number value&apos;s region while you set the
+            value up.
           </p>
           <button type="button" className="btn primary" onClick={onNew}>
             New reference
@@ -137,17 +137,19 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
               </th>
             </tr>
           </thead>
-          <tbody>
-            {withReferences.map((app) => {
-              const { file } = app;
-              if (file === null) {
-                return null;
-              }
-              return [
-                <tr key={app.id} className="group">
-                  <td colSpan={4}>{file.name}</td>
-                </tr>,
-                ...file.references.map((reference) => {
+          {withReferences.map((app) => {
+            const { file } = app;
+            if (file === null) {
+              return null;
+            }
+            return (
+              <tbody key={app.id}>
+                <tr className="group">
+                  <th colSpan={4} scope="rowgroup">
+                    {file.name}
+                  </th>
+                </tr>
+                {file.references.map((reference) => {
                   const key = `${app.id}/${reference.id}`;
                   const used = readers(file, reference.id);
                   const changes = draftOfSaved(drafts, 'reference', reference.id, app.id);
@@ -155,6 +157,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                     <tr key={key}>
                       <td>
                         {reference.name}
+                        <RiskMark app={app.id} file={file} reference={reference} />
                         {changes === null ? null : (
                           <>
                             {' '}
@@ -173,7 +176,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                         <DeleteActions
                           name={reference.name}
                           actLabel="Delete reference"
-                          title={used.length === 0 ? undefined : `${andList(used)} read with it`}
+                          blocked={keptByReaders(used)}
                           confirming={confirming === key}
                           onConfirm={(asking) => {
                             setConfirming(asking ? key : null);
@@ -206,22 +209,22 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                       </td>
                     </tr>
                   );
-                }),
-                ...draftRows(draftsOfApp(app.id)),
-              ];
-            })}
-            {orphans.length === 0 ? null : (
-              <>
-                <tr className="group">
-                  <td colSpan={4}>
-                    Drafts
-                    <small className="warn">Their application is no longer saved, or its file cannot be read.</small>
-                  </td>
-                </tr>
-                {draftRows(orphans)}
-              </>
-            )}
-          </tbody>
+                })}
+                {draftRows(draftsOfApp(app.id))}
+              </tbody>
+            );
+          })}
+          {orphans.length === 0 ? null : (
+            <tbody>
+              <tr className="group">
+                <th colSpan={4} scope="rowgroup">
+                  Drafts
+                  <small className="warn">Their application is no longer saved, or its file cannot be read.</small>
+                </th>
+              </tr>
+              {draftRows(orphans)}
+            </tbody>
+          )}
         </table>
       )}
     </main>

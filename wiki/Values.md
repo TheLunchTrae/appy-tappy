@@ -407,8 +407,9 @@ the number or comes before it, and is never part of it. So a value that
 needs only **Digits** reads `87%` as 87 and `Lv.5` as 5.
 
 The value reads nothing while a character it leaves out is a part of the
-number its region shows, and says that it leaves out a character its number
-holds, since the number would be another number without it. So a value that
+number its region shows, and says that the number shows a character that
+isn't in **Characters it needs**, since the number would be another number
+without it. So a value that
 needs only **Digits** reads none of `-5`, `.5`, `87.5%`, and `1,234`: turn
 on **Minus**, **Decimal point**, or **Comma**. With **Whole number only**
 on, the number ends at its `.` anyway, so such a value reads `87.5%` as 87.
@@ -665,18 +666,20 @@ The Values page shows each value's size and side under **Region**, such as
 
 ### Fix a value at one size
 
-While the application runs, the Values page adds a column for the window's
-size now, such as **At 3440 × 1440 now**, with what each value reads there.
-Closing an application's window clears its live readings. When no windows
-are open for the listed values, their saved rows stay and the live column
-goes away.
+The Values page has a column for the window's size now, with what each value
+reads there while its application runs. The column's heading names the size,
+such as **At 3440 × 1440 now**, or says **At the window's size now** while
+no window is open or the open windows differ in size. Closing an
+application's window clears its live readings, and its values say
+**Not running** there.
 
 Each value has **Fix at this size** beside it there, unless the window is at
 the size the value was first drawn at. At that size, [edit the
 value](#edit-a-value) instead. **Matches no state** isn't always wrong: the
 region may show none of the states right now. A value that can't be read
-there says why, such as **Cannot read: a character has a shape the reference
-has not learned**.
+there says why and what to do about it, such as **Can't read: character 3 of
+"8 7 ?" has a shape Digits hasn't learned. It looks closest to "8". Teach it
+on the References page.**
 
 1. AppyTappy finds the application's window and takes a screenshot of it at
    its size now, with the region where the value would be read there: it
@@ -701,7 +704,8 @@ has not learned**.
 At that size AppyTappy then reads the fix exactly, instead of scaling. The
 **Region** column lists each fix, such as **· fixed at 3440 × 1440**. A value
 can have up to 8 fixes. Fixing it again at the same size replaces the fix,
-and **Remove fix** beside a reading made with one removes it.
+and **Remove fix** beside a reading made with one removes it, after you
+answer **Remove fix** again to confirm.
 
 While you resize the window, AppyTappy waits until the window keeps one size
 for a quarter of a second before it reads at that size. While the window is
@@ -765,7 +769,7 @@ one of these:
 
 The box in the last step shows what the edited value reads at the
 window's size now: scaled, at its fix, or
-**Not read at 2560 × 1440, the window's size now**, as
+**Can't read at 2560 × 1440, the window's size now**, as
 [Window size](#window-size) describes.
 
 ### States in an edit
@@ -847,5 +851,6 @@ Draw the region again and the value says how you make it now.
 ## Delete a value
 
 Select **Delete** next to a value, then **Delete value** to confirm. A value
-that an automation watches cannot be deleted: the Values page names the
-automations to change or delete first.
+that an automation watches cannot be deleted: **Delete** says **Can't
+delete** with the value's name and the automations to change or delete
+first, in the value's row, and **OK** closes that.

@@ -1,7 +1,15 @@
 import { expect, test } from 'bun:test';
 
 import type { CharactersSpec } from '../src/lib/bindings.ts';
-import { lookalikeWarning, neededPairs, riskKey, risksArrived } from '../src/lib/useReadingRisks.ts';
+import {
+  lookalikeWarning,
+  neededPairs,
+  riskKey,
+  riskMark,
+  risksAnswered,
+  risksArrived,
+  risksFailed,
+} from '../src/lib/useReadingRisks.ts';
 
 const pairs = [
   ['8', '6'],
@@ -46,9 +54,9 @@ test('an answer shows only while the reference asks under the key it was asked u
     dropped: [],
   };
   const asked = riskKey(spec) ?? '';
-  const risks = { lookalikes: [['8', '6']], hidesTone: true } as const;
+  const risks = { lookalikes: [['8', '6']], hidesTone: true, problem: null } as const;
   const answer = { key: asked, risks };
-  const none = { lookalikes: [], hidesTone: false };
+  const none = { lookalikes: [], hidesTone: false, problem: null };
   expect(riskKey(null)).toBeNull();
   expect(riskKey({ ...spec })).toBe(asked);
   expect(risksArrived(answer, asked)).toEqual(risks);
@@ -57,4 +65,42 @@ test('an answer shows only while the reference asks under the key it was asked u
   expect(risksArrived(answer, relabeled)).toEqual(none);
   expect(risksArrived(answer, riskKey({ ...spec, ink: { red: 255, green: 0, blue: 0 } }))).toEqual(none);
   expect(risksArrived(answer, null)).toEqual(none);
+});
+
+test('a check that failed says so under the key it was asked under, unlike a check that found nothing', () => {
+  const failed = risksFailed('That screenshot is gone. Take a new one and try again.');
+  expect(failed).toEqual({
+    lookalikes: [],
+    hidesTone: false,
+    problem: "Can't check for characters that look alike. That screenshot is gone. Take a new one and try again.",
+  });
+  expect(risksArrived({ key: 'asked', risks: failed }, 'asked')).toEqual(failed);
+  // A change to what it asks about drops the failure with the answer, and the next answer replaces it.
+  expect(risksArrived({ key: 'asked', risks: failed }, 'changed').problem).toBeNull();
+});
+
+test('a reference that cannot be taught is answered no risks and no problem, since its check says why', () => {
+  const none = { lookalikes: [], hidesTone: false, problem: null };
+  expect(risksAnswered(null)).toEqual(none);
+  expect(risksAnswered({ lookalikes: [['8', '6']], hidesTone: true })).toEqual({
+    lookalikes: [['8', '6']],
+    hidesTone: true,
+    problem: null,
+  });
+});
+
+test('a saved reference is marked for the pairs its values can misread and for a hidden outline', () => {
+  const none = { lookalikes: [], hidesTone: false };
+  expect(riskMark(none, [])).toBeNull();
+  expect(riskMark({ ...none, lookalikes: [['8', '6']] }, [])).toBe(
+    '8 and 6 look alike in what it learned. Edit it to see what to do.',
+  );
+  // No value that reads with it needs either character.
+  expect(riskMark({ ...none, lookalikes: [['8', '6']] }, ['1', '2'])).toBeNull();
+  expect(riskMark({ lookalikes: pairs, hidesTone: true }, ['0'])).toBe(
+    "Some characters look alike in what it learned. An outline or a shadow around the characters isn't part of what it learned. Edit it to see what to do.",
+  );
+  expect(riskMark({ ...none, hidesTone: true }, ['1'])).toBe(
+    "An outline or a shadow around the characters isn't part of what it learned. Edit it to see what to do.",
+  );
 });

@@ -929,14 +929,27 @@ pub(crate) async fn contrast_tolerance(app: AppHandle, spec: CharactersSpec) -> 
 }
 
 /// What may keep the reference `spec` teaches from reading as its samples
-/// do.
+/// do, or `None` for one that can't learn one of its lessons.
 #[tauri::command]
 pub(crate) async fn reading_risks(
     app: AppHandle,
     spec: CharactersSpec,
-) -> Result<ReadingRisks, String> {
+) -> Result<Option<ReadingRisks>, String> {
     try_ask(&app, "reading_risks", move |owner| {
         owner.reading_risks(&spec)
+    })
+    .await
+}
+
+/// What may keep the saved reference `reference` from reading as its
+/// samples do.
+#[tauri::command]
+pub(crate) async fn saved_reading_risks(
+    app: AppHandle,
+    reference: ReferenceRef,
+) -> Result<ReadingRisks, String> {
+    try_ask(&app, "saved_reading_risks", move |owner| {
+        owner.saved_reading_risks(&reference)
     })
     .await
 }

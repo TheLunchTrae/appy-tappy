@@ -135,9 +135,9 @@ This page covers what the user guide leaves out.
   failure as its problem. Once the window has closed, no recording starts or goes
   on until another window is picked.
 - **Live reading.** `read_value` answers what the check being set up reads
-  on the newest frame, or why that frame cannot be read, in the check's own
-  words (`CheckError`), which the box under the check shows in place of a
-  reading. The live check is the value the check would save
+  on the newest frame, or why that frame cannot be read, in the setup app's
+  words for the check's error (`reading::cant_read`), which the box under
+  the check shows in place of a reading. The live check is the value the check would save
   (`owner/live.rs`): `set_check` converts the page's description to its
   saved form with `check_spec::to_saved` and reads it back with
   `saved::build`, as a save does, so no second implementation of a check
@@ -852,6 +852,13 @@ reference found by contrast asks once its tolerance is fitted, since the fit
 changes the spec.
 [Reading risks](State-machines.md#reading-risks) has its
 states. Only the setup app checks this, so the runtime is unchanged.
+
+The References page asks the same of each saved reference, and of its hidden
+outlines, once its row shows (`saved_reading_risks`, `useSavedRiskMark`), and
+marks the row (`RiskMark`). The owner learns the reference from its saved
+pictures for each ask, on its own thread.
+[Saved reference marks](State-machines.md#saved-reference-marks) has the
+states.
 
 ### Hidden outlines
 
