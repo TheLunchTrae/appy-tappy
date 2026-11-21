@@ -21,7 +21,7 @@ use appytappy_config::app_file::{PinDef, SizeChangesDef};
 use appytappy_config::settings_file::ReadInterval;
 use appytappy_sources::schedule::{Activity, ReadSchedule};
 use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ImageMatch};
-use appytappy_sources::screen::digits::{DigitReader, InkRule};
+use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::find::PictureSearch;
 use appytappy_sources::screen::mask::Mask;
 use appytappy_sources::screen::saved::{SavedCheck, SavedValue};
@@ -33,12 +33,6 @@ const SAMPLES: usize = 101;
 /// The time each sample aims to fill, so short operations repeat enough to
 /// outlast the clock's resolution.
 const SAMPLE_TIME: Duration = Duration::from_millis(1);
-
-const WHITE: Rgb = Rgb {
-    red: 255,
-    green: 255,
-    blue: 255,
-};
 
 type BenchResult = Result<(), Box<dyn Error>>;
 
@@ -70,13 +64,8 @@ fn main() -> BenchResult {
     )
     .map_err(|_same| io::Error::other("the fixture bar's colors match"))?;
     let glyphs = Image::decode_png(include_bytes!("../tests/fixtures/digits.png"))?;
-    let mut reader = DigitReader::new(InkRule::Contrast { tolerance: 60 });
+    let mut reader = DigitReader::new();
     reader.learn(&glyphs, "0123456789.%")?;
-    let mut reader_by_color = DigitReader::new(InkRule::Color {
-        color: WHITE,
-        tolerance: 60,
-    });
-    reader_by_color.learn(&glyphs, "0123456789.%")?;
     let gold = ColorMatch {
         color: second.pixel(105, 115).ok_or_else(missing)?,
         tolerance: 40,
@@ -127,9 +116,6 @@ fn main() -> BenchResult {
     })?;
     report(&mut out, "bar fill, 202x12", || fill.percent(&bar))?;
     report(&mut out, "number, 100x28", || reader.read(&counter, false))?;
-    report(&mut out, "number with a text color, 100x28", || {
-        reader_by_color.read(&counter, false)
-    })?;
     report(&mut out, "color, 120x50", || gold.matches(&panel))?;
     report(&mut out, "image, 120x50", || picture.matches(&panel))?;
     report(&mut out, "image, 120x50, every other pixel", || {

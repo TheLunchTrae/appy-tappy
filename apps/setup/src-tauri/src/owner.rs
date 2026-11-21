@@ -71,7 +71,7 @@ pub(crate) use self::live::{ReadingRisks, ReferenceTrial, TrialSpec};
 pub(crate) use self::messages::{Event, Message, Run};
 pub(crate) use self::recording::RecordSpec;
 pub(crate) use self::references::{
-    ReferenceSaveSpec, ReferenceSettingsSpec, SavedReferenceId, SavingKind,
+    ReferenceSaveSpec, ReferenceSettingsSpec, SavedReferenceId,
 };
 pub(crate) use self::sharing::{ImportSpec, SharedView};
 pub(crate) use self::values::{SaveSpec, SavedValue};

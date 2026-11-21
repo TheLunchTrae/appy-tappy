@@ -1214,13 +1214,7 @@ mod tests {
 
         use super::*;
         use crate::screen::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
-        use crate::screen::digits::{DigitReader, InkRule};
-
-        const WHITE: Rgb = Rgb {
-            red: 255,
-            green: 255,
-            blue: 255,
-        };
+        use crate::screen::digits::DigitReader;
 
         fn screenshots() -> [Image; 2] {
             [
@@ -1258,38 +1252,21 @@ mod tests {
             let glyphs =
                 Image::decode_png(include_bytes!("../../tests/fixtures/digits.png")).unwrap();
             let counter = Region::new(120, 38, 100, 28).unwrap();
-            let by_color = InkRule::Color {
-                color: WHITE,
-                tolerance: 60,
-            };
-            for ink_rule in [InkRule::Contrast { tolerance: 60 }, by_color] {
-                let mut reader = DigitReader::new(ink_rule);
-                reader.learn(&glyphs, "0123456789.%").unwrap();
-                let check = Check::Number {
-                    reader,
-                    whole: false,
-                };
-                assert_eq!(
-                    read(&check, &first, counter),
-                    Value::Number(Number::new(37.0).unwrap()),
-                    "{ink_rule:?}"
-                );
-                assert_eq!(
-                    read(&check, &second, counter),
-                    Value::Number(Number::new(90.5).unwrap()),
-                    "{ink_rule:?}"
-                );
-            }
-            let mut reader = DigitReader::new(by_color);
+            let mut reader = DigitReader::new();
             reader.learn(&glyphs, "0123456789.%").unwrap();
-            let whole = Check::Number {
-                reader,
-                whole: true,
-            };
-            assert_eq!(
-                read(&whole, &second, counter),
-                Value::Number(Number::new(90.0).unwrap())
-            );
+            for (whole, shown) in [(false, [37.0, 90.5]), (true, [37.0, 90.0])] {
+                let check = Check::Number {
+                    reader: reader.clone(),
+                    whole,
+                };
+                for (screenshot, shown) in [&first, &second].into_iter().zip(shown) {
+                    assert_eq!(
+                        read(&check, screenshot, counter),
+                        Value::Number(Number::new(shown).unwrap()),
+                        "whole: {whole}"
+                    );
+                }
+            }
         }
 
         #[test]

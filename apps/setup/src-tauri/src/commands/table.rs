@@ -90,7 +90,6 @@ macro_rules! with_commands {
             commands::capture_outline(application: String, width: u32, height: u32) -> CaptureOutline;
             /// The tolerance the reference `spec` teaches finds its characters by contrast with: `spec`'s own while every
             /// sample reads with it, and otherwise one its samples read with, when there is one.
-            commands::contrast_tolerance(spec: CharactersSpec) -> u8;
             /// What may keep the reference `spec` teaches from reading as its samples do: the pairs of characters whose
             /// learned shapes match each other, and whether its tolerance leaves an outline or a shadow out. Null for a
             /// reference that can't learn one of its lessons, which its live check says.
@@ -102,7 +101,7 @@ macro_rules! with_commands {
             /// or by contrast without one, and `tolerance` tells it from the region's background, at any size,
             /// elsewhere on that screenshot and away from the finds `added` already and those an earlier search offered
             /// that the user left out, `passed`, in place of any earlier search.
-            commands::find_like(screenshot: usize, region: RegionDef, added: Vec<RegionDef>, passed: Vec<RegionDef>, ink: Option<ColorDef>, tolerance: u8) -> FoundView;
+            commands::find_like(screenshot: usize, region: RegionDef, added: Vec<RegionDef>, passed: Vec<RegionDef>) -> FoundView;
             /// The search and the text read for each find so far, or null without one.
             commands::found_state() -> Option<FoundView>;
             /// A find of search `search` at most `maxWidth` wide, or null for an unknown index or a replaced search.
@@ -110,14 +109,13 @@ macro_rules! with_commands {
             /// Has the text reader read finds `indexes` of search `search` again, as the text color `ink`, if any, and
             /// `tolerance` tell their characters from the background,
             /// and answers the search, or null when that search was replaced or forgotten.
-            commands::reread_found(search: U64AsNumber, indexes: Vec<usize>, ink: Option<ColorDef>, tolerance: u8) -> Option<FoundView>;
             /// Forgets the search.
             commands::forget_found() -> ();
             /// The characters the box `region` of screenshot `screenshot` shows, as the text color `ink`, if any, and
             /// `tolerance` split them,
             /// each with the name a find's or a recorded reading's character of the same shape has. None for an unknown
             /// screenshot or a box that does not fit it.
-            commands::box_characters(screenshot: usize, region: RegionDef, ink: Option<ColorDef>, tolerance: u8) -> Vec<CharacterView>;
+            commands::box_characters(screenshot: usize, region: RegionDef) -> Vec<CharacterView>;
             /// Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can.
             commands::found_problems(spec: CharactersSpec, found: Vec<Label>) -> Vec<Option<String>>;
             /// Captures a saved value's region on its application's window, replacing any capture, and returns the
@@ -213,7 +211,7 @@ macro_rules! with_commands {
             commands::save_reference_settings(spec: ReferenceSettingsSpec) -> SavedReferenceId;
             /// The saved pictures the saved reference `reference` can't learn with the text color `ink`, or by contrast
             /// without one, and `tolerance`, saved as `saving` says without the pictures `dropped` names.
-            commands::unlearned_samples(reference: ReferenceRef, ink: Option<ColorDef>, tolerance: u8, dropped: Vec<String>, saving: SavingKind) -> Vec<UnlearnedSample>;
+            commands::unlearned_samples(reference: ReferenceRef, dropped: Vec<String>) -> Vec<UnlearnedSample>;
             /// The saved picture `image` of the saved reference `reference` at most `maxWidth` wide, or null when there
             /// is none.
             commands::sample_picture(reference: ReferenceRef, image: String, max_width: u32) -> Pixels;

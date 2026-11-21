@@ -112,7 +112,7 @@ mod tests {
     use super::*;
     use crate::screen::Size;
     use crate::screen::check::{BarFill, ColorMatch, ImageMatch, StateMatch};
-    use crate::screen::digits::{DigitReader, InkRule};
+    use crate::screen::digits::DigitReader;
 
     const WHITE: Rgb = Rgb {
         red: 255,
@@ -141,21 +141,20 @@ mod tests {
         Image::new(size, bgra).expect("matching length")
     }
 
-    /// "1" then "7", a pixel apart.
-    const ONE_SEVEN: [&str; 5] = [
-        "#.###", //
-        "#...#", //
-        "#...#", //
-        "#...#", //
-        "#...#", //
+    /// "1" then "7", a pixel apart and a pixel in from each edge.
+    const ONE_SEVEN: [&str; 7] = [
+        ".......", //
+        ".#.###.", //
+        ".#...#.", //
+        ".#...#.", //
+        ".#...#.", //
+        ".#...#.", //
+        ".......", //
     ];
 
     #[test]
     fn a_number_scores_each_character_against_its_glyphs() {
-        let mut reader = DigitReader::new(InkRule::Color {
-            color: WHITE,
-            tolerance: 10,
-        });
+        let mut reader = DigitReader::new();
         reader.learn(&draw(&ONE_SEVEN), "17").expect("learn");
         let check = Check::Number {
             reader,
@@ -178,10 +177,10 @@ mod tests {
             .collect();
         assert_eq!(read, "17", "the best matches are what a read reads");
         let one = characters.first().expect("a 1");
-        assert_eq!(one.best.map(|best| best.differing), Some(0));
+        assert_eq!(one.best.map(|best| best.distance), Some(0));
         let runner_up = one.runner_up.expect("a 7 as runner-up");
         assert_eq!(runner_up.character, '7');
-        assert!(runner_up.differing > 0, "{runner_up:?}");
+        assert!(runner_up.distance > 0, "{runner_up:?}");
         assert_eq!(
             check.explain(&draw(&["....."])),
             Err(CheckError::Number(super::super::digits::ReadError::NoInk))
@@ -190,16 +189,14 @@ mod tests {
 
     #[test]
     fn a_number_with_one_character_has_no_runner_up() {
-        let mut reader = DigitReader::new(InkRule::Color {
-            color: WHITE,
-            tolerance: 10,
-        });
-        reader.learn(&draw(&["#", "#", "#"]), "1").expect("learn");
+        let mut reader = DigitReader::new();
+        let one = draw(&["...", ".#.", ".#.", ".#.", "..."]);
+        reader.learn(&one, "1").expect("learn");
         let Ok(Workings::Number(characters)) = (Check::Number {
             reader,
             whole: false,
         })
-        .explain(&draw(&["#", "#", "#"])) else {
+        .explain(&one) else {
             panic!("number workings");
         };
         assert_eq!(characters.len(), 1);

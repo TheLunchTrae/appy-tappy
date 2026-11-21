@@ -21,7 +21,7 @@ use crate::overlay::OverlayWindow;
 use crate::recording::{Scope, Text, look, ocr};
 use crate::stores::{self, Stores};
 use crate::ticket::Ticket;
-use appytappy_config::app_file::{ColorDef, RegionDef};
+use appytappy_config::app_file::RegionDef;
 
 use super::host::{ClickNow, ClickedWindow, Host};
 use super::messages::{Event, Message};
@@ -357,54 +357,52 @@ pub(super) fn found_text(search: u64, index: usize, text: Text) -> Message<FakeH
     }
 }
 
-/// A 14 by 8 frame of two white blocks whose black outlines touch, on
-/// a dark blue background.
-pub(super) fn outlined() -> Image {
-    let pixels = (0..8_u32)
-        .flat_map(|y| {
-            (0..14_u32).flat_map(move |x| {
-                let inside = (2..6).contains(&y);
-                if inside && ((3..5).contains(&x) || (9..11).contains(&x)) {
-                    [255, 255, 255, 0]
-                } else if (1..7).contains(&y) && (2..12).contains(&x) {
-                    [0, 0, 0, 0]
-                } else {
-                    [90, 30, 10, 0]
-                }
-            })
-        })
-        .collect();
-    Image::new(
-        Size {
-            width: 14,
-            height: 8,
-        },
-        pixels,
-    )
-    .expect("matching length")
-}
-
-/// A 20 by 8 frame with three marks of red on a gray background, each
-/// 6 tall: a 5 wide block at x 1, the same block less its top right
-/// pixel at x 8, and a 1 wide bar at x 15.
+/// A 40 by 18 frame with three marks of red on a gray background, each
+/// 16 tall: a 16 wide block at x 1, the same block less the 2 by 2 pixels
+/// of its top right corner at x 19, and a 2 wide bar at x 37.
 pub(super) fn near_twins() -> Image {
     let red = [0, 0, 255, 0];
     let gray = [40, 40, 40, 0];
-    let pixels = (0..8_u32)
+    let pixels = (0..18_u32)
         .flat_map(|y| {
-            (0..20_u32).flat_map(move |x| {
-                let tall = (1..7).contains(&y);
-                let block = tall && (1..6).contains(&x);
-                let twin = tall && (8..13).contains(&x) && !(x == 12 && y == 1);
-                let bar = tall && x == 15;
+            (0..40_u32).flat_map(move |x| {
+                let tall = (1..17).contains(&y);
+                let block = tall && (1..17).contains(&x);
+                let corner = (33..35).contains(&x) && (1..3).contains(&y);
+                let twin = tall && (19..35).contains(&x) && !corner;
+                let bar = tall && (37..39).contains(&x);
                 if block || twin || bar { red } else { gray }
             })
         })
         .collect();
     Image::new(
         Size {
-            width: 20,
-            height: 8,
+            width: 40,
+            height: 18,
+        },
+        pixels,
+    )
+    .expect("matching length")
+}
+
+/// An 8 by 6 gray frame with two red strokes, each 2 wide and 4 tall with
+/// gray all around it: two characters of one shape, the first in the
+/// frame's left half and the second in its right.
+pub(super) fn text_frame() -> Image {
+    let red = [0, 0, 255, 0];
+    let gray = [40, 40, 40, 0];
+    let pixels = (0..6_u32)
+        .flat_map(|y| {
+            (0..8_u32).flat_map(move |x| {
+                let stroke = (1..5).contains(&y) && matches!(x, 1 | 2 | 5 | 6);
+                if stroke { red } else { gray }
+            })
+        })
+        .collect();
+    Image::new(
+        Size {
+            width: 8,
+            height: 6,
         },
         pixels,
     )
@@ -577,15 +575,13 @@ pub(super) fn characters(json: &str) -> CharactersSpec {
 }
 
 /// A recording of `region` of screenshot 0 of the application `example`'s
-/// window, of characters of the color `ink` at no tolerance.
-pub(super) fn characters_in(region: RegionDef, ink: ColorDef) -> RecordSpec {
+/// window.
+pub(super) fn characters_in(region: RegionDef) -> RecordSpec {
     RecordSpec {
         app: "example".to_owned(),
         region,
         screenshot: 0,
         pin: None,
-        ink: Some(ink),
-        tolerance: 0,
         scope: Scope::Place,
         examples: Vec::new(),
     }
@@ -618,6 +614,16 @@ pub(super) fn capturing(name: &str) -> (Harness, FrameHandler, std::path::PathBu
     let (mut harness, root) = with_example_app(name);
     let mut handler = harness.pick();
     harness.deliver(&mut handler, Ok(&frame_image()));
+    assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+    (harness, handler, root)
+}
+
+/// A harness with `Example App` saved and window 7 picked, [`text_frame`]
+/// its newest frame and its screenshot 0, with the capture's handler.
+pub(super) fn capturing_text(name: &str) -> (Harness, FrameHandler, std::path::PathBuf) {
+    let (mut harness, root) = with_example_app(name);
+    let mut handler = harness.pick();
+    harness.deliver(&mut handler, Ok(&text_frame()));
     assert_eq!(harness.ask(Owner::screenshot), Ok(0));
     (harness, handler, root)
 }

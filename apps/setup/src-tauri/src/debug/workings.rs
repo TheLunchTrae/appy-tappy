@@ -85,15 +85,10 @@ pub(crate) struct CharacterView {
 pub(crate) struct GlyphView {
     /// The glyph's character.
     pub(crate) character: String,
-    /// How many grid cells one of the two sets where the other sets
-    /// neither that cell nor one beside it.
-    pub(crate) apart: u32,
-    /// How many grid cells only one of the two sets.
-    pub(crate) differing: u32,
-    /// How many grid cells either of the two sets.
-    pub(crate) set: u32,
-    /// Whether the character reads as this glyph: at most 1 in 32 of the
-    /// set cells are apart.
+    /// How far the character's shape is from the glyph's, from 0 for the
+    /// same shape to 1000.
+    pub(crate) distance: u16,
+    /// Whether the character is close enough to read as this glyph.
     pub(crate) matches: bool,
 }
 
@@ -205,9 +200,7 @@ impl From<GlyphScore> for GlyphView {
     fn from(score: GlyphScore) -> Self {
         Self {
             character: score.character.to_string(),
-            apart: score.apart,
-            differing: score.differing,
-            set: score.set,
+            distance: score.distance,
             matches: score.matches(),
         }
     }
@@ -302,23 +295,21 @@ mod tests {
 
     #[test]
     fn a_failed_number_keeps_its_reason_beside_its_character_scores() {
+        // Each picture has a pixel of background all around its rows.
         let image = |rows: &[&str]| {
+            let width = rows[0].len().checked_add(2).unwrap();
             let size = Size {
-                width: u32::try_from(rows[0].len()).unwrap(),
-                height: u32::try_from(rows.len()).unwrap(),
+                width: u32::try_from(width).unwrap(),
+                height: u32::try_from(rows.len().checked_add(2).unwrap()).unwrap(),
             };
-            Image::new(size, row(&rows.concat()).as_bgra().to_vec()).unwrap()
+            let blank = ".".repeat(width);
+            let framed: Vec<String> = std::iter::once(blank.clone())
+                .chain(rows.iter().map(|row| format!(".{row}.")))
+                .chain(std::iter::once(blank))
+                .collect();
+            Image::new(size, row(&framed.concat()).as_bgra().to_vec()).unwrap()
         };
-        let mut reader = appytappy_sources::screen::digits::DigitReader::new(
-            appytappy_sources::screen::digits::InkRule::Color {
-                color: Rgb {
-                    red: 255,
-                    green: 255,
-                    blue: 255,
-                },
-                tolerance: 0,
-            },
-        );
+        let mut reader = appytappy_sources::screen::digits::DigitReader::new();
         reader.learn(&image(&["#", "#", "#"]), "1").unwrap();
         reader.learn(&image(&["#.#", ".#.", "#.#"]), "%").unwrap();
         reader

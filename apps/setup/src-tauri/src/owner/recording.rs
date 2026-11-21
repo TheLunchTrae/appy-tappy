@@ -5,8 +5,8 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use appytappy_config::app_file::{ColorDef, PinDef, RegionDef};
-use appytappy_sources::screen::digits::DigitReader;
+use appytappy_config::app_file::{PinDef, RegionDef};
+use appytappy_sources::screen::digits::{DigitReader, Tone};
 use appytappy_sources::screen::{Image, Region, Size};
 use serde::Deserialize;
 
@@ -38,13 +38,6 @@ pub(crate) struct RecordSpec {
     /// The side of the window the region stays at as the window changes
     /// size, or `None` for the side the region is nearest.
     pub(crate) pin: Option<PinDef>,
-    /// The reference's text color, or `None` when it finds its characters
-    /// by contrast.
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub(crate) ink: Option<ColorDef>,
-    /// The reference's tolerance, as `ReferenceDef` has it.
-    pub(crate) tolerance: u8,
     /// Where to look for characters: in the region alone, or wherever the
     /// window shows text like the region's.
     pub(crate) scope: Scope,
@@ -166,7 +159,7 @@ impl<H: Host> Owner<H> {
     /// Records what `spec` names of the picked window, keeping each reading
     /// it shows: in the region alone, or wherever
     /// the window shows text like the region's. With `more`, goes on with
-    /// the stopped recording, which must be of the same region, ink, window
+    /// the stopped recording, which must be of the same region, window
     /// size, and scope; otherwise starts a new one in place of any
     /// recording. The recording follows the window to another size as
     /// `spec`'s application says its window changes size ([`Follows`]). A
@@ -178,28 +171,26 @@ impl<H: Host> Owner<H> {
         let (region, window_size) = self.recordable(spec.region, spec.screenshot)?;
         let size_changes = self.stores()?.app(&spec.app)?.file.size_changes;
         let follows = Follows::of(size_changes, spec.pin, region, window_size);
-        let ink_rule = check_spec::ink_rule(spec.ink, spec.tolerance);
         let now = Instant::now();
         // The whole window is searched for text as tall as each example's
         // on its screenshot.
-        let reader = DigitReader::new(ink_rule);
+        let reader = DigitReader::new();
         let examples = match spec.scope {
             Scope::Place => Vec::new(),
             Scope::Window => self.example_heights(&spec.examples, window_size, &reader),
         };
         match self.capture.recording_mut() {
             Some(Recorder::Readings(recording))
-                if more && recording.records(region, ink_rule, window_size, spec.scope) =>
+                if more && recording.records(region, window_size, spec.scope) =>
             {
                 recording.resume(follows, now);
                 recording.look_for(examples);
                 Ok(recording.id.number())
             },
             Some(Recorder::Readings(_)) if more => Err(
-                "Recording more needs the settings it was recorded with: the same place, the \
-                 same way to tell the characters from the background, a screenshot of the same \
-                 window size, and the same choice of where to look. Use its settings, or discard \
-                 the recording to start a new one."
+                "Recording more needs the settings it was recorded with: the same place, a \
+                 screenshot of the same window size, and the same choice of where to look. Use \
+                 its settings, or discard the recording to start a new one."
                     .to_owned(),
             ),
             Some(Recorder::Looks(_)) | None if more => Err(
@@ -212,13 +203,12 @@ impl<H: Host> Owner<H> {
                 // measured before anything is replaced.
                 let sample = match spec.scope {
                     Scope::Place => None,
-                    Scope::Window => Some(self.sample_height(region, spec.screenshot, &reader)?),
+                    Scope::Window => Some(self.sample(region, spec.screenshot, &reader)?),
                 };
                 let id = self.tickets.next();
-                let mut recording =
-                    Recording::new(id, region, ink_rule, (window_size, follows), now);
-                if let Some(sample) = sample {
-                    recording = recording.across_window(sample);
+                let mut recording = Recording::new(id, region, (window_size, follows), now);
+                if let Some((tone, sample)) = sample {
+                    recording = recording.across_window(tone, sample);
                     recording.look_for(examples);
                 }
                 self.record_with(Recorder::Readings(recording));
@@ -227,19 +217,19 @@ impl<H: Host> Owner<H> {
         }
     }
 
-    /// How tall the characters are that `region` of screenshot `screenshot`
-    /// shows in the ink `reader` tells from background, or what to do when
-    /// it shows none.
-    fn sample_height(
+    /// What tells the text that `region` of screenshot `screenshot` shows
+    /// from the rest of the window, as `reader` finds it, and how tall its
+    /// characters are, or what to do when it shows none.
+    fn sample(
         &self,
         region: Region,
         screenshot: usize,
         reader: &DigitReader,
-    ) -> Result<u32, String> {
+    ) -> Result<(Tone, u32), String> {
         self.capture
             .screenshots()
             .get(screenshot)
-            .and_then(|image| find::sample_heights(image, &[region], reader).pop()?)
+            .and_then(|image| find::sample(image, region, reader))
             .ok_or_else(|| {
                 "That place shows no characters, so there is nothing to look for in the rest of \
                  the window. Draw it around some characters first."
@@ -271,9 +261,13 @@ impl<H: Host> Owner<H> {
                     .screenshots()
                     .get(screenshot)
                     .filter(|image| image.size() == window_size)?;
-                Some(find::sample_heights(image, &regions, reader))
+                Some(
+                    regions
+                        .into_iter()
+                        .filter_map(|region| Some(find::sample(image, region, reader)?.1))
+                        .collect::<Vec<u32>>(),
+                )
             })
-            .flatten()
             .flatten()
             .collect()
     }
@@ -361,13 +355,6 @@ impl<H: Host> Owner<H> {
             .map_err(|error| error.to_string())
     }
 
-    /// The tolerance the reference `spec` teaches finds its characters by
-    /// contrast with, as [`CharactersSpec::contrast_tolerance`] chooses it.
-    pub(crate) fn contrast_tolerance(&mut self, spec: &CharactersSpec) -> Result<u8, String> {
-        self.keep_reference(spec.reference.as_ref());
-        self.with_session(|session| spec.contrast_tolerance(session))
-            .map_err(|error| error.to_string())
-    }
 }
 
 #[cfg(test)]
@@ -376,53 +363,69 @@ mod tests {
     use std::sync::mpsc;
 
     use appytappy_config::app_file::{PinDef, SizeChangesDef};
-    use appytappy_sources::screen::Size;
+    use appytappy_sources::screen::{FrameHandler, Size};
     use appytappy_sources::screen::settle::SETTLE;
 
     use crate::owner::messages::{Event, Message};
     use crate::owner::test_support::{
-        FakeHost, Harness, capturing, characters_in, example_app, frame_image, harness, recognized,
-        teaching, with_example_app,
+        FakeHost, Harness, characters_in, example_app, harness, recognized, teaching,
+        with_example_app,
     };
     use crate::pixels;
     use crate::recording::RecordingView;
     use crate::ticket::Ticket;
-    use appytappy_config::app_file::ColorDef;
 
     use super::*;
 
-    /// A 4 by 2 frame with its left `red` columns red and the rest gray.
+    /// A 6 by 4 gray frame whose middle, 4 by 2, has its left `red`
+    /// columns red.
     fn red_columns(red: usize) -> Image {
         red_where([0, 1, 2, 3].map(|x| x < red))
     }
 
-    /// A 4 by 2 frame whose columns are red where `red` says so and gray
-    /// elsewhere.
+    /// A 6 by 4 gray frame whose middle, 4 by 2, has its columns red where
+    /// `red` says so. The gray around the middle is the background a
+    /// reader tells the red from.
     fn red_where(red: [bool; 4]) -> Image {
-        let row: Vec<u8> = red
-            .into_iter()
-            .flat_map(|red| if red { [0, 0, 255, 0] } else { [40, 40, 40, 0] })
+        let columns: Vec<u32> = (1..)
+            .zip(red)
+            .filter_map(|(x, red)| red.then_some(x))
             .collect();
-        Image::new(
-            Size {
-                width: 4,
-                height: 2,
-            },
-            [row.clone(), row].concat(),
-        )
-        .expect("matching length")
+        red_at(6, &columns)
     }
 
-    /// Records the whole 4 by 2 frame, red as ink, drawn on screenshot 0.
+    /// A harness with `Example App` saved and window 7 picked, with
+    /// [`red_columns`] of 2 its newest frame and its screenshot 0, and the
+    /// capture's handler.
+    fn capturing(name: &str) -> (Harness, FrameHandler, std::path::PathBuf) {
+        let (mut harness, root) = with_example_app(name);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        (harness, handler, root)
+    }
+
+    /// Records the middle, 4 by 2, of the 6 by 4 frame, drawn on
+    /// screenshot 0.
     fn start_recording(
-        red: u8,
         more: bool,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
-        let region: RegionDef =
-            serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
-        let ink: ColorDef = serde_json::from_str(&format!(r#"{{"red":{red},"green":0,"blue":0}}"#))
-            .expect("valid JSON");
-        move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region, ink), more)
+        start_recording_from(0, more)
+    }
+
+    /// Records columns `x` and on of the frame's middle, drawn on
+    /// screenshot 0.
+    fn start_recording_from(
+        x: u32,
+        more: bool,
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
+        let region: RegionDef = serde_json::from_str(&format!(
+            r#"{{"x":{},"y":1,"width":{},"height":2}}"#,
+            x.saturating_add(1),
+            4_u32.saturating_sub(x)
+        ))
+        .expect("valid JSON");
+        move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region), more)
     }
 
     impl Harness {
@@ -446,10 +449,10 @@ mod tests {
     fn a_recording_keeps_each_reading_once_and_has_it_read_as_text() {
         let (mut harness, root) = with_example_app("rec-keeps-once");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         assert_eq!(harness.recording(), None);
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         for frame in [
             red_columns(2),
             red_columns(2),
@@ -513,15 +516,15 @@ mod tests {
     fn a_stop_names_its_recording_and_leaves_one_that_took_its_place() {
         let (mut harness, root) = with_example_app("rec-stop-names-its-own");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         let records = |harness: &mut Harness| harness.recording().map(|view| view.recording);
-        let readings = harness.ask(start_recording(255, false)).expect("records");
+        let readings = harness.ask(start_recording(false)).expect("records");
         assert_eq!(harness.recording().expect("a recording").id, readings);
         harness.ask(move |owner| owner.stop_recording(readings));
         assert_eq!(records(&mut harness), Some(false));
         assert_eq!(
-            harness.ask(start_recording(255, true)),
+            harness.ask(start_recording(true)),
             Ok(readings),
             "going on keeps the number"
         );
@@ -529,7 +532,7 @@ mod tests {
         // A recording of looks takes its place, and the stop the readings'
         // screen sends as it goes leaves the looks alone.
         let region: RegionDef =
-            serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
+            serde_json::from_str(r#"{"x":1,"y":1,"width":4,"height":2}"#).expect("valid JSON");
         let looks = harness
             .ask(move |owner| owner.start_look_recording(region, 0, 0))
             .expect("records");
@@ -546,7 +549,7 @@ mod tests {
 
         // And a recording of readings that takes the looks' place is left
         // by their stop.
-        let newer = harness.ask(start_recording(255, false)).expect("records");
+        let newer = harness.ask(start_recording(false)).expect("records");
         harness.ask(move |owner| owner.stop_recording(looks));
         assert_eq!(records(&mut harness), Some(true));
         harness.ask(move |owner| owner.stop_recording(newer));
@@ -558,9 +561,9 @@ mod tests {
     fn a_reading_s_pixels_are_answered_only_for_its_own_recording() {
         let (mut harness, root) = with_example_app("rec-pixels-of-its-own");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         let old = harness.recording().expect("a recording").id;
         let pixels = |harness: &mut Harness, recording| {
@@ -571,7 +574,7 @@ mod tests {
         // Discarded and recorded again at once: the page's late ask for the
         // old recording's first reading gets none of the new one's pixels.
         harness.ask(Owner::discard_recording);
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(3)));
         let new = harness.recording().expect("a recording").id;
         assert_ne!(new, old);
@@ -585,9 +588,9 @@ mod tests {
     fn a_frame_of_shapes_already_kept_is_counted_and_not_read_as_text() {
         let (mut harness, root) = with_example_app("rec-counted-frame");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         // A stroke one column wide, one two wide, then both in each order.
         for red in [
             [true, false, false, false],
@@ -618,7 +621,7 @@ mod tests {
     #[test]
     fn review_and_the_check_learn_from_recorded_readings() {
         let (mut harness, mut handler, root) = capturing("recording-review");
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.deliver(&mut handler, Ok(&red_columns(3)));
         // Screenshot 0 shows the same two columns as reading 0.
@@ -628,8 +631,8 @@ mod tests {
                 .map(|(reading, text)| format!(r#"{{"reading":{reading},"text":"{text}"}}"#))
                 .collect();
             let spec: CharactersSpec = serde_json::from_str(&format!(
-                r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,
-                    "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[{labels}],
+                r#"{{"region":{{"x":1,"y":1,"width":4,"height":2}},"screenshot":0,
+                    "labels":[{labels}],
                     "recorded":[{}]}}"#,
                 recorded.join(",")
             ))
@@ -661,26 +664,10 @@ mod tests {
             "the labeled screenshot gave the same shape to another character"
         );
         assert_eq!(labeled[1], None);
-        let by_contrast = |screenshot: usize| -> CharactersSpec {
-            serde_json::from_str(&format!(
-                r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":{screenshot},
-                    "tolerance":7,"labels":[]}}"#
-            ))
-            .expect("valid JSON")
-        };
-        assert_eq!(
-            harness.ask(|owner| owner.contrast_tolerance(&by_contrast(0))),
-            Ok(7),
-            "nothing to learn from leaves the tolerance as it is"
-        );
-        assert_eq!(
-            harness.ask(|owner| owner.contrast_tolerance(&by_contrast(9))),
-            Err("That screenshot is gone. Take a new one and try again.".to_owned())
-        );
         let number = |reading| -> CharactersSpec {
             serde_json::from_str(&format!(
-                r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,
-                    "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[],
+                r#"{{"region":{{"x":1,"y":1,"width":4,"height":2}},"screenshot":0,
+                    "labels":[],
                     "recorded":[{{"reading":{reading},"text":"1"}}]}}"#
             ))
             .expect("valid JSON")
@@ -704,24 +691,23 @@ mod tests {
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
-    /// Records the whole window for text like columns `x` and on of the 4
-    /// by 2 screenshot 0, red as ink.
+    /// Records the whole window for text like columns `x` and on of the
+    /// middle of screenshot 0.
     fn start_window_recording(
         x: u32,
         more: bool,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let region: RegionDef = serde_json::from_str(&format!(
-            r#"{{"x":{x},"y":0,"width":{},"height":2}}"#,
+            r#"{{"x":{},"y":1,"width":{},"height":2}}"#,
+            x.saturating_add(1),
             4_u32.saturating_sub(x)
         ))
         .expect("valid JSON");
-        let ink: ColorDef =
-            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         move |owner: &mut Owner<FakeHost>| {
             owner.start_recording(
                 RecordSpec {
                     scope: Scope::Window,
-                    ..characters_in(region, ink)
+                    ..characters_in(region)
                 },
                 more,
             )
@@ -732,7 +718,7 @@ mod tests {
     fn a_whole_window_is_recorded_for_text_as_tall_as_the_region_s_on_its_screenshot() {
         let (mut harness, root) = with_example_app("rec-window-sample");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         // Columns 2 and 3 of the screenshot are gray.
         assert_eq!(
@@ -775,7 +761,7 @@ mod tests {
         harness.stop_recording();
         assert!(
             harness
-                .ask(start_recording(255, true))
+                .ask(start_recording(true))
                 .expect_err("the place alone is another recording")
                 .contains("the same choice of where to look")
         );
@@ -816,8 +802,6 @@ mod tests {
             ))
             .expect("valid JSON")
         };
-        let ink: ColorDef =
-            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         let spec = RecordSpec {
             scope,
             examples: examples
@@ -827,7 +811,7 @@ mod tests {
                     screenshot,
                 })
                 .collect(),
-            ..characters_in(region(0, 0, 6), ink)
+            ..characters_in(region(0, 0, 6))
         };
         move |owner: &mut Owner<FakeHost>| owner.start_recording(spec, more)
     }
@@ -867,35 +851,34 @@ mod tests {
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
-    /// A gray frame `width` wide and 2 tall whose `red` columns are red.
+    /// A gray frame `width` wide and 4 tall whose `red` columns are red
+    /// in its two middle rows.
     fn red_at(width: u32, red: &[u32]) -> Image {
-        let pixels = (0..2_u32)
-            .flat_map(|_| 0..width)
-            .flat_map(|x| {
-                if red.contains(&x) {
+        let pixels = (0..4_u32)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                if (1..3).contains(&y) && red.contains(&x) {
                     [0, 0, 255, 0]
                 } else {
                     [40, 40, 40, 0]
                 }
             })
             .collect();
-        Image::new(Size { width, height: 2 }, pixels).expect("matching length")
+        Image::new(Size { width, height: 4 }, pixels).expect("matching length")
     }
 
-    /// Records columns 2 and 3 of the 4 by 2 screenshot 0, red as ink,
+    /// Records the two right columns of the middle of screenshot 0,
     /// staying at `pin`.
     fn start_recording_right(
         pin: Option<PinDef>,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let region: RegionDef =
-            serde_json::from_str(r#"{"x":2,"y":0,"width":2,"height":2}"#).expect("valid JSON");
-        let ink: ColorDef =
-            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+            serde_json::from_str(r#"{"x":3,"y":1,"width":2,"height":2}"#).expect("valid JSON");
         move |owner: &mut Owner<FakeHost>| {
             owner.start_recording(
                 RecordSpec {
                     pin,
-                    ..characters_in(region, ink)
+                    ..characters_in(region)
                 },
                 false,
             )
@@ -905,8 +888,8 @@ mod tests {
     #[test]
     fn a_recording_follows_the_window_to_another_size_as_its_application_s_window_changes_size() {
         let (mut harness, mut handler, root) = capturing("rec-follows");
-        // Twice as wide as it was and as tall: red at its right edge alone.
-        let wide = red_at(8, &[7]);
+        // Twice as wide as it was and as tall: red by its right edge alone.
+        let wide = red_at(12, &[10]);
         let mut kept_at = |harness: &mut Harness, pin| {
             harness.ask(start_recording_right(pin)).expect("records");
             harness.deliver(&mut handler, Ok(&wide));
@@ -914,7 +897,7 @@ mod tests {
             harness.deliver(&mut handler, Ok(&wide));
             let view = harness.recording().expect("a recording");
             // Back at the size it was drawn at for the next recording.
-            harness.deliver(&mut handler, Ok(&frame_image()));
+            harness.deliver(&mut handler, Ok(&red_columns(2)));
             (view.readings.len(), view.problem)
         };
         assert_eq!(
@@ -935,7 +918,7 @@ mod tests {
             (
                 0,
                 Some(
-                    "The region was drawn when the window was 4 × 2, and it is 8 × 2 now. \
+                    "The region was drawn when the window was 6 × 4, and it is 12 × 4 now. \
                      Resize the window to record."
                         .to_owned()
                 )
@@ -947,15 +930,15 @@ mod tests {
     #[test]
     fn a_window_that_stops_drawing_at_a_new_size_is_placed_when_the_recording_is_shown() {
         let (mut harness, mut handler, root) = capturing("rec-settles-unasked");
-        let wide = red_at(8, &[7]);
+        let wide = red_at(12, &[10]);
         // One frame at the new size, and no more: nothing on it changes.
         harness.ask(start_recording_right(None)).expect("records");
         harness.deliver(&mut handler, Ok(&wide));
         let view = harness.recording().expect("a recording");
-        assert_eq!((view.at.width, view.readings.len()), (4, 0), "not yet");
+        assert_eq!((view.at.width, view.readings.len()), (6, 0), "not yet");
         harness.wait(SETTLE);
         let view = harness.recording().expect("a recording");
-        assert_eq!(view.at.width, 8);
+        assert_eq!(view.at.width, 12);
         assert_eq!(view.problem, None);
         assert_eq!(view.readings.len(), 1, "the newest frame is recorded");
         let again = harness.recording().expect("a recording");
@@ -964,16 +947,16 @@ mod tests {
         harness
             .ask(|owner| owner.save_app(Some("example"), example_app(SizeChangesDef::Rarely)))
             .expect("saves");
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.ask(start_recording_right(None)).expect("records");
         harness.deliver(&mut handler, Ok(&wide));
         harness.wait(SETTLE);
         let view = harness.recording().expect("a recording");
-        assert_eq!(view.at.width, 8);
+        assert_eq!(view.at.width, 12);
         assert_eq!(
             view.problem.as_deref(),
             Some(
-                "The region was drawn when the window was 4 × 2, and it is 8 × 2 now. Resize the \
+                "The region was drawn when the window was 6 × 4, and it is 12 × 4 now. Resize the \
                  window to record."
             )
         );
@@ -984,12 +967,10 @@ mod tests {
     fn a_recording_needs_its_application_saved() {
         let (mut harness, _handler, root) = capturing("rec-no-app");
         let region: RegionDef =
-            serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
-        let ink: ColorDef =
-            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+            serde_json::from_str(r#"{"x":1,"y":1,"width":4,"height":2}"#).expect("valid JSON");
         let spec = RecordSpec {
             app: "other".to_owned(),
-            ..characters_in(region, ink)
+            ..characters_in(region)
         };
         assert!(
             harness
@@ -1004,7 +985,7 @@ mod tests {
     fn a_whole_window_recording_stops_with_a_reason_when_the_look_thread_is_gone() {
         let (mut harness, root) = with_example_app("rec-look-thread-gone");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         harness
             .ask(start_window_recording(0, false))
@@ -1032,13 +1013,13 @@ mod tests {
     }
 
     #[test]
-    fn recording_goes_on_after_a_stop_and_starts_over_for_other_ink() {
+    fn recording_goes_on_after_a_stop_and_starts_over_for_another_place() {
         let (mut harness, root) = with_example_app("rec-goes-on");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         assert_eq!(
-            harness.ask(start_recording(255, true)),
+            harness.ask(start_recording(true)),
             Err(
                 "That recording is gone, so there is nothing to record more of. Start a new \
                  recording."
@@ -1047,21 +1028,20 @@ mod tests {
             "recording more never starts a recording"
         );
         assert!(harness.recording().is_none());
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.stop_recording();
-        harness.ask(start_recording(255, true)).expect("goes on");
+        harness.ask(start_recording(true)).expect("goes on");
         assert!(harness.recording().expect("kept").recording);
         harness.deliver(&mut handler, Ok(&red_columns(3)));
         assert_eq!(harness.readings().len(), 2, "the same recording went on");
         harness.stop_recording();
         assert_eq!(
-            harness.ask(start_recording(200, true)),
+            harness.ask(start_recording_from(1, true)),
             Err(
-                "Recording more needs the settings it was recorded with: the same place, the \
-                 same way to tell the characters from the background, a screenshot of the same \
-                 window size, and the same choice of where to look. Use its settings, or discard \
-                 the recording to start a new one."
+                "Recording more needs the settings it was recorded with: the same place, a \
+                 screenshot of the same window size, and the same choice of where to look. Use \
+                 its settings, or discard the recording to start a new one."
                     .to_owned()
             ),
             "recording more never replaces the recording"
@@ -1069,8 +1049,8 @@ mod tests {
         assert_eq!(harness.readings().len(), 2, "kept as it was");
         let replaced = harness.recording().expect("a recording").id;
         harness
-            .ask(start_recording(200, false))
-            .expect("records other ink");
+            .ask(start_recording_from(1, false))
+            .expect("records another place");
         assert_eq!(harness.readings().len(), 0, "a new recording");
         let jobs: Vec<ocr::Source> = harness.jobs.try_iter().map(|job| job.source).collect();
         let source = ocr::Source::Recording(Ticket::numbered(replaced));
@@ -1095,12 +1075,12 @@ mod tests {
     fn a_recording_needs_a_window_a_screenshot_and_a_region_inside_it() {
         let mut harness = harness(false);
         assert_eq!(
-            harness.ask(start_recording(255, false)),
+            harness.ask(start_recording(false)),
             Err("Pick a window to record.".to_owned())
         );
         let mut handler = harness.pick();
         assert_eq!(
-            harness.ask(start_recording(255, false)),
+            harness.ask(start_recording(false)),
             Err("Take a screenshot first.".to_owned())
         );
         let small = Image::new(
@@ -1114,18 +1094,16 @@ mod tests {
         harness.deliver(&mut handler, Ok(&small));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         assert_eq!(
-            harness.ask(start_recording(255, false)),
+            harness.ask(start_recording(false)),
             Err(
                 "The region reaches past the edge of the window. Draw it inside the window."
                     .to_owned()
             )
         );
         let empty: RegionDef =
-            serde_json::from_str(r#"{"x":0,"y":0,"width":0,"height":2}"#).expect("valid JSON");
-        let ink: ColorDef =
-            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+            serde_json::from_str(r#"{"x":1,"y":1,"width":0,"height":2}"#).expect("valid JSON");
         assert_eq!(
-            harness.ask(|owner| owner.start_recording(characters_in(empty, ink), false)),
+            harness.ask(|owner| owner.start_recording(characters_in(empty), false)),
             Err("Draw a region on the screenshot first.".to_owned())
         );
     }
@@ -1134,9 +1112,9 @@ mod tests {
     fn a_capture_failure_stops_the_recording_and_says_why() {
         let (mut harness, root) = with_example_app("rec-capture-failure");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
         let stopped = harness.recording().expect("kept for review");
@@ -1147,7 +1125,7 @@ mod tests {
         );
         assert_eq!(stopped.readings.len(), 1, "what it kept stays");
         harness.deliver(&mut handler, Ok(&red_columns(3)));
-        harness.ask(start_recording(255, true)).expect("goes on");
+        harness.ask(start_recording(true)).expect("goes on");
         let going = harness.recording().expect("the same recording");
         assert!(going.recording);
         assert_eq!(going.problem, None, "going on clears why it stopped");
@@ -1158,9 +1136,9 @@ mod tests {
     fn a_closed_window_records_nothing_more() {
         let (mut harness, root) = with_example_app("rec-closed-window");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.deliver(
             &mut handler,
@@ -1172,7 +1150,7 @@ mod tests {
         let closed = "The captured window closed.";
         for more in [true, false] {
             assert_eq!(
-                harness.ask(start_recording(255, more)),
+                harness.ask(start_recording(more)),
                 Err(closed.to_owned())
             );
         }
@@ -1189,9 +1167,9 @@ mod tests {
     fn a_recording_stopped_before_the_window_closed_says_it_cannot_go_on() {
         let (mut harness, root) = with_example_app("rec-stopped-then-closed");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.stop_recording();
         harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
@@ -1218,9 +1196,9 @@ mod tests {
     fn a_reading_the_text_reader_cannot_take_says_to_type_it() {
         let (mut harness, root) = with_example_app("rec-reader-gone");
         let mut handler = harness.pick();
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(start_recording(255, false)).expect("records");
+        harness.ask(start_recording(false)).expect("records");
         let (closed, _) = mpsc::channel();
         harness.owner.ocr = closed;
         harness.deliver(&mut handler, Ok(&red_columns(2)));

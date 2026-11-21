@@ -2,10 +2,10 @@
 //! the same screenshot that stands out as the box's does, at any size, so
 //! the user adds it all at once instead of drawing a box around each.
 //!
-//! It looks at the ink of the whole screenshot, as the reference tells the
-//! box's ink from its background ([`DigitReader::ink_like`]): what stands
-//! out from the background the box has, or what has the reference's text
-//! color. It joins touching ink pixels into blobs, and takes each height
+//! It looks at the ink of the whole screenshot that is like the box's
+//! ([`DigitReader::tone`]): what has the color of the box's text, or, where
+//! that text is no one color, what stands out from the background the box
+//! has. It joins touching ink pixels into blobs, and takes each height
 //! the blobs have as a size of text to look for, the sample's first. Blobs
 //! side by side on one line, no further apart than a size, make a run of
 //! text, and a run whose tallest character is as tall as the size, within
@@ -18,7 +18,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use appytappy_sources::screen::digits::{DigitReader, Ink};
+use appytappy_sources::screen::digits::{self, DigitReader, Ink, Tone};
 use appytappy_sources::screen::{Image, Region};
 
 use super::ink::Line;
@@ -384,7 +384,7 @@ fn same_size(height: u32, sample: u32) -> bool {
 /// find becomes; `None` when it shows none or `region` reaches outside
 /// `image`.
 pub(crate) fn ink_line(image: &Image, region: Region, reader: &DigitReader) -> Option<Line> {
-    Line::of(&reader.ink(&reader.cut(image, region)?))
+    Line::of(&reader.ink(&digits::cut(image, region)?))
 }
 
 /// The height of the characters among `blobs` that `region` shows: that of
@@ -417,24 +417,16 @@ fn with_margin(run: Bounds, height: u32, ink: &Ink) -> Option<Region> {
     )
 }
 
-/// How tall the characters are that each of `regions` of `image` shows, in
-/// the ink `reader` tells from that region's background: the sizes
-/// [`lines`] looks for. `None` for a region that holds no ink or lies
-/// outside `image`.
-pub(crate) fn sample_heights(
-    image: &Image,
-    regions: &[Region],
-    reader: &DigitReader,
-) -> Vec<Option<u32>> {
-    regions
-        .iter()
-        .map(|&region| {
-            let ink = reader.ink_like(image, region)?;
-            let line = line_height(&ink, region)?;
-            let blobs = blobs(&ink, line.saturating_mul(2));
-            Some(sample_of(&blobs, region, line))
-        })
-        .collect()
+/// What tells text like that in `region` of `image` from the rest of a
+/// frame, as `reader` finds it, and how tall its characters are: what
+/// [`lines`] looks for, and one of the sizes it looks for. `None` for a
+/// region that holds no ink or lies outside `image`.
+pub(crate) fn sample(image: &Image, region: Region, reader: &DigitReader) -> Option<(Tone, u32)> {
+    let tone = reader.tone(image, region)?;
+    let ink = tone.ink(image);
+    let line = line_height(&ink, region)?;
+    let blobs = blobs(&ink, line.saturating_mul(2));
+    Some((tone, sample_of(&blobs, region, line)))
 }
 
 /// How far the middle of `run` is from the middle of `near`, squared, in
@@ -498,9 +490,8 @@ fn sized_runs<T: Copy>(mut blobs: Vec<Bounds>, sizes: &[Sought<T>]) -> Vec<(Run,
 }
 
 /// Where `image` shows text with characters as tall as one of `sizes`,
-/// within [`SIZE_PERCENT`], in the ink `reader` tells from the background
-/// around `near`, or from the image's outermost pixels where `near` lies
-/// outside `image`: each run [`sized_runs`] finds, with a margin around its
+/// within [`SIZE_PERCENT`], in the ink of `tone`: each run [`sized_runs`]
+/// finds, with a margin around its
 /// ink and the size it has, the run nearest the middle of `near` first, and
 /// of runs as near the higher one, then the one further left. It looks for
 /// the smallest size first, so small text beside larger text is a run of
@@ -508,10 +499,8 @@ fn sized_runs<T: Copy>(mut blobs: Vec<Bounds>, sizes: &[Sought<T>]) -> Vec<(Run,
 /// text beside its examples too, wherever the window shows it. It takes the
 /// [`MAX_LINES`] nearest, so a window full of such text does not crowd out
 /// the text around the region.
-pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, reader: &DigitReader) -> Vec<Spot> {
-    let ink = reader
-        .ink_like(image, near)
-        .unwrap_or_else(|| reader.ink(image));
+pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, tone: Tone) -> Vec<Spot> {
+    let ink = tone.ink(image);
     let largest = sizes.0.last().map_or(0, |size| size.height);
     let sought: Vec<Sought<TextSize>> = sizes
         .0
@@ -579,7 +568,7 @@ pub(crate) fn like(
     passed: &[Region],
     reader: &DigitReader,
 ) -> Option<Search> {
-    let ink = reader.ink_like(image, region)?;
+    let ink = reader.tone(image, region)?.ink(image);
     let line = line_height(&ink, region)?;
     let tallest = line
         .saturating_mul(2)
@@ -638,7 +627,6 @@ pub(crate) fn like(
 
 #[cfg(test)]
 mod tests {
-    use appytappy_sources::screen::digits::InkRule;
     use appytappy_sources::screen::{Rgb, Size};
 
     use super::*;
@@ -663,14 +651,27 @@ mod tests {
     }
 
     fn reader() -> DigitReader {
-        DigitReader::new(InkRule::Color {
-            color: Rgb {
-                red: 255,
-                green: 0,
-                blue: 0,
-            },
-            tolerance: 10,
-        })
+        DigitReader::new()
+    }
+
+    /// Text of the color of [`INK`].
+    const RED: Tone = Tone::Color(Rgb {
+        red: 255,
+        green: 0,
+        blue: 0,
+    });
+
+    /// How tall the characters are that each of `regions` of `image`
+    /// shows.
+    fn sample_heights(
+        image: &Image,
+        regions: &[Region],
+        reader: &DigitReader,
+    ) -> Vec<Option<u32>> {
+        regions
+            .iter()
+            .map(|&region| Some(sample(image, region, reader)?.1))
+            .collect()
     }
 
     fn region(x: u32, y: u32, width: u32, height: u32) -> Region {
@@ -746,9 +747,9 @@ mod tests {
             pixels,
         )
         .expect("matching length");
-        let by_contrast = DigitReader::new(InkRule::Contrast { tolerance: 30 });
-        let sample = region(0, 0, 12, 12);
-        let search = like(&image, sample, &[], &[], &by_contrast).expect("the sample has ink");
+        let by_contrast = DigitReader::new();
+        let place = region(0, 0, 12, 12);
+        let search = like(&image, place, &[], &[], &by_contrast).expect("the sample has ink");
         assert_eq!(
             search
                 .finds
@@ -758,19 +759,16 @@ mod tests {
             [region(18, 18, 11, 12)],
             "the scene beside the panel is taller than text"
         );
+        let (tone, height) = sample(&image, place, &by_contrast).expect("the sample has ink");
+        assert_eq!(height, 8, "both tones of a character are one blob");
         assert_eq!(
-            sample_heights(&image, &[sample], &by_contrast),
-            [Some(8)],
-            "both tones of a character are one blob"
-        );
-        assert_eq!(
-            lines(&image, &Sizes::of(8), sample, &by_contrast),
+            lines(&image, &Sizes::of(8), place, tone),
             [spot(8, 0, 0, 11, 12), spot(8, 18, 18, 11, 12)]
         );
-        // A place outside the picture has no background, so the picture's
-        // border is the background, and most of that is the panel's.
+        // The sample's tone finds the text wherever the look is nearest
+        // to, and whatever that place shows.
         assert_eq!(
-            lines(&image, &Sizes::of(8), region(50, 30, 20, 20), &by_contrast).len(),
+            lines(&image, &Sizes::of(8), region(50, 30, 20, 20), tone).len(),
             2
         );
     }
@@ -789,7 +787,7 @@ mod tests {
             "a place without ink, or past the picture's edge, shows no size"
         );
         assert_eq!(
-            lines(&image, &Sizes::of(8), place, &reader()),
+            lines(&image, &Sizes::of(8), place, RED),
             [spot(8, 0, 0, 11, 12), spot(8, 28, 18, 11, 12)],
             "each with a margin, kept inside the picture"
         );
@@ -827,7 +825,7 @@ mod tests {
         let boxes = [pair(30, 2, 8), pair(30, 22, 8)].concat();
         let image = screenshot(60, 40, &boxes);
         assert_eq!(
-            lines(&image, &Sizes::of(8), region(2, 22, 8, 8), &reader()),
+            lines(&image, &Sizes::of(8), region(2, 22, 8, 8), RED),
             [spot(8, 28, 20, 11, 12), spot(8, 28, 0, 11, 12)]
         );
         // A column of 35 runs, 12 pixels apart: three more than one look
@@ -836,7 +834,7 @@ mod tests {
             .flat_map(|row| pair(2, row.saturating_mul(12).saturating_add(2), 8))
             .collect();
         let tall = screenshot(20, 424, &column);
-        let taken = lines(&tall, &Sizes::of(8), region(0, 0, 12, 12), &reader());
+        let taken = lines(&tall, &Sizes::of(8), region(0, 0, 12, 12), RED);
         assert_eq!(taken.len(), MAX_LINES);
         let lowest = taken.iter().map(|line| line.region.y()).max();
         assert_eq!(lowest, Some(372), "the three lowest are left out");
@@ -879,7 +877,7 @@ mod tests {
         let image = screenshot(60, 44, &boxes);
         let place = region(0, 0, 12, 12);
         assert_eq!(
-            lines(&image, &sizes(8, &[14]), place, &reader()),
+            lines(&image, &sizes(8, &[14]), place, RED),
             // A margin of a quarter of each run's own size.
             [spot(8, 0, 0, 11, 12), spot(14, 0, 21, 12, 20)],
             "text 20 tall is neither size"
@@ -891,7 +889,7 @@ mod tests {
         // 12 is within 15% of both 10 and 13.
         let image = screenshot(60, 40, &pair(4, 4, 12));
         assert_eq!(
-            lines(&image, &sizes(10, &[13]), region(0, 0, 12, 12), &reader()),
+            lines(&image, &sizes(10, &[13]), region(0, 0, 12, 12), RED),
             [spot(10, 2, 2, 11, 16)]
         );
     }
@@ -902,7 +900,7 @@ mod tests {
         // only because 24 is held as a size of its own.
         let image = screenshot(60, 40, &pair(4, 4, 24));
         assert_eq!(
-            lines(&image, &sizes(20, &[24]), region(0, 0, 12, 12), &reader()),
+            lines(&image, &sizes(20, &[24]), region(0, 0, 12, 12), RED),
             [spot(24, 0, 0, 17, 34)]
         );
     }
@@ -916,7 +914,7 @@ mod tests {
         boxes.push((22, 4, 3, 8));
         let image = screenshot(60, 40, &boxes);
         assert_eq!(
-            lines(&image, &sizes(8, &[16]), region(0, 0, 12, 12), &reader()),
+            lines(&image, &sizes(8, &[16]), region(0, 0, 12, 12), RED),
             [spot(16, 0, 0, 15, 24), spot(8, 20, 2, 7, 12)]
         );
     }
@@ -932,7 +930,7 @@ mod tests {
             }
         }
         let image = screenshot(230, 80, &boxes);
-        let taken = lines(&image, &sizes(8, &[16]), region(0, 0, 12, 20), &reader());
+        let taken = lines(&image, &sizes(8, &[16]), region(0, 0, 12, 20), RED);
         assert_eq!(taken.len(), MAX_LINES);
         assert_eq!(taken[0], spot(16, 0, 0, 13, 22), "the nearest is first");
         let small = taken.iter().filter(|spot| spot.size.height == 8).count();
@@ -951,13 +949,13 @@ mod tests {
         let mut boxes = pair(2, 2, 8).to_vec();
         boxes.push((10, 2, 3, 16));
         let image = screenshot(60, 40, &boxes);
-        assert_eq!(lines(&image, &sizes(8, &[30]), place, &reader()), []);
+        assert_eq!(lines(&image, &sizes(8, &[30]), place, RED), []);
         // Ink 17 tall is no part of it, though the look for 30 joins it.
         let mut boxes = pair(2, 2, 8).to_vec();
         boxes.push((10, 2, 3, 17));
         let image = screenshot(60, 40, &boxes);
         assert_eq!(
-            lines(&image, &sizes(8, &[30]), place, &reader()),
+            lines(&image, &sizes(8, &[30]), place, RED),
             [spot(8, 0, 0, 11, 12)]
         );
     }
@@ -1329,7 +1327,7 @@ mod tests {
     #[test]
     fn no_pixel_past_the_screenshot_s_edges_has_a_place_in_it() {
         // (3, 0) of a 3 by 2 screenshot would be (0, 1) if the row wrapped.
-        let ink = reader().ink(&screenshot(3, 2, &[(0, 1, 1, 1)]));
+        let ink = RED.ink(&screenshot(3, 2, &[(0, 1, 1, 1)]));
         assert_eq!(index(&ink, 0, 1), Some(3));
         assert_eq!(index(&ink, 2, 1), Some(5));
         assert_eq!(index(&ink, 3, 0), None);
@@ -1340,7 +1338,7 @@ mod tests {
     fn the_line_height_counts_rows_inside_the_region_and_takes_the_first_of_a_tie() {
         // Ink 4 wide on rows 0 and 1, and 2 wide on rows 4 to 7: 8 pixels each.
         let image = screenshot(6, 12, &[(0, 0, 4, 2), (0, 4, 2, 4), (0, 9, 6, 3)]);
-        let ink = reader().ink(&image);
+        let ink = RED.ink(&image);
         assert_eq!(line_height(&ink, region(0, 0, 6, 8)), Some(2));
         // The region ends inside the ink below it.
         assert_eq!(line_height(&ink, region(0, 9, 6, 2)), Some(2));

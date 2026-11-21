@@ -5,7 +5,7 @@ use appytappy_sources::screen::{FrameHandler, Image, Size};
 
 use crate::owner::ReferenceSaveSpec;
 use crate::owner::test_support::{
-    FakeHost, Harness, STATE, add_example_app, frame_image, harness_with, scratch_store, spec,
+    FakeHost, Harness, STATE, add_example_app, frame_image, harness_with, scratch_store, spec, text_frame,
     with_saved_bar,
 };
 
@@ -365,17 +365,16 @@ fn a_number_fix_names_its_reference_only_when_it_is_not_the_first_drawing_s() {
     let mut harness = harness_with(false, Ok(stores));
     add_example_app(&mut harness);
     let mut handler = harness.pick();
-    harness.deliver(&mut handler, Ok(&frame_image()));
+    harness.deliver(&mut handler, Ok(&text_frame()));
     assert_eq!(harness.ask(Owner::screenshot), Ok(0));
     for name in ["Digits", "Small"] {
-        // The red square on screenshot 0 taught as a 1.
+        // The first stroke on screenshot 0 taught as a 1.
         let reference = ReferenceSaveSpec {
             app: "example".to_owned(),
             reference_name: name.to_owned(),
             characters: serde_json::from_str(
-                r#"{"region":{"x":0,"y":0,"width":2,"height":2},
-                    "screenshot":0,"reference":null,"ink":{"red":255,"green":0,"blue":0},
-                    "tolerance":0,"labels":[{"screenshot":0,"text":"1"}]}"#,
+                r#"{"region":{"x":0,"y":0,"width":4,"height":6},
+                    "screenshot":0,"reference":null,"labels":[{"screenshot":0,"text":"1"}]}"#,
             )
             .expect("valid JSON"),
         };

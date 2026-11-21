@@ -158,21 +158,20 @@ fn file_label(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use appytappy_config::app_file::OverlayModeDef;
-    use appytappy_sources::screen::{Image, Size};
+    use appytappy_sources::screen::Image;
 
     use crate::owner::ReferenceSaveSpec;
     use crate::owner::test_support::{
-        BAR, FakeHost, Harness, STATE, capturing, characters_in, frame_image, spec,
+        BAR, FakeHost, Harness, STATE, capturing_text, characters_in, spec, text_frame,
     };
     use crate::stores::SavedApp;
-    use appytappy_config::app_file::ColorDef;
 
     use super::*;
 
     /// A harness whose `Example App` has a state with a picture and a bar,
     /// reads with no anti-cheat, and shows its overlay.
     fn with_values(name: &str) -> (Harness, std::path::PathBuf) {
-        let (mut harness, _handler, root) = capturing(name);
+        let (mut harness, _handler, root) = capturing_text(name);
         for (value, check) in [("Icon visible", STATE), ("Progress bar", BAR)] {
             harness
                 .ask(|owner| owner.save(&spec("example", value, check)))
@@ -395,8 +394,8 @@ mod tests {
     }
 
     /// The reference `name` of `Example App`, new or the saved one
-    /// `editing`, taught the whole 4 by 2 frame's red by `labels` and the
-    /// recorded readings `recorded`, in the UI's JSON.
+    /// `editing`, taught the first stroke of [`text_frame`] by `labels` and
+    /// the recorded readings `recorded`, in the UI's JSON.
     fn reference(
         name: &str,
         editing: Option<&str>,
@@ -410,8 +409,7 @@ mod tests {
             app: "example".to_owned(),
             reference_name: name.to_owned(),
             characters: serde_json::from_str(&format!(
-                r#"{{"region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,{editing}
-                    "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,
+                r#"{{"region":{{"x":0,"y":0,"width":4,"height":6}},"screenshot":0,{editing}
                     "labels":[{labels}],"recorded":[{recorded}]}}"#
             ))
             .expect("valid JSON"),
@@ -423,7 +421,7 @@ mod tests {
 
     #[test]
     fn a_reference_says_whether_a_recording_taught_it() {
-        let (mut harness, mut handler, root) = capturing("share-origin");
+        let (mut harness, mut handler, root) = capturing_text("share-origin");
         let origins = |harness: &mut Harness| -> Vec<(String, OriginDef)> {
             saved(harness, "example")
                 .file
@@ -439,13 +437,11 @@ mod tests {
         };
         save(&mut harness, reference("By hand", None, LABEL, ""));
         save(&mut harness, reference("Other", None, LABEL, ""));
-        let region = serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("JSON");
-        let ink: ColorDef =
-            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("JSON");
+        let region = serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":6}"#).expect("JSON");
         harness
-            .ask(|owner| owner.start_recording(characters_in(region, ink), false))
+            .ask(|owner| owner.start_recording(characters_in(region), false))
             .expect("records");
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&text_frame()));
         save(&mut harness, reference("Recorded", None, "", READING));
         assert_eq!(
             origins(&mut harness),
@@ -495,21 +491,19 @@ mod tests {
 
     #[test]
     fn a_label_on_a_screenshot_a_recording_of_looks_kept_counts_as_recorded() {
-        let (mut harness, mut handler, root) = capturing("share-origin-looks");
-        let region = serde_json::from_str(r#"{"x":2,"y":0,"width":2,"height":2}"#).expect("JSON");
+        let (mut harness, mut handler, root) = capturing_text("share-origin-looks");
+        let region = serde_json::from_str(r#"{"x":6,"y":0,"width":2,"height":1}"#).expect("JSON");
         harness
             .ask(|owner| owner.start_look_recording(region, 0, 0))
             .expect("records");
-        // The right half is red here and gray on screenshot 0, so the
-        // recording keeps this frame as screenshot 1.
-        let red = Image::new(
-            Size {
-                width: 4,
-                height: 2,
-            },
-            [0, 0, 255, 0].repeat(8),
-        )
-        .expect("matching length");
+        // The region is red here and gray on screenshot 0, so the
+        // recording keeps this frame as screenshot 1. Its first stroke is
+        // where screenshot 0 has it.
+        let mut pixels = text_frame().pixels().to_vec();
+        for pixel in pixels.iter_mut().skip(6).take(2) {
+            *pixel = [0, 0, 255, 0];
+        }
+        let red = Image::new(text_frame().size(), pixels.concat()).expect("matching length");
         harness.deliver(&mut handler, Ok(&red));
         let label = r#"{"screenshot":1,"text":"1"}"#;
         harness

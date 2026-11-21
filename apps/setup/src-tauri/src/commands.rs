@@ -43,7 +43,7 @@ use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
     FixSpec, FoundClick, FoundView, ImportSpec, Live, Message, Owner, ReadingRisks, RecordSpec,
     ReferenceSaveSpec, ReferenceSettingsSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId,
-    SavedValue, SavingKind, SharedView, TrialSpec,
+    SavedValue, SharedView, TrialSpec,
 };
 use crate::reading::Reading;
 use crate::recording::RecordingView;
@@ -608,20 +608,16 @@ pub(crate) async fn save_reference_settings(
     .await
 }
 
-/// The saved samples the saved reference `reference` cannot learn with the
-/// text color `ink` and `tolerance`, saved as `saving` says without the
-/// samples `dropped` names.
+/// The saved samples the saved reference `reference` cannot learn without
+/// the samples `dropped` names.
 #[tauri::command]
 pub(crate) async fn unlearned_samples(
     app: AppHandle,
     reference: ReferenceRef,
-    ink: Option<ColorDef>,
-    tolerance: u8,
     dropped: Vec<String>,
-    saving: SavingKind,
 ) -> Result<Vec<UnlearnedSample>, String> {
     try_ask(&app, "unlearned_samples", move |owner| {
-        owner.unlearned_samples(&reference, ink, tolerance, &dropped, saving)
+        owner.unlearned_samples(&reference, &dropped)
     })
     .await
 }
@@ -918,16 +914,6 @@ pub(crate) async fn review_problems(
     .await
 }
 
-/// The tolerance the reference `spec` teaches finds its characters by
-/// contrast with.
-#[tauri::command]
-pub(crate) async fn contrast_tolerance(app: AppHandle, spec: CharactersSpec) -> Result<u8, String> {
-    try_ask(&app, "contrast_tolerance", move |owner| {
-        owner.contrast_tolerance(&spec)
-    })
-    .await
-}
-
 /// What may keep the reference `spec` teaches from reading as its samples
 /// do, or `None` for one that can't learn one of its lessons.
 #[tauri::command]
@@ -965,11 +951,9 @@ pub(crate) async fn find_like(
     region: RegionDef,
     added: Vec<RegionDef>,
     passed: Vec<RegionDef>,
-    ink: Option<ColorDef>,
-    tolerance: u8,
 ) -> Result<FoundView, String> {
     try_ask(&app, "find_like", move |owner| {
-        owner.find_like(screenshot, region, &added, &passed, ink, tolerance)
+        owner.find_like(screenshot, region, &added, &passed)
     })
     .await
 }
@@ -996,41 +980,21 @@ pub(crate) async fn found_picture(
     .map(pixels)
 }
 
-/// Has the text reader read finds `indexes` of search `search` again, with
-/// the text color `ink`, if any, and `tolerance`; `None` when that search
-/// was replaced or forgotten.
-#[tauri::command]
-pub(crate) async fn reread_found(
-    app: AppHandle,
-    search: u64,
-    indexes: Vec<usize>,
-    ink: Option<ColorDef>,
-    tolerance: u8,
-) -> Result<Option<FoundView>, String> {
-    ask(&app, "reread_found", move |owner| {
-        owner.reread_found(search, &indexes, ink, tolerance)
-    })
-    .await
-}
-
 /// Forgets the search.
 #[tauri::command]
 pub(crate) async fn forget_found(app: AppHandle) -> Result<(), String> {
     ask(&app, "forget_found", Owner::forget_found).await
 }
 
-/// The characters the box `region` of screenshot `screenshot` shows, as the
-/// text color `ink`, if any, and `tolerance` split them.
+/// The characters the box `region` of screenshot `screenshot` shows.
 #[tauri::command]
 pub(crate) async fn box_characters(
     app: AppHandle,
     screenshot: usize,
     region: RegionDef,
-    ink: Option<ColorDef>,
-    tolerance: u8,
 ) -> Result<Vec<CharacterView>, String> {
     ask(&app, "box_characters", move |owner| {
-        owner.box_characters(screenshot, region, ink, tolerance)
+        owner.box_characters(screenshot, region)
     })
     .await
 }

@@ -21,10 +21,10 @@ use appytappy_config::app_file::{
 use appytappy_config::signal::StateName;
 
 use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
-use super::digits::{DigitReader, InkRule, LearnError};
+use super::digits::{self, DigitReader, LearnError};
 use super::mask::Mask;
 use super::scale::scaled;
-use super::{EmptyRegion, Image, ImageError, Region, Rgb, Size};
+use super::{EmptyRegion, Image, ImageError, Region, Size};
 
 /// A saved value's first drawing: the window size it was drawn at, its
 /// region, and its check.
@@ -77,7 +77,7 @@ pub struct SavedValue {
 pub struct AtSize {
     /// The region of the window's content its check is given: the value's
     /// region, and for a number the pixels around it that its reader's rule
-    /// reads it from ([`InkRule::reads`]).
+    /// reads it from ([`digits::reads`]).
     pub region: Region,
     /// Which check reads it.
     check: Drawing,
@@ -148,12 +148,12 @@ impl SavedValue {
     }
 
     /// Where `check` reads `region` of a window of `size`: a number's
-    /// reader is given the pixels its rule reads the region from
-    /// ([`InkRule::reads`]).
+    /// reader is given the region and the pixels around it
+    /// ([`digits::reads`]).
     fn reading(&self, region: Region, size: Size, check: Drawing) -> AtSize {
         let mut at = AtSize { region, check };
-        if let Check::Number { reader, .. } = self.check(&at) {
-            at.region = reader.reads(region, size);
+        if matches!(self.check(&at), Check::Number { .. }) {
+            at.region = digits::reads(region, size);
         }
         at
     }
@@ -521,10 +521,7 @@ pub fn reader(
     reference: &ReferenceDef,
     mut picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Result<DigitReader, SavedError> {
-    let mut reader = DigitReader::new(InkRule::new(
-        reference.ink.map(Rgb::from),
-        reference.tolerance,
-    ));
+    let mut reader = DigitReader::new();
     for sample in &reference.samples {
         reader
             .learn(&load(&sample.image, &mut picture)?, &sample.text)
@@ -764,7 +761,7 @@ mod tests {
     use appytappy_config::signal::{Number, Value};
 
     use super::*;
-    use crate::screen::digits::drawn::{Pen, Percent, draw};
+    use crate::screen::digits::drawn::{Pen, draw};
 
     const OFTEN: SizeChangesDef = SizeChangesDef::Often;
 
@@ -985,20 +982,26 @@ mod tests {
     }
 
     /// "11" as two separate red columns on gray, 4 by 2 pixels drawn
-    /// `scale` times larger.
+    /// `scale` times larger, with a pixel of gray around them.
     fn elevens(scale: u32) -> Image {
-        let ink = [0, 0, 255, 255];
-        let paper = [40, 40, 40, 255];
-        let wide = usize::try_from(scale).expect("small");
-        let row = [ink, paper, ink, paper]
-            .iter()
-            .flat_map(|pixel| pixel.repeat(wide))
-            .collect::<Vec<u8>>();
         let size = Size {
-            width: scale.saturating_mul(4),
-            height: scale.saturating_mul(2),
+            width: scale.saturating_mul(4).saturating_add(2),
+            height: scale.saturating_mul(2).saturating_add(2),
         };
-        Image::new(size, row.repeat(wide.saturating_mul(2))).expect("matching length")
+        let bgra = (0..size.height)
+            .flat_map(|y| (0..size.width).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                let across = x.wrapping_sub(1);
+                let inside = across < scale.saturating_mul(4)
+                    && (1..size.height.saturating_sub(1)).contains(&y);
+                if inside && across.div_euclid(scale).is_multiple_of(2) {
+                    [0, 0, 255, 255]
+                } else {
+                    [40, 40, 40, 255]
+                }
+            })
+            .collect();
+        Image::new(size, bgra).expect("matching length")
     }
 
     fn counter(text: &str) -> ReferenceDef {
@@ -1006,8 +1009,6 @@ mod tests {
             id: "counter".to_owned(),
             name: "Counter".to_owned(),
             origin: OriginDef::ByHand,
-            ink: Some(RED),
-            tolerance: 10,
             samples: vec![SampleDef {
                 image: sample_name("counter", 1),
                 text: text.to_owned(),
@@ -1023,7 +1024,7 @@ mod tests {
         let pen = Pen {
             height,
             at: (f64::from(size.width) * 0.376, height * 0.25),
-            percent: Percent::Joined,
+            ..Pen::new(height, 0.0)
         };
         draw(text, pen, size)
     }
@@ -1058,12 +1059,6 @@ mod tests {
             id: "percent".to_owned(),
             name: "Percent".to_owned(),
             origin: OriginDef::ByHand,
-            ink: Some(ColorDef {
-                red: 255,
-                green: 255,
-                blue: 255,
-            }),
-            tolerance: 40,
             samples,
         };
         let value = ScreenDef {
@@ -1122,7 +1117,7 @@ mod tests {
     }
 
     #[test]
-    fn a_number_found_by_contrast_reads_a_region_as_tight_as_its_text() {
+    fn a_number_reads_a_region_as_tight_as_its_text() {
         // Ones two pixels wide and four tall, a pixel apart, from (3, 2):
         // a region drawn around them holds nothing of the background but
         // the gaps between them.
@@ -1152,14 +1147,9 @@ mod tests {
             let width = wide(ones).checked_sub(1).expect("at least one");
             Region::new(3, 2, width, 4).expect("not empty")
         };
-        let reader = DigitReader::new(InkRule::Contrast { tolerance: 40 });
-        let sample = reader.cut(&showing(2), around(2)).expect("in the window");
+        let sample = digits::cut(&showing(2), around(2)).expect("in the window");
         let files = pictures(&[(&sample_name("counter", 1), &sample)]);
-        let reference = ReferenceDef {
-            ink: None,
-            tolerance: 40,
-            ..counter("11")
-        };
+        let reference = counter("11");
         let mut value = screen(CheckDef::Number {
             reference: "counter".to_owned(),
             whole: true,
@@ -1294,8 +1284,8 @@ mod tests {
         assert!(error.source().is_none());
     }
 
-    /// Rings in the reference's color, 16 pixels tall and each as wide as
-    /// `widths` says, a blank column apart.
+    /// Red rings on gray, 16 pixels tall and each as wide as `widths`
+    /// says, a blank column apart and a pixel in from each edge.
     fn rings(widths: &[usize]) -> Image {
         let line = |fill: &str| {
             let rings: Vec<String> = widths
@@ -1305,9 +1295,13 @@ mod tests {
             rings.join(".")
         };
         let (edge, middle) = (line("#"), line("."));
-        let mut rows = vec![middle.as_str(); 16];
-        rows[0] = &edge;
-        rows[15] = &edge;
+        let blank = ".".repeat(edge.len().saturating_add(2));
+        let (edge, middle) = (format!(".{edge}."), format!(".{middle}."));
+        let mut rows = vec![middle.as_str(); 18];
+        rows[0] = &blank;
+        rows[1] = &edge;
+        rows[16] = &edge;
+        rows[17] = &blank;
         let bgra = rows
             .concat()
             .chars()
@@ -1321,7 +1315,7 @@ mod tests {
             .collect();
         let size = Size {
             width: u32::try_from(edge.len()).expect("small"),
-            height: 16,
+            height: 18,
         };
         Image::new(size, bgra).expect("matching length")
     }
@@ -1451,10 +1445,7 @@ mod tests {
         // A reader for no reference the application has is not kept.
         let mut unknown = Readers::new(&references).learned(
             "other",
-            DigitReader::new(InkRule::Color {
-                color: RED.into(),
-                tolerance: 10,
-            }),
+            DigitReader::new(),
         );
         assert!(matches!(
             build(&number, &mut unknown, OFTEN, from(&BTreeMap::new())),
@@ -1728,12 +1719,16 @@ mod tests {
         let files = pictures(&[
             (&sample_name("counter", 1), &elevens(3)),
             (&sample_name("big", 1), &elevens(2)),
+            (&sample_name("big", 2), &rings(&[10])),
         ]);
         let mut big = counter("11");
         big.id = "big".to_owned();
-        // A wider tolerance tells its reader from the counter's.
-        big.tolerance = 20;
         big.samples[0].image = sample_name("big", 1);
+        // One character more tells its reader from the counter's.
+        big.samples.push(SampleDef {
+            image: sample_name("big", 2),
+            text: "0".to_owned(),
+        });
         let mut screen = screen(CheckDef::Number {
             reference: "counter".to_owned(),
             whole: true,

@@ -76,10 +76,9 @@ pub(crate) fn cant_read(error: &CheckError, reference: Option<&str>) -> String {
         CheckError::SizeMismatch { expected, found } => {
             format!("its region is {found} but its saved picture is {expected}.")
         },
-        CheckError::Number(ReadError::NoInk) => format!(
-            "nothing in its region stands out from the background, or has the text color of \
-             {reference}."
-        ),
+        CheckError::Number(ReadError::NoInk) => {
+            "nothing in its region stands out from the background.".to_owned()
+        },
         CheckError::Number(ReadError::TooManyCharacters) => {
             format!("its region shows more than {MAX_CHARACTERS} characters.")
         },
@@ -103,6 +102,9 @@ pub(crate) fn cant_read(error: &CheckError, reference: Option<&str>) -> String {
         CheckError::Number(ReadError::NoNumber { read }) => {
             format!("it read \"{read}\", which holds no number.")
         },
+        CheckError::Number(ReadError::ColorsDisagree { read, other }) => format!(
+            "its region reads as \"{read}\" in one color and as \"{other}\" in another."
+        ),
     }
 }
 
@@ -136,9 +138,9 @@ pub(crate) fn cant_read_saved(error: &CheckError, reference: Option<&str>) -> St
         CheckError::Number(ReadError::NoInk | ReadError::NoNumber { .. }) => {
             "If the number shows there now, edit the value to draw its region again."
         },
-        CheckError::Number(ReadError::TooManyCharacters) => {
-            "Edit the value to draw its region around the number alone."
-        },
+        CheckError::Number(
+            ReadError::TooManyCharacters | ReadError::ColorsDisagree { .. },
+        ) => "Edit the value to draw its region around the number alone.",
         CheckError::Number(ReadError::UnknownCharacter { .. }) => {
             "Teach it on the References page."
         },
@@ -152,19 +154,24 @@ mod tests {
     use std::io;
 
     use appytappy_sources::screen::Image;
-    use appytappy_sources::screen::Rgb;
-    use appytappy_sources::screen::digits::{DigitReader, InkRule, LearnError};
+    use appytappy_sources::screen::digits::{DigitReader, LearnError};
 
     use super::*;
 
     /// A picture with a white pixel for each `#` of `rows` and a black one
-    /// for each `.`.
+    /// for each `.`, with a black pixel all around them.
     fn image(rows: &[&str]) -> Image {
+        let width = rows[0].len().checked_add(2).expect("small");
         let size = Size {
-            width: u32::try_from(rows[0].len()).expect("small"),
-            height: u32::try_from(rows.len()).expect("small"),
+            width: u32::try_from(width).expect("small"),
+            height: u32::try_from(rows.len().checked_add(2).expect("small")).expect("small"),
         };
-        let pixels = rows
+        let blank = ".".repeat(width);
+        let framed: Vec<String> = std::iter::once(blank.clone())
+            .chain(rows.iter().map(|row| format!(".{row}.")))
+            .chain(std::iter::once(blank))
+            .collect();
+        let pixels = framed
             .concat()
             .bytes()
             .flat_map(|cell| {
@@ -178,14 +185,7 @@ mod tests {
     #[test]
     fn a_failed_read_says_why_and_what_to_do_in_the_setup_apps_words() {
         let untaught = || {
-            DigitReader::new(InkRule::Color {
-                color: Rgb {
-                    red: 255,
-                    green: 255,
-                    blue: 255,
-                },
-                tolerance: 0,
-            })
+            DigitReader::new()
         };
         let mut reader = untaught();
         reader.learn(&image(&["#", "#", "#"]), "1").expect("learns");
@@ -196,6 +196,18 @@ mod tests {
             .learn(&image(&["#.....", "#.###.", "#....."]), "1-")
             .expect("learns");
         let digits_only = reader.clone().reading(Some("1")).expect("knows 1");
+        // A block learned as an 8, and as a 6 with a corner gone: a block
+        // with half that corner gone is about as close to one as to the
+        // other.
+        let (block, notched) = ("#".repeat(16), format!("{}..", "#".repeat(14)));
+        let whole = [block.as_str(); 16];
+        let mut corner_gone = whole;
+        corner_gone[..2].fill(notched.as_str());
+        let mut between = whole;
+        between[..1].fill(notched.as_str());
+        let mut twins = untaught();
+        twins.learn(&image(&whole), "8").expect("learns");
+        twins.learn(&image(&corner_gone), "6").expect("learns");
         let failed = |reader: &DigitReader, rows: &[&str]| {
             CheckError::Number(reader.read(&image(rows), false).expect_err("fails"))
         };
@@ -203,8 +215,14 @@ mod tests {
             (
                 failed(&reader, &["#.###", "#.#.#", "#.###"]),
                 Some("Digits"),
-                "character 2 of \"1 ?\" has a shape Digits hasn't learned. It looks closest to \
-                 \"%\". Teach it on the References page.",
+                "character 2 of \"1 ?\" has a shape Digits hasn't learned. Teach it on the \
+                 References page.",
+            ),
+            (
+                failed(&twins, &between),
+                Some("Digits"),
+                "character 1 of \"?\" has a shape Digits hasn't learned. It looks closest to \
+                 \"8\". Teach it on the References page.",
             ),
             (
                 failed(&untaught(), &["#"]),
@@ -227,8 +245,8 @@ mod tests {
             (
                 failed(&reader, &["..."]),
                 Some("Digits"),
-                "nothing in its region stands out from the background, or has the text color of \
-                 Digits. If the number shows there now, edit the value to draw its region again.",
+                "nothing in its region stands out from the background. If the number shows there \
+                 now, edit the value to draw its region again.",
             ),
             (
                 failed(&reader, &["#.".repeat(25).as_str()]),

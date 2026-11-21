@@ -627,7 +627,8 @@ mod tests {
     use crate::owner::messages::Run;
     use crate::owner::run;
     use crate::owner::test_support::{
-        FakeHost, Harness, STATE, capturing, characters_in, frame_image, harness, trial,
+        FakeHost, Harness, STATE, capturing_text, characters_in, frame_image,
+        harness, text_frame, trial,
     };
     use crate::pixels;
     use crate::window_list::WindowFit;
@@ -961,9 +962,9 @@ mod tests {
                         ))
                         .expect("the UI's spelling"),
                         serde_json::from_value(serde_json::json!({
-                            "kind": "ink",
-                            "ink": {"red": 255, "green": 0, "blue": 0},
-                            "tolerance": 0
+                            "kind": "barFill",
+                            "filled": {"red": 255, "green": 0, "blue": 0},
+                            "empty": {"red": 40, "green": 40, "blue": 40}
                         }))
                         .expect("the UI's spelling"),
                     )
@@ -973,10 +974,11 @@ mod tests {
         assert_eq!(
             harness.ask(matching(0, 4)),
             Ok(serde_json::json!({
-                "kind": "ink",
-                "ink": {"count": 4, "spans": [[0, 2], [4, 6]]}
+                "kind": "barFill",
+                "filled": {"count": 4, "spans": [[0, 2], [4, 6]]},
+                "empty": {"count": 4, "spans": [[2, 4], [6, 8]]}
             })),
-            "the red half of each row"
+            "the red half of each row is filled and the gray half empty"
         );
         assert_eq!(
             harness.ask(matching(0, 5)),
@@ -1075,15 +1077,13 @@ mod tests {
 
     #[test]
     fn stopping_closes_the_capture_and_releases_every_picture_it_held() {
-        let (mut harness, mut handler, root) = capturing("capture-stop");
+        let (mut harness, mut handler, root) = capturing_text("capture-stop");
         let left: RegionDef =
-            serde_json::from_str(r#"{"x":0,"y":0,"width":2,"height":2}"#).expect("valid JSON");
-        let red: ColorDef =
-            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+            serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":6}"#).expect("valid JSON");
         harness
-            .ask(|owner| owner.start_recording(characters_in(left, red), false))
+            .ask(|owner| owner.start_recording(characters_in(left), false))
             .expect("records");
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&text_frame()));
         harness
             .ask(|owner| owner.set_check(&trial(STATE)))
             .expect("a valid check");

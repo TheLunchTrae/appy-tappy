@@ -449,8 +449,6 @@ mod tests {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: None,
-            tolerance: 40,
             samples: vec![SampleDef {
                 image: "icon.png".to_owned(),
                 text: "1".to_owned(),
