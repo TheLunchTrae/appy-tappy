@@ -365,9 +365,10 @@ A reference reads one font. These it can't read, or reads less well:
   panel with a pattern. The reference can't tell the characters from what
   is behind them, and its boxes show more characters than you typed.
 - **Rotated or slanted text** that it learned upright.
-- **Very small marks.** A `.` only a pixel or two wide can fail to read
-  when the reference learned it more than twice as large. Draw a box
-  around a reading at the small size too.
+- **Very small text.** In text about 12 pixels tall, a `.` is only a pixel
+  or two wide, and some characters can fail to read when the reference
+  learned them at another size. Draw a box around a reading at the small
+  size too.
 - **Text in the background's own color** reads only with an outline more
   than a pixel wide around it.
 

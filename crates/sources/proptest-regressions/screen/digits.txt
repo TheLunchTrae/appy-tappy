@@ -7,3 +7,5 @@
 cc c1801d440a095057a244fc9179f30b39fa3aef3b269facb24837434720ec24da # shrinks to height = 16, hundredths = 2300, decimals = false, across = 3.5807648471382145
 cc 471857357ccac380138972e85a2e6adcef2abde3b9c0e49f530f6a216f57fe49 # shrinks to height = 40, hundredths = 0, decimals = false, across = 3.0, colors = Colors { ink: [255, 255, 255], outline: [0, 0, 0], background: [255, 255, 255] }
 cc b5457d46c68c59e9c87bc239d1a576aa26d238063afec8b53412c38618ad191e # shrinks to height = 16, hundredths = 0, decimals = true, across = 3.0, colors = Colors { ink: [90, 230, 60], outline: [20, 60, 10], background: [230, 230, 230] }
+cc 2133dc5521f9e19f358d6ea640458912a4c930ef45a59f40f2953c18c3071399 # shrinks to height = 28, hundredths = 2812, decimals = false, across = 3.0, colors = Colors { ink: [255, 255, 255], outline: [0, 0, 0], background: [255, 255, 255] }
+cc d974c02afb28d0cddc44cd5ffaecbba48712e31c55ad7cf1b266efd905bcbfa5 # shrinks to height = 28, hundredths = 1269, decimals = true, across = 3.4749079615965957, colors = Colors { ink: [255, 255, 255], outline: [0, 0, 0], background: [255, 255, 255] }

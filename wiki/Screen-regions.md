@@ -108,9 +108,10 @@ color most of those outermost pixels have is the background, and the
 outermost pixels themselves are never ink. So a region may be as tight as
 its text, even where a character fills it edge to edge, and text beside the
 region does not change the background while another color has more of
-the pixels around. A sample saved for a text color, which a reference once
-could have, holds its region alone: text that touches its edge there is
-cut short, and the setup app lists the sample among the
+the pixels around. A sample saved as its region alone, without the pixels
+around it, cuts short the text that touches its edge: the reference learns
+the cut character from it, or can't learn from it, and then the setup app
+lists the sample among the
 [saved pictures the reference can't learn](Setup-app.md#saved-pictures-a-reference-cant-learn).
 On a side at the window's edge there is no pixel past the region, and the
 region's own outermost pixels stand in.
@@ -119,14 +120,21 @@ The pixels are counted by color, to the nearest 16 of red, green, and
 blue. The most common color is the first, and each next most common one
 whose red, green, or blue is more than 40 from every color so far is
 another (`SAME_COLOR`), up to 12 (`MAX_COLORS`). A pixel has the color
-nearest its own. The blend along an anti-aliased edge is no color of its
-own: a color that lies between two others, in pixels with few of their own
-color around them and with both of those colors close by, is left out, so
-each pixel of an edge goes to the side it is mostly of and a stroke is as
-wide at any size and at any fraction of a pixel. Thin text of a color that
-happens to lie between the background's and that of other text has no such
-text close by, and stays a color. A read is integers only and gives the same answer for
-the same pixels.
+nearest its own. A read is integers only and gives the same answer for the
+same pixels.
+
+The blend along an anti-aliased edge is no color of its own (`blends`).
+Where a color lies between two others, each piece of it, the pixels that
+touch one another, is a blend when it is thin, with few pixels that have
+the color on every side, and a quarter of its pixels have both of those
+colors within two pixels. A blend goes to the nearest color, so each pixel
+of an edge goes to the side it is mostly of, and a stroke is as wide at any
+size and at any fraction of a pixel. A color between two others takes a
+blend only where it is close by. Thin gray text beside white text on black
+stays text: the white's edge passes through the gray, and only the pieces
+along that edge are blends. A color with blends and nothing else but pieces
+of fewer than 4 pixels (`SPECK`) is left out whole, so a lone mark that
+small in such a color is not read.
 
 Each color is a layer, and one more layer holds every color but the
 background's, for text that is no one color, such as a gradient. The
@@ -143,19 +151,23 @@ them:
   it. The typed text chooses the layer, so a box whose text is typed as it
   shows always teaches when one layer splits into that many characters.
 - **A read** takes a layer whose every character the reference knows
-  (`Attempt::chosen`). An outline around the text can match too, less
-  well, so only the layers whose characters are about as close to their
-  glyphs as the closest layer's count, and of those it is the one with the
-  most pixels across in the characters it matched. A layer the reference
-  knows less than half as much of as another is no contender: a speck that
-  happens to match, or the inside of a `0`. Where two contenders read as
-  different text, the read fails rather than choose
-  (`ReadError::ColorsDisagree`). A read takes its number from one color, so
-  where other colors show something as tall as half the line beside the
-  number, which neither touches the number's ink nor lies within one of
-  its characters, the read fails at that place as for an unlearned shape
-  (`Attempt::beside`). A character in another color whose outline runs
-  into the number's outline is not seen that way.
+  (`Attempt::chosen`). A layer the reference knows less than half as much
+  of as another is no contender: a speck that happens to match, or the
+  inside of a `0`. A layer with a digit that shares no column with a
+  contender counts too: a `1` beside a wider `%` in a color of its own. An
+  outline around the text can match too, less well, so a layer is left
+  where another matches its characters more closely in the same columns,
+  by more than 100 (`CLEAR_BY`). Of the rest, a layer with a digit comes
+  before one without, and then the one with the most pixels across in the
+  characters it matched. Where two contenders read as different text, the
+  read fails rather than choose (`ReadError::ColorsDisagree`). A read takes
+  its number from one color, so where other colors show something as tall
+  as half the line beside the number, which neither touches the number's
+  ink nor lies within one of its characters, the read fails at that place
+  as for an unlearned shape (`Attempt::beside`). A sign in a color of its
+  own, such as a gold `%` after a white number, is no such thing where a
+  layer knows it as a character no number holds. A character in another
+  color whose outline runs into the number's outline is not seen at all.
 
 A color whose one mark fills the image from side to side and top to bottom,
 where another color has ink too, is a plate behind the text and not the
@@ -202,7 +214,8 @@ same text again adds little, and a reader holds at most 256 glyphs. Two
 learned glyphs of different characters within 100 of each other, so that
 neither is clearly closer to its own shape, are
 [lookalikes](References.md#what-it-has-learned), which the setup
-app warns about.
+app warns about. Glyphs further apart than that can still have a shape
+between them that is about as close to both, and it reads as neither.
 
 The tests draw text as a game does, bold with an outline and anti-aliased
 at any fraction of a pixel (`screen/digits/drawn.rs`). One reference
@@ -218,14 +231,17 @@ These limits follow:
 - Characters that touch are one mark, and no learned shape.
 - The text line's height is that of the characters the region shows, so a
   character's place depends on what stands beside it.
-- A small mark such as a `.` that is only two pixels wide has too few
-  pixels to be told from one learned at more than twice its size, and
-  fails the read. Teach the reference a picture at the small size too.
+- In text about 12 pixels tall, a `.` is two pixels wide and an outline
+  less than one. That is too few pixels to tell some characters from ones
+  learned at another size, and those reads fail. Teach the reference a
+  picture at the small size too.
 - Text of the background's color needs an outline more than one pixel
   wide to close it in.
 - A stroke thinner than about a twentieth of its character's height fills
   less than a third of the square, so two characters that differ only by
-  such a stroke can be within reach of each other.
+  such a stroke can be within reach of each other. In so thin a font, a
+  digit the reference never learned can read as one it did, so teach it
+  every digit.
 - A different font is different shapes. Each font takes its own reference,
   or more labeled pictures in the same one.
 

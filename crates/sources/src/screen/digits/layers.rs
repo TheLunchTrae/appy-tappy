@@ -12,11 +12,15 @@
 //!    is another, up to [`MAX_COLORS`]. A pixel has the color nearest to
 //!    its own.
 //!
-//!    The blend along an anti-aliased edge is no color of its own: a color
-//!    that lies between two others, in pixels with others of their color
-//!    on few sides and with both of those colors close by, is left out. So
-//!    each pixel of an edge goes to the side it is mostly of, and a stroke
-//!    is as wide in its layer at any size and at any fraction of a pixel.
+//!    The blend along an anti-aliased edge is no color of its own. Where
+//!    a color lies between two others, each piece of it, the pixels that
+//!    touch one another, is a blend when it is thin and has both of those
+//!    colors close by. A color that is blends and specks is left out. So each
+//!    pixel of an edge goes to the side it is mostly of, and a stroke is
+//!    as wide in its layer at any size and at any fraction of a pixel.
+//!    Thin text of a color that happens to lie between two others stays
+//!    text: the edge of white text on black passes through gray, and only
+//!    the pieces along that edge are blends.
 //! 2. **Background.** The color most of the image's outermost pixels have
 //!    is the background. Its pixels are ink only where pixels of other
 //!    colors close them in, as an outline does, so white text with an
@@ -46,9 +50,10 @@ const COUNTED_BITS: u32 = 4;
 /// How many colors there are to count.
 const COUNTED: usize = 1 << (COUNTED_BITS * 3);
 
-/// How many times the pixels of a color that have its color on every side
-/// its pixels may be, and the color still be the blend along an edge when
-/// it lies between two others. A stroke three pixels wide has more.
+/// How many times the pixels of a piece of a color that have its color on
+/// every side its pixels may be, and the piece still be the blend along an
+/// edge when its color lies between two others. A stroke three pixels wide
+/// has more.
 const THIN: u32 = 8;
 
 /// How much red, green, or blue must differ between two colors to say
@@ -67,6 +72,10 @@ const PURE: u8 = 6;
 /// How many pixels around a pixel on an edge are looked at for the color
 /// the layer meets there.
 const MEETS: u32 = 2;
+
+/// How many pixels that touch one another the smallest piece of a color
+/// has that can be a character: a point two pixels wide.
+const SPECK: usize = 4;
 
 /// One layer of an image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,28 +134,9 @@ impl Layers {
                 }
             }
         }
-        // How many pixels of each counted color have it on every side.
-        let mut amid = vec![0_u32; COUNTED];
-        let rows = || counted.chunks(width);
-        let blank: &[u16] = &[];
-        let above = std::iter::once(blank).chain(rows());
-        let below = rows().skip(1).chain(std::iter::once(blank));
-        for ((row, above), below) in rows().zip(above).zip(below) {
-            for (x, &color) in row.iter().enumerate() {
-                let place = usize::from(color);
-                if let Some(count) = counts.get_mut(place) {
-                    *count = count.saturating_add(1);
-                }
-                let beside =
-                    |row: &[u16], x: Option<usize>| x.and_then(|x| row.get(x)) == Some(&color);
-                if beside(row, x.checked_sub(1))
-                    && beside(row, x.checked_add(1))
-                    && beside(above, Some(x))
-                    && beside(below, Some(x))
-                    && let Some(count) = amid.get_mut(place)
-                {
-                    *count = count.saturating_add(1);
-                }
+        for &color in &counted {
+            if let Some(count) = counts.get_mut(usize::from(color)) {
+                *count = count.saturating_add(1);
             }
         }
         // The mean color of the pixels counted as `counted`: a flat color
@@ -185,18 +175,14 @@ impl Layers {
             .zip(&around)
             .max_by_key(|&(color, &count)| (count, std::cmp::Reverse(color)))
             .map(|(color, _)| color);
-        // The most common colors, each with whether it is thin.
+        // The most common colors, each with whether it may be a blend.
         let mut found: Vec<(Rgb, bool)> = Vec::new();
-        for &(count, counted) in &common {
+        for &(_, counted) in &common {
             let color = mean(counted);
-            let thin = Some(counted) != behind
-                && amid
-                    .get(counted)
-                    .is_some_and(|&amid| amid.saturating_mul(THIN) < count);
             if found.len() < MAX_COLORS.saturating_mul(2)
                 && !found.iter().any(|&(one, _)| same(one, color))
             {
-                found.push((color, thin));
+                found.push((color, Some(counted) != behind));
             }
         }
         // The place in `found` of each counted color the image has, and of
@@ -213,43 +199,78 @@ impl Layers {
             .iter()
             .map(|&counted| spots.get(usize::from(counted)).copied().unwrap_or(NO_LAYER))
             .collect();
-        let blends = blends(&found, &placed, width);
-        let colors: Vec<Rgb> = found
-            .into_iter()
-            .zip(blends)
-            .filter(|&(_, blend)| !blend)
-            .map(|((color, _), _)| color)
-            .take(MAX_COLORS)
-            .collect();
-        // The place of the color nearest each counted color, found once
-        // for each that the image has.
-        let mut nearest = vec![0_u8; COUNTED];
-        for &(_, color) in &common {
-            let pixel = mean(color);
-            // A blend of two colors goes to the nearer of the two, and not
-            // to a third that happens to lie nearer than either: the gray
-            // between a white outline and a dark background is no part of
-            // red text.
-            let blends = |one: Rgb| {
-                colors
-                    .iter()
-                    .any(|&other| other != one && between(pixel, one, other))
-            };
-            let nearest_of = |blended: bool| {
+        let Blends { gone, mixed } = blends(&found, &placed, width);
+        // The place among `colors` of each color found that is one.
+        let mut kept = Vec::with_capacity(found.len());
+        let mut colors: Vec<Rgb> = Vec::new();
+        for (&(color, _), &gone) in found.iter().zip(&gone) {
+            let place = (!gone && colors.len() < MAX_COLORS)
+                .then(|| u8::try_from(colors.len()).ok())
+                .flatten();
+            kept.push(place);
+            colors.extend(place.map(|_| color));
+        }
+        // The place of the color nearest `pixel`, of those with a
+        // [`bit`] in `among`.
+        //
+        // A blend of two colors goes to the nearer of the two, and not to
+        // a third that happens to lie nearer than either: the gray between
+        // a white outline and a dark background is no part of red text.
+        let nearest_to = |pixel: Rgb, among: u32| {
+            let others = || {
                 (0..=u8::MAX)
                     .zip(&colors)
+                    .filter(|&(place, _)| among & bit(usize::from(place)) != 0)
+            };
+            let blends =
+                |one: Rgb| others().any(|(_, &other)| other != one && between(pixel, one, other));
+            let nearest_of = |blended: bool| {
+                others()
                     .filter(|&(_, &one)| !blended || blends(one))
                     .min_by_key(|&(_, &one)| apart(one, pixel))
                     .map(|(place, _)| place)
             };
-            let place = nearest_of(true).or_else(|| nearest_of(false)).unwrap_or(0);
-            if let Some(slot) = nearest.get_mut(color) {
-                *slot = place;
-            }
-        }
-        let color: Vec<u8> = counted
+            nearest_of(true).or_else(|| nearest_of(false))
+        };
+        // Each pixel's color where it is all of one, and [`NO_LAYER`]
+        // where it is a blend.
+        let solid: Vec<u8> = placed
             .iter()
-            .map(|&counted| nearest.get(usize::from(counted)).copied().unwrap_or(0))
+            .zip(&mixed)
+            .map(|(&placed, &mixed)| {
+                kept.get(usize::from(placed))
+                    .copied()
+                    .flatten()
+                    .filter(|_| !mixed)
+                    .unwrap_or(NO_LAYER)
+            })
+            .collect();
+        // The colors that lie between no two others, a [`bit`] to each.
+        let ends = (0..colors.len())
+            .zip(&colors)
+            .filter(|&(place, &color)| {
+                let others = || {
+                    (0..colors.len())
+                        .zip(&colors)
+                        .filter(move |&(other, _)| other != place)
+                };
+                !others().any(|(one, &first)| {
+                    others().any(|(other, &second)| one < other && between(color, first, second))
+                })
+            })
+            .fold(0_u32, |ends, (place, _)| ends | bit(place));
+        // A blend goes to the nearest color. One that lies between two
+        // others has to be close by to take it: the edge of white text on
+        // black passes through the color of gray text elsewhere in the
+        // image, and is no part of that text.
+        let color: Vec<u8> = (0..)
+            .zip(pixels.iter().zip(&solid))
+            .map(|(at, (&pixel, &solid_here))| {
+                if solid_here != NO_LAYER {
+                    return solid_here;
+                }
+                nearest_to(pixel, ends | close_by(&solid, width, at)).unwrap_or(0)
+            })
             .collect();
         let mut edge = [0_u32; MAX_COLORS];
         for at in outermost(size) {
@@ -481,92 +502,116 @@ fn bit(place: usize) -> u32 {
         .unwrap_or(0)
 }
 
-/// For each pixel of the color at `place`, which colors have a pixel
-/// within [`MEETS`] of it, a [`bit`] to each. `placed` holds each pixel's
-/// color, in rows `width` long.
-fn meets(placed: &[u8], width: usize, place: usize) -> Vec<u32> {
+/// Which colors have a pixel within [`MEETS`] of the one at `at`, a
+/// [`bit`] to each. `placed` holds each pixel's color, in rows `width`
+/// long.
+fn close_by(placed: &[u8], width: usize, at: usize) -> u32 {
     let reach = index(MEETS);
-    let rows: Vec<&[u8]> = placed.chunks(width).collect();
-    let mut met = Vec::new();
-    for (y, row) in rows.iter().enumerate() {
-        for (x, _) in row
-            .iter()
-            .enumerate()
-            .filter(|&(_, &color)| usize::from(color) == place)
-        {
-            let from = x.saturating_sub(reach);
-            let across = x
-                .saturating_add(reach)
-                .saturating_add(1)
-                .saturating_sub(from);
-            let near = rows
-                .iter()
-                .skip(y.saturating_sub(reach))
-                .take(
-                    y.saturating_add(reach)
-                        .saturating_add(1)
-                        .saturating_sub(y.saturating_sub(reach)),
-                )
-                .flat_map(|row| row.iter().skip(from).take(across));
-            met.push(near.fold(0_u32, |met, &color| met | bit(usize::from(color))));
-        }
-    }
-    met
+    let column = at.checked_rem(width).unwrap_or(0);
+    let from = column.saturating_sub(reach);
+    let across = column
+        .saturating_add(reach)
+        .saturating_add(1)
+        .min(width)
+        .saturating_sub(from);
+    let row = at.saturating_sub(column);
+    let first = row.saturating_sub(reach.saturating_mul(width));
+    (first..=row.saturating_add(reach.saturating_mul(width)))
+        .step_by(width.max(1))
+        .filter_map(|row| {
+            let start = row.checked_add(from)?;
+            placed.get(start..start.checked_add(across)?.min(placed.len()))
+        })
+        .flatten()
+        .fold(0_u32, |met, &color| met | bit(usize::from(color)))
 }
 
-/// Which of the colors `found` in an image, each with whether it is thin,
-/// are the blend along an edge and no color of their own. `placed` holds
-/// each pixel's color, in rows `width` long.
+/// What the pixels of a color are that are no blends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rest {
+    /// None, or pieces of fewer than [`SPECK`] pixels.
+    Specks,
+    /// A piece large enough to be a character among them.
+    Text,
+}
+
+/// The blends among the colors found in an image.
+struct Blends {
+    /// Whether each color found is the blend along an edge, all of it,
+    /// and no color of its own.
+    gone: Vec<bool>,
+    /// Whether each pixel is a blend, though its color is one of the
+    /// image's: another color's edge passes through that color.
+    mixed: Vec<bool>,
+}
+
+/// Which of the colors `found` in an image, each with whether it may be a
+/// blend, are the blend along an edge and no color of their own, and
+/// which pixels of the rest are blends. `placed` holds each pixel's
+/// color, in rows `width` long.
 ///
-/// A thin color between two others is the blend along their edge,
+/// A color between two others may be the blend along their edge,
 /// whichever of the three is the most common: an outline less than two
 /// pixels wide has fewer pixels of its own color than of its blends. A
-/// blend lies where its two colors meet, so many of its pixels have both
-/// close by, or blends nearer each. Thin text of a color that happens to
-/// lie between the background's and that of other text does not. The
-/// least common color is judged first, and a blend is no end of another.
-fn blends(found: &[(Rgb, bool)], placed: &[u8], width: usize) -> Vec<bool> {
-    let mut blends = vec![false; found.len()];
-    for (place, &(color, thin)) in found.iter().enumerate().rev() {
-        let blend = thin && is_blend(found, &blends, placed, width, place, color);
-        if let Some(gone) = blends.get_mut(place) {
-            *gone = blend;
+/// blend lies where its two colors meet, so its pixels have both close
+/// by, or blends nearer each. Thin text of a color that happens to lie
+/// between the background's and that of other text does not, but the
+/// edge of that other text passes through its color. So a color's pixels
+/// are judged in the pieces they lie in ([`mixed`]), and the color is
+/// gone only when it has blends and nothing else but specks, which are
+/// blends that lie apart from one of their two colors. The least common
+/// color is judged first, and a color that is gone is no end of another.
+fn blends(found: &[(Rgb, bool)], placed: &[u8], width: usize) -> Blends {
+    let mut blends = Blends {
+        gone: vec![false; found.len()],
+        mixed: vec![false; placed.len()],
+    };
+    for (place, &(color, may)) in found.iter().enumerate().rev() {
+        if !may {
+            continue;
+        }
+        let (mixed, rest) = mixed(found, &blends.gone, placed, width, place, color);
+        if rest == Rest::Specks && !mixed.is_empty() {
+            if let Some(gone) = blends.gone.get_mut(place) {
+                *gone = true;
+            }
+            continue;
+        }
+        for at in mixed {
+            if let Some(mixed) = blends.mixed.get_mut(at) {
+                *mixed = true;
+            }
         }
     }
     blends
 }
 
-/// Whether the thin color `color`, at `place` among `found`, is a blend
-/// of two of the others that are no `blends` themselves, as [`blends`]
-/// describes.
-fn is_blend(
+/// The pixels of `color`, at `place` among `found`, that are a blend of
+/// two of the others that are not `gone` themselves, by where each is in
+/// `placed`, and what the rest of the color's pixels are. A color that
+/// lies between no two of the others has no blends.
+///
+/// A piece of the color, the pixels that touch one another, is a blend
+/// when it is thin, with few pixels that have the color on every side,
+/// and a quarter of its pixels have both colors close by. A stroke of
+/// text in the color is no blend, and neither is a point with only the
+/// background around it.
+fn mixed(
     found: &[(Rgb, bool)],
-    blends: &[bool],
+    gone: &[bool],
     placed: &[u8],
     width: usize,
     place: usize,
     color: Rgb,
-) -> bool {
+) -> (Vec<usize>, Rest) {
     let others = || {
         found
             .iter()
-            .zip(blends)
+            .zip(gone)
             .enumerate()
             .filter(move |&(other, (_, &gone))| other != place && !gone)
             .map(|(other, (&(color, _), _))| (other, color))
     };
-    let mut pairs = others()
-        .enumerate()
-        .flat_map(|(skip, one)| {
-            others()
-                .skip(skip.saturating_add(1))
-                .map(move |other| (one, other))
-        })
-        .filter(|&((_, one), (_, other))| between(color, one, other))
-        .peekable();
-    if pairs.peek().is_none() {
-        return false;
-    }
     // The colors toward `end`: `end`, and each color between it and this
     // one, which is a blend nearer that end.
     let toward = |(end, end_color): (usize, Rgb)| {
@@ -578,15 +623,86 @@ fn is_blend(
             })
             .fold(0_u32, |all, (other, _)| all | bit(other))
     };
-    let met = meets(placed, width, place);
-    pairs.any(|(one, other)| {
-        let (one, other) = (toward(one), toward(other));
-        let beside = met
+    let pairs: Vec<(u32, u32)> = others()
+        .enumerate()
+        .flat_map(|(skip, one)| {
+            others()
+                .skip(skip.saturating_add(1))
+                .map(move |other| (one, other))
+        })
+        .filter(|&((_, one), (_, other))| between(color, one, other))
+        .map(|(one, other)| (toward(one), toward(other)))
+        .collect();
+    if pairs.is_empty() {
+        return (Vec::new(), Rest::Text);
+    }
+    let own = |at: usize| {
+        placed
+            .get(at)
+            .is_some_and(|&color| usize::from(color) == place)
+    };
+    // Whether a pixel has its color on every side.
+    let amid = |at: usize| {
+        let column = at.checked_rem(width).unwrap_or(0);
+        [
+            at.checked_sub(width),
+            at.checked_add(width),
+            at.checked_sub(1).filter(|_| column > 0),
+            at.checked_add(1)
+                .filter(|_| column.saturating_add(1) < width),
+        ]
+        .into_iter()
+        .all(|beside| beside.is_some_and(own))
+    };
+    // Whether a pixel has both colors of a pair close by.
+    let beside = |at: usize| {
+        let met = close_by(placed, width, at);
+        pairs
             .iter()
-            .filter(|&&met| met & one != 0 && met & other != 0)
-            .count();
-        beside.saturating_mul(4) >= met.len()
-    })
+            .any(|&(one, other)| met & one != 0 && met & other != 0)
+    };
+    let mut seen = vec![false; placed.len()];
+    let (mut mixed, mut rest) = (Vec::new(), Rest::Specks);
+    for at in (0..placed.len()).filter(|&at| own(at)) {
+        let piece = piece(placed, width, at, &mut seen);
+        let inner = piece.iter().filter(|&&at| amid(at)).count();
+        let thin = inner.saturating_mul(index(THIN)) < piece.len();
+        let both = piece.iter().filter(|&&at| beside(at)).count();
+        if thin && both > 0 && both.saturating_mul(4) >= piece.len() {
+            mixed.extend(piece);
+        } else if piece.len() >= SPECK {
+            rest = Rest::Text;
+        }
+    }
+    (mixed, rest)
+}
+
+/// The pixels of one color that touch the one at `start` through each
+/// other, side to side or corner to corner, by where each is in `placed`,
+/// which holds each pixel's color in rows `width` long. None of them is
+/// `seen` before, and all are after; a `start` seen before gives none.
+fn piece(placed: &[u8], width: usize, start: usize, seen: &mut [bool]) -> Vec<usize> {
+    let color = placed.get(start).copied();
+    let mut piece = Vec::new();
+    let mut next = vec![start];
+    while let Some(at) = next.pop() {
+        match seen.get_mut(at) {
+            Some(seen) if !*seen && placed.get(at).copied() == color => *seen = true,
+            _ => continue,
+        }
+        piece.push(at);
+        let column = at.checked_rem(width).unwrap_or(0);
+        let columns =
+            column.saturating_sub(1)..=column.saturating_add(1).min(width.saturating_sub(1));
+        let row = at.saturating_sub(column);
+        for row in [row.checked_sub(width), Some(row), row.checked_add(width)]
+            .into_iter()
+            .flatten()
+        {
+            next.extend(columns.clone().map(|column| row.saturating_add(column)));
+        }
+    }
+    piece
 }
 
 /// Whether two colors are one color to a reader.
