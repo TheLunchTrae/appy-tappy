@@ -1077,8 +1077,8 @@ mod tests {
         assert_eq!(
             harness.ask(|owner| owner.set_check(&trial(NUMBER))),
             Err(
-                "Digits is missing its saved picture ref-digits-1.png. Edit Digits and remove \
-                 that picture under Saved pictures it can't learn."
+                "Digits is missing its saved picture ref-digits-1.png. Edit Digits on the \
+                 References page and remove that picture under Saved pictures it can't learn."
                     .to_owned()
             )
         );

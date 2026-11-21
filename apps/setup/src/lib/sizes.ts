@@ -52,7 +52,7 @@ export const REMOVE_FIX_HINT =
 
 /** The hint beside Read with, in the fix flow of a number. */
 export const READ_WITH_HINT =
-  'Characters often look different at another size. Learn a reference at this size if the shared one misreads.';
+  'Characters often look different at another size. If the shared reference misreads here, teach a reference on the References page from screenshots at this size, then pick it here.';
 
 /** The nine sides a region can stay at, row by row from the top left, as the picker lays them out. */
 export const PINS: readonly PinDef[] = [

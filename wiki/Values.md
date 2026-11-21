@@ -55,9 +55,10 @@ back to the automation with the value picked.
    can leave it alone. Then select **Next: characters** for a **Number**, or
    **Next: how to read it** for the other checks.
 
-3. **Characters,** for a **Number**. Pick the reference the number reads
-   with, make one with **New reference from this region**, or teach one with
-   **Record readings**, as [Checks](#checks) describes. This step and
+3. **Characters,** for a **Number**. Say which characters it needs and pick
+   the reference the number reads with, as [Checks](#checks) describes.
+   References are made and taught on their own page, never in this step:
+   see [Make a reference](References.md#make-a-reference). This step and
    **Check and save** don't show the region, apart from a recording's
    outline; go back to **Where to read** to change it. Then select
    **Next: check and save**.
@@ -256,21 +257,14 @@ What a recording gives each check:
   **Color to look for** on one that shows it. The tolerance is the same fixed
   16, so a small light in a large region may not give a new screenshot when
   it turns on.
-- **Number.** A number learns characters, not looks, so it records readings
-  instead. Under **Characters**, select **Record readings**. The
-  reference you picked opens with its
-  [recording](References.md#record-readings) already running on the value's
-  region, unless it has a
-  [draft of changes](Drafts.md#finish-or-delete-a-draft) to finish first.
-  With no reference picked, a new one opens: click the characters on
-  the screenshot to pick their color, then select **Start recording**.
-  **Save reference** brings you back to the value.
+- **Number.** A number reads characters, not looks, so it records nothing
+  here. Its reference learns characters from
+  [recorded readings](References.md#record-readings) on the References page.
 
 When you [edit a value](#edit-a-value), a **State**, a **Bar fill**, or a
 **Color** offers recording as a new value does, to take a state's picture
 again or pick a color again, while the window has the size the value was drawn
-at; at another size it says which size it needs. A **Number** offers
-**Record readings**.
+at; at another size it says which size it needs.
 
 When you [fix a value at one size](#fix-a-value-at-one-size), a **State**
 offers recording, with the tolerance of its first drawing. A **Bar fill** or a
@@ -302,14 +296,13 @@ instant can then be missed.
   [reference](References.md): the shapes of the application's
   characters. **Characters it needs** says what the value can show, as
   [Characters a number needs](#characters-a-number-needs) describes. Pick
-  one of the application's references, or select
-  **New reference from this region** to make one from the region you drew.
-  **Edit** changes the picked one, such as to teach it a digit it does not
-  know yet. A reference that has yet to learn characters the value needs
-  lists them after **Missing**; it still reads the characters it knows.
-  **Record readings** teaches the picked one, or a new one, from
-  what the region shows while you use the application, as
-  [Record screenshots](#record-screenshots) describes. Turn on
+  one of the application's references. A reference that has yet to learn
+  characters the value needs lists them after **Missing**; it still reads the
+  characters it knows. To make a reference, or teach one a digit it does not
+  know yet, go to the References page, as
+  [Make a reference](References.md#make-a-reference) describes. While the
+  application has no reference, the step says so: select **Save as draft**,
+  make the reference, then [finish the draft](Drafts.md) and pick it. Turn on
   **Whole number only** to ignore every digit after the
   decimal point, so `87.5%` reads as 87. The reference still has to know the
   point, so teach it on a screenshot that shows one.
@@ -391,12 +384,9 @@ page still lists them all, and picking another reference changes nothing
 you turned on.
 
 The list does two things. It says what to teach: the list of references
-shows after **Missing** which needed characters each has yet to learn, and a
-reference you make or edit from the value shows the same list, as
-**Characters the value needs**, and what is
-[still missing](References.md#what-it-has-learned). When the reference you
-picked knows none of them, a note under the references says so: teach it
-them, or choose another reference.
+shows after **Missing** which needed characters each has yet to learn. When
+the reference you picked knows none of them, a note under the references
+says so: teach it them on the References page, or choose another reference.
 
 It also says what the value reads. A value that shows only some of a font
 reads better when it reads only those characters, since it can then no
@@ -695,8 +685,9 @@ on the References page.**
    size and add them in the same order; each takes the next state's name.
    The fix compares with the first drawing's tolerance.
    For a **Number** check, **Read with** keeps the reference the value reads
-   with at every size, or **Learn a reference at this size** teaches a new
-   one from this size's screenshots. A **Number**'s region doesn't show in
+   with at every size, or picks another of the application's references, such
+   as one you taught on the References page from screenshots at this size.
+   A **Number**'s region doesn't show in
    this step; go back to **Where to read** to move it. A **Bar fill** or
    **Color** check keeps its colors.
 4. Select **Save fix**.
@@ -741,7 +732,7 @@ headed **Fix** and saves with **Save fix**.
    the check to one of them turns it off.
 3. **How to read it.** Change the colors, the states' names, or the
    **Tolerance**. A **Number** has two steps here, as a new one does:
-   **Characters** changes the reference and **Whole number only**, and
+   **Characters** picks another reference and changes **Whole number only**, and
    **Check and save** follows. The box in the last step shows what the value
    would read on the live window once saved.
 4. Select **Save changes**. **Discard**, or leaving the editor, keeps the

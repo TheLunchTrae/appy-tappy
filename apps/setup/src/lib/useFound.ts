@@ -77,15 +77,13 @@ export interface Finder {
   readonly add: () => void;
   /** Forgets the search without adding any of it; a later search skips its finds. */
   readonly dismiss: () => void;
-  /** Forgets the search and which finds the user passed over, for a reference edited afresh. */
-  readonly reset: () => void;
 }
 
 /**
  * The search for text like a box of the reference `draft` teaches, which adds to `reference`, if any: its finds with
  * the user's edits, their pictures, and which ones the reference cannot learn. `addBoxes` adds the kept finds to the
- * draft as boxes. `learned` is every text the reference learns from already, and `needs` the characters the value it
- * is taught for needs, which the finds listed may only show. Leaving the component that uses it forgets the search.
+ * draft as boxes. `learned` is every text the reference learns from already, and `needs` the characters it is
+ * taught for, which the finds listed may only show. Leaving the component that uses it forgets the search.
  */
 export function useFound(
   draft: Draft,
@@ -317,10 +315,6 @@ export function useFound(
     },
     dismiss: () => {
       passOverRest();
-      forget();
-    },
-    reset: () => {
-      setPassed(new Map());
       forget();
     },
   };

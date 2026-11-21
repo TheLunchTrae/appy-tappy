@@ -269,8 +269,6 @@ export type HeldEvent =
    * box drawn later, which can have its ID, joins anew.
    */
   | { readonly kind: 'boxes'; readonly ids: ReadonlySet<number> }
-  /** The reference's editor closes, so the next reference starts with nothing. */
-  | { readonly kind: 'forget' }
   /** The check edited reading `index` of recording `recording`, which the draft now has as `reading`. */
   | {
       readonly kind: 'reading';
@@ -334,8 +332,6 @@ export function heldStep(held: Held, event: HeldEvent): Held {
       });
       return seen.length === held.past.seen.size ? held : { ...held, past: { ...held.past, seen: new Set(seen) } };
     }
-    case 'forget':
-      return NOTHING_HELD;
     case 'reading': {
       const readings = new Map(leftOutOf(held, event.recording));
       if (event.reading.leftOut) {
@@ -381,8 +377,6 @@ export interface CharacterCheck {
    * user neither typed them nor answered for their shapes in a check of this reference.
    */
   readonly unconfirmed: readonly string[];
-  /** Closes it and forgets what every check answered, as the reference's editor closes. */
-  readonly forget: () => void;
   readonly act: (event: Turn) => void;
   /** Edits one place's text and tick by hand, as its row in the list of finds or its tile in review does. */
   readonly edit: (place: Place, entry: ReviewEntry) => void;
@@ -527,9 +521,6 @@ export function useCharacterCheck(
     },
     close,
     unconfirmed: notConfirmed,
-    forget: () => {
-      send({ kind: 'forget' });
-    },
     act: (event) => {
       if (guide === null) {
         return;

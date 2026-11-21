@@ -597,8 +597,6 @@ pub(super) fn teaching(characters: CharactersSpec) -> ReferenceTrial {
     ReferenceTrial {
         app: "example".to_owned(),
         characters,
-        needs: String::new(),
-        whole: false,
         pin: None,
     }
 }

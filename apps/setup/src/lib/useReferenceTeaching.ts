@@ -13,12 +13,10 @@ import {
   type ReferenceSaving,
   boxBlocked,
   findBlocked as findBlockedBy,
-  fromReference,
   readingOf,
   recordBlocked,
   recordedPlace,
   settingsDiffer,
-  toReference,
   withRecordedInk,
 } from './check.ts';
 import { progress } from './confirm.ts';
@@ -35,7 +33,10 @@ import { useFound } from './useFound.ts';
 import { useRecording } from './useRecording.ts';
 import { focusNext, useRecordFocus, useReview } from './useReview.ts';
 
-/** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
+/**
+ * The characters the reference is taught for: none, which filters no find and leaves nothing missing. One list, so
+ * nothing that depends on it runs again.
+ */
 const NO_NEEDS: readonly string[] = [];
 
 /** The saved samples of a new reference. */
@@ -45,15 +46,14 @@ const NO_SAMPLES: readonly SampleDef[] = [];
 interface TeachingSetup {
   /** The saved application the reference belongs to. */
   readonly app: string;
-  /** The reference the editor teaches, or null while no editor is open. */
+  /** The reference the editor teaches, or null outside a reference's capture. */
   readonly editing: Editing | null;
-  readonly setEditing: Dispatch<SetStateAction<Editing | null>>;
   readonly draft: Draft;
   readonly setDraft: Dispatch<SetStateAction<Draft>>;
   readonly boxes: ReturnType<typeof useBoxes>;
-  /** The saved reference the editor adds to, or null for a new one or while no editor is open. */
+  /** The saved reference the editor adds to, or null for a new one or outside a reference's capture. */
   readonly reference: ReferenceRef | null;
-  /** What saving the reference sends, or null while no editor is open. */
+  /** What saving the reference sends, or null outside a reference's capture. */
   readonly saving: Built<ReferenceSaving> | null;
   /** The side a recording's region stays at. */
   readonly pin: PinDef | null;
@@ -68,21 +68,17 @@ interface TeachingSetup {
   readonly stopPicking: () => void;
   /** Hears when a save starts and ends. */
   readonly onSaving: (saving: boolean) => void;
-  /**
-   * Hears what a save made, and how to leave the editor for the value. What it throws shows as why the reference
-   * was not saved.
-   */
-  readonly onSaved: (saved: SavedReference, close: () => void) => Promise<void>;
+  /** Hears what a save made. What it throws shows as why the reference was not saved. */
+  readonly onSaved: (saved: SavedReference) => Promise<void>;
 }
 
 /**
- * The reference the capture screen teaches while its editor is open: what it learns from, its recording, the review
+ * The reference a reference's capture teaches: what it learns from, its recording, the review
  * and the check that show in place of the window's picture, and its commands.
  */
 export function useReferenceTeaching({
   app,
   editing,
-  setEditing,
   draft,
   setDraft,
   boxes,
@@ -101,11 +97,9 @@ export function useReferenceTeaching({
   const recording = recorder.view;
   // Where the next new recording looks for characters. Record more goes on with the recording's own.
   const [recordScope, setRecordScope] = useState<RecordingScope>('place');
-  // Why the reference was not saved. It is the editor's own, and goes when the editor closes, so it never shows as
-  // the value's.
+  // Why the reference was not saved.
   const [error, setError] = useState<string | null>(null);
-  // The characters the value it is taught for needs, which what it learns is compared with; none filters no find.
-  const needs = editing?.needs ?? NO_NEEDS;
+  const needs = NO_NEEDS;
   const focus = useRecordFocus();
   const review = useReview(recording, draft, setDraft, reference, needs, focus);
   // What the reference being edited learns from: its saved pictures, its boxes with text, and its kept readings.
@@ -181,8 +175,8 @@ export function useReferenceTeaching({
     if (region === null || drawnOn === null) {
       return;
     }
-    // A reference taught by itself reads at its first box, which the recording is of.
-    const readAt = draft.region === null ? (draft.boxes[0]?.id ?? null) : null;
+    // A reference reads at its first box, which the recording is of.
+    const readAt = draft.boxes[0]?.id ?? null;
     const scope = more ? (recording?.settings.scope ?? recordScope) : recordScope;
     // Each box is one more example of the text a recording of the whole window looks for.
     const examples = draft.boxes.map((box) => ({ region: box.region, screenshot: box.screenshot }));
@@ -221,9 +215,8 @@ export function useReferenceTeaching({
     if (settings === undefined) {
       return;
     }
-    // A reference taught by itself reads at a box, so that box goes back where the recording read; the value's
-    // region is the value's, and stays.
-    const place = recordedPlace(draft, settings, boxOf(draft.boxes, boxes.recordedId)?.screenshot ?? null, [...full]);
+    // A reference reads at a box, so that box goes back where the recording read.
+    const place = recordedPlace(settings, boxOf(draft.boxes, boxes.recordedId)?.screenshot ?? null, [...full]);
     if (place !== null) {
       boxes.restore(place, settings.region);
     }
@@ -231,26 +224,6 @@ export function useReferenceTeaching({
     recorder.clearCommandError();
     // The pressed button gives way to Record more, so focus moves to it.
     focusNext(focus.more);
-  };
-
-  // Opens the editor as `editing`, on a saved reference or on a new one read from the value's region.
-  const open = (opened: Editing): void => {
-    setEditing(opened);
-    setDraft((current) => toReference(current, opened.existing));
-    boxes.select(null);
-    stopPicking();
-    setError(null);
-  };
-
-  // Leaves the editor for the value, forgetting its boxes and recording.
-  const close = (): void => {
-    setEditing(null);
-    setError(null);
-    stopPicking();
-    boxes.select(null);
-    finder.reset();
-    guided.forget();
-    setDraft(fromReference);
   };
 
   const save = async (): Promise<void> => {
@@ -271,7 +244,7 @@ export function useReferenceTeaching({
             dropped: spec.dropped,
           }));
       setError(null);
-      await onSaved(saved, close);
+      await onSaved(saved);
     } catch (failed: unknown) {
       setError(errorText(failed));
     } finally {
@@ -315,7 +288,7 @@ export function useReferenceTeaching({
     sheeted: reviewed !== null || checking,
     checkStep,
     recordError: recorder.commandError ?? review.error ?? recorder.pollError,
-    /** Why it cannot record, or null when it can or no editor is open. */
+    /** Why it cannot record, or null when it can or outside a reference's capture. */
     recordBlocked: editing === null ? null : (windowless ?? recordBlocked(draft)),
     /** Why Find more like it cannot search from the selected box, or null. */
     findBlocked: findBlockedBy(boxes.selected),
@@ -329,8 +302,6 @@ export function useReferenceTeaching({
     record,
     stop,
     discard,
-    open,
-    close,
     save,
   };
 }

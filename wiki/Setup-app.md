@@ -153,11 +153,8 @@ This page covers what the user guide leaves out.
   and the owner reads a number check that names it back with `saved::build`,
   as `set_check` does, so every rule of a saved number holds for it. It
   reads as a number in its region, placed as a value of its application
-  is. A reference opened from a number is tried as that number will read
-  with it once both are saved (`ReferenceTrial`): whole when the number
-  is, at its side of the window, and with the characters the number
-  needs. A reference made by itself is tried with every character it
-  knows.
+  is. A reference is tried with every character it knows, with the digits
+  after a decimal point (`ReferenceTrial`).
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
@@ -368,13 +365,9 @@ This page covers what the user guide leaves out.
   hand shows as its characters and the next save writes it in order; it
   reads each preset's state back from the set; and its `coverage` splits the
   set and the learned characters into known, missing, and extra, for the
-  reference picker and the reference editor. The editor works on a copy of
-  the list (`Editing.needs`, which `startEditing` in `lib/captureDraft.ts`
-  takes from the value's draft), which the value takes back only when the
-  reference is saved (`withTaught`). `needsField` says how the editor shows
-  it: to change when opened from a value, to read when opened from a fix,
-  which needs what its value does, and not at all from the References page,
-  where a reference is taught for no characters. The cap holds where a list
+  reference picker and the reference editor. The list belongs to the value
+  alone: a reference is set up only in its own capture, from the References
+  page, where it is taught for no characters. The cap holds where a list
   is set or changed (`expected_within_limit`, and `buildSpec` on the page),
   so a saved value with a longer list, written by hand, still takes a fix or
   an edit that leaves the list alone. The learned characters are
@@ -442,10 +435,8 @@ check, and `components/ReferenceInspector.tsx` shows it. One flow page,
 value and for a reference.
 
 [Recording readings](References.md#record-readings) runs in the reference
-editor. A number value's **Record readings** opens that editor on the value's
-region, for the reference picked or a new one, and the recording starts at
-once: with the saved reference's text color and tolerance, or by contrast at
-the tolerance a new reference starts with. Each frame is cut to the region and reduced
+editor, at the reference's first box, with its text color and tolerance. A
+value's capture records no readings. Each frame is cut to the region and reduced
 to the shapes a reference reads: `DigitReader::shapes` finds the ink, splits it
 into characters, and scales each to the grid the check compares. A crop with
 no ink is skipped, and so is a frame of another size than the screenshot the
@@ -547,9 +538,9 @@ character is one shape.
   application whose window changes size often, the region is scaled with
   `scale::scaled` and a text size with `scale::scaled_length`, both by the
   window's new height over the height it was drawn at. The region stays at
-  the side the page sends (`RecordSpec::pin`): the value's own when the
-  reference is taught for a value, and the side the region is nearest
-  otherwise (`PinDef::guess`), as the live check places a reference. For an
+  the side the page sends (`RecordSpec::pin`), or the side the region is
+  nearest when it sends none (`PinDef::guess`), as the live check places a
+  reference. For an
   application whose window rarely changes size, nothing is guessed: the
   recording waits for the size the region was drawn at. A recording of the
   whole window only looks near its region, so a region that scales outside
@@ -586,7 +577,7 @@ character is one shape.
 The page works out what the shapes mean, because the labels live there
 (`lib/review.ts`, `lib/discovery.ts`). A reading's text names its shapes
 when it has one character for each. From that, while recording and in
-review, the page shows the characters the value needs that nothing
+review, the page shows the characters the reference is taught for that nothing
 shows, using the [expected characters](#behavior-the-guide-leaves-out) and
 `coverage`; the ones only the text reader's unchecked guesses show; and the
 ones the reference knows or a reading the user checked shows. A reading is
@@ -714,8 +705,8 @@ forgets it; reads already
 queued for a forgotten search still run, and their text is dropped. Pictures
 of finds are asked for by the search's number, so an answer for a replaced
 search is empty. The UI lists
-the finds that may show the characters the value needs (`fitsNeeds` in
-`lib/found.ts`), polls while text is still being read, and asks which kept
+the finds that may show the characters the reference is taught for, every
+find while it is taught for none (`fitsNeeds` in `lib/found.ts`), polls while text is still being read, and asks which kept
 finds the reference cannot learn (`found_problems`), learning them after the
 draft's own boxes the way review learns recorded readings. **Reread**
 (`reread_found`) cuts the named finds' ink again from the pixels the search
@@ -807,9 +798,9 @@ error on a saved sample there points at the list and names no reference to
 open (`SpecError::SavedLearn`, and `SpecError::MissingPicture` for a
 picture that is gone). An error on a box or a reading the draft adds stays
 the box's own (`SpecError::Learn`). A value that reads with the reference
-names it and says to edit it (`SpecError::ReferenceLearn`,
-`SpecError::MissingSample`, from `sample_problem_of`), since the value's
-reference picker offers **Edit** for it. While the answer lists a sample,
+names it and says to edit it on the References page
+(`SpecError::ReferenceLearn`, `SpecError::MissingSample`, from
+`sample_problem_of`), since a reference is changed only there. While the answer lists a sample,
 **Save reference** waits and says so (`referenceSave` in
 `lib/teaching.ts`), so settings alone, which no trial judges, are not sent
 to be refused. The answer marks a sample whose picture is missing
@@ -1438,11 +1429,11 @@ format was saved by another version and can only be deleted.
 
 What each kind keeps in `state`:
 
-| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                          | What it does not keep                                                                                                                  |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                            | A value or application flow the editor had opened, and what such a flow would hand back                                                |
-| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                                       | The window picked in the list                                                                                                          |
-| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference, the characters it needs and **Whole number only**), and the reference being edited with its copy of those characters | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
+| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                      | What it does not keep                                                                                                                  |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                        | A value or application flow the editor had opened, and what such a flow would hand back                                                |
+| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                                   | The window picked in the list                                                                                                          |
+| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference, the characters it needs and **Whole number only**), and for a reference, the reference being edited and its name | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
 
 Screenshots follow one rule, however they were kept: every screenshot the
 capture holds when the draft is saved goes into the draft, those a
@@ -1472,8 +1463,9 @@ by window size, so a value can have several, each finished from its own row.
 A fix draft copies how its value is read (`fixDraft`); once the value's
 check, colors, or states are edited, the draft no longer fits it, and its row
 says so and offers only **Delete** (`fixOutdated` in `lib/captureDraft.ts`).
-A value draft that kept the reference editor open takes that reference again
-from the application's file when it is finished (`refreshedEditing`).
+A reference draft takes its reference again from the application's file when
+it is finished (`refreshedEditing`), and only a reference's capture opens with
+a reference editor.
 Removing an application deletes the drafts that belong to it, and deleting a
 value its fix drafts (`DraftStore::delete_where`), since nothing could finish
 them; that is best effort, and one that stays says it can only be deleted. Finishing a draft opens its flow; a value, fix,

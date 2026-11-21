@@ -6,45 +6,15 @@ import { type Kept, draftProblem, isKept } from './drafts.ts';
 import { NAME_THE_REFERENCE } from './teaching.ts';
 import { sameContent } from './unsaved.ts';
 
-/** The reference being made or changed, and its name as typed. */
+/** The reference a reference's capture makes or changes, and its name as typed. */
 export interface Editing {
   readonly existing: ReferenceDef | null;
   readonly name: string;
-  /**
-   * The characters the value it is taught for needs, as the editor has them: the value's own when the editor opens,
-   * which the value takes back only when the reference is saved. None for a reference made by itself.
-   */
-  readonly needs: readonly string[];
 }
 
-/** What the capture makes or changes: a value, a saved value's edit or fix, or a reference by itself. */
-export type CaptureFlow = 'value' | 'edit' | 'fix' | 'reference';
-
-/**
- * How the reference editor shows the characters the value needs. A reference made by itself is taught for no value,
- * so it shows none. A fix needs what its value does, so it shows them and changes none.
- */
-export type NeedsField = 'hidden' | 'editable' | 'readOnly';
-
-/** How the reference editor of `flow` shows the characters the value needs. */
-export function needsField(flow: CaptureFlow): NeedsField {
-  if (flow === 'reference') {
-    return 'hidden';
-  }
-  return flow === 'fix' ? 'readOnly' : 'editable';
-}
-
-/** The reference editor of `flow` as it opens on `existing`, or on a new reference, from the check `draft`. */
-export function startEditing(flow: CaptureFlow, existing: ReferenceDef | null, draft: Draft): Editing {
-  return { existing, name: existing?.name ?? '', needs: flow === 'reference' ? [] : draft.characters };
-}
-
-/**
- * `draft`, a value's, once the reference editor `editing` saved `reference` for it: a number that reads with it and
- * needs the characters the editor left. Leaving the editor any other way keeps the characters the value had.
- */
-export function withTaught(draft: Draft, reference: string, editing: Editing | null): Draft {
-  return { ...draft, kind: 'number', reference, characters: editing?.needs ?? draft.characters };
+/** The reference editor as it opens on `existing`, or on a new reference. */
+export function startEditing(existing: ReferenceDef | null): Editing {
+  return { existing, name: existing?.name ?? '' };
 }
 
 /**
@@ -81,6 +51,7 @@ export interface CaptureSetup {
   readonly step: Step;
   /** Whether the user said the value's content may move around inside the window. */
   readonly mayMove: boolean;
+  /** The reference a reference's capture teaches, and null for every other capture. */
   readonly editing: Editing | null;
   readonly draft: Draft;
 }

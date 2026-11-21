@@ -62,16 +62,10 @@ function Presets({
 
 /**
  * The characters a number value needs: presets to turn on, and a field for any other character. It edits one set of
- * characters, which the value reads and its reference is taught against.
+ * characters, which the value reads.
  */
-export function ExpectedCharacters({
-  expected,
-  onExpected,
-  label = 'Characters it needs',
-}: Props & {
-  /** What the field is called: the value's own name for it, or the reference editor's, where "it" is the reference. */
-  readonly label?: string;
-}) {
+export function ExpectedCharacters({ expected, onExpected }: Props) {
+  const label = 'Characters it needs';
   // The field's text as typed, and the set it started from, while it is being typed in. Outside that, the field
   // shows the set's own other characters, in order.
   const [typing, setTyping] = useState<{ readonly start: readonly string[]; readonly text: string } | null>(null);

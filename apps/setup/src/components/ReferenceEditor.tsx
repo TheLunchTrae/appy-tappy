@@ -1,13 +1,11 @@
 import { type ReactNode, useState } from 'react';
 
-import type { NeedsField } from '../lib/captureDraft.ts';
 import type { Coverage } from '../lib/expected.ts';
 import type { Color } from '../lib/pixels.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
 import { INK_HINT, INK_TOLERANCE_HINT, LOOKALIKE_HINT } from '../lib/hints.ts';
 import { HIDDEN_TONE_WARNING, lookalikeWarning } from '../lib/useReadingRisks.ts';
 import { CharacterChips, MissingChips } from './CharacterChips.tsx';
-import { ExpectedCharacters } from './ExpectedCharacters.tsx';
 import { ColorField, ToleranceField } from './Fields.tsx';
 import { Hint } from './Hint.tsx';
 
@@ -25,11 +23,11 @@ interface Props {
   /** The labeled boxes' texts. */
   readonly labeled: readonly string[];
   readonly recorded: readonly string[];
-  /** The characters the value it is taught for needs, each once; none for a reference made by itself. */
+  /** The characters it is taught for, each once; none to learn whatever its boxes and readings show. */
   readonly expected: readonly string[];
   /** How the characters in those texts compare with the ones it needs. */
   readonly coverage: Coverage;
-  /** The pairs of characters it may read as each other, of those with a character the value needs. */
+  /** The pairs of characters it may read as each other, of those with a character a value that reads with it needs. */
   readonly lookalikes: readonly (readonly [string, string])[];
   /** Whether its tolerance leaves an outline or a shadow out of what it learned. */
   readonly hidesTone: boolean;
@@ -54,13 +52,7 @@ interface Props {
   /** Goes back to finding the characters by contrast. */
   readonly onNoTextColor: () => void;
   readonly onTolerance: (tolerance: number) => void;
-  /** How the characters the value needs show. */
-  readonly needsField: NeedsField;
-  readonly onExpected: (expected: readonly string[]) => void;
 }
-
-/** What the editor calls the list of the value it is taught for, since "it" here is the reference. */
-const NEEDS_LABEL = 'Characters the value needs';
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
@@ -124,7 +116,7 @@ function TextColor(
   );
 }
 
-/** The inspector of a reference: its name, the characters its value needs, the ones it learns, and its text color. */
+/** The inspector of a reference: its name, the characters it learns and has yet to, and its text color. */
 export function ReferenceEditor(props: Props) {
   const { name, appName, ink, tolerance, saved, labeled, recorded, finding } = props;
   const { expected, coverage, readers } = props;
@@ -160,27 +152,13 @@ export function ReferenceEditor(props: Props) {
         <span>Application</span>
         <p>{appName}</p>
       </div>
-      {props.needsField === 'editable' ? (
-        <ExpectedCharacters label={NEEDS_LABEL} expected={expected} onExpected={props.onExpected} />
-      ) : null}
-      {props.needsField === 'readOnly' ? (
-        <div className="field">
-          <span>{NEEDS_LABEL}</span>
-          {chosen ? <CharacterChips characters={expected} ink={ink} large /> : null}
-          <span className="note">
-            {chosen
-              ? 'A fix needs the characters its value does. To change them, edit the value.'
-              : 'The value needs no characters, so the fix reads every character this reference knows.'}
-          </span>
-        </div>
-      ) : null}
       {props.boxes}
       {props.findPanel}
       {chosen ? (
         <div className="field">
           <span>Characters still missing</span>
           {coverage.missing.length === 0 ? (
-            <span className="ok">None. It knows every character the value needs.</span>
+            <span className="ok">None. It knows every character it needs.</span>
           ) : (
             <>
               <MissingChips characters={coverage.missing} large />
@@ -199,7 +177,7 @@ export function ReferenceEditor(props: Props) {
         )}
         {extra.length === 0 ? null : (
           <>
-            <span className="note">Not among the characters the value needs, which is fine:</span>
+            <span className="note">Not among the characters it needs, which is fine:</span>
             <CharacterChips characters={extra} ink={ink} pending={pending.filter(isExtra)} large />
           </>
         )}

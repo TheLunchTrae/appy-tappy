@@ -84,7 +84,7 @@ export interface Draft {
  * The tolerance a new reference starts with, and so a number check's. A reference that finds its characters by
  * contrast keeps it while its samples read with it, as {@link useContrastTolerance} says.
  */
-export const NEW_REFERENCE_TOLERANCE = 40;
+const NEW_REFERENCE_TOLERANCE = 40;
 
 export const EMPTY_DRAFT: Draft = {
   kind: 'number',
@@ -112,13 +112,10 @@ export const EMPTY_DRAFT: Draft = {
 export type Drawn = Pick<Draft, 'region' | 'drawnOn'>;
 
 /**
- * Where the reference being taught reads, records, and sizes its boxes: the value's region when it is taught from a
- * value, or else its first box. Every box must be on a screenshot of the size that one is on.
+ * Where the reference being taught reads, records, and sizes its boxes: its first box. Every box must be on a
+ * screenshot of the size that one is on.
  */
 export function readingOf(draft: Draft): Drawn {
-  if (draft.region !== null && draft.drawnOn !== null) {
-    return { region: draft.region, drawnOn: draft.drawnOn };
-  }
   const first = draft.boxes[0];
   return first === undefined ? { region: null, drawnOn: null } : { region: first.region, drawnOn: first.screenshot };
 }
@@ -170,18 +167,14 @@ export function withTextColor(draft: Draft, color: Color | null): Draft {
  * The screenshot the reading box goes back on to read where the stopped recording's `settings` read, or null when it
  * stays. `boxOn` is the screenshot the box the recording read at is on now, or null when that box is gone, and
  * `screenshots` each screenshot's index and its window size. The box keeps its screenshot when that has the size
- * recorded at, and otherwise goes on the newest one that has it. A reference taught from a value reads at the
- * value's region, which the editor leaves alone, and with no screenshot of the size the box has nowhere to go.
+ * recorded at, and otherwise goes on the newest one that has it. With no screenshot of the size the box has nowhere
+ * to go.
  */
 export function recordedPlace(
-  draft: Draft,
   settings: RecordingSettings,
   boxOn: number | null,
   screenshots: readonly (readonly [number, Size])[],
 ): number | null {
-  if (draft.region !== null) {
-    return null;
-  }
   const own = screenshots.find(([index]) => index === boxOn)?.[1];
   return boxOn !== null && own?.width === settings.windowSize.width && own.height === settings.windowSize.height
     ? boxOn
@@ -623,27 +616,13 @@ export function withoutState(draft: Draft, index: number): Draft {
   return { ...draft, states: draft.states.filter((_, position) => position !== index) };
 }
 
-/**
- * `draft` opening the reference editor: its characters start as `existing`'s, or a new reference's, with no boxes or
- * recorded readings yet. The value's region stays, and the reference reads there.
- */
-export function toReference(draft: Draft, existing: ReferenceDef | null): Draft {
+/** The draft a reference's capture opens with: `existing`'s text color and tolerance, or a new reference's. */
+export function referenceDraft(existing: ReferenceDef | null): Draft {
   return {
-    ...draft,
+    ...EMPTY_DRAFT,
     ink: existing?.ink ?? null,
     tolerance: existing?.tolerance ?? NEW_REFERENCE_TOLERANCE,
-    boxes: [],
-    recorded: new Map(),
-    dropped: [],
   };
-}
-
-/**
- * `draft` leaving the reference editor for the value it was opened from, without the editor's boxes or readings, or
- * the saved pictures it left out.
- */
-export function fromReference(draft: Draft): Draft {
-  return { ...draft, boxes: [], recorded: new Map(), dropped: [] };
 }
 
 /** `draft` with the saved picture `image` of the reference being edited left out. */

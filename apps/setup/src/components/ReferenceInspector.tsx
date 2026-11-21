@@ -3,7 +3,7 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
-import type { Editing, NeedsField } from '../lib/captureDraft.ts';
+import type { Editing } from '../lib/captureDraft.ts';
 import { type Built, type Draft, type ReferenceSaving, withTextColor, withoutSample } from '../lib/check.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers, readersNeed } from '../lib/reference.ts';
@@ -104,8 +104,6 @@ interface Props {
   readonly appName: string;
   /** The application's file, for the values that read with the reference, or null until it is read. */
   readonly file: AppFile | null;
-  /** The value's steps, which wait while its reference is taught, or null for a reference made by itself. */
-  readonly stepper: ReactNode;
   /** Whether the text color is being picked from the picture. */
   readonly pickingInk: boolean;
   readonly canPick: boolean;
@@ -125,8 +123,6 @@ interface Props {
   readonly busy: boolean;
   readonly draftError: ReactNode;
   readonly draftButton: ReactNode;
-  /** How the editor shows the characters the value it is taught for needs. */
-  readonly needsField: NeedsField;
   /** Leaves the editor without saving. */
   readonly onDiscard: () => void;
 }
@@ -141,7 +137,6 @@ export function ReferenceInspector({
   boxes,
   appName,
   file,
-  stepper,
   pickingInk,
   canPick,
   onPickInk,
@@ -155,20 +150,13 @@ export function ReferenceInspector({
   busy,
   draftError,
   draftButton,
-  needsField,
   onDiscard,
 }: Props) {
   const { taught, finder, guided, review, recorder, checking, covered } = teaching;
   const chosen = boxes.selected;
   const saved = editing.existing?.samples ?? [];
-  // A look-alike pair warns when it has one of these characters: the value's, or for a reference by itself those of
-  // every value that reads with it.
-  const lookalikeNeeds =
-    needsField !== 'hidden'
-      ? teaching.needs
-      : editing.existing === null || file === null
-        ? []
-        : readersNeed(file, editing.existing.id);
+  // A look-alike pair warns when it has a character that a value that reads with the reference needs.
+  const lookalikeNeeds = editing.existing === null || file === null ? [] : readersNeed(file, editing.existing.id);
   const settingsOnly = saving.ok && saving.spec.kind === 'settings';
   const refSave = referenceSave({
     named: editing.name.trim().length > 0,
@@ -181,7 +169,6 @@ export function ReferenceInspector({
   });
   return (
     <aside className="inspector" aria-label="Reference">
-      {stepper}
       <ReferenceEditor
         name={editing.name}
         appName={appName}
@@ -212,10 +199,6 @@ export function ReferenceInspector({
         onTolerance={(tolerance) => {
           setDraft((current) => ({ ...current, tolerance }));
         }}
-        needsField={needsField}
-        onExpected={(needs) => {
-          setEditing((current) => (current === null ? null : { ...current, needs }));
-        }}
         boxes={
           <BoxList
             boxes={draft.boxes}
@@ -223,8 +206,7 @@ export function ReferenceInspector({
             full={full}
             position={position}
             blocked={teaching.boxBlock}
-            // A reference taught from a value reads at the value's region, not at a box.
-            readsAt={draft.region === null ? (draft.boxes[0]?.id ?? null) : null}
+            readsAt={draft.boxes[0]?.id ?? null}
             onSelect={(id) => {
               const box = boxOf(draft.boxes, id);
               boxes.select(id);
@@ -319,9 +301,7 @@ export function ReferenceInspector({
         </p>
       )}
       {refSave.can && covered.missing.length > 0 ? (
-        <p className="note">
-          It has yet to learn every character the value needs. You can save now and teach the rest later.
-        </p>
+        <p className="note">It has yet to learn every character it needs. You can save now and teach the rest later.</p>
       ) : null}
       {draftError}
       {checking ? null : <CheckOffer characters={guided.unconfirmed} onCheck={guided.open} />}
