@@ -2637,7 +2637,13 @@ mod tests {
     ];
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(48))]
+        // A failing case is shrunk a few times only: each try draws and
+        // reads text, and a failure has to end well inside the mutation
+        // lane's test timeout.
+        #![proptest_config(ProptestConfig {
+            max_shrink_iters: 16,
+            ..ProptestConfig::with_cases(48)
+        })]
 
         /// An application that scales its interface, or centers a number
         /// whose width changes, draws the same character at another

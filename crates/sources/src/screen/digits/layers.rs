@@ -641,18 +641,14 @@ fn mixed(
             .get(at)
             .is_some_and(|&color| usize::from(color) == place)
     };
-    // Whether a pixel has its color on every side.
+    // Whether a pixel has its color on every side: it and its four
+    // neighbors.
     let amid = |at: usize| {
-        let column = at.checked_rem(width).unwrap_or(0);
-        [
-            at.checked_sub(width),
-            at.checked_add(width),
-            at.checked_sub(1).filter(|_| column > 0),
-            at.checked_add(1)
-                .filter(|_| column.saturating_add(1) < width),
-        ]
-        .into_iter()
-        .all(|beside| beside.is_some_and(own))
+        let mut held = 0_u8;
+        visit(width, at, |next| {
+            held = held.saturating_add(u8::from(own(next)));
+        });
+        held == 5
     };
     // Whether a pixel has both colors of a pair close by.
     let beside = |at: usize| {
@@ -668,7 +664,7 @@ fn mixed(
         let inner = piece.iter().filter(|&&at| amid(at)).count();
         let thin = inner.saturating_mul(index(THIN)) < piece.len();
         let both = piece.iter().filter(|&&at| beside(at)).count();
-        if thin && both > 0 && both.saturating_mul(4) >= piece.len() {
+        if thin && both.saturating_mul(4) >= piece.len() {
             mixed.extend(piece);
         } else if piece.len() >= SPECK {
             rest = Rest::Text;
@@ -686,9 +682,13 @@ fn piece(placed: &[u8], width: usize, start: usize, seen: &mut [bool]) -> Vec<us
     let mut piece = Vec::new();
     let mut next = vec![start];
     while let Some(at) = next.pop() {
-        match seen.get_mut(at) {
-            Some(seen) if !*seen && placed.get(at).copied() == color => *seen = true,
-            _ => continue,
+        if let Some(seen) = seen.get_mut(at)
+            && !*seen
+            && placed.get(at).copied() == color
+        {
+            *seen = true;
+        } else {
+            continue;
         }
         piece.push(at);
         let column = at.checked_rem(width).unwrap_or(0);
@@ -713,9 +713,11 @@ pub(super) fn same(one: Rgb, other: Rgb) -> bool {
 /// Which of the counted colors `color` is.
 fn counted(color: Rgb) -> u16 {
     let kept = |channel: u8| u16::from(channel >> (u8::BITS.saturating_sub(COUNTED_BITS)));
+    // Each channel has bits of its own, so the sum is the three side by
+    // side.
     (kept(color.red) << (COUNTED_BITS.saturating_mul(2)))
-        | (kept(color.green) << COUNTED_BITS)
-        | kept(color.blue)
+        .saturating_add(kept(color.green) << COUNTED_BITS)
+        .saturating_add(kept(color.blue))
 }
 
 /// Red, green, and blue of `color` less those of `from`.
@@ -1026,5 +1028,52 @@ mod tests {
         // A color nearer the background than that, at 47, says nothing.
         assert_eq!(unmixed(own, rgb(47, 0, 0), met, background), None);
         assert_eq!(unmixed(own, own, rgb(0, 47, 0), background), None);
+    }
+
+    #[test]
+    fn a_piece_of_a_color_between_two_others_is_a_blend_when_thin_with_both_close_by() {
+        let (black, gray, white) = (rgb(0, 0, 0), rgb(128, 128, 128), rgb(255, 255, 255));
+        let found = [(black, false), (gray, true), (white, true)];
+        // The gray pixels of `rows` that are blends, in order, and what
+        // is left of the gray.
+        let blends = |rows: &[&str]| {
+            let placed: Vec<u8> = rows
+                .iter()
+                .flat_map(|row| row.bytes())
+                .map(|cell| match cell {
+                    b'b' => 0,
+                    b'g' => 1,
+                    _ => 2,
+                })
+                .collect();
+            let width = rows.first().map_or(0, |row| row.len());
+            let (mut blends, rest) = mixed(&found, &[false; 3], &placed, width, 1, gray);
+            blends.sort_unstable();
+            (blends, rest)
+        };
+        // A line a pixel wide between white and black is the edge's blend.
+        let line = ["wwwwwwww", "gggggggg", "bbbbbbbb"];
+        assert_eq!(blends(&line), ((8..16).collect(), Rest::Specks));
+        // So is one with both colors within two pixels of a quarter of it.
+        let quarter = ["wwwwwwww", "ggggwbww", "wwwwwwww"];
+        assert_eq!(blends(&quarter), ((8..12).collect(), Rest::Specks));
+        // Eight pixels with one that has gray on every side are no
+        // thinner than a stroke, and stay.
+        let cross = ["wwwgwwww", "wggggggw", "bbbgbbbb"];
+        assert_eq!(blends(&cross), (Vec::new(), Rest::Text));
+        // A pixel with white around it and no black is no blend of the
+        // two, and too small to be text.
+        let alone = ["wwwww", "wwwww", "wwgww", "wwwww", "wwwww"];
+        assert_eq!(blends(&alone), (Vec::new(), Rest::Specks));
+    }
+
+    #[test]
+    fn a_blend_of_two_colors_just_far_enough_apart_is_shared_between_them() {
+        let (own, met) = (rgb(TELLING, 0, 0), rgb(0, 0, 0));
+        assert_eq!(part(own, own, met), u8::MAX);
+        assert_eq!(part(met, own, met), 0);
+        // Colors nearer than that, at 47, are one, and the pixel is all
+        // the layer's.
+        assert_eq!(part(met, rgb(47, 0, 0), met), u8::MAX);
     }
 }
