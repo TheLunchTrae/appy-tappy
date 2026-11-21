@@ -15,7 +15,7 @@
   },
   "devDependencies": {
     "markdownlint-cli2": "^0.24.1",
-    "oxfmt": "^0.77.0"
+    "oxfmt": "^0.78.0"
   },
   "overrides": {
     "katex": "^0.19.1"
