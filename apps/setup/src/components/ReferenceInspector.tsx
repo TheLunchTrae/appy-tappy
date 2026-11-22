@@ -3,10 +3,10 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
-import type { Editing, NeedsField } from '../lib/captureDraft.ts';
+import { type Editing, type NeedsField, savedReads } from '../lib/captureDraft.ts';
 import { type Built, type Draft, type ReferenceSaving, withoutSample } from '../lib/check.ts';
 import type { Picture } from '../lib/pixels.ts';
-import { readers, readersNeed } from '../lib/reference.ts';
+import { readers, readersLose, readersNeed } from '../lib/reference.ts';
 import { neededPairs } from '../lib/useReadingRisks.ts';
 import { background } from '../lib/repeat.ts';
 import { checkBackLabel, referenceSave } from '../lib/teaching.ts';
@@ -180,6 +180,11 @@ export function ReferenceInspector({
         recorded={taught.recorded}
         finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
         reads={editing.reads}
+        readersLose={
+          editing.existing === null || file === null
+            ? null
+            : readersLose(file, editing.existing.id, savedReads(editing))
+        }
         onReads={(reads) => {
           setEditing((current) => (current === null ? null : { ...current, reads }));
         }}
@@ -297,7 +302,8 @@ export function ReferenceInspector({
       )}
       {refSave.can && covered.missing.length > 0 ? (
         <p className="note">
-          It has yet to learn every character the value needs. You can save now and teach the rest later.
+          It has yet to learn every character {editing.needs.length > 0 ? 'the value needs' : 'it reads'}. You can save
+          now and teach the rest later.
         </p>
       ) : null}
       {draftError}

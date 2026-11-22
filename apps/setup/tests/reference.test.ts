@@ -8,6 +8,7 @@ import {
   readers,
   readersNeed,
   referenceCharacters,
+  readersLose,
   unreadBy,
 } from '../src/lib/reference.ts';
 
@@ -136,6 +137,8 @@ test('readers names the number values that read with a reference, in a check or 
   ]);
   expect(readersNeed(reading('18', needing(['8%', '1', '', '%'])), 'percent')).toEqual(['1', '8']);
   expect(readersNeed(reading('%', { ...file, values: [] }), 'percent')).toEqual(['%']);
+  // Values that need none of what it reads count for nothing.
+  expect(readersNeed(reading('5', needing(['8%', '1', '%', '%'])), 'percent')).toEqual(['5']);
 });
 
 test('andList joins names as a sentence does', () => {
@@ -149,4 +152,46 @@ test('unreadBy names what a value needs that its reference does not read', () =>
   const reference = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, samples: [] };
   expect(unreadBy({ ...reference, characters: '0123456789' }, ['1', '%', 'O'])).toEqual(['%', 'O']);
   expect(unreadBy(reference, ['1', '%'])).toEqual([]);
+});
+
+test('readersLose names what the values that read with a reference would stop reading', () => {
+  const value = (name: string, characters?: string) => ({
+    id: name,
+    name,
+    origin: { kind: 'byHand' } as const,
+    screen: {
+      windowSize: { width: 10, height: 10 },
+      region: { x: 0, y: 0, width: 1, height: 1 },
+      fixes: [],
+      check: {
+        kind: 'number' as const,
+        reference: 'percent',
+        whole: false,
+        ...(characters === undefined ? {} : { characters }),
+      },
+    },
+  });
+  const file: AppFile = {
+    format: 2,
+    name: 'Player',
+    window: { title: '', class: '', executable: '', mustMatch: { title: true, class: false }, fallback: 'none' },
+    sizeChanges: 'often',
+    antiCheat: 'unknown',
+    references: [],
+    values: [value('Progress', '12%'), value('Best', '1'), value('Any')],
+  };
+  expect(readersLose(file, 'percent', ['1', '2'])).toBe(
+    'Progress needs %, which it would no longer read. Turn it on, or change what the value needs.',
+  );
+  expect(readersLose(file, 'percent', ['%'])).toBe(
+    'Progress needs 1 2 and Best needs 1, which it would no longer read. Turn them on, or change what the values need.',
+  );
+  expect(readersLose(file, 'percent', ['1', '2', '%'])).toBeNull();
+  expect(readersLose(file, 'percent', [])).toBeNull();
+});
+
+test('referenceCharacters and unreadBy take a list that names no character as every character', () => {
+  const reference = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, characters: ' ' };
+  expect(referenceCharacters({ ...reference, samples: [{ image: 'a.png', text: '1%' }] })).toEqual(['1', '%']);
+  expect(unreadBy({ ...reference, samples: [] }, ['%'])).toEqual([]);
 });

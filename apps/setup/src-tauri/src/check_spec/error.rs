@@ -86,6 +86,13 @@ pub(crate) enum SpecError {
         /// The picture's file name.
         picture: String,
     },
+    /// A number reads only characters that its reference does not read.
+    NotRead {
+        /// The reference's name.
+        reference: String,
+        /// The characters the number reads.
+        characters: String,
+    },
     /// A number reads only characters that its reference knows none of.
     NoCharacters {
         /// The reference's name.
@@ -168,6 +175,14 @@ impl fmt::Display for SpecError {
             },
             // A fix needs the characters its value chose, with a reference
             // of its own, so the wording holds where they cannot be chosen.
+            Self::NotRead {
+                reference,
+                characters,
+            } => write!(
+                formatter,
+                "{reference} reads none of the characters this value needs, \"{characters}\". \
+                 Edit {reference} to read them, or change the characters the value needs."
+            ),
             Self::NoCharacters {
                 reference,
                 characters,

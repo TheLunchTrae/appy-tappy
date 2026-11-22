@@ -326,7 +326,7 @@ function readsOf(reads: readonly string[]): { readonly characters?: string } {
 export function buildCharacters(
   draft: Draft,
   reference: ReferenceRef | null,
-  reads: readonly string[] = [],
+  reads: readonly string[],
 ): Built<CharactersSpec> {
   const spec = taughtSpec(draft, reference);
   if (spec === null) {
@@ -359,7 +359,7 @@ export type ReferenceSaving =
 export function buildReferenceSave(
   draft: Draft,
   reference: ReferenceRef | null,
-  reads: readonly string[] = [],
+  reads: readonly string[],
 ): Built<ReferenceSaving> {
   const characters = buildCharacters(draft, reference, reads);
   if (characters.ok) {

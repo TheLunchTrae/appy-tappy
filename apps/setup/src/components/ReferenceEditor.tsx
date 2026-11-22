@@ -20,6 +20,8 @@ interface Props {
   /** The characters it reads, each once; none for every character it learns. */
   readonly reads: readonly string[];
   readonly onReads: (reads: readonly string[]) => void;
+  /** What saving it reading those would take from the values that read with it, or null. */
+  readonly readersLose: string | null;
   /** The characters the value it is taught for needs, each once; none for a reference made by itself. */
   readonly valueNeeds: readonly string[];
   /** The characters what it learned is compared with: the ones the value needs, or else the ones it reads. */
@@ -108,6 +110,11 @@ export function ReferenceEditor(props: Props) {
         expected={props.reads}
         onExpected={props.onReads}
       />
+      {props.readersLose === null ? null : (
+        <p className="warn" role="status">
+          {props.readersLose}
+        </p>
+      )}
       {props.needsField === 'editable' ? (
         <ExpectedCharacters label={NEEDS_LABEL} expected={valueNeeds} onExpected={props.onExpected} />
       ) : null}

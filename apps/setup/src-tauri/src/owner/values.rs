@@ -216,6 +216,14 @@ pub(super) fn read_back(
             }
             .to_string()
         },
+        SavedError::NotRead { id, characters } => {
+            let saved = file.references.iter().find(|reference| reference.id == id);
+            SpecError::NotRead {
+                reference: saved.map_or(id, |reference| reference.name.clone()),
+                characters,
+            }
+            .to_string()
+        },
         error => file
             .references
             .iter()

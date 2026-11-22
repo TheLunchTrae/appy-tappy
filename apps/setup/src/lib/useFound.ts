@@ -72,7 +72,7 @@ export interface Finder {
  * The search for text like a box of the reference `draft` teaches, which adds to `reference`, if any: its finds with
  * the user's edits, their pictures, and which ones the reference cannot learn. `addBoxes` adds the kept finds to the
  * draft as boxes. `learned` is every text the reference learns from already, and `needs` the characters the value it
- * is taught for needs, which the finds listed may only show. Leaving the component that uses it forgets the search.
+ * is taught for needs, or else the ones it reads, which the finds listed may only show. Leaving the component that uses it forgets the search.
  */
 export function useFound(
   draft: Draft,

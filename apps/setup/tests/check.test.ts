@@ -239,7 +239,7 @@ describe('buildCharacters', () => {
         { id: 2, screenshot: 1, region, text: '  ' },
       ],
     };
-    expect(buildCharacters(draft, null)).toEqual({
+    expect(buildCharacters(draft, null, [])).toEqual({
       ok: true,
       spec: {
         // With no value's region, the reference reads where its first box is.
@@ -261,6 +261,7 @@ describe('buildCharacters', () => {
     const built = buildCharacters(
       { ...EMPTY_DRAFT, region: value, drawnOn: 3, boxes: [{ id: 0, screenshot: 1, region, text: '5' }] },
       null,
+      [],
     );
     expect(built.ok && [built.spec.region, built.spec.screenshot]).toEqual([value, 3]);
   });
@@ -277,7 +278,7 @@ describe('buildCharacters', () => {
         [2, ''],
       ]),
     };
-    const built = buildCharacters(draft, null);
+    const built = buildCharacters(draft, null, []);
     expect(built.ok && built.spec.recorded).toEqual([
       { reading: 1, text: '8%' },
       { reading: 4, text: '9%' },
@@ -285,11 +286,11 @@ describe('buildCharacters', () => {
   });
 
   test('asks for what a new reference needs', () => {
-    expect(buildCharacters(EMPTY_DRAFT, null)).toEqual({
+    expect(buildCharacters(EMPTY_DRAFT, null, [])).toEqual({
       ok: false,
       next: 'Draw a box around the characters on a screenshot.',
     });
-    expect(buildCharacters({ ...EMPTY_DRAFT, region }, null)).toEqual({
+    expect(buildCharacters({ ...EMPTY_DRAFT, region }, null, [])).toEqual({
       ok: false,
       next: 'Draw a box around the characters on a screenshot.',
     });
@@ -297,6 +298,7 @@ describe('buildCharacters', () => {
       buildCharacters(
         { ...EMPTY_DRAFT, region, drawnOn: 0, boxes: [{ id: 0, screenshot: 0, region, text: ' ' }] },
         null,
+        [],
       ),
     ).toEqual({
       ok: false,
@@ -305,7 +307,7 @@ describe('buildCharacters', () => {
   });
 
   test('a saved reference needs nothing new to be tried', () => {
-    const built = buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0 }, percent);
+    const built = buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0 }, percent, []);
     expect(built.ok && built.spec.reference).toEqual(percent);
   });
 });
@@ -649,7 +651,7 @@ describe('buildReferenceSave', () => {
     // The region of a value whose window is not captured sits on no screenshot.
     const dropped = ['ref-percent-1.png'];
     const windowless = { ...EMPTY_DRAFT, region, dropped };
-    expect(buildReferenceSave(windowless, percent)).toEqual({
+    expect(buildReferenceSave(windowless, percent, [])).toEqual({
       ok: true,
       spec: { kind: 'settings', reference: percent, dropped },
     });
@@ -657,12 +659,12 @@ describe('buildReferenceSave', () => {
 
   test('teaches the characters once there is a place to read them', () => {
     const draft = { ...EMPTY_DRAFT, boxes: [{ id: 0, screenshot: 1, region, text: '5' }] };
-    const built = buildReferenceSave(draft, percent);
+    const built = buildReferenceSave(draft, percent, []);
     expect(built.ok && built.spec.kind).toBe('taught');
   });
 
   test('a new reference still says what it needs', () => {
-    expect(buildReferenceSave({ ...EMPTY_DRAFT }, null).ok).toBe(false);
+    expect(buildReferenceSave({ ...EMPTY_DRAFT }, null, []).ok).toBe(false);
   });
 
   test('sends the characters the reference reads either way, and none for every character', () => {

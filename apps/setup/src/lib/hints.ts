@@ -80,7 +80,7 @@ export const EXPECTED_HINT =
 
 /** The characters a reference reads. */
 export const READS_HINT =
-  "The characters this reference is for. Find more like it lists only text that may show them, recording looks only for them, and the reference reads only them, so text with other characters on the screen doesn't get in the way. Turn on every character its values show; each value can need fewer. With nothing chosen, it reads every character it learns.";
+  "The characters this reference is for. Find more like it lists only text that may show them, recording review starts readings without them unkept, and the reference reads only them, so text with other characters on the screen doesn't get in the way. Turn on every character its values show; each value can need fewer. With nothing chosen, it reads every character it learns.";
 
 /** Finding more text like the selected box. */
 export const FIND_LIKE_HINT =

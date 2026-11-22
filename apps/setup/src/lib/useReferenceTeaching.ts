@@ -32,8 +32,6 @@ import { useFound } from './useFound.ts';
 import { useRecording } from './useRecording.ts';
 import { focusNext, useRecordFocus, useReview } from './useReview.ts';
 
-/** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
-
 /** The saved samples of a new reference. */
 const NO_SAMPLES: readonly SampleDef[] = [];
 

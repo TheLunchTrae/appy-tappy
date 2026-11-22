@@ -421,7 +421,9 @@ whatever the value needs: text needs no teaching only after a character the
 reference knows has ended the number, such as the `HP` in `37% HP`.
 
 With nothing turned on, the value reads every character its reference
-knows, and any it learns later, and no character shows as missing.
+reads, and any it learns later, and no character shows as missing. When its
+reference reads none of the characters the value needs, AppyTappy doesn't
+read the value, and saving it names the reference to edit.
 
 A [fix](#fix-a-value-at-one-size) that reads with its own reference needs
 the same characters as its value.

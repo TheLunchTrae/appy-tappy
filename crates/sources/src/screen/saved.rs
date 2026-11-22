@@ -16,7 +16,7 @@ use std::io;
 
 use appytappy_config::app_file::{
     CheckDef, CheckDefError, FixDef, MAX_FIXES, PinDef, ReferenceDef, RegionDef, ScreenDef,
-    SizeChangesDef, SizeDef, StateDef,
+    SizeChangesDef, SizeDef, StateDef, is_label_character,
 };
 use appytappy_config::signal::StateName;
 
@@ -281,13 +281,16 @@ impl<'app> Readers<'app> {
     /// The reader of the reference `id` for a number that reads
     /// `characters`, or every character for `None`: with its glyphs for
     /// the characters both the reference and the number read, chosen here
-    /// once, so a read matches against no others.
+    /// once, so a read matches against no others. A reference whose list
+    /// names no character reads every character, as one without a list
+    /// does.
     ///
     /// # Errors
     ///
-    /// Returns what [`Self::reader`] does, and
-    /// [`SavedError::NoCharacters`] when the reference has learned none of
-    /// those characters.
+    /// Returns what [`Self::reader`] does, [`SavedError::NotRead`] when the
+    /// reference reads none of the number's characters, and
+    /// [`SavedError::NoCharacters`] when it has learned none of the
+    /// characters both read.
     pub fn reading(
         &mut self,
         id: &str,
@@ -298,9 +301,20 @@ impl<'app> Readers<'app> {
             .references
             .iter()
             .find(|known| known.id == id)
-            .and_then(|known| known.characters.as_deref());
-        self.reader(id, picture)?
-            .clone()
+            .and_then(|known| known.characters.as_deref())
+            .filter(|own| own.chars().any(is_label_character));
+        let reader = self.reader(id, picture)?.clone();
+        if let (Some(own), Some(needs)) = (own, characters)
+            && !needs
+                .chars()
+                .any(|character| is_label_character(character) && own.contains(character))
+        {
+            return Err(SavedError::NotRead {
+                id: id.to_owned(),
+                characters: needs.to_owned(),
+            });
+        }
+        reader
             .reading(own)
             .and_then(|reader| reader.reading(characters))
             .ok_or_else(|| SavedError::NoCharacters {
@@ -673,6 +687,13 @@ pub enum SavedError {
         /// The reference's ID.
         id: String,
     },
+    /// A number reads only characters that its reference does not read.
+    NotRead {
+        /// The reference's ID.
+        id: String,
+        /// The characters the number reads.
+        characters: String,
+    },
     /// A number reads only characters that its reference knows none of.
     NoCharacters {
         /// The reference's ID.
@@ -739,6 +760,10 @@ impl fmt::Display for SavedError {
             Self::NoReference { id } => {
                 write!(formatter, "its reference {id} is not saved")
             },
+            Self::NotRead { id, characters } => write!(
+                formatter,
+                "its reference {id} reads none of the characters it needs, {characters:?}"
+            ),
             Self::NoCharacters { id, characters } => write!(
                 formatter,
                 "its reference {id} knows none of the characters it needs, {characters:?}"
@@ -770,6 +795,7 @@ impl Error for SavedError {
             | Self::FixReference
             | Self::SamePicture(_)
             | Self::NoReference { .. }
+            | Self::NotRead { .. }
             | Self::NoCharacters { .. } => None,
         }
     }
@@ -1417,7 +1443,22 @@ mod tests {
             read_digits(Some("O"))
                 .expect_err("the reference reads no letter")
                 .to_string(),
-            "its reference counter knows none of the characters it needs, \"O\""
+            "its reference counter reads none of the characters it needs, \"O\""
+        );
+        // A list that names no character reads every character.
+        let blank = || {
+            let mut reference = counter("O0");
+            reference.characters = Some(" ".to_owned());
+            reference
+        };
+        assert!(
+            build(
+                &number(Some("O")),
+                &mut Readers::new(&[blank()]),
+                OFTEN,
+                from(&files)
+            )
+            .is_ok()
         );
         // A fix that reads with its own reference reads the same characters
         // of it.

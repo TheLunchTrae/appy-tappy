@@ -16,7 +16,7 @@ import { EXPECTED_HINT, READS_HINT } from '../lib/hints.ts';
 import { Hint } from './Hint.tsx';
 
 interface Props {
-  /** The characters the value needs, each once; none for every character its reference knows. */
+  /** The characters chosen, each once: a value's, none for every character its reference reads, or a reference's, none for every character it learns. */
   readonly expected: readonly string[];
   readonly onExpected: (expected: readonly string[]) => void;
 }

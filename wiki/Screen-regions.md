@@ -73,9 +73,13 @@ color for each pixel of its region, and the ink of each color.
   left-out `O` reads as 1; that takes a shape that matches no glyph of its
   own character and matches one of another's, which is rare. `DigitReader::reading` sorts the glyphs once, when
   `saved::build` builds the check, so a read matches each character against
-  the glyphs the value reads first. Characters the
-  reference has yet to learn are passed over, and a value whose reference
-  knows none of its characters is not read (`SavedError::NoCharacters`).
+  the glyphs the value reads first. The reference's own characters, its
+  `characters` list, narrow the reader the same way before the value's do,
+  so a value reads only what both read. A value whose reference reads none
+  of the characters it needs is not read (`SavedError::NotRead`). Characters
+  the reference has yet to learn are passed over, and a value whose
+  reference knows none of its characters is not read
+  (`SavedError::NoCharacters`).
 - **Bar fill** returns how full a bar is, from 0 to 100. The user clicks one
   filled spot and one empty spot. The check counts the region's pixels closer
   to each color and ignores pixels near neither, such as a border or a label:

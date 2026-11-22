@@ -126,6 +126,11 @@ reason gives too:
   [characters](Values.md#characters-a-number-needs) leave out a `-`, a `.`,
   a `,`, or a digit that is a part of the number: turn it on under
   **Characters it needs**.
+- **Its reference reads none of the characters it needs.** In the log:
+  `reads none of the characters it needs`. The reference's
+  [**Characters it reads**](References.md#characters-it-reads) leaves out
+  every character the value needs: edit the reference to read them, or
+  change what the value needs.
 - **Its region reads as one text in one color and as another in another.**
   In the log: `two colors in the region read as different text`. The
   message shows both. Two pieces of text the reference knows are in the

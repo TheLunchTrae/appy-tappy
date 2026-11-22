@@ -37,8 +37,9 @@ select **Capture this window**, as the first step of
    `Percent font` and `percent font` are one name. Until it has a name,
    **Save reference** waits, and says `Name the reference.` above the button.
 2. **Choose the characters it reads,** under **Characters it reads**, as
-   [Characters it reads](#characters-it-reads) describes. A new reference
-   starts with **Digits** turned on.
+   [Characters it reads](#characters-it-reads) describes. A reference you
+   start from the References page starts with **Digits** turned on, and one
+   you start from a value starts with the characters the value needs.
 3. **Teach it the characters.** On a screenshot, drag to draw a box tightly
    around some characters, then type what the box shows, such as `87%`, in
    its row under **Boxes**. AppyTappy learns the shape of each character from
@@ -83,9 +84,9 @@ reads, and the editor names them.
 
 **Characters it reads** says which characters the reference is for. It reads
 only these, [Find more like it](#find-more-like-it) lists only text that may
-show them, and a [recording](#record-readings) looks for them and leaves out
-readings without them. So a reference for a percentage doesn't pick up the
-names and labels around it.
+show them, and in a [recording](#record-readings)'s review, a reading
+without any of them starts with **Keep** cleared. So a reference for a
+percentage doesn't pick up the names and labels around it.
 
 - **Digits** is `0` to `9`.
 - **Decimal point**, **Comma**, **Percent**, **Minus**, **Plus**, and
@@ -109,6 +110,13 @@ for a digit.
 When you teach a reference for a value that needs a character it doesn't
 read, saving it adds that character to **Characters it reads**, so the value
 can read it.
+
+When you turn off a character that a saved value needs, a note under
+**Characters it reads** names the value and the character, such as
+`Progress needs %, which it would no longer read.` Turn the character back
+on, or change what the value needs. If you save anyway, the value names
+this reference when you next save it, and AppyTappy doesn't read the
+characters the reference no longer reads.
 
 ## Boxes
 

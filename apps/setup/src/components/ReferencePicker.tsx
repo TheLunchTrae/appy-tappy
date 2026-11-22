@@ -91,7 +91,8 @@ export function ReferencePicker(props: Props) {
         {chosen !== null && unreadBy(chosen, characters).length > 0 ? (
           <span className="warn" role="status">
             {chosen.name} doesn&apos;t read {andList([...unreadBy(chosen, characters)])}, so this value can&apos;t
-            either. Edit {chosen.name} to read them, or choose another reference.
+            either. Edit {chosen.name} to read {unreadBy(chosen, characters).length === 1 ? 'it' : 'them'}, or choose
+            another reference.
           </span>
         ) : null}
         {chosen !== null && knowsNone(readable(chosen), referenceCharacters(chosen)) ? (
