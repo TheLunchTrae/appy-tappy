@@ -16,6 +16,15 @@ mutants.workspace = true
 # Reads and writes the PNG files that hold a screen binding's reference image;
 # a hand-written decoder would need its own inflate implementation.
 png = "0.18.1"
+# The text reader: a pure-Rust neural text reader, so it runs the same on
+# every system and needs no operating system OCR. It reads a line in any
+# font, which a hand-written reader cannot. Only its recognition model
+# loads, from the file wiki/Setup-app.md names.
+ocrs = { version = "0.14.0", default-features = false, features = ["onnx"] }
+# Loads the text reader's model file, and gives the rectangle of the line
+# it reads.
+rten = { version = "0.28.0", default-features = false, features = ["onnx_format"] }
+rten-imageproc = "0.28.0"
 
 # Microsoft's Windows API bindings; the features select the APIs the adapter
 # in `win.rs` and `win/capture.rs` calls. Capture uses them directly rather

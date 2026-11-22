@@ -1,19 +1,19 @@
-//! A reading's ink as the text reader takes it.
+//! A number's ink as the text reader takes it.
 
 use std::ops::Range;
 
-use appytappy_sources::screen::digits::Ink;
+use super::super::digits::Ink;
 
 /// One line of text for the text reader: gray pixels, one byte each, row by
 /// row.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Line {
+pub struct Line {
     /// Its width in pixels.
-    pub(crate) width: u32,
+    pub width: u32,
     /// Its height in pixels.
-    pub(crate) height: u32,
+    pub height: u32,
     /// Its pixels: 0 is black, 255 white.
-    pub(crate) pixels: Vec<u8>,
+    pub pixels: Vec<u8>,
 }
 
 /// The white around a line's ink, in pixels on each side. The text reader's
@@ -30,7 +30,8 @@ impl Line {
     /// line of text with [`MARGIN`] of white around it. Black on white reads
     /// better than the application's own colors, which can be any pair. The
     /// line is [`rows`]. `None` without ink.
-    pub(crate) fn of(ink: &Ink) -> Option<Self> {
+    #[must_use]
+    pub fn of(ink: &Ink) -> Option<Self> {
         let size = ink.size();
         let rows = rows(ink)?;
         let inked = |x: &u32| rows.clone().any(|y| ink.at(*x, y));
@@ -127,8 +128,8 @@ impl Near {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_sources::screen::digits::DigitReader;
-    use appytappy_sources::screen::{Image, Size};
+    use super::super::super::digits::DigitReader;
+    use super::super::super::{Image, Size};
 
     use super::*;
 

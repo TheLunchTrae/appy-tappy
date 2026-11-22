@@ -18,6 +18,7 @@ pub mod place;
 pub mod saved;
 pub mod scale;
 pub mod settle;
+pub mod text;
 pub mod workings;
 
 mod capture;

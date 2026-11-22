@@ -19,9 +19,8 @@
 use std::collections::{HashMap, HashSet};
 
 use appytappy_sources::screen::digits::{self, DigitReader, Ink, Tone};
+use appytappy_sources::screen::text::Line;
 use appytappy_sources::screen::{Image, Region};
-
-use super::ink::Line;
 
 /// The most finds one search returns; the rest are counted.
 pub(crate) const MAX_FOUND: usize = 12;

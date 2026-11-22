@@ -11,7 +11,9 @@ use appytappy_config::app_file::RegionDef;
 use crate::check_spec::{CharactersSpec, Label};
 use crate::pixels;
 use crate::recording::character::{self, CharacterView};
-use crate::recording::{Line, Text, find, ocr};
+use appytappy_sources::screen::text::Line;
+
+use crate::recording::{Text, find, ocr};
 use crate::ticket::Ticket;
 
 use super::Owner;

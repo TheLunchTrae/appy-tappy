@@ -44,7 +44,6 @@
 pub(crate) mod character;
 pub(crate) mod find;
 pub(crate) mod follow;
-mod ink;
 mod lifecycle;
 pub(crate) mod look;
 pub(crate) mod looks;
@@ -56,6 +55,7 @@ use std::time::{Duration, Instant};
 use appytappy_config::app_file::{RegionDef, SizeDef};
 use appytappy_sources::screen::digits::{self, DigitReader, ReadError, Shape, Tone};
 use appytappy_sources::screen::settle::Settle;
+use appytappy_sources::screen::text::Line;
 use appytappy_sources::screen::{FrameMeaning, Image, Region, Size};
 use serde::{Deserialize, Serialize};
 
@@ -64,7 +64,6 @@ use crate::ticket::Ticket;
 use self::character::CharacterView;
 use self::find::{Sizes, TextSize};
 use self::follow::{Follows, Unplaced};
-pub(crate) use self::ink::Line;
 pub(crate) use self::lifecycle::Lifecycle;
 use self::looks::LookRecording;
 use self::sightings::{Full, MAX_SHAPES, ShapeView, Sightings};
