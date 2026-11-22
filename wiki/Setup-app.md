@@ -700,7 +700,8 @@ queued for a forgotten search still run, and their text is dropped. Pictures
 of finds are asked for by the search's number, so an answer for a replaced
 search is empty. The UI lists
 the finds that may show the characters the reference reads, every find
-while it reads every character it learns (`fitsNeeds` in `lib/found.ts`), polls while text is still being read, and asks which kept
+while it reads every character it learns (`fitsNeeds` in `lib/found.ts`),
+polls while text is still being read, and asks which kept
 finds the reference cannot learn (`found_problems`), learning them after the
 draft's own boxes the way review learns recorded readings. Added finds become boxes of the draft
 (`lib/boxes.ts`), each a label with a `region` of its own on its screenshot,

@@ -159,7 +159,8 @@ and [**Characters it knows**](References.md#what-it-has-learned) warns when
 two characters have the same shape.
 [**Characters still missing**](References.md#what-it-has-learned) lists the
 characters it reads that are left to teach, and the reference picker shows
-after **Missing** what the value needs that it hasn't learned. If it reads a digit as a letter that looks like it, such as
+after **Missing** what the value needs that it hasn't learned. If it reads
+a digit as a letter that looks like it, such as
 `0` as `O`, set the value's
 [**Characters it needs**](Values.md#characters-a-number-needs) to the
 characters it shows. Some text the **Number**
