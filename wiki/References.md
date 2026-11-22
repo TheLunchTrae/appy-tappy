@@ -466,7 +466,9 @@ stray shape and draw a box around it instead.
 1. **Start recording.** Draw a box around the characters first. Under **Record readings**, choose where to
    **Look in**: **This place**, or **The whole window**, which
    [Record the whole window](#record-the-whole-window) describes. Then
-   select **Start recording**. The region turns red while it records.
+   select **Start recording**. The region turns red while it records. It
+   reads what the window shows when you start, so you can start on a
+   screen that already shows the characters.
 2. **Use the application.** Go on in it until the region has shown the
    characters you need. AppyTappy reads each kept reading's text for you, and
    **Recording** says what that gives so far:

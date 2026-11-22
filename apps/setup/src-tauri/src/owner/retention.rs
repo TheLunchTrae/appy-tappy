@@ -106,10 +106,11 @@ fn with_everything_saved(name: &str) -> (Harness, FrameHandler, Stores, PathBuf,
     harness.deliver(&mut handler, Ok(&text_frame()));
     assert_eq!(harness.ask(Owner::screenshot), Ok(0));
 
+    // The recording starts on the frame it records.
+    harness.deliver(&mut handler, Ok(&narrow_image()));
     harness
         .ask(|owner| owner.start_recording(characters_in(left()), false))
         .expect("records");
-    harness.deliver(&mut handler, Ok(&narrow_image()));
     harness.stop_recording();
     let digits = ReferenceSaveSpec {
         app: "example".to_owned(),

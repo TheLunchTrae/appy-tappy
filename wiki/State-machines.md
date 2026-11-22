@@ -2048,7 +2048,10 @@ failed read, as a poll's is, not a failed start: it shows until the next
 read that answers clears it (`learn`).
 
 A recording of readings keeps a reading for each shape a region shows, for
-the user to review. Its `Sightings` hold `full`, which says why it takes no
+the user to review. A start and **Record more** each record the newest
+frame of the window at once (`Owner::record_newest`): a window sends a frame
+only when what it shows changes, so a recording started on a still screen
+reads what that screen shows. Its `Sightings` hold `full`, which says why it takes no
 more once a frame did not fit. A reading's picture is answered only for its
 own recording's ticket, one of the
 [stale-message guards](#how-to-read-this-page). The page asks for each
