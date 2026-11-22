@@ -179,7 +179,8 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(8);
+    expect(DRAFT_FORMAT).toBe(9);
+    expect(Object.keys(startEditing(null)).sort()).toEqual(['existing', 'name', 'reads']);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',

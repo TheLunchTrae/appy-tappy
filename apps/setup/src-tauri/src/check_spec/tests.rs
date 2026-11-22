@@ -1393,8 +1393,8 @@ fn saved_checks_keep_their_settings() {
             characters: "\\'".to_owned(),
         }
         .to_string(),
-        "Digits knows none of the characters this value needs, \"\\'\". Teach it one of them, \
-         or change the characters the value needs."
+        "Digits knows none of the characters this value needs, \"\\'\". Teach it one of them on \
+         the References page, or change the characters the value needs."
     );
     assert_eq!(
         SpecError::NotRead {
@@ -1402,8 +1402,8 @@ fn saved_checks_keep_their_settings() {
             characters: "%".to_owned(),
         }
         .to_string(),
-        "Digits reads none of the characters this value needs, \"%\". Edit Digits to read them, \
-         or change the characters the value needs."
+        "Digits reads none of the characters this value needs, \"%\". Edit Digits on the \
+         References page to read them, or change the characters the value needs."
     );
     assert_eq!(
         SpecError::OtherApplication.to_string(),

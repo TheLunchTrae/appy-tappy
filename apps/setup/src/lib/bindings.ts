@@ -1418,11 +1418,6 @@ region: RegionDef,
  */
 screenshot: number,
 /**
- * The side of the window the region stays at as the window changes
- * size, or `None` for the side the region is nearest.
- */
-pin: PinDef | null,
-/**
  * Where to look for characters: in the region alone, or wherever the
  * window shows text like the region's.
  */
@@ -1708,12 +1703,7 @@ app: string,
 /**
  * The characters it is taught.
  */
-characters: CharactersSpec,
-/**
- * The side of the window its region stays at, or `None` for the side
- * the region is nearest.
- */
-pin: PinDef | null, }>;
+characters: CharactersSpec, }>;
 
 /**
  * A rectangle in pixels from the window's top-left corner.

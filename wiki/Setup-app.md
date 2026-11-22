@@ -575,7 +575,7 @@ character is one shape.
 The page works out what the shapes mean, because the labels live there
 (`lib/review.ts`, `lib/discovery.ts`). A reading's text names its shapes
 when it has one character for each. From that, while recording and in
-review, the page shows the characters the reference is taught for that nothing
+review, the page shows the characters the reference reads that nothing
 shows, using the [expected characters](#behavior-the-guide-leaves-out) and
 `coverage`; the ones only the text reader's unchecked guesses show; and the
 ones the reference knows or a reading the user checked shows. A reading is
@@ -625,10 +625,9 @@ recording only when the region and window size are the
 ones it was recorded with, and otherwise says so rather than start over. The
 window size is the one the region was drawn at, not the one the window has
 by then. The
-UI then offers **Use its settings**. A reference taught by itself reads at
-its first box, so its recorded box goes back where the recording read
-([Recording](State-machines.md#recording)); the value's region is never
-changed from the reference editor. Kept readings are lost only on a discard,
+UI then offers **Use its settings**. A reference reads at its first box, so
+its recorded box goes back where the recording read
+([Recording](State-machines.md#recording)). Kept readings are lost only on a discard,
 on **Change window**, or when the flow is left; a closed window keeps them
 for review. **Back** and Escape leave
 review without keeping, and review's edits stay for the next one.
@@ -700,8 +699,8 @@ forgets it; reads already
 queued for a forgotten search still run, and their text is dropped. Pictures
 of finds are asked for by the search's number, so an answer for a replaced
 search is empty. The UI lists
-the finds that may show the characters the reference is taught for, every
-find while it is taught for none (`fitsNeeds` in `lib/found.ts`), polls while text is still being read, and asks which kept
+the finds that may show the characters the reference reads, every find
+while it reads every character it learns (`fitsNeeds` in `lib/found.ts`), polls while text is still being read, and asks which kept
 finds the reference cannot learn (`found_problems`), learning them after the
 draft's own boxes the way review learns recorded readings. Added finds become boxes of the draft
 (`lib/boxes.ts`), each a label with a `region` of its own on its screenshot,
@@ -780,11 +779,10 @@ The page asks the
 owner for the pairs of the reference it teaches once its samples rest for a
 quarter of a second (`reading_risks`, `useReadingRisks` in
 `lib/useReadingRisks.ts`), and the editor warns about the pairs with a
-character the value needs, or about every pair when it needs none
-(`neededPairs`). A pair with only one needed character is still a risk: a
-read can take a shown letter or symbol the value doesn't need for a kept
-lookalike. A reference made
-by itself takes what the values that read with it need (`readersNeed`).
+character the reference reads (`neededPairs`). A pair with only one such
+character is still a risk: a read can take a shown letter or symbol it
+doesn't read for a kept lookalike. A reference that reads every character
+it learns takes what the values that read with it need (`readersNeed`).
 [Reading risks](State-machines.md#reading-risks) has its
 states. Only the setup app checks this, so the runtime is unchanged.
 

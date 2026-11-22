@@ -211,7 +211,8 @@ once the text shows other characters, so it leaves the list and is not
 added. A reference that reads every character it learns lists every find.
 
 1. **Tick the ones to add.** Each find in the list shows outlined on the
-   screenshot under the same number, with the text AppyTappy read. A find starts unticked: tick the
+   screenshot under the same number, with the text AppyTappy read. A skipped
+   find keeps its number, so the numbers can have gaps. A find starts unticked: tick the
    ones to add, or **Select all**, which also clears every tick. Fix any text
    it got wrong; typing a find's text ticks it.
 2. **Deal with the flagged ones.** A ticked find is flagged when it can't be
@@ -530,8 +531,7 @@ stray shape and draw a box around it instead.
    save without review's changes. To record more, keep
    the place it reads as it
    was, on a screenshot of the same window size: if you changed it,
-   **Use its settings** puts it back. In a reference you teach by itself,
-   that moves the box it recorded at back to where it was and to the top of
+   **Use its settings** puts it back: that moves the box it recorded at back to where it was and to the top of
    the list, or adds an empty box there if you deleted it. Or **Discard**
    the recording to start a new one. A recording with readings asks first,
    since its readings go with any text you typed and any readings you kept
@@ -555,8 +555,7 @@ follows depends on what you answered for the application under
 
 - **Often.** Recording goes on. Once the window has kept its new size for a
   moment, the recorded place is scaled to it and keeps its distance from
-  the side of the window the value stays at, or the side it is nearest when
-  the reference is taught by itself, and a recording of the whole window looks
+  the side of the window it is nearest, and a recording of the whole window looks
   for the text sizes scaled the same way. **Recording** then says so, such
   as **The window is 1280 × 720 now, so the place is scaled to it.** A
   character that looks the same at two window sizes is kept once.
@@ -596,8 +595,7 @@ text for you to check. It doesn't show what the reference reads: the box
 at the bottom of the panel does, on the live window.
 
 To remove a screenshot, select it, then select **Remove screenshot** with its
-number. One the value's region is drawn on, or that a box is on, stays: draw
-the region on another screenshot or delete its boxes first. A screenshot
+number. One that a box is on stays: delete its boxes first. A screenshot
 whose found text is listed stays until you add the finds or select
 **Not these**.
 
@@ -607,7 +605,7 @@ A counter in one place shows its characters slowly, and the same font is
 often elsewhere in the window too: a stats panel, a second counter, a score
 on a results screen. With **Look in** set to **The whole window**, a
 recording collects characters from all of it. The place the reference
-reads, its first box or the value's region, is the example: AppyTappy looks
+reads, its first box, is the example: AppyTappy looks
 for text in the color the text in that place has when the recording
 starts, as tall as it shows on its screenshot, anywhere in the window, and reads each piece like
 the place itself. While it records, the window shows an

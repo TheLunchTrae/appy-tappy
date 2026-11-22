@@ -138,9 +138,7 @@ export interface Restored {
 function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restored | null): CaptureSetup {
   const kept = (restored?.screenshots ?? null) === null ? null : (resumed?.def.state ?? null);
   if (kept !== null && mode.kind !== 'edit' && isKept<CaptureKept>(kept, mode.kind)) {
-    const setup = restoreSetup(kept.state, mode.kind === 'reference' ? mode.existing : undefined);
-    // Only a reference's capture teaches a reference.
-    return mode.kind === 'reference' ? setup : { ...setup, editing: null };
+    return restoreSetup(kept.state, mode.kind === 'reference' ? mode.existing : undefined);
   }
   const editing: Editing | null = mode.kind === 'reference' ? startEditing(mode.existing) : null;
   if (mode.kind === 'edit') {
@@ -349,7 +347,6 @@ export function Capture({
     boxes,
     reference: editingRef,
     saving: referenceSave,
-    pin,
     windowless,
     full,
     shown: shownPicture,
@@ -546,8 +543,8 @@ export function Capture({
     if (characters === null || !characters.ok) {
       return characters;
     }
-    return { ok: true, spec: { app: appId, characters: characters.spec, pin } };
-  }, [characters, appId, pin]);
+    return { ok: true, spec: { app: appId, characters: characters.spec } };
+  }, [characters, appId]);
   const trial = useMemo((): Trial => {
     if (taughtTrial !== null) {
       return trialOf('characters', taughtTrial, { set: setCharacters });

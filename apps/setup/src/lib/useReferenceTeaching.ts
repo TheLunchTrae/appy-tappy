@@ -3,7 +3,7 @@
 
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
 
-import type { PinDef, RecordingScope, ReferenceRef, SampleDef, SavedReference } from './bindings.ts';
+import type { RecordingScope, ReferenceRef, SampleDef, SavedReference } from './bindings.ts';
 import { errorText, saveReference, saveReferenceSettings } from './api.ts';
 import { boxOf } from './boxes.ts';
 import type { Editing } from './captureDraft.ts';
@@ -50,8 +50,6 @@ interface TeachingSetup {
   readonly reference: ReferenceRef | null;
   /** What saving the reference sends, or null outside a reference's capture. */
   readonly saving: Built<ReferenceSaving> | null;
-  /** The side a recording's region stays at. */
-  readonly pin: PinDef | null;
   /** Why nothing can be recorded for want of a window, or null while one is captured. */
   readonly windowless: string | null;
   /** Each screenshot's pixels. */
@@ -79,7 +77,6 @@ export function useReferenceTeaching({
   boxes,
   reference,
   saving,
-  pin,
   windowless,
   full,
   shown,
@@ -164,7 +161,7 @@ export function useReferenceTeaching({
     const scope = more ? (recording?.settings.scope ?? recordScope) : recordScope;
     // Each box is one more example of the text a recording of the whole window looks for.
     const examples = draft.boxes.map((box) => ({ region: box.region, screenshot: box.screenshot }));
-    await recorder.start({ app, pin, region, drawnOn, scope, examples }, more, () => {
+    await recorder.start({ app, region, drawnOn, scope, examples }, more, () => {
       review.show(false);
       setSelected(null);
       stopPicking();

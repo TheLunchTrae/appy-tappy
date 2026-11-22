@@ -181,7 +181,8 @@ impl fmt::Display for SpecError {
             } => write!(
                 formatter,
                 "{reference} reads none of the characters this value needs, \"{characters}\". \
-                 Edit {reference} to read them, or change the characters the value needs."
+                 Edit {reference} on the References page to read them, or change the characters \
+                 the value needs."
             ),
             Self::NoCharacters {
                 reference,
@@ -189,7 +190,8 @@ impl fmt::Display for SpecError {
             } => write!(
                 formatter,
                 "{reference} knows none of the characters this value needs, \"{characters}\". \
-                 Teach it one of them, or change the characters the value needs."
+                 Teach it one of them on the References page, or change the characters the \
+                 value needs."
             ),
             Self::NothingSelected(name) => write!(
                 formatter,

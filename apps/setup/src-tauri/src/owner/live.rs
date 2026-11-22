@@ -60,9 +60,6 @@ pub(crate) struct ReferenceTrial {
     pub(crate) app: String,
     /// The characters it is taught.
     pub(crate) characters: CharactersSpec,
-    /// The side of the window its region stays at, or `None` for the side
-    /// the region is nearest.
-    pub(crate) pin: Option<PinDef>,
 }
 
 /// What may keep a reference from reading as its samples do, for its
@@ -245,7 +242,9 @@ impl<H: Host> Owner<H> {
                 whole: false,
                 characters: None,
             },
-            pin: trial.pin,
+            // Its region stays at the side it is nearest, as a value's does
+            // before a side is picked.
+            pin: None,
             reading_area: false,
             fixes: Vec::new(),
         };
@@ -697,7 +696,7 @@ mod tests {
             harness.ask(|owner| owner.set_check(&reading("2"))),
             Err(
                 "Percent knows none of the characters this value needs, \"2\". Teach it one of \
-                 them, or change the characters the value needs."
+                 them on the References page, or change the characters the value needs."
                     .to_owned()
             )
         );
@@ -724,8 +723,8 @@ mod tests {
         assert_eq!(
             harness.ask(|owner| owner.set_check(&reading("39"))),
             Err(
-                "Percent reads none of the characters this value needs, \"39\". Edit Percent to \
-                 read them, or change the characters the value needs."
+                "Percent reads none of the characters this value needs, \"39\". Edit Percent on \
+                 the References page to read them, or change the characters the value needs."
                     .to_owned()
             )
         );

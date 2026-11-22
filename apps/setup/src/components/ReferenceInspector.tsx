@@ -193,7 +193,6 @@ export function ReferenceInspector({
             full={full}
             position={position}
             blocked={teaching.boxBlock}
-            readsAt={draft.boxes[0]?.id ?? null}
             onSelect={(id) => {
               const box = boxOf(draft.boxes, id);
               boxes.select(id);

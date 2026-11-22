@@ -102,7 +102,6 @@ test('closing the reference editor stops a late recording start without reviving
         app: 'example',
         region: { x: 0, y: 0, width: 4, height: 2 },
         drawnOn: 0,
-        pin: null,
         scope: 'place',
         examples: [],
       },

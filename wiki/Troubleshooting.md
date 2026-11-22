@@ -115,8 +115,8 @@ reason gives too:
   `8 7 ?`, and the character it learned that the first `?` looks most like.
   If that is the character the application shows there, the application drew
   it a little differently this time: draw a [box](References.md#boxes) around
-  this reading on a screenshot, or [record](References.md#record-readings)
-  the region until it reads. If it is another character, the reference hasn't
+  this reading on a screenshot of the reference, or
+  [record](References.md#record-readings) at its first box until it reads. If it is another character, the reference hasn't
   learned the one shown: draw a box around a reading with it.
   [What a reference can't learn](References.md#what-a-reference-cant-learn)
   lists the characters no box teaches.
@@ -157,8 +157,9 @@ the number can show appears in at least one of them. Check the text typed
 for each box and reading too: one wrong label teaches a wrong character,
 and [**Characters it knows**](References.md#what-it-has-learned) warns when
 two characters have the same shape.
-[**Characters still missing**](References.md#what-it-has-learned) lists what
-is left to teach. If it reads a digit as a letter that looks like it, such as
+[**Characters still missing**](References.md#what-it-has-learned) lists the
+characters it reads that are left to teach, and the reference picker shows
+after **Missing** what the value needs that it hasn't learned. If it reads a digit as a letter that looks like it, such as
 `0` as `O`, set the value's
 [**Characters it needs**](Values.md#characters-a-number-needs) to the
 characters it shows. Some text the **Number**

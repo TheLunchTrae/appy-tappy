@@ -3284,11 +3284,11 @@ stateDiagram-v2
   warning goes while a label is typed and comes back once the answer for the
   new text arrives. A closed editor that opens again on the same key asks
   afresh, since a reference saved again keeps its ID and so its key.
-- **Shown** warns about the pairs of the answer with a character the value
-  needs, or about every pair when it needs none (`neededPairs`). A reference
-  made or edited by itself takes the characters that the values reading with
-  it need between them (`readersNeed`), and every pair when one of them needs
-  none or none reads with it. It warns about no pair when none is left. The answer for a reference that
+- **Shown** warns about the pairs of the answer with a character the
+  reference reads (`neededPairs`). A reference that reads every character it
+  learns takes the characters that the values reading with it need between
+  them (`readersNeed`), and every pair when one of them needs none or none
+  reads with it. It warns about no pair when none is left. The answer for a reference that
   can't learn a lesson warns about nothing (`risksAnswered`): it has no
   shapes to compare, and the reading of its
   [live check](#live-check) says which lesson it can't learn and why, so the
