@@ -61,9 +61,10 @@ there stays as you left it.
    choices.
 4. Select **New value** and capture the application's window. Take a
    screenshot and draw a box around what AppyTappy should read, such as a
-   number or a bar. To read a number, select
-   **New reference from this region** there to teach AppyTappy the
-   application's characters. Then select **Save value**.
+   number or a bar. A number reads with a reference, which knows the
+   application's characters: make it first, on its own, on the References
+   page, as [Make a reference](References.md#make-a-reference) describes,
+   then pick it in the value. Then select **Save value**.
    [Values](Values.md) describes each step.
 5. Back in the automation, say when it runs, such as when the value is at
    least 90, and what it does, such as pause the music. Then select

@@ -15,8 +15,6 @@ interface Props {
   readonly position: (screenshot: number) => number;
   /** Why no box can be drawn on the screenshot shown, or null when one can. */
   readonly blocked: string | null;
-  /** The box the reference reads and records at, or null when it reads elsewhere, such as at a value's region. */
-  readonly readsAt: number | null;
   readonly onSelect: (id: number) => void;
   readonly onText: (id: number, text: string) => void;
   readonly onDelete: (id: number) => void;
@@ -35,7 +33,9 @@ function Crop({ box, full }: { readonly box: Box; readonly full: ReadonlyMap<num
 }
 
 /** The boxes a reference learns from: each one's pixels, what it shows, and a way to select or delete it. */
-export function BoxList({ boxes, selected, full, position, blocked, readsAt, onSelect, onText, onDelete }: Props) {
+export function BoxList({ boxes, selected, full, position, blocked, onSelect, onText, onDelete }: Props) {
+  // The reference reads and records at its first box.
+  const readsAt = boxes[0]?.id;
   return (
     <div className="field">
       <span className="name">

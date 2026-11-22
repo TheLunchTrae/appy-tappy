@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 
-import type { NeedsField } from '../lib/captureDraft.ts';
 import type { Coverage } from '../lib/expected.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
 import { LOOKALIKE_HINT } from '../lib/hints.ts';
@@ -17,18 +16,14 @@ interface Props {
   /** The labeled boxes' texts. */
   readonly labeled: readonly string[];
   readonly recorded: readonly string[];
-  /** The characters it reads, each once; none for every character it learns. */
+  /** The characters it reads, each once; none for every character it learns. What it learned is compared with these. */
   readonly reads: readonly string[];
   readonly onReads: (reads: readonly string[]) => void;
   /** What saving it reading those would take from the values that read with it, or null. */
   readonly readersLose: string | null;
-  /** The characters the value it is taught for needs, each once; none for a reference made by itself. */
-  readonly valueNeeds: readonly string[];
-  /** The characters what it learned is compared with: the ones the value needs, or else the ones it reads. */
-  readonly expected: readonly string[];
-  /** How the characters in those texts compare with those. */
+  /** How the characters in those texts compare with the ones it reads. */
   readonly coverage: Coverage;
-  /** The pairs of characters it can't tell apart, of those with a character the value needs. */
+  /** The pairs of characters it can't tell apart, of those with a character it reads. */
   readonly lookalikes: readonly (readonly [string, string])[];
   /** Why that could not be checked, or null. */
   readonly risksProblem: string | null;
@@ -45,13 +40,7 @@ interface Props {
   /** The saved pictures it can't learn, with a way to leave them out. */
   readonly unlearned: ReactNode;
   readonly onName: (name: string) => void;
-  /** How the characters the value needs show. */
-  readonly needsField: NeedsField;
-  readonly onExpected: (expected: readonly string[]) => void;
 }
-
-/** What the editor calls the list of the value it is taught for, since "it" here is the reference. */
-const NEEDS_LABEL = 'Characters the value needs';
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
@@ -66,12 +55,11 @@ function learnedNote(saved: number, labeled: number, recorded: number): string {
   return parts.length === 0 ? 'Nothing learned yet.' : `Learned from ${andList(parts)}.`;
 }
 
-/** The inspector of a reference: its name, the characters it reads and its value needs, and the ones it learns. */
+/** The inspector of a reference: its name, the characters it reads, and the ones it learns. */
 export function ReferenceEditor(props: Props) {
   const { name, appName, saved, labeled, recorded, finding } = props;
-  const { expected, coverage, readers, valueNeeds } = props;
-  // What the characters it learned are compared with, in words: the value's, or its own.
-  const against = valueNeeds.length > 0 ? 'the value needs' : 'it reads';
+  const { coverage, readers } = props;
+  const expected = props.reads;
   const lookalike = lookalikeWarning(props.lookalikes);
   // With no characters needed, every character it learned shows as one group.
   const chosen = expected.length > 0;
@@ -104,38 +92,19 @@ export function ReferenceEditor(props: Props) {
         <span>Application</span>
         <p>{appName}</p>
       </div>
-      <ExpectedCharacters
-        owner="reference"
-        label="Characters it reads"
-        expected={props.reads}
-        onExpected={props.onReads}
-      />
+      <ExpectedCharacters owner="reference" expected={props.reads} onExpected={props.onReads} />
       {props.readersLose === null ? null : (
         <p className="warn" role="status">
           {props.readersLose}
         </p>
       )}
-      {props.needsField === 'editable' ? (
-        <ExpectedCharacters label={NEEDS_LABEL} expected={valueNeeds} onExpected={props.onExpected} />
-      ) : null}
-      {props.needsField === 'readOnly' ? (
-        <div className="field">
-          <span>{NEEDS_LABEL}</span>
-          {valueNeeds.length > 0 ? <CharacterChips characters={valueNeeds} large /> : null}
-          <span className="note">
-            {valueNeeds.length > 0
-              ? 'A fix needs the characters its value does. To change them, edit the value.'
-              : 'The value needs no characters, so the fix reads every character this reference reads.'}
-          </span>
-        </div>
-      ) : null}
       {props.boxes}
       {props.findPanel}
       {chosen ? (
         <div className="field">
           <span>Characters still missing</span>
           {coverage.missing.length === 0 ? (
-            <span className="ok">None. It knows every character {against}.</span>
+            <span className="ok">None. It knows every character it reads.</span>
           ) : (
             <>
               <MissingChips characters={coverage.missing} large />
@@ -154,11 +123,7 @@ export function ReferenceEditor(props: Props) {
         )}
         {extra.length === 0 ? null : (
           <>
-            <span className="note">
-              {valueNeeds.length > 0
-                ? 'Not among the characters the value needs, which is fine:'
-                : 'Not among the characters it reads, so it reads none of these:'}
-            </span>
+            <span className="note">Not among the characters it reads, so it reads none of these:</span>
             <CharacterChips characters={extra} pending={pending.filter(isExtra)} large />
           </>
         )}

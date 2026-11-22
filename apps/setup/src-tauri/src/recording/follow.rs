@@ -28,20 +28,12 @@ pub(crate) enum Follows {
 impl Follows {
     /// How a recording of `region`, drawn on a window of `drawn`, follows
     /// the window of an application whose window changes size as
-    /// `size_changes` says. A region that scales stays at `pin`, or at the
-    /// side it is nearest when the user chose none, as a saved value's
-    /// does.
-    pub(crate) fn of(
-        size_changes: SizeChangesDef,
-        pin: Option<PinDef>,
-        region: Region,
-        drawn: Size,
-    ) -> Self {
+    /// `size_changes` says. A region that scales stays at the side it is
+    /// nearest, as a saved value's does when the user chose none.
+    pub(crate) fn of(size_changes: SizeChangesDef, region: Region, drawn: Size) -> Self {
         match size_changes {
             SizeChangesDef::Rarely => Self::Drawn,
-            SizeChangesDef::Often => {
-                Self::Scaled(pin.unwrap_or_else(|| PinDef::guess(region.into(), drawn.into())))
-            },
+            SizeChangesDef::Often => Self::Scaled(PinDef::guess(region.into(), drawn.into())),
         }
     }
 
@@ -143,12 +135,7 @@ mod tests {
 
     #[test]
     fn a_window_that_rarely_changes_size_is_recorded_only_at_the_size_drawn() {
-        let follows = Follows::of(
-            SizeChangesDef::Rarely,
-            Some(PinDef::TopLeft),
-            region(10, 10, 20, 10),
-            DRAWN,
-        );
+        let follows = Follows::of(SizeChangesDef::Rarely, region(10, 10, 20, 10), DRAWN);
         assert_eq!(follows, Follows::Drawn);
         let place = region(10, 10, 20, 10);
         let not = Err(Unplaced::NotFollowed);
@@ -171,8 +158,7 @@ mod tests {
     #[test]
     fn a_window_that_often_changes_size_scales_the_region_and_a_height_by_one_factor() {
         let place = region(160, 10, 20, 10);
-        let follows = Follows::of(SizeChangesDef::Often, Some(PinDef::TopRight), place, DRAWN);
-        assert_eq!(follows, Follows::Scaled(PinDef::TopRight));
+        let follows = Follows::Scaled(PinDef::TopRight);
         assert_eq!(follows.region(place, DRAWN, DRAWN), Ok(place));
         // Twice the height, and three times the width: the factor is 2,
         // and the region keeps twice its 40 from the right edge.
@@ -238,8 +224,8 @@ mod tests {
     }
 
     #[test]
-    fn a_region_with_no_side_chosen_stays_at_the_side_it_is_nearest() {
-        let near = |x, y| Follows::of(SizeChangesDef::Often, None, region(x, y, 20, 10), DRAWN);
+    fn a_region_stays_at_the_side_it_is_nearest() {
+        let near = |x, y| Follows::of(SizeChangesDef::Often, region(x, y, 20, 10), DRAWN);
         assert_eq!(near(0, 0), Follows::Scaled(PinDef::TopLeft));
         assert_eq!(near(180, 90), Follows::Scaled(PinDef::BottomRight));
         assert_eq!(near(90, 45), Follows::Scaled(PinDef::Center));

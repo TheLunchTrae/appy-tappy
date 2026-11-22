@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use appytappy_config::app_file::{PinDef, RegionDef};
+use appytappy_config::app_file::RegionDef;
 use appytappy_sources::screen::digits::{DigitReader, Tone};
 use appytappy_sources::screen::{Image, Region, Size};
 use serde::Deserialize;
@@ -35,9 +35,6 @@ pub(crate) struct RecordSpec {
     /// The screenshot the region was drawn on, whose window size the
     /// recording keeps.
     pub(crate) screenshot: usize,
-    /// The side of the window the region stays at as the window changes
-    /// size, or `None` for the side the region is nearest.
-    pub(crate) pin: Option<PinDef>,
     /// Where to look for characters: in the region alone, or wherever the
     /// window shows text like the region's.
     pub(crate) scope: Scope,
@@ -170,7 +167,7 @@ impl<H: Host> Owner<H> {
     pub(crate) fn start_recording(&mut self, spec: RecordSpec, more: bool) -> Result<u64, String> {
         let (region, window_size) = self.recordable(spec.region, spec.screenshot)?;
         let size_changes = self.stores()?.app(&spec.app)?.file.size_changes;
-        let follows = Follows::of(size_changes, spec.pin, region, window_size);
+        let follows = Follows::of(size_changes, region, window_size);
         let now = Instant::now();
         // The whole window is searched for text as tall as each example's
         // on its screenshot.
@@ -361,7 +358,7 @@ mod tests {
     use std::io;
     use std::sync::mpsc;
 
-    use appytappy_config::app_file::{PinDef, SizeChangesDef};
+    use appytappy_config::app_file::SizeChangesDef;
     use appytappy_sources::screen::settle::SETTLE;
     use appytappy_sources::screen::{FrameHandler, Size};
 
@@ -864,22 +861,11 @@ mod tests {
         Image::new(Size { width, height: 4 }, pixels).expect("matching length")
     }
 
-    /// Records the two right columns of the middle of screenshot 0,
-    /// staying at `pin`.
-    fn start_recording_right(
-        pin: Option<PinDef>,
-    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
+    /// Records the two right columns of the middle of screenshot 0.
+    fn start_recording_right() -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let region: RegionDef =
             serde_json::from_str(r#"{"x":3,"y":1,"width":2,"height":2}"#).expect("valid JSON");
-        move |owner: &mut Owner<FakeHost>| {
-            owner.start_recording(
-                RecordSpec {
-                    pin,
-                    ..characters_in(region)
-                },
-                false,
-            )
-        }
+        move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region), false)
     }
 
     #[test]
@@ -887,8 +873,8 @@ mod tests {
         let (mut harness, mut handler, root) = capturing("rec-follows");
         // Twice as wide as it was and as tall: red by its right edge alone.
         let wide = red_at(12, &[10]);
-        let mut kept_at = |harness: &mut Harness, pin| {
-            harness.ask(start_recording_right(pin)).expect("records");
+        let mut kept = |harness: &mut Harness| {
+            harness.ask(start_recording_right()).expect("records");
             harness.deliver(&mut handler, Ok(&wide));
             harness.wait(SETTLE);
             harness.deliver(&mut handler, Ok(&wide));
@@ -898,20 +884,15 @@ mod tests {
             (view.readings.len(), view.problem)
         };
         assert_eq!(
-            kept_at(&mut harness, None),
+            kept(&mut harness),
             (1, None),
             "nearest the right edge, the region stays at it"
-        );
-        assert_eq!(
-            kept_at(&mut harness, Some(PinDef::TopLeft)),
-            (0, None),
-            "staying at the left edge, it shows no ink"
         );
         harness
             .ask(|owner| owner.save_app(Some("example"), example_app(SizeChangesDef::Rarely)))
             .expect("saves");
         assert_eq!(
-            kept_at(&mut harness, None),
+            kept(&mut harness),
             (
                 0,
                 Some(
@@ -929,7 +910,7 @@ mod tests {
         let (mut harness, mut handler, root) = capturing("rec-settles-unasked");
         let wide = red_at(12, &[10]);
         // One frame at the new size, and no more: nothing on it changes.
-        harness.ask(start_recording_right(None)).expect("records");
+        harness.ask(start_recording_right()).expect("records");
         harness.deliver(&mut handler, Ok(&wide));
         let view = harness.recording().expect("a recording");
         assert_eq!((view.at.width, view.readings.len()), (6, 0), "not yet");
@@ -945,7 +926,7 @@ mod tests {
             .ask(|owner| owner.save_app(Some("example"), example_app(SizeChangesDef::Rarely)))
             .expect("saves");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
-        harness.ask(start_recording_right(None)).expect("records");
+        harness.ask(start_recording_right()).expect("records");
         harness.deliver(&mut handler, Ok(&wide));
         harness.wait(SETTLE);
         let view = harness.recording().expect("a recording");

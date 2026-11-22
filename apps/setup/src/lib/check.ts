@@ -100,13 +100,10 @@ export const EMPTY_DRAFT: Draft = {
 export type Drawn = Pick<Draft, 'region' | 'drawnOn'>;
 
 /**
- * Where the reference being taught reads, records, and sizes its boxes: the value's region when it is taught from a
- * value, or else its first box. Every box must be on a screenshot of the size that one is on.
+ * Where the reference being taught reads, records, and sizes its boxes: its first box. Every box must be on a
+ * screenshot of the size that one is on.
  */
 export function readingOf(draft: Draft): Drawn {
-  if (draft.region !== null && draft.drawnOn !== null) {
-    return { region: draft.region, drawnOn: draft.drawnOn };
-  }
   const first = draft.boxes[0];
   return first === undefined ? { region: null, drawnOn: null } : { region: first.region, drawnOn: first.screenshot };
 }
@@ -136,18 +133,14 @@ export function newestOfSize(screenshots: readonly (readonly [number, Size])[], 
  * The screenshot the reading box goes back on to read where the stopped recording's `settings` read, or null when it
  * stays. `boxOn` is the screenshot the box the recording read at is on now, or null when that box is gone, and
  * `screenshots` each screenshot's index and its window size. The box keeps its screenshot when that has the size
- * recorded at, and otherwise goes on the newest one that has it. A reference taught from a value reads at the
- * value's region, which the editor leaves alone, and with no screenshot of the size the box has nowhere to go.
+ * recorded at, and otherwise goes on the newest one that has it. With no screenshot of the size the box has nowhere
+ * to go.
  */
 export function recordedPlace(
-  draft: Draft,
   settings: RecordingSettings,
   boxOn: number | null,
   screenshots: readonly (readonly [number, Size])[],
 ): number | null {
-  if (draft.region !== null) {
-    return null;
-  }
   const own = screenshots.find(([index]) => index === boxOn)?.[1];
   return boxOn !== null && own?.width === settings.windowSize.width && own.height === settings.windowSize.height
     ? boxOn
@@ -404,7 +397,7 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
     reads: 'number',
     build: (draft, region, app) => {
       if (draft.reference === null) {
-        return missing('Pick a reference to read the number with, or make one from this region.');
+        return missing('Pick a reference to read the number with. References are made on the References page.');
       }
       const spec = { kind: 'number', region, reference: { app, id: draft.reference }, whole: draft.whole } as const;
       return {
@@ -598,14 +591,6 @@ export function withStateAt(draft: Draft, index: number, update: (state: DraftSt
 /** `draft` without the state at `index`. */
 export function withoutState(draft: Draft, index: number): Draft {
   return { ...draft, states: draft.states.filter((_, position) => position !== index) };
-}
-
-/**
- * `draft` entering or leaving the reference editor: without the editor's boxes or readings, or the saved pictures it
- * left out. The value's region stays, and the reference reads there.
- */
-export function withoutTeaching(draft: Draft): Draft {
-  return { ...draft, boxes: [], recorded: new Map(), dropped: [] };
 }
 
 /** `draft` with the saved picture `image` of the reference being edited left out. */

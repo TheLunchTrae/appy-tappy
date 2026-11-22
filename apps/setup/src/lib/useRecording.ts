@@ -2,7 +2,7 @@
 
 import { useEffect, useReducer, useRef, useState } from 'react';
 
-import type { ExampleSpec, PinDef, RecordingSettings, RecordingView } from './bindings.ts';
+import type { ExampleSpec, RecordingSettings, RecordingView } from './bindings.ts';
 import { discardRecording, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
 import type { Picture } from './pixels.ts';
 import { background } from './repeat.ts';
@@ -22,11 +22,10 @@ const CROP_RETRY_MS = 1000;
 
 /**
  * What a recording records: a region drawn on a screenshot of `app`'s window, in that place alone or wherever the
- * window shows text like it or like one of the `examples`, the reference's boxes. As the window changes size the region stays at `pin`, or at the side it is nearest for null.
+ * window shows text like it or like one of the `examples`, the reference's boxes. As the window changes size the region stays at the side it is nearest.
  */
 type Recordable = Omit<RecordingSettings, 'windowSize'> & {
   readonly app: string;
-  readonly pin: PinDef | null;
   readonly drawnOn: number;
   readonly examples: readonly ExampleSpec[];
 };
@@ -102,8 +101,8 @@ export function useRecording(active = true): {
   // so kept readings and review edits are never dropped without a discard.
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
     await command(async (current) => {
-      const { app, pin, region, drawnOn, scope, examples } = settings;
-      const recording = await startRecording({ app, region, screenshot: drawnOn, pin, scope, examples }, more);
+      const { app, region, drawnOn, scope, examples } = settings;
+      const recording = await startRecording({ app, region, screenshot: drawnOn, scope, examples }, more);
       if (!current()) {
         await stopRecording(recording);
         return;

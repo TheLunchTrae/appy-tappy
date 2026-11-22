@@ -8,12 +8,8 @@ import {
   captureMissing,
   captureProblem,
   fixOutdated,
-  needsField,
   refreshedEditing,
-  savedReads,
   startEditing,
-  teachingNeeds,
-  withTaught,
   keptSetup,
   labeledCharacters,
   regionOnStage,
@@ -21,7 +17,7 @@ import {
   shownOnStep,
   storeSetup,
 } from '../src/lib/captureDraft.ts';
-import { type Draft, EMPTY_DRAFT, fixDraft, withoutTeaching } from '../src/lib/check.ts';
+import { type Draft, EMPTY_DRAFT, fixDraft } from '../src/lib/check.ts';
 import {
   DRAFT_FORMAT,
   draftOfSaved,
@@ -167,7 +163,6 @@ describe('what a draft keeps', () => {
         existing: null,
         name: 'Digits',
         reads: ['1', '2', '%'],
-        needs: ['1', '2', '%'],
       },
       draft,
     };
@@ -184,7 +179,8 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(8);
+    expect(DRAFT_FORMAT).toBe(9);
+    expect(Object.keys(startEditing(null)).sort()).toEqual(['existing', 'name', 'reads']);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -327,7 +323,7 @@ describe('what an unfinished item still needs', () => {
     expect(captureMissing(drawn, next, false)).toEqual(['Pick the reference.']);
     const editing = {
       ...drawn,
-      editing: { existing: null, name: '', reads: [], needs: [] },
+      editing: { existing: null, name: '', reads: [] },
     };
     expect(captureMissing(editing, next, false)).toEqual(['Name the reference.']);
   });
@@ -412,7 +408,7 @@ describe('a draft and what it belongs to', () => {
       samples: [],
     };
     const taught = { ...saved, tolerance: 12 };
-    const editing = { existing: saved, name: 'Percent', reads: [], needs: ['1'] };
+    const editing = { existing: saved, name: 'Percent', reads: [] };
     expect(refreshedEditing(editing, [taught])).toEqual({ ...editing, existing: taught });
     // A reference deleted since is made as a new one, and a new one stays new.
     expect(refreshedEditing(editing, [])).toEqual({ ...editing, existing: null });
@@ -430,7 +426,7 @@ describe('a draft and what it belongs to', () => {
       samples: [{ image: 'ref-percent-2.png', text: '1' }],
     };
     const draft = { ...EMPTY_DRAFT, dropped: ['ref-percent-2.png'] };
-    const setup = { ...EMPTY_SETUP, editing: { existing: saved, name: 'Percent', reads: [], needs: [] }, draft };
+    const setup = { ...EMPTY_SETUP, editing: { existing: saved, name: 'Percent', reads: [] }, draft };
     // Two replacements can give a different picture the same name and label.
     const reused = { ...saved, samples: [{ image: 'ref-percent-2.png', text: '1' }] };
     for (const current of [undefined, saved, reused, null]) {
@@ -507,53 +503,10 @@ test("a number's later steps leave its region to Where to read, unless a recordi
   );
 });
 
-describe("the characters a value needs, in its reference's editor", () => {
-  const value: Draft = { ...EMPTY_DRAFT, reference: 'percent', characters: ['1', '%'] };
-
-  test('show to change from a value, to read from a fix, and not at all for a reference made by itself', () => {
-    expect(needsField('value')).toBe('editable');
-    expect(needsField('edit')).toBe('editable');
-    expect(needsField('fix')).toBe('readOnly');
-    expect(needsField('reference')).toBe('hidden');
-    expect(startEditing('value', null, value)).toEqual({
-      existing: null,
-      name: '',
-      reads: ['1', '%'],
-      needs: ['1', '%'],
-    });
-    expect(startEditing('fix', null, value).needs).toEqual(['1', '%']);
-    // A reference made by itself is taught for no value, whatever the capture's own draft holds.
-    expect(startEditing('reference', null, value).needs).toEqual([]);
-  });
-
-  test('the characters a reference reads start as saved, else as its value needs, else as the digits', () => {
-    const saved = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, samples: [] };
-    expect(startEditing('reference', null, value).reads).toEqual(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
-    expect(startEditing('reference', { ...saved, characters: '% 1' }, value).reads).toEqual(['1', '%']);
-    // A saved reference that names none reads every character it learns, and goes on doing so.
-    expect(startEditing('value', saved, value).reads).toEqual([]);
-  });
-
-  test('teaching goes by the characters the value needs, or else the ones the reference reads', () => {
-    expect(teachingNeeds(null)).toEqual([]);
-    expect(teachingNeeds({ existing: null, name: '', reads: ['1', '%'], needs: ['1'] })).toEqual(['1']);
-    expect(teachingNeeds({ existing: null, name: '', reads: ['1', '%'], needs: [] })).toEqual(['1', '%']);
-  });
-
-  test('a reference saves reading what its value needs too, unless it reads every character', () => {
-    expect(savedReads({ existing: null, name: '', reads: ['1'], needs: ['%', '1'] })).toEqual(['1', '%']);
-    expect(savedReads({ existing: null, name: '', reads: [], needs: ['%'] })).toEqual([]);
-  });
-
-  test('change the value only when the reference is saved', () => {
-    const editing = { ...startEditing('value', null, value), needs: ['1', '2', '%'] };
-    // Discard leaves the editor for the value as it was.
-    expect(withoutTeaching(value).characters).toEqual(['1', '%']);
-    expect(withTaught(withoutTeaching(value), 'clock', editing)).toMatchObject({
-      kind: 'number',
-      reference: 'clock',
-      characters: ['1', '2', '%'],
-    });
-    expect(withTaught(value, 'clock', null).characters).toEqual(['1', '%']);
-  });
+test('the characters a reference reads start as saved, else as the digits', () => {
+  const saved = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, samples: [] };
+  expect(startEditing(null).reads).toEqual(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  expect(startEditing({ ...saved, characters: '% 1' }).reads).toEqual(['1', '%']);
+  // A saved reference that names none reads every character it learns, and goes on doing so.
+  expect(startEditing(saved).reads).toEqual([]);
 });

@@ -181,7 +181,8 @@ impl fmt::Display for SpecError {
             } => write!(
                 formatter,
                 "{reference} reads none of the characters this value needs, \"{characters}\". \
-                 Edit {reference} to read them, or change the characters the value needs."
+                 Edit {reference} on the References page to read them, or change the characters \
+                 the value needs."
             ),
             Self::NoCharacters {
                 reference,
@@ -189,7 +190,8 @@ impl fmt::Display for SpecError {
             } => write!(
                 formatter,
                 "{reference} knows none of the characters this value needs, \"{characters}\". \
-                 Teach it one of them, or change the characters the value needs."
+                 Teach it one of them on the References page, or change the characters the \
+                 value needs."
             ),
             Self::NothingSelected(name) => write!(
                 formatter,
@@ -231,7 +233,7 @@ impl fmt::Display for SpecError {
                     Cut::Recording => "Use its settings, or discard the recording.",
                     Cut::State(_) => "Take that state from a screenshot of that size.",
                 };
-                // A reference reads at a value's region or at one of its boxes.
+                // A reference reads at its first box, and a value at its region.
                 let place = match cut {
                     Cut::Label(_) | Cut::Recording => "the reference reads on",
                     Cut::State(_) => "the region was drawn on",
@@ -250,8 +252,8 @@ impl fmt::Display for SpecError {
             ),
             Self::MissingSample { reference, picture } => write!(
                 formatter,
-                "{reference} is missing its saved picture {picture}. Edit {reference} and remove \
-                 that picture under Saved pictures it can't learn."
+                "{reference} is missing its saved picture {picture}. Edit {reference} on the \
+                 References page and remove that picture under Saved pictures it can't learn."
             ),
             Self::ReferenceLearn {
                 reference,
@@ -260,7 +262,8 @@ impl fmt::Display for SpecError {
             } => write!(
                 formatter,
                 "{reference} can't learn from its saved picture of \"{text}\": {} Edit \
-                 {reference} and remove that picture under Saved pictures it can't learn.",
+                 {reference} on the References page and remove that picture under Saved \
+                 pictures it can't learn.",
                 cant_learn(source)
             ),
             // The reference's own editor says these, where the picture

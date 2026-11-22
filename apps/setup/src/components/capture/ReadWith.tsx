@@ -9,14 +9,17 @@ interface Props {
   readonly shared: string;
   /** The reference the fix reads with now. */
   readonly selected: string | null;
-  readonly onShared: () => void;
-  /** Opens the editor on a new reference for this size. */
-  readonly onLearn: () => void;
+  readonly onSelect: (reference: string) => void;
 }
 
-/** What a fix of a number reads with: the reference its value shares, or one learned at this size. */
-export function ReadWith({ references, shared, selected, onShared, onLearn }: Props) {
-  const named = (id: string | null): ReferenceDef | null => references?.find((saved) => saved.id === id) ?? null;
+/**
+ * What a fix of a number reads with: the reference its value shares, or another of the application's saved
+ * references, such as one taught on the References page from screenshots at this size.
+ */
+export function ReadWith({ references, shared, selected, onSelect }: Props) {
+  // The shared reference comes first, and stays a choice while the file is read.
+  const sharedDef = references?.find((saved) => saved.id === shared);
+  const others = (references ?? []).filter((saved) => saved.id !== shared);
   return (
     <fieldset className="choices" aria-describedby="hint-read-with">
       <legend className="group-title">
@@ -25,40 +28,38 @@ export function ReadWith({ references, shared, selected, onShared, onLearn }: Pr
           {READ_WITH_HINT}
         </Hint>
       </legend>
-      <label className="choice" aria-label="Shared reference">
+      <label className="choice" aria-label={sharedDef?.name ?? 'Its reference'}>
         <input
           type="radio"
           name="read-with"
           aria-describedby="read-with-shared"
           checked={selected === shared}
-          onChange={onShared}
+          onChange={() => {
+            onSelect(shared);
+          }}
         />
         <span>
-          <span className="choice-name">{named(shared)?.name ?? 'Its reference'}</span>
+          <span className="choice-name">{sharedDef?.name ?? 'Its reference'}</span>
           <small id="read-with-shared" className="note">
             The reference it reads with at every size.
           </small>
         </span>
       </label>
-      <label className="choice" aria-label="Learn a reference at this size">
-        <input
-          type="radio"
-          name="read-with"
-          aria-describedby="read-with-own"
-          checked={selected !== shared}
-          onChange={onLearn}
-        />
-        <span>
-          <span className="choice-name">
-            {selected === shared
-              ? 'Learn a reference at this size'
-              : (named(selected)?.name ?? 'A reference learned at this size')}
+      {others.map((reference) => (
+        <label key={reference.id} className="choice" aria-label={reference.name}>
+          <input
+            type="radio"
+            name="read-with"
+            checked={selected === reference.id}
+            onChange={() => {
+              onSelect(reference.id);
+            }}
+          />
+          <span>
+            <span className="choice-name">{reference.name}</span>
           </span>
-          <small id="read-with-own" className="note">
-            Teach the characters again from this size&apos;s screenshots.
-          </small>
-        </span>
-      </label>
+        </label>
+      ))}
     </fieldset>
   );
 }

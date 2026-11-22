@@ -33,13 +33,11 @@ interface Props {
   readonly current: Step;
   /** Whether a step other than the current one has what it sets. */
   readonly done: (step: Step) => boolean;
-  /** Whether the steps wait, as they do while a reference is taught. */
-  readonly locked: boolean;
   readonly onStep: (step: Step) => void;
 }
 
 /** The value's steps as tabs, numbered, with a tick on each finished one. */
-export function Stepper({ tabs, current, done, locked, onStep }: Props) {
+export function Stepper({ tabs, current, done, onStep }: Props) {
   return (
     <div className="stepper" role="group" aria-label="Steps">
       {tabs.map((tab, number) => {
@@ -51,7 +49,6 @@ export function Stepper({ tabs, current, done, locked, onStep }: Props) {
             type="button"
             className="step-tab"
             aria-current={isCurrent ? 'step' : undefined}
-            disabled={locked}
             onClick={() => {
               onStep(tab.step);
             }}

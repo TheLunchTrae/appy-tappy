@@ -3,7 +3,7 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
-import { type Editing, type NeedsField, savedReads } from '../lib/captureDraft.ts';
+import type { Editing } from '../lib/captureDraft.ts';
 import { type Built, type Draft, type ReferenceSaving, withoutSample } from '../lib/check.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { readers, readersLose, readersNeed } from '../lib/reference.ts';
@@ -104,8 +104,6 @@ interface Props {
   readonly appName: string;
   /** The application's file, for the values that read with the reference, or null until it is read. */
   readonly file: AppFile | null;
-  /** The value's steps, which wait while its reference is taught, or null for a reference made by itself. */
-  readonly stepper: ReactNode;
   /** Each screenshot's pixels, and where each sits in the strip. */
   readonly full: ReadonlyMap<number, Picture>;
   readonly position: (index: number) => number;
@@ -119,8 +117,6 @@ interface Props {
   readonly busy: boolean;
   readonly draftError: ReactNode;
   readonly draftButton: ReactNode;
-  /** How the editor shows the characters the value it is taught for needs. */
-  readonly needsField: NeedsField;
   /** Leaves the editor without saving. */
   readonly onDiscard: () => void;
 }
@@ -135,7 +131,6 @@ export function ReferenceInspector({
   boxes,
   appName,
   file,
-  stepper,
   full,
   position,
   setSelected,
@@ -145,17 +140,16 @@ export function ReferenceInspector({
   busy,
   draftError,
   draftButton,
-  needsField,
   onDiscard,
 }: Props) {
   const { taught, finder, guided, review, recorder, checking, covered } = teaching;
   const chosen = boxes.selected;
   const saved = editing.existing?.samples ?? [];
-  // A look-alike pair warns when it has one of these characters: the value's, or the ones the reference reads, or for
-  // a reference by itself that reads every character it learns, those of every value that reads with it.
+  // A look-alike pair warns when it has a character the reference reads, or, for one that reads every character it
+  // learns, a character that a value that reads with it needs.
   const lookalikeNeeds =
-    needsField !== 'hidden' || teaching.needs.length > 0
-      ? teaching.needs
+    editing.reads.length > 0
+      ? editing.reads
       : editing.existing === null || file === null
         ? []
         : readersNeed(file, editing.existing.id);
@@ -171,7 +165,6 @@ export function ReferenceInspector({
   });
   return (
     <aside className="inspector" aria-label="Reference">
-      {stepper}
       <ReferenceEditor
         name={editing.name}
         appName={appName}
@@ -181,25 +174,17 @@ export function ReferenceInspector({
         finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
         reads={editing.reads}
         readersLose={
-          editing.existing === null || file === null
-            ? null
-            : readersLose(file, editing.existing.id, savedReads(editing))
+          editing.existing === null || file === null ? null : readersLose(file, editing.existing.id, editing.reads)
         }
         onReads={(reads) => {
           setEditing((current) => (current === null ? null : { ...current, reads }));
         }}
-        valueNeeds={editing.needs}
-        expected={teaching.needs}
         coverage={covered}
         lookalikes={neededPairs(teaching.risks.lookalikes, lookalikeNeeds)}
         risksProblem={teaching.risks.problem}
         readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
         onName={(name) => {
           setEditing((current) => (current === null ? null : { ...current, name }));
-        }}
-        needsField={needsField}
-        onExpected={(needs) => {
-          setEditing((current) => (current === null ? null : { ...current, needs }));
         }}
         boxes={
           <BoxList
@@ -208,8 +193,6 @@ export function ReferenceInspector({
             full={full}
             position={position}
             blocked={teaching.boxBlock}
-            // A reference taught from a value reads at the value's region, not at a box.
-            readsAt={draft.region === null ? (draft.boxes[0]?.id ?? null) : null}
             onSelect={(id) => {
               const box = boxOf(draft.boxes, id);
               boxes.select(id);
@@ -301,10 +284,7 @@ export function ReferenceInspector({
         </p>
       )}
       {refSave.can && covered.missing.length > 0 ? (
-        <p className="note">
-          It has yet to learn every character {editing.needs.length > 0 ? 'the value needs' : 'it reads'}. You can save
-          now and teach the rest later.
-        </p>
+        <p className="note">It has yet to learn every character it reads. You can save now and teach the rest later.</p>
       ) : null}
       {draftError}
       {checking ? null : <CheckOffer characters={guided.unconfirmed} onCheck={guided.open} />}

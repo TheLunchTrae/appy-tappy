@@ -63,6 +63,7 @@ function Presets({
 /** What the chooser says for the characters of a value, or of a reference, where "it" is the reference. */
 const WORDS = {
   value: {
+    label: 'Characters it needs',
     hint: EXPECTED_HINT,
     none: 'Nothing chosen, so the value reads every character its reference reads, and any it learns later.',
     some: 'Turn on everything the value shows: its digits and any sign right after them, such as the % in 87%.',
@@ -70,6 +71,7 @@ const WORDS = {
       'Letters. A number value reads no text. Turn these on for letters its region shows with the number, such as the Lv in Lv.5.',
   },
   reference: {
+    label: 'Characters it reads',
     hint: READS_HINT,
     none: 'Nothing chosen, so it reads every character it learns, and finds and records text of any characters.',
     some: 'Turn on every character it is for. It finds, records, and reads only these.',
@@ -86,12 +88,9 @@ export function ExpectedCharacters({
   expected,
   onExpected,
   owner = 'value',
-  label = 'Characters it needs',
 }: Props & {
   /** Whose characters these are, which decides what the chooser says and whether it holds them to a most. */
   readonly owner?: keyof typeof WORDS;
-  /** What the field is called: the value's own name for it, or the reference editor's, where "it" is the reference. */
-  readonly label?: string;
 }) {
   // The field's text as typed, and the set it started from, while it is being typed in. Outside that, the field
   // shows the set's own other characters, in order.
@@ -99,6 +98,7 @@ export function ExpectedCharacters({
   // The reference editor can show a reference's chooser and its value's at once.
   const otherId = useId();
   const words = WORDS[owner];
+  const { label } = words;
   return (
     <div className="field">
       <span className="name">

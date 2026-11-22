@@ -7,7 +7,7 @@ import { DIGITS, expectedSet } from './expected.ts';
 import { NAME_THE_REFERENCE } from './teaching.ts';
 import { sameContent } from './unsaved.ts';
 
-/** The reference being made or changed, its name as typed, and the characters it reads. */
+/** The reference a reference's capture makes or changes, its name as typed, and the characters it reads. */
 export interface Editing {
   readonly existing: ReferenceDef | null;
   readonly name: string;
@@ -16,70 +16,15 @@ export interface Editing {
    * looks for, records, and reads only these.
    */
   readonly reads: readonly string[];
-  /**
-   * The characters the value it is taught for needs, as the editor has them: the value's own when the editor opens,
-   * which the value takes back only when the reference is saved. None for a reference made by itself.
-   */
-  readonly needs: readonly string[];
-}
-
-/** What the capture makes or changes: a value, a saved value's edit or fix, or a reference by itself. */
-export type CaptureFlow = 'value' | 'edit' | 'fix' | 'reference';
-
-/**
- * How the reference editor shows the characters the value needs. A reference made by itself is taught for no value,
- * so it shows none. A fix needs what its value does, so it shows them and changes none.
- */
-export type NeedsField = 'hidden' | 'editable' | 'readOnly';
-
-/** How the reference editor of `flow` shows the characters the value needs. */
-export function needsField(flow: CaptureFlow): NeedsField {
-  if (flow === 'reference') {
-    return 'hidden';
-  }
-  return flow === 'fix' ? 'readOnly' : 'editable';
 }
 
 /**
- * The reference editor of `flow` as it opens on `existing`, or on a new reference, from the check `draft`. A saved
- * reference reads what it was saved reading. A new one reads the characters its value needs, or the digits when it
- * is made by itself.
+ * The reference editor as it opens on `existing`, or on a new reference. A saved reference reads what it was saved
+ * reading, and a new one the digits.
  */
-export function startEditing(flow: CaptureFlow, existing: ReferenceDef | null, draft: Draft): Editing {
-  const needs = flow === 'reference' ? [] : draft.characters;
-  const reads =
-    existing !== null ? expectedSet(existing.characters ?? '') : flow === 'reference' ? DIGITS.characters : needs;
-  return { existing, name: existing?.name ?? '', reads, needs };
-}
-
-const NO_NEEDS: readonly string[] = [];
-
-/**
- * The characters the reference `editing` teaches is compared with: the ones its value needs, or the ones it reads
- * when it is made by itself or for a value that needs none. Finding text, recording, and what is still missing go by
- * these.
- */
-export function teachingNeeds(editing: Editing | null): readonly string[] {
-  if (editing === null) {
-    return NO_NEEDS;
-  }
-  return editing.needs.length > 0 ? editing.needs : editing.reads;
-}
-
-/**
- * The characters the reference `editing` saves reading: the ones it reads, with those its value needs added, so the
- * value reads them all. None, for every character it learns, stays none.
- */
-export function savedReads(editing: Editing): readonly string[] {
-  return editing.reads.length === 0 ? [] : expectedSet([...editing.reads, ...editing.needs].join(''));
-}
-
-/**
- * `draft`, a value's, once the reference editor `editing` saved `reference` for it: a number that reads with it and
- * needs the characters the editor left. Leaving the editor any other way keeps the characters the value had.
- */
-export function withTaught(draft: Draft, reference: string, editing: Editing | null): Draft {
-  return { ...draft, kind: 'number', reference, characters: editing?.needs ?? draft.characters };
+export function startEditing(existing: ReferenceDef | null): Editing {
+  const reads = existing === null ? DIGITS.characters : expectedSet(existing.characters ?? '');
+  return { existing, name: existing?.name ?? '', reads };
 }
 
 /**
@@ -116,6 +61,7 @@ export interface CaptureSetup {
   readonly step: Step;
   /** Whether the user said the value's content may move around inside the window. */
   readonly mayMove: boolean;
+  /** The reference a reference's capture teaches, and null for every other capture. */
   readonly editing: Editing | null;
   readonly draft: Draft;
 }

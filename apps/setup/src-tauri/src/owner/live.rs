@@ -23,7 +23,7 @@ use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Size};
 use serde::{Deserialize, Serialize};
 
-use crate::check_spec::{self, CharactersSpec, CheckSpec, SpecError, expected_characters};
+use crate::check_spec::{self, CharactersSpec, CheckSpec, SpecError};
 use crate::reading::{at_size, cant_read};
 
 use super::Owner;
@@ -60,14 +60,6 @@ pub(crate) struct ReferenceTrial {
     pub(crate) app: String,
     /// The characters it is taught.
     pub(crate) characters: CharactersSpec,
-    /// The characters the number it is made for needs, or none for every
-    /// character it is taught.
-    pub(crate) needs: String,
-    /// Whether that number ignores digits after the decimal point.
-    pub(crate) whole: bool,
-    /// The side of the window that number's region stays at, or `None`
-    /// for the side the region is nearest.
-    pub(crate) pin: Option<PinDef>,
 }
 
 /// What may keep a reference from reading as its samples do, for its
@@ -232,10 +224,9 @@ impl<H: Host> Owner<H> {
     /// Makes the reference `trial` teaches the check the live frame is
     /// read with: a number read with it in the region the characters were
     /// drawn in, read back as [`Self::set_check`] reads a value's check
-    /// back. The number is the one the reference is made for, where it is
-    /// made for one: it reads only that number's characters, whole when that
-    /// number is, and stays at its side. The saved reference the characters
-    /// add to is kept for the asks that follow.
+    /// back. It reads every character the reference knows, with the digits
+    /// after a decimal point. The saved reference the characters add to is
+    /// kept for the asks that follow.
     pub(crate) fn set_characters(&mut self, trial: &ReferenceTrial) -> Result<(), String> {
         self.keep_reference(trial.characters.reference.as_ref());
         let mut found = self.stores()?.app(&trial.app)?;
@@ -243,16 +234,17 @@ impl<H: Host> Owner<H> {
             .with_session(|session| trial.characters.teach(session, None, TAUGHT, &[]))
             .map_err(|error| error.to_string())?;
         let id = taught.reference.id.clone();
-        let characters = expected_characters(&trial.needs);
         let screen = ScreenDef {
             window_size: taught.window_size.into(),
             region: taught.region.into(),
             check: CheckDef::Number {
                 reference: id.clone(),
-                whole: trial.whole,
-                characters,
+                whole: false,
+                characters: None,
             },
-            pin: trial.pin,
+            // Its region stays at the side it is nearest, as a value's does
+            // before a side is picked.
+            pin: None,
             reading_area: false,
             fixes: Vec::new(),
         };
@@ -704,7 +696,7 @@ mod tests {
             harness.ask(|owner| owner.set_check(&reading("2"))),
             Err(
                 "Percent knows none of the characters this value needs, \"2\". Teach it one of \
-                 them, or change the characters the value needs."
+                 them on the References page, or change the characters the value needs."
                     .to_owned()
             )
         );
@@ -731,8 +723,8 @@ mod tests {
         assert_eq!(
             harness.ask(|owner| owner.set_check(&reading("39"))),
             Err(
-                "Percent reads none of the characters this value needs, \"39\". Edit Percent to \
-                 read them, or change the characters the value needs."
+                "Percent reads none of the characters this value needs, \"39\". Edit Percent on \
+                 the References page to read them, or change the characters the value needs."
                     .to_owned()
             )
         );
@@ -761,7 +753,7 @@ mod tests {
         at the window sizes it was drawn at.";
 
     #[test]
-    fn a_reference_made_for_a_number_reads_as_that_number_will() {
+    fn a_reference_being_taught_reads_only_where_its_application_reads() {
         let (mut harness, mut handler, root) =
             with_percent("live-made-for", SizeChangesDef::Rarely);
         harness.deliver(&mut handler, Ok(&showing("3.7%", 1)));
@@ -775,17 +767,8 @@ mod tests {
             .ask(|owner| owner.set_characters(&teaching(taught.clone())))
             .expect("learns");
         assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(3.7))));
-        // Made for a whole number, it reads as one.
-        let whole = ReferenceTrial {
-            whole: true,
-            ..teaching(taught)
-        };
-        harness
-            .ask(|owner| owner.set_characters(&whole))
-            .expect("learns");
-        assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(3.0))));
         // Its application's window changes size rarely, so at another size
-        // it reads nothing, as the number will.
+        // it reads nothing, as a number of that application does.
         harness.deliver(&mut handler, Ok(&a_column_wider(&showing("3.7%", 1))));
         harness.wait(SETTLE);
         assert_eq!(harness.ask(Owner::reading), Err(A_COLUMN_WIDER.to_owned()));
@@ -919,30 +902,6 @@ mod tests {
             harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
-        let no_seven = ReferenceTrial {
-            needs: "39%".to_owned(),
-            ..teaching(taught.clone())
-        };
-        // Made for a value that needs only some characters, it reads as
-        // that value will: not around a digit the value leaves out.
-        harness
-            .ask(|owner| owner.set_characters(&no_seven))
-            .expect("learns them");
-        assert_eq!(harness.ask(Owner::reading), Err(NO_SEVEN.to_owned()));
-        assert_eq!(
-            harness.ask(|owner| owner.set_characters(&ReferenceTrial {
-                needs: "2".to_owned(),
-                ..teaching(taught.clone())
-            })),
-            Err(
-                "The reference knows none of the characters this value needs, \"2\". Teach it \
-                 one of them, or change the characters the value needs."
-                    .to_owned()
-            )
-        );
-        harness
-            .ask(|owner| owner.set_characters(&teaching(taught.clone())))
-            .expect("learns");
         harness.deliver(&mut handler, Ok(&showing("97%", 2)));
         harness.wait(SETTLE);
         assert_eq!(harness.ask(Owner::reading), Ok(Some(Reading::Number(97.0))));

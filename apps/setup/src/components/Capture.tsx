@@ -5,7 +5,6 @@ import {
   editValue,
   errorText,
   explainReading,
-  listDrafts,
   placeValue,
   saveFix,
   saveValue,
@@ -77,18 +76,13 @@ import {
   refreshedEditing,
   restoreSetup,
   regionOnStage,
-  savedReads,
   shownOnStep,
   storeSetup,
-  needsField,
   startEditing,
-  withTaught,
 } from '../lib/captureDraft.ts';
-import { type ReportDraft, type Resumed, draftsOf, isKept, keep, useDraft } from '../lib/drafts.ts';
+import { type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { background } from '../lib/repeat.ts';
-import { ask } from '../lib/request.ts';
 import { type Made, savedNote } from '../lib/flow.ts';
-import { draftHolds } from '../lib/teaching.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useBarSetup } from '../lib/useBarSetup.ts';
@@ -113,6 +107,9 @@ export type CaptureMode =
 
 /** What the reference editor's save waits for while no reference is edited, which never shows. */
 const NO_REFERENCE_SAVE: Built<ReferenceSaving> = { ok: false, next: '' };
+
+/** The characters outside a reference's capture, which reads none. */
+const NO_CHARACTERS: readonly string[] = [];
 
 /** The name a draft of the capture lists under: what was typed, or else what it makes or fixes. */
 function draftName(mode: Exclude<CaptureMode, { readonly kind: 'edit' }>, setup: CaptureSetup): string {
@@ -143,8 +140,7 @@ function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restor
   if (kept !== null && mode.kind !== 'edit' && isKept<CaptureKept>(kept, mode.kind)) {
     return restoreSetup(kept.state, mode.kind === 'reference' ? mode.existing : undefined);
   }
-  const editing: Editing | null =
-    mode.kind === 'reference' ? startEditing('reference', mode.existing, EMPTY_DRAFT) : null;
+  const editing: Editing | null = mode.kind === 'reference' ? startEditing(mode.existing) : null;
   if (mode.kind === 'edit') {
     return { step: 'where', editing, ...editStart(mode.value) };
   }
@@ -288,39 +284,16 @@ export function Capture({
     editing,
     draft,
   };
-  // The application's references that have a draft of changes. Drafts change only in flows, and this is the open
-  // one, so reading them once is enough; when they cannot be read, every reference can be edited.
-  const [drafted, setDrafted] = useState<ReadonlySet<string>>(() => new Set());
-  useEffect(
-    () =>
-      ask(
-        listDrafts,
-        (drafts) => {
-          setDrafted(
-            new Set(
-              draftsOf(drafts, 'reference').flatMap(({ def }) =>
-                def.app === appId && def.changes !== null ? [def.changes] : [],
-              ),
-            ),
-          );
-        },
-        () => {
-          // Without the drafts, nothing is held back.
-        },
-      ),
-    [appId],
-  );
-
-  // The saved reference the editor adds to, or null for a new one or while no editor is open.
+  // The saved reference a reference's capture adds to, or null for a new one or outside a reference's capture.
   const existingId = editing?.existing?.id ?? null;
   const editingRef = useMemo(
     (): ReferenceRef | null => (existingId === null ? null : { app: appId, id: existingId }),
     [existingId, appId],
   );
   const isEditing = editing !== null;
-  // What the reference reads once it is saved, which it is tried with too.
-  const reads = useMemo(() => (editing === null ? [] : savedReads(editing)), [editing]);
-  // The characters the reference editor teaches while it is open, and the check of the value it was opened from.
+  // What the reference reads, which it is tried and saved with.
+  const reads = editing?.reads ?? NO_CHARACTERS;
+  // The characters a reference's capture teaches, and the check of every other capture.
   const characters = useMemo(
     () => (isEditing ? buildCharacters(draft, editingRef, reads) : null),
     [isEditing, draft, editingRef, reads],
@@ -369,13 +342,11 @@ export function Capture({
   const teaching = useReferenceTeaching({
     app: appId,
     editing,
-    setEditing,
     draft,
     setDraft,
     boxes,
     reference: editingRef,
     saving: referenceSave,
-    pin: fixPin ?? pin,
     windowless,
     full,
     shown: shownPicture,
@@ -384,15 +355,9 @@ export function Capture({
       setPicking(null);
     },
     onSaving: setSaving,
-    onSaved: async (saved, close) => {
-      if (mode.kind === 'reference') {
-        await drafting.finished();
-        onSaved({ app: saved.app, value: null });
-        return;
-      }
-      await appFile.reload();
-      close();
-      setDraft((current) => withTaught(current, saved.reference, editing));
+    onSaved: async (saved) => {
+      await drafting.finished();
+      onSaved({ app: saved.app, value: null });
     },
   });
   const { recording, finder, reviewed, sheeted, checking } = teaching;
@@ -573,17 +538,13 @@ export function Capture({
     sizes: full,
   });
   const { drawnOn } = draft;
-  // A reference is tried as the number it is made for reads with it once both are saved: with the characters that
-  // number needs, whole when it is, and at its side. A reference made on its own reads every character it knows.
+  // A reference is tried as it reads alone: every character it knows, with the digits after a decimal point.
   const taughtTrial = useMemo((): Built<ReferenceTrial> | null => {
     if (characters === null || !characters.ok) {
       return characters;
     }
-    const { spec } = characters;
-    const whole = mode.kind !== 'reference' && draft.whole;
-    const needs = (editing?.needs ?? []).join('');
-    return { ok: true, spec: { app: appId, characters: spec, needs, whole, pin: fixPin ?? pin } };
-  }, [characters, editing?.needs, draft.whole, mode.kind, appId, fixPin, pin]);
+    return { ok: true, spec: { app: appId, characters: characters.spec } };
+  }, [characters, appId]);
   const trial = useMemo((): Trial => {
     if (taughtTrial !== null) {
       return trialOf('characters', taughtTrial, { set: setCharacters });
@@ -702,30 +663,6 @@ export function Capture({
     }
   };
 
-  // Opens the reference editor on `existing`, or on a new reference. The editor records readings, and the owner
-  // records one thing at a time, so a recording of looks goes first.
-  const openEditor = async (existing: ReferenceDef | null): Promise<void> => {
-    teaching.open(startEditing(mode.kind, existing, draft));
-    // Why the value was not saved is about the value before this edit, so it does not show when the editor closes.
-    setSaveError(null);
-    await looks.discard();
-  };
-
-  // Opens the reference editor on the picked reference, or on a new one, and
-  // starts recording the value's region.
-  const recordReadings = async (): Promise<void> => {
-    const existing = file?.references.find((reference) => reference.id === draft.reference) ?? null;
-    if (existing !== null && draftHolds(existing, drafted) !== null) {
-      return;
-    }
-    const { region, drawnOn } = draft;
-    await openEditor(existing);
-    if (region === null || drawnOn === null) {
-      return;
-    }
-    await teaching.record(false, { region, drawnOn });
-  };
-
   // Why the screenshot shown cannot be removed, or null when it can or the live view shows.
   const unremovable =
     selected === null
@@ -807,37 +744,24 @@ export function Capture({
     setStep(next);
     setSelected(shownOnStep(next, draft.drawnOn, selected));
   };
-  // While a reference is taught, the steps show where the value is, and wait until the reference is saved or discarded.
   const stepper = (
     <Stepper
       tabs={stepTabs(threeSteps)}
-      current={editing === null ? shownStep : 'how'}
+      current={shownStep}
       done={(tab) => (tab === 'where' ? whereDone : tab === 'how' ? threeSteps && draft.reference !== null : false)}
-      locked={editing !== null}
       onStep={goTo}
     />
   );
-  // A number reads with a reference, which its second step picks, teaches, or records readings for.
+  // A number reads with one of its application's saved references, which its second step picks.
   const referencePicker = (
     <ReferencePicker
       appName={choice.name}
       file={file}
       selected={draft.reference}
-      hasRegion={draft.region !== null}
       whole={draft.whole}
       characters={draft.characters}
       onSelect={(reference) => {
         setDraft((current) => ({ ...current, reference }));
-      }}
-      onEdit={(id) => {
-        background(openEditor(file?.references.find((reference) => reference.id === id) ?? null));
-      }}
-      drafted={drafted}
-      onNew={() => {
-        background(openEditor(null));
-      }}
-      onRecord={() => {
-        background(recordReadings());
       }}
       onWhole={(whole) => {
         setDraft((current) => ({ ...current, whole }));
@@ -876,11 +800,8 @@ export function Capture({
           references={file?.references ?? null}
           shared={sharedReference}
           selected={draft.reference}
-          onShared={() => {
-            setDraft((current) => ({ ...current, reference: sharedReference }));
-          }}
-          onLearn={() => {
-            background(openEditor(null));
+          onSelect={(reference) => {
+            setDraft((current) => ({ ...current, reference }));
           }}
         />
       ),
@@ -937,7 +858,6 @@ export function Capture({
         bar={{
           path: [
             ...trail,
-            ...(mode.kind !== 'reference' && editing !== null ? [flowName] : []),
             ...(sheeted ? [teaching.name] : []),
             ...(checking && reviewed !== null ? ['Review recording'] : []),
           ],
@@ -1293,7 +1213,6 @@ export function Capture({
           boxes={boxes}
           appName={choice.name}
           file={file}
-          stepper={mode.kind === 'reference' ? null : stepper}
           full={full}
           position={position}
           setSelected={setSelected}
@@ -1303,8 +1222,7 @@ export function Capture({
           busy={busy}
           draftError={draftError}
           draftButton={draftButton}
-          needsField={needsField(mode.kind)}
-          onDiscard={mode.kind === 'reference' ? onCancel : teaching.close}
+          onDiscard={onCancel}
         />
       )}
     </main>

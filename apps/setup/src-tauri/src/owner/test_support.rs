@@ -581,7 +581,6 @@ pub(super) fn characters_in(region: RegionDef) -> RecordSpec {
         app: "example".to_owned(),
         region,
         screenshot: 0,
-        pin: None,
         scope: Scope::Place,
         examples: Vec::new(),
     }
@@ -593,9 +592,6 @@ pub(super) fn teaching(characters: CharactersSpec) -> ReferenceTrial {
     ReferenceTrial {
         app: "example".to_owned(),
         characters,
-        needs: String::new(),
-        whole: false,
-        pin: None,
     }
 }
 
