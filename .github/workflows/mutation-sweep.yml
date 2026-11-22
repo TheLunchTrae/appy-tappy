@@ -15,10 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # One shard of the workspace's mutants on each runner, so the sweep takes
-  # about two hours; wiki/Rust-standards.md#mutation-testing says how the
-  # shard count and time limit follow from the mutant count. Add shards as
-  # the workspace grows.
+  # One shard of the workspace's mutants on each of the 20 runners GitHub's
+  # free plan runs at once, so the sweep takes about two hours;
+  # wiki/Rust-standards.md#mutation-testing says how the shard count and time
+  # limit follow from the mutant count.
   mutants:
     name: mutants ${{ strategy.job-index }}/${{ strategy.job-total }}
     runs-on: ubuntu-26.04
@@ -27,7 +27,7 @@ jobs:
       fail-fast: false
       # The list's length sets the shard count; its values are not read.
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     env:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
