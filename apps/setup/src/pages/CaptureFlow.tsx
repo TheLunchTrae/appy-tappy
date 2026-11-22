@@ -141,7 +141,7 @@ function SavedCapture({
       }
       windowNotes={
         <>
-          <AntiCheatRunning products={antiCheat} />
+          <AntiCheatRunning products={antiCheat} setting={found?.summary.file?.antiCheat ?? null} />
           {fallback === null ? null : (
             <>
               <p className="warn">{fallback}</p>
