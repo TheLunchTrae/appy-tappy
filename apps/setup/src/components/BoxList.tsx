@@ -93,7 +93,9 @@ export function BoxList({ boxes, selected, full, position, blocked, onSelect, on
         </ul>
       )}
       {boxes.length === 0 ? null : (
-        <p className="note">Box 1 is where the reference is tried on the live window, and where recording looks.</p>
+        <p className="note">
+          Box 1 is where the reference is tried on the live window, and where recording This place records.
+        </p>
       )}
       {blocked === null ? null : <p className="note">{blocked}</p>}
     </div>

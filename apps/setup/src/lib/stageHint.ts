@@ -4,10 +4,10 @@ import { AREA_DRAW_HINT } from './moving.ts';
 import type { SelectTool } from './selection.ts';
 
 /**
- * What the stage draws: the value's region, over the live window too, a reference's boxes, or nothing in a step
- * that leaves the region to Where to read.
+ * What the stage draws: the value's region, over the live window too, a reference's boxes, over the live window
+ * too, or nothing in a step that leaves the region to Where to read.
  */
-export type Drawing = 'region' | 'live' | 'boxes' | 'none';
+export type Drawing = 'region' | 'live' | 'boxes' | 'liveBoxes' | 'none';
 
 /** What the stage shows and takes, which decides its hint. */
 export interface StageView {
@@ -27,7 +27,10 @@ export interface StageView {
   /** Whether the screenshot shown has another size than the edited value was drawn at. */
   readonly otherSize: boolean;
   readonly drawing: Drawing;
-  /** The window size an edited value's region is drawn at, as text, which a drag over the live window needs. */
+  /**
+   * The window size a drag over the live window needs, as text: the one an edited value's region is drawn at, or the
+   * one a reference reads at.
+   */
   readonly drawnAt: string | null;
   /** Why no box can go on the screenshot shown, or null. */
   readonly boxBlock: string | null;
@@ -61,6 +64,10 @@ export function stageHint({
   if (selected === null && drawing === 'live') {
     const where = drawnAt === null ? 'where the value shows' : `at ${drawnAt} where the value shows`;
     return `Drag over the window ${where}; that takes the screenshot. Or take one (${shortcut}).`;
+  }
+  if (selected === null && drawing === 'liveBoxes') {
+    const at = drawnAt === null ? '' : ` at ${drawnAt}`;
+    return `Drag over the window${at} around some characters to draw a box; that takes the screenshot. Or take one (${shortcut}).`;
   }
   if (selected === null) {
     return shotCount === 0

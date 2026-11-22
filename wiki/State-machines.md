@@ -2487,7 +2487,8 @@ While the live view shows, the capture screen's first step, and a
 reference's capture, lay a region surface over the live window, so the user
 can drag where the value shows, or a reference's box, without taking a
 screenshot first. The press takes the screenshot the region
-goes on, and the box drawn replaces any region already placed. `liveDraw` in
+goes on. For a value the box drawn replaces any region already placed, and
+for a reference it adds a box. `liveDraw` in
 `apps/setup/src/lib/liveDraw.ts` is the pure `(state, event)` transition,
 and `useLiveDraw` there holds the state, numbers the presses, and takes the
 screenshot.
@@ -2538,9 +2539,10 @@ stateDiagram-v2
   and so is one that arrives once its press already has a screenshot.
 
 The surface shows only while the first step sets the value's place or a
-reference is taught, the live view shows, no recording runs, no review is open, and no color is being
-picked (`liveDrawFrame` in `apps/setup/src/lib/liveDraw.ts`). The live frame
-is the window shrunk to the stage's width, so its size alone doesn't tell the
+reference is taught, the live view shows, no recording runs, neither review
+nor the character check is open, and no color is being picked
+(`liveDrawFrame` in `apps/setup/src/lib/liveDraw.ts`). The live frame is the
+window shrunk to the stage's width, so its size alone doesn't tell the
 window's. A placed region shows over it, scaled, while the frame is one of a
 window of the size the region is drawn at (`regionOverFrame`), until a press.
 The box goes on the screenshot its press takes, except that an edited saved

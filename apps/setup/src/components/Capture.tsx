@@ -802,7 +802,16 @@ export function Capture({
   const regionOnLive =
     liveFrame === null || editing !== null ? null : regionOverFrame(draft.region, regionSize, liveFrame);
   const regionShown = regionOnStage(step, draft.kind, recordingNow !== null);
-  const drawing: Drawing = liveFrame !== null ? 'live' : editing !== null ? 'boxes' : regionShown ? 'region' : 'none';
+  const drawing: Drawing =
+    liveFrame !== null
+      ? editing === null
+        ? 'live'
+        : 'liveBoxes'
+      : editing !== null
+        ? 'boxes'
+        : regionShown
+          ? 'region'
+          : 'none';
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
   const placeShot = draft.drawnOn ?? selected;
   const stripShots = setsPlace ? shots.filter((shot) => shot.index === placeShot) : shots;
@@ -994,7 +1003,14 @@ export function Capture({
             area,
             otherSize: otherSize !== null,
             drawing,
-            drawnAt: edited === null ? null : sizeText(edited.screen.windowSize),
+            drawnAt:
+              editing !== null
+                ? teaching.readingSize === null
+                  ? null
+                  : sizeText(teaching.readingSize)
+                : edited === null
+                  ? null
+                  : sizeText(edited.screen.windowSize),
             boxBlock: teaching.boxBlock,
           })
         }

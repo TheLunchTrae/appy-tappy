@@ -156,7 +156,8 @@ on the live window or any screenshot, and several on one screenshot too.
 
 - **Draw.** Drag on the live window, or on a screenshot away from the boxes
   there. A box drawn on the live window goes on the screenshot that the drag
-  takes as it starts. The new box is
+  takes as it starts, at the window size the hint above the window names; a
+  click there without a drag only takes the screenshot. The new box is
   selected, and the keyboard moves to its row under **Boxes**, so you can
   type what it shows straight away.
 - **Select.** Press a box on the screenshot, or its number under **Boxes**,
@@ -290,8 +291,9 @@ AppyTappy tends to misread a character the same way wherever it shows, such
 as every `7` as a `1`. **Check characters** lets you fix that once instead of
 in each text. It shows above the list of finds, in a recording's review, and
 above **Save reference**, under **Not confirmed yet** while there are
-characters nobody has confirmed. Above **Save reference** it is there as soon
-as the reference has a box, so you can check at any point. It goes through the
+characters nobody has confirmed. Above **Save reference** it is always there,
+so you can check at any point; until the reference has a box, it waits and
+says **Draw a box first.** It goes through the
 characters of the boxes, the listed finds, and the kept readings together,
 so one answer also fixes a box you drew by hand.
 

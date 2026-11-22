@@ -126,7 +126,7 @@ describe('drawing over the live view', () => {
 describe('where the live view takes a drawn region', () => {
   const frame = { width: 800, height: 450 };
   const scene = { draws: true, live: frame, occupied: false };
-  test('draws the region over it, placed or not, only in Where to read with a frame and nothing else under way', () => {
+  test('draws the region over it, placed or not, only while it draws, with a frame and nothing else under way', () => {
     expect(liveDrawFrame(scene)).toBe(frame);
     expect(liveDrawFrame({ ...scene, draws: false })).toBeNull();
     expect(liveDrawFrame({ ...scene, live: null })).toBeNull();

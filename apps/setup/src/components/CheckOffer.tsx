@@ -20,10 +20,9 @@ interface Props {
 const NEEDS_PLACE_ID = 'check-needs-place';
 
 /**
- * The offer to check a reference's characters before it is saved, while it would learn some that are the text
- * reader's guesses and that nobody has confirmed one at a time. It sits above Save reference and never holds the
- * save up: the user takes it, or saves. With nothing unconfirmed, Check characters stays there alone, so the user can
- * check at any point once the reference has a box.
+ * Check characters above Save reference, which never holds the save up: alone, waiting for a box while there is
+ * nothing to check, or as an offer while the reference would learn characters that are the text reader's guesses and
+ * that nobody has confirmed one at a time, which the user takes, or saves.
  *
  * It says "confirmed", not "checked": the recording panel's Found, not checked yet counts a reading as checked once
  * the user keeps it, and the two show together.
