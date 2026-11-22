@@ -57,7 +57,7 @@ import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
 import { SettingsContext, type SettingsHandle, type SettingsUpdate, sameSettings } from './lib/settings.ts';
-import { type Held, onLeave } from './lib/unsaved.ts';
+import { type Held, onClose, onLeave } from './lib/unsaved.ts';
 import { type DraftSaver, type Resumed, draftsOf } from './lib/drafts.ts';
 
 type Page = 'automations' | 'applications' | 'values' | 'references' | 'settings' | 'debug';
@@ -411,18 +411,22 @@ export function App() {
       }),
     );
   };
-  // Closing the window while a flow holds work asks first, as a tab does, and waits for a save under way.
-  const heldNow = useRef(held);
-  heldNow.current = held;
+  // Closing the window while a flow holds work asks first, as a tab does. A close during a save waits for it, then
+  // closes or asks, as the flows that are left hold work.
+  const [closeWaits, setCloseWaits] = useState(false);
+  const closing = useRef({ held, keeping });
+  closing.current = { held, keeping };
   useEffect(() => {
     const stop = getCurrentWindow().onCloseRequested((event) => {
-      const now = onLeave(heldNow.current);
+      const now = onClose(closing.current.held, closing.current.keeping);
       if (now === 'leave') {
         return;
       }
       event.preventDefault();
       if (now === 'ask') {
         setLeaving('close');
+      } else {
+        setCloseWaits(true);
       }
     });
     return () => {
@@ -433,6 +437,21 @@ export function App() {
       );
     };
   }, []);
+  useEffect(() => {
+    if (!closeWaits) {
+      return;
+    }
+    const now = onClose(held, keeping);
+    if (now === 'wait') {
+      return;
+    }
+    setCloseWaits(false);
+    if (now === 'leave') {
+      background(getCurrentWindow().destroy());
+    } else {
+      setLeaving('close');
+    }
+  }, [closeWaits, held, keeping]);
   // The saved applications that have a draft of changes, which the picker opens in place of the saved one.
   const draftedApps = new Set(
     draftsOf(drafts, 'application').flatMap(({ def }) => (def.changes === null ? [] : [def.changes])),
@@ -650,7 +669,7 @@ export function App() {
               </button>
             );
           })}
-          <UpdateNotice busy={held !== 'nothing'} hidden={leaving !== null && flow !== null} />
+          <UpdateNotice busy={held !== 'nothing'} />
         </nav>
         {leaving === null || question === null ? null : (
           <Dialog

@@ -66,6 +66,14 @@ export function onLeave(now: Held): Leave {
   }
 }
 
+/**
+ * What closing the window does while the flows hold `now`, with `keeping` while leaving saves their drafts: it waits
+ * for any save, as a press does, since the window would go before the save ends.
+ */
+export function onClose(now: Held, keeping: boolean): Leave {
+  return keeping ? 'wait' : onLeave(now);
+}
+
 /** Tells `report` what the flow holds whenever that changes, and that it holds nothing once the flow goes. */
 export function useReportHeld(report: (held: Held) => void, now: Held): void {
   useEffect(() => {

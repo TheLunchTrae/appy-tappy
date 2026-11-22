@@ -170,8 +170,10 @@ carry on, **Save as draft** to keep it as a [draft](Drafts.md) and finish it
 later, or **Leave** to drop it. **Discard** or **Cancel** asks the same way
 before it drops what you changed, with **Discard** in place of **Leave**. While a save is
 still under way, the pages, **Leave**, **Change window**, and **Discard** or
-**Cancel** wait for it to finish. An [edit of a saved value](Values.md#edit-a-value)
-can't be saved as a draft, so its question offers only **Stay** and **Leave**.
+**Cancel** wait for it to finish, and closing AppyTappy Setup waits too, then
+closes it or asks. An [edit of a saved value](Values.md#edit-a-value) can't be
+saved as a draft, so its question offers only **Stay** and **Leave**, or
+**Discard**.
 
 When you opened one from another, such as a value from a new automation,
 **Cancel** returns to the one you came from, as you left it. Selecting a page

@@ -1118,7 +1118,7 @@ stateDiagram-v2
     Saving --> Open: a reference made for a value's draft is saved, that draft opens on its check with it picked
     Open --> SavingDraft: Next: make a reference in a new value opened from its page
     SavingDraft --> Open: the reference's draft and the value's are saved, the reference flow opens on the first
-    Saving --> Saving: the tabs, Cancel, and Leave wait until the save ends
+    Saving --> Saving: the tabs, Cancel, Leave, and closing the window wait until the save ends
     Open --> SavingDraft: Save as draft in the open flow
     SavingDraft --> Open: the draft save fails, the flow shows why
     SavingDraft --> Open: saved with a flow waiting, which shows again as it was left
@@ -1133,9 +1133,9 @@ stateDiagram-v2
     Asking --> KeepingHere: Save as draft, and the open flow holds work a draft keeps
     Asking --> KeepingUnder: Save as draft, and only an automation that waits holds work
     KeepingHere --> KeepingUnder: the open flow's draft is saved, and an automation waits with work
-    KeepingHere --> Page: the open flow's draft is saved and nothing waits with work, the asked page opens
+    KeepingHere --> Page: the open flow's draft is saved and nothing waits with work, the asked page opens or the window closes
     KeepingHere --> Asking: the save fails, the question shows why
-    KeepingUnder --> Page: the automation's draft is saved, the asked page opens
+    KeepingUnder --> Page: the automation's draft is saved, the asked page opens or the window closes
     KeepingUnder --> Asking: the save fails, the question shows why
 ```
 
@@ -1190,9 +1190,11 @@ draft opens from its page with none waiting:
   unsaved changes, and what **Save as draft** keeps of them. **Leave** drops
   every flow, and **Stay** keeps the stack as it is. While a save runs, the
   tabs and the question's answers wait. Closing the window asks the same
-  question (`onCloseRequested` in `App.tsx`), and **Leave** then closes it;
-  while a save runs, the window stays open. The question shows in a modal
-  dialog.
+  question (`onCloseRequested` in `App.tsx`), and **Leave** then closes it.
+  A close while a save runs, including the drafts that **Save as draft** in
+  the question saves, waits for it (`onClose` in `unsaved.ts`, `closeWaits`
+  in `App.tsx`): the window then closes, or asks when a flow still holds
+  unsaved work. The question shows in a modal dialog.
 - **Discard and Cancel.** They end the open flow alone, so they ask only when
   the open flow reports unsaved work: `discardQuestion` names what it loses
   and offers **Save as draft**, which saves the open flow's draft and ends it
