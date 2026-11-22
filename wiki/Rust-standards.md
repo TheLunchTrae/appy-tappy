@@ -140,8 +140,7 @@ The **Mutation sweep** workflow, `.github/workflows/mutation-sweep.yml`, runs
 and it is not a merge gate: run it on `main` as a final check before a
 [release](Installer.md#builds). It catches a mutant that survives only once two
 merged changes meet, which the diff lane misses until a later change edits its
-line. Its shards take the mutants round-robin, so each gets a share of every
-crate's mutants and they take similar time, and each shard keeps its
+line. Its shards take the mutants round-robin too, and each shard keeps its
 `mutants.out/` as a run artifact for the workflow's `retention-days`. A shard
 fails when a mutant survives or times out, or when the unmutated baseline
 fails; its `mutants.out/` says which.

@@ -80,7 +80,10 @@ jobs:
       # The setup app's Rust side embeds the built UI, so the UI builds first.
       - name: Build the setup UI
         run: mise run ui:build
+      # Stops before the job's limit, so a shard that runs too long still
+      # uploads its report.
       - name: Mutation-test the shard
+        timeout-minutes: 170
         run: mise run rust:mutants
       # Holds each surviving mutant's diff and log, so a failed shard can be
       # read without running it again.

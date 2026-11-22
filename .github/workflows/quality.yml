@@ -189,7 +189,7 @@ jobs:
       # tested and its report says how long each took.
       - name: Mutation-test the changed code
         if: steps.selection.outputs.build == 'true'
-        timeout-minutes: 55
+        timeout-minutes: 50
         run: mise run rust:mutants:diff
       - name: Upload the mutation report
         if: failure() && steps.selection.outputs.build == 'true'
