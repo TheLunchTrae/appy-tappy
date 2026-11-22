@@ -383,7 +383,7 @@ impl Shade {
             .filter_map(|(rows, left)| Some((rows?, left)))
         {
             let kept = beyond
-                .filter(|&beyond| beyond < lines)
+                .filter(|&beyond| left.get(beyond).is_some())
                 .and_then(|beyond| kept(&row(at), &row(beyond)));
             if let (Some(kept), Some(left)) = (kept, left.get_mut(at)) {
                 *left = kept
