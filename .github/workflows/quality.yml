@@ -103,11 +103,13 @@ jobs:
     strategy:
       fail-fast: false
       # The list's length sets the shard count; its values are not read.
-      # A runner tests 60 to 110 mutants an hour, fewer where mutants time
-      # out, and a rewrite of a module selects about 540, so twelve shards
-      # keep each well inside the limit.
+      # GitHub's free plan runs at most 20 of the account's jobs at once, and
+      # this workflow's other three jobs start beside the shards, so 17
+      # shards all start at once; a shard past that would wait for a runner
+      # longer than it saves. wiki/Rust-standards.md#mutation-testing says
+      # how the count follows from that limit and each runner's setup time.
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     env:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -145,6 +147,13 @@ jobs:
           else
             echo 'No mutants selected for this shard.'
           fi
+      # A mutant that grows memory without end should die by the kernel's
+      # out-of-memory killer, which fails its tests, rather than push the
+      # runner into swap, where it slows until the job's limit cancels the
+      # shard and loses its log.
+      - name: Turn off swap
+        if: steps.selection.outputs.build == 'true'
+        run: sudo swapoff -a
       - name: Install the webview build libraries
         if: steps.selection.outputs.build == 'true'
         run: |
@@ -175,9 +184,21 @@ jobs:
       - name: Build the setup UI
         if: steps.selection.outputs.build == 'true'
         run: mise run ui:build
+      # Stops before the job's limit, which would cancel the job and lose its
+      # logs, so a shard that runs too long still shows which mutants it
+      # tested and its report says how long each took.
       - name: Mutation-test the changed code
         if: steps.selection.outputs.build == 'true'
+        timeout-minutes: 50
         run: mise run rust:mutants:diff
+      - name: Upload the mutation report
+        if: failure() && steps.selection.outputs.build == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutants-${{ strategy.job-index }}
+          path: mutants.out/
+          retention-days: 14
+          overwrite: true
 
   # AppyTappy ships for Windows only. This job proves the Rust workspace
   # lints, documents, and passes its tests on the target platform, where the
