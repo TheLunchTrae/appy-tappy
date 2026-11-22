@@ -31,10 +31,10 @@ interface Props {
   /** Closes the flow once its draft is saved or deleted. */
   readonly onDrafted: () => void;
   /**
-   * Closes a new value's flow once it is kept as a draft, and opens the draft of a reference for it; null where
-   * **Save and make a reference** is not offered.
+   * Closes a new value's flow once it is kept as the draft `value`, and opens `reference`, the draft of a reference
+   * for it; null where **New reference** is not offered.
    */
-  readonly onMakeReference: ((reference: Resumed) => void) | null;
+  readonly onMakeReference: ((reference: Resumed, value: Resumed) => void) | null;
   /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
   readonly onAddApplication: (chosen: string | null) => void;
   /** Leaves to change how `app` is found, and comes back to it. */

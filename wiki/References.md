@@ -32,8 +32,7 @@ saved already. First choose the application the reference belongs to, or
 select **Add application**, then select **Capture this window**, as the first
 step of [making a value](Values.md#make-a-value) describes.
 
-A value whose application has no reference yet can open one for itself with
-**Save and make a reference**, as
+A value can open a new reference for itself with **New reference**, as
 [A value without a reference](Values.md#a-value-without-a-reference)
 describes. The reference then starts with one box where the value is.
 

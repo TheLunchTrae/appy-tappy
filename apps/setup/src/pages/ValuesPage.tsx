@@ -93,7 +93,7 @@ function ValueDraftRows({ list, app, rows }: ValueDraftProps) {
           </>
         )}
         onFinish={() => {
-          rows.onFinish(wait.kind === 'ready' ? finishedWith(resumed, wait.reference) : resumed);
+          rows.onFinish(wait.kind === 'ready' ? finishedWith(resumed, wait.reference.id) : resumed);
         }}
         onDelete={async () => {
           await rows.onDelete(resumed.id);
