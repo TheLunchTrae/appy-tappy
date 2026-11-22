@@ -54,14 +54,14 @@ mod tests {
     use appytappy_sources::screen::{FrameHandler, Image, Size};
 
     use crate::owner::test_support::{
-        FakeHost, Harness, capturing, characters_in, frame_image, harness, recognized, trial,
+        FakeHost, Harness, capturing, capturing_text, characters_in, frame_image, harness,
+        recognized, text_frame, trial,
     };
     use crate::pixels;
     use crate::recording::Text;
     use crate::recording::looks::MAX_LOOKS;
     use crate::recording::ocr;
     use crate::ticket::Ticket;
-    use appytappy_config::app_file::ColorDef;
 
     use super::*;
 
@@ -92,14 +92,12 @@ mod tests {
         owner.start_look_recording(region, 10, 0)
     }
 
-    /// Records the readings of the whole 4 by 2 frame, drawn on screenshot
-    /// 0, with red as ink: a new recording, or with `more` the stopped one.
+    /// Records the readings of the left half of [`text_frame`], drawn on
+    /// screenshot 0: a new recording, or with `more` the stopped one.
     fn start_readings(more: bool) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let region: RegionDef =
-            serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
-        let ink: ColorDef =
-            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
-        move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region, ink), more)
+            serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":6}"#).expect("valid JSON");
+        move |owner: &mut Owner<FakeHost>| owner.start_recording(characters_in(region), more)
     }
 
     impl Harness {
@@ -317,8 +315,10 @@ mod tests {
         assert_eq!(harness.ask(|owner| owner.screenshot_pixels(1, 4)), None);
 
         // A recording of readings holds no look, so it refuses nothing.
+        let whole: RegionDef =
+            serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         harness
-            .ask(start_readings(false))
+            .ask(|owner| owner.start_recording(characters_in(whole), false))
             .expect("records readings");
         assert_eq!(harness.ask(|owner| owner.remove_screenshots(&[7])), Ok(()));
         std::fs::remove_dir_all(root).expect("clean up");
@@ -418,11 +418,11 @@ mod tests {
 
     #[test]
     fn one_recording_runs_at_a_time_and_each_has_its_own_number() {
-        let (mut harness, mut handler, root) = capturing("looks-one-at-a-time");
+        let (mut harness, mut handler, root) = capturing_text("looks-one-at-a-time");
         harness
             .ask(start_readings(false))
             .expect("records readings");
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&text_frame()));
         let jobs: Vec<(ocr::Source, usize)> = harness
             .jobs
             .try_iter()
@@ -451,7 +451,9 @@ mod tests {
         assert!(harness.looks().is_some(), "the refused start left it");
         let late = |recording| recognized(recording, 0, Text::Read("1".to_owned()));
         assert!(harness.owner.handle(late(first)).is_continue());
-        harness.deliver(&mut handler, Ok(&shade(100)));
+        let gray = Image::new(text_frame().size(), [100, 100, 100, 0].repeat(48))
+            .expect("matching length");
+        harness.deliver(&mut handler, Ok(&gray));
         assert_eq!(harness.jobs.try_iter().count(), 0, "it reads no text");
         assert_eq!(harness.kept(), [1]);
 
@@ -459,7 +461,7 @@ mod tests {
             .ask(start_readings(false))
             .expect("records readings again");
         assert_eq!(harness.looks(), None, "the recording of looks is gone");
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Ok(&text_frame()));
         let jobs: Vec<(ocr::Source, usize)> = harness
             .jobs
             .try_iter()
@@ -489,7 +491,7 @@ mod tests {
         assert_eq!(text_of(&mut harness), [Text::Read("1".to_owned())]);
         assert_eq!(
             harness.ask(|owner| owner.screenshot_pixels(1, 4)),
-            Some(pixels::rgba(&shade(100), 4)),
+            Some(pixels::rgba(&gray, 4)),
             "the screenshot the recording of looks kept stays"
         );
         std::fs::remove_dir_all(root).expect("clean up");

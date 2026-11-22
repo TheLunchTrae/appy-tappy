@@ -4,7 +4,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 
 import type { ExampleSpec, PinDef, RecordingSettings, RecordingView } from './bindings.ts';
 import { discardRecording, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
-import type { Color, Picture } from './pixels.ts';
+import type { Picture } from './pixels.ts';
 import { background } from './repeat.ts';
 import { type CropAsks, type Crops, cropAskFailed, cropsToAsk, NO_CROP_ASKS, NO_CROPS, withCrop } from './review.ts';
 import { useRecorder } from './useRecorder.ts';
@@ -21,13 +21,11 @@ const CROP_WIDTH = 480;
 const CROP_RETRY_MS = 1000;
 
 /**
- * What a recording records: a region drawn on a screenshot of `app`'s window, read with the reference's text color,
- * null for contrast, and tolerance, in that place alone or wherever the window shows text like it or like one of the
- * `examples`, the reference's boxes. As the window changes size the region stays at `pin`, or at the side it is nearest for null.
+ * What a recording records: a region drawn on a screenshot of `app`'s window, in that place alone or wherever the
+ * window shows text like it or like one of the `examples`, the reference's boxes. As the window changes size the region stays at `pin`, or at the side it is nearest for null.
  */
-type Recordable = Omit<RecordingSettings, 'windowSize' | 'ink'> & {
+type Recordable = Omit<RecordingSettings, 'windowSize'> & {
   readonly app: string;
-  readonly ink: Color | null;
   readonly pin: PinDef | null;
   readonly drawnOn: number;
   readonly examples: readonly ExampleSpec[];
@@ -104,12 +102,8 @@ export function useRecording(active = true): {
   // so kept readings and review edits are never dropped without a discard.
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
     await command(async (current) => {
-      const { app, pin, region, ink, tolerance, drawnOn, scope, examples } = settings;
-      const textColor = ink === null ? {} : { ink };
-      const recording = await startRecording(
-        { app, region, screenshot: drawnOn, pin, ...textColor, tolerance, scope, examples },
-        more,
-      );
+      const { app, pin, region, drawnOn, scope, examples } = settings;
+      const recording = await startRecording({ app, region, screenshot: drawnOn, pin, scope, examples }, more);
       if (!current()) {
         await stopRecording(recording);
         return;

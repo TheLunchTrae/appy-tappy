@@ -1,10 +1,9 @@
 //! Which pixels of a screenshot a color setting takes, for the UI to tint
 //! while the user picks the color and moves its tolerance.
 //!
-//! Each rule asks the function its reader asks: a reference's characters
-//! [`DigitReader::ink_like`], a bar [`BarFill::classify`], and a color check
-//! [`Rgb::near`]. So the tint shows what the reader will take, at the
-//! tolerance's edge too.
+//! Each rule asks the function its reader asks: a bar
+//! [`BarFill::classify`], and a color check [`Rgb::near`]. So the tint shows
+//! what the reader will take, at the tolerance's edge too.
 //!
 //! A color check compares its region's average color, not each pixel, so its
 //! answer carries that average, how far it is, and what the check reads on
@@ -12,13 +11,12 @@
 
 use appytappy_config::app_file::CheckDefError;
 use appytappy_sources::screen::check::{BarFill, BarPixel, ColorMatch, average};
-use appytappy_sources::screen::digits::{DigitReader, InkRule};
 use appytappy_sources::screen::{Image, Region, Rgb};
 use serde::{Deserialize, Serialize};
 
 use appytappy_config::app_file::{ColorDef, RegionDef};
 
-use crate::check_spec::{SpecError, ink_rule};
+use crate::check_spec::SpecError;
 
 /// The most runs a layer carries. Runs go to the UI as JSON, and a picture
 /// dithered at a tolerance's edge has a run for every other pixel, so the cap
@@ -31,13 +29,6 @@ const MAX_RUNS: usize = 500_000;
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum MatchRule {
-    /// The characters of a reference with a text color: each of a pixel's
-    /// red, green, and blue is within `tolerance` of `ink`'s.
-    Ink { ink: ColorDef, tolerance: u8 },
-    /// The characters of a reference that finds them by contrast: a
-    /// pixel's red, green, or blue is more than `tolerance` from the
-    /// background of `region`, where the reference reads.
-    Contrast { region: RegionDef, tolerance: u8 },
     /// A bar's fill: a pixel is filled, empty, or neither.
     BarFill { filled: ColorDef, empty: ColorDef },
     /// A color check: a pixel on its own is within `tolerance` of `color`.
@@ -86,8 +77,6 @@ impl Layer {
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum MatchView {
-    /// The pixels a reference counts as its characters.
-    Ink { ink: Layer },
     /// The pixels a bar counts as filled and as empty; the rest are neither.
     BarFill { filled: Layer, empty: Layer },
     /// The pixels within a color check's tolerance on their own, and what
@@ -105,45 +94,12 @@ pub(crate) enum MatchView {
     },
 }
 
-/// The pixels of `area` of `image` that are ink like the text in `region`
-/// of it, as a reference that tells ink from background by `rule` finds
-/// them. A rule of contrast takes the background from around `region`, so
-/// it reads the pixels around `area` too.
-fn ink_view(
-    image: &Image,
-    area: Region,
-    region: Region,
-    rule: InkRule,
-) -> Result<MatchView, SpecError> {
-    let read = rule.reads(area, image.size());
-    let within = |part: Region| {
-        Region::new(
-            part.x().checked_sub(read.x())?,
-            part.y().checked_sub(read.y())?,
-            part.size().width,
-            part.size().height,
-        )
-    };
-    let ink = image
-        .crop(read)
-        .zip(within(region))
-        .and_then(|(read, region)| DigitReader::new(rule).ink_like(&read, region))
-        .ok_or(SpecError::Outside)?;
-    let (ink, area) = (&ink, within(area).ok_or(SpecError::Outside)?);
-    let [ink] = layers(
-        (area.y()..area.bottom())
-            .flat_map(|y| (area.x()..area.right()).map(move |x| ink.at(x, y).then_some(0))),
-    );
-    Ok(MatchView::Ink { ink })
-}
-
 /// What `rule` takes of `area` on `image`.
 ///
 /// # Errors
 ///
-/// Returns [`SpecError::EmptyRegion`] for an empty `area` or an empty
-/// region of a rule of contrast, [`SpecError::Outside`] for one that
-/// reaches past the image or a region that reaches past `area`, and
+/// Returns [`SpecError::EmptyRegion`] for an empty `area`,
+/// [`SpecError::Outside`] for one that reaches past the image, and
 /// [`SpecError::Check`] for a bar whose two colors are the same.
 pub(crate) fn find(
     image: &Image,
@@ -155,20 +111,6 @@ pub(crate) fn find(
     let cropped = image.crop(area).ok_or(SpecError::Outside)?;
     let pixels = cropped.pixels().iter().copied();
     Ok(match rule {
-        MatchRule::Ink { ink, tolerance } => {
-            ink_view(image, area, area, ink_rule(Some(ink), tolerance))?
-        },
-        MatchRule::Contrast { region, tolerance } => {
-            let region = Region::try_from(region).map_err(|_empty| SpecError::EmptyRegion)?;
-            let inside = region.x() >= area.x()
-                && region.y() >= area.y()
-                && region.right() <= area.right()
-                && region.bottom() <= area.bottom();
-            if !inside {
-                return Err(SpecError::Outside);
-            }
-            ink_view(image, area, region, ink_rule(None, tolerance))?
-        },
         MatchRule::BarFill { filled, empty } => {
             let bar = BarFill::new(filled.into(), empty.into())
                 .map_err(|_same| SpecError::Check(CheckDefError::SameColors))?;
@@ -230,7 +172,6 @@ mod tests {
     use appytappy_config::signal::Number;
     use appytappy_sources::screen::Size;
     use appytappy_sources::screen::check::CheckError;
-    use appytappy_sources::screen::digits::ReadError;
 
     use super::*;
 
@@ -274,94 +215,38 @@ mod tests {
     }
 
     /// Red 200, give or take 10 on each channel.
-    fn ink() -> MatchRule {
-        MatchRule::Ink {
-            ink: color(200, 0, 0),
+    fn near_red() -> MatchRule {
+        MatchRule::Color {
+            color: color(200, 0, 0),
             tolerance: 10,
         }
     }
 
-    #[test]
-    fn characters_found_by_contrast_stand_out_from_their_region_s_background() {
-        // A scene of 200 beside a panel of 20 that holds a character of 90.
-        let image = reds(&[
-            &[200, 20, 20, 20, 20],
-            &[200, 20, 90, 20, 20],
-            &[200, 20, 20, 20, 20],
-        ]);
-        let panel = area(1, 0, 4, 3);
-        let contrast = |region, tolerance| MatchRule::Contrast { region, tolerance };
-        assert_eq!(
-            find(&image, whole(&image), contrast(panel, 30)),
-            Ok(MatchView::Ink {
-                ink: layer(4, &[[0, 1], [5, 6], [7, 8], [10, 11]])
-            }),
-            "the scene stands out from the panel as the character does"
-        );
-        assert_eq!(
-            find(&image, panel, contrast(panel, 69)),
-            Ok(MatchView::Ink {
-                ink: layer(1, &[[5, 6]])
-            }),
-            "the region is found from the rectangle's own corner"
-        );
-        assert_eq!(
-            find(&image, panel, contrast(panel, 70)),
-            Ok(MatchView::Ink { ink: layer(0, &[]) })
-        );
-        // A region as tight as its character still tells it from the
-        // panel around it, which the rectangle asked about leaves out.
-        let character = area(2, 1, 1, 1);
-        assert_eq!(
-            find(&image, character, contrast(character, 30)),
-            Ok(MatchView::Ink {
-                ink: layer(1, &[[0, 1]])
-            })
-        );
-        assert_eq!(
-            find(&image, area(2, 0, 3, 3), contrast(panel, 30)),
-            Err(SpecError::Outside),
-            "a region that starts left of the rectangle"
-        );
-        assert_eq!(
-            find(&image, area(1, 1, 4, 2), contrast(panel, 30)),
-            Err(SpecError::Outside),
-            "a region that starts above the rectangle"
-        );
-        assert_eq!(
-            find(&image, area(1, 0, 2, 3), contrast(panel, 30)),
-            Err(SpecError::Outside),
-            "a region that reaches past the rectangle"
-        );
-        assert_eq!(
-            find(&image, whole(&image), contrast(area(1, 0, 0, 3), 30)),
-            Err(SpecError::EmptyRegion)
-        );
+    /// The pixels `rule` takes of `area` of `image`.
+    fn near(image: &Image, area: RegionDef, rule: MatchRule) -> Result<Layer, SpecError> {
+        match find(image, area, rule)? {
+            MatchView::Color { near, .. } => Ok(near),
+            MatchView::BarFill { .. } => panic!("a color rule"),
+        }
     }
 
     #[test]
     fn runs_cover_each_kind_row_by_row() {
-        // A 4x2 picture: ink, ink, not, ink / ink, not, not, ink.
+        // A 4x2 picture: near, near, not, near / near, not, not, near.
         let image = reds(&[&[200, 205, 0, 195], &[200, 0, 0, 200]]);
+        // A run goes on from the end of a row into the next.
         assert_eq!(
-            find(&image, whole(&image), ink()),
-            Ok(MatchView::Ink {
-                // A run goes on from the end of a row into the next.
-                ink: layer(5, &[[0, 2], [3, 5], [7, 8]])
-            })
+            near(&image, whole(&image), near_red()),
+            Ok(layer(5, &[[0, 2], [3, 5], [7, 8]]))
         );
         // Only the middle columns: the indexes count within the rectangle.
         assert_eq!(
-            find(&image, area(1, 0, 2, 2), ink()),
-            Ok(MatchView::Ink {
-                ink: layer(1, &[[0, 1]])
-            })
+            near(&image, area(1, 0, 2, 2), near_red()),
+            Ok(layer(1, &[[0, 1]]))
         );
         assert_eq!(
-            find(&image, area(2, 1, 2, 1), ink()),
-            Ok(MatchView::Ink {
-                ink: layer(1, &[[1, 2]])
-            })
+            near(&image, area(2, 1, 2, 1), near_red()),
+            Ok(layer(1, &[[1, 2]]))
         );
     }
 
@@ -369,19 +254,14 @@ mod tests {
     fn no_match_and_every_match_are_answers() {
         let image = reds(&[&[200, 200], &[200, 200]]);
         assert_eq!(
-            find(&image, whole(&image), ink()),
-            Ok(MatchView::Ink {
-                ink: layer(4, &[[0, 4]])
-            })
+            near(&image, whole(&image), near_red()),
+            Ok(layer(4, &[[0, 4]]))
         );
-        let none = MatchRule::Ink {
-            ink: color(0, 200, 0),
+        let none = MatchRule::Color {
+            color: color(0, 200, 0),
             tolerance: 10,
         };
-        assert_eq!(
-            find(&image, whole(&image), none),
-            Ok(MatchView::Ink { ink: layer(0, &[]) })
-        );
+        assert_eq!(near(&image, whole(&image), none), Ok(layer(0, &[])));
     }
 
     #[test]
@@ -444,15 +324,15 @@ mod tests {
     fn a_rectangle_must_lie_on_the_picture() {
         let image = reds(&[&[200, 200]]);
         assert_eq!(
-            find(&image, area(0, 0, 0, 1), ink()),
+            find(&image, area(0, 0, 0, 1), near_red()),
             Err(SpecError::EmptyRegion)
         );
         assert_eq!(
-            find(&image, area(1, 0, 2, 1), ink()),
+            find(&image, area(1, 0, 2, 1), near_red()),
             Err(SpecError::Outside)
         );
         assert_eq!(
-            find(&image, area(0, 1, 1, 1), ink()),
+            find(&image, area(0, 1, 1, 1), near_red()),
             Err(SpecError::Outside)
         );
     }
@@ -477,42 +357,8 @@ mod tests {
     /// Whether `rule` takes the only pixel of `image`.
     fn takes(image: &Image, rule: MatchRule) -> bool {
         match find(image, whole(image), rule).expect("on the picture") {
-            MatchView::Ink { ink: layer } | MatchView::Color { near: layer, .. } => {
-                layer.count == 1
-            },
+            MatchView::Color { near: layer, .. } => layer.count == 1,
             MatchView::BarFill { filled, empty } => filled.count == 1 || empty.count == 1,
-        }
-    }
-
-    #[test]
-    fn the_tint_and_the_number_reader_agree_at_the_tolerances_edge() {
-        let rule = |tolerance| MatchRule::Ink {
-            ink: color(200, 0, 0),
-            tolerance,
-        };
-        let reader = |tolerance| {
-            DigitReader::new(InkRule::Color {
-                color: Rgb {
-                    red: 200,
-                    green: 0,
-                    blue: 0,
-                },
-                tolerance,
-            })
-        };
-        // Exactly at the tolerance on one channel is ink; one past is not.
-        for (image, tolerance, ink) in [
-            (reds(&[&[210]]), 10, true),
-            (reds(&[&[211]]), 10, false),
-            (reds(&[&[190]]), 10, true),
-            (reds(&[&[189]]), 10, false),
-        ] {
-            assert_eq!(takes(&image, rule(tolerance)), ink);
-            assert_eq!(
-                reader(tolerance).shapes(&image).err(),
-                (!ink).then_some(ReadError::NoInk),
-                "the reader finds ink where the tint shows it"
-            );
         }
     }
 

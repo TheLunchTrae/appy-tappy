@@ -468,7 +468,7 @@ mod tests {
     use appytappy_config::app_file::SizeChangesDef;
     use appytappy_config::signal::Number;
     use appytappy_sources::screen::check::Check;
-    use appytappy_sources::screen::digits::{DigitReader, InkRule};
+    use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::saved::SavedFix;
     use appytappy_sources::screen::settle::SETTLE;
     use appytappy_sources::screen::{Placement, Region};
@@ -944,24 +944,19 @@ mod tests {
     fn a_value_that_cannot_be_read_says_why() {
         let (events, readings) = mpsc::channel::<Reading>();
         let (control, _control) = mpsc::channel();
-        let mut value = red_at("count", 0, 0);
+        let mut value = red_at("count", 1, 1);
         value.check.drawn.check = Check::Number {
-            reader: DigitReader::new(InkRule::Color {
-                color: RED,
-                tolerance: 10,
-            }),
+            reader: DigitReader::new(),
             whole: false,
         };
         let job = job(vec![value]);
         let mut frames = frames_at(&job, WINDOW, events, control);
-        let black = frame_image(2, 2, |_, _| false);
+        let black = frame_image(4, 4, |_, _| false);
         frames.handle(Ok(frame(&black, WINDOW)));
         frames.handle(Ok(frame(&black, WINDOW)));
         assert_eq!(
             problems(&readings),
-            [
-                "value 0 cannot be read: no pixel in the region stands out from its background, or has the reference's text color"
-            ]
+            ["value 0 cannot be read: nothing in the region stands out from its background"]
         );
     }
 
@@ -971,10 +966,7 @@ mod tests {
         let (control, _control) = mpsc::channel();
         let mut value = scaling("count", 4, 6, WINDOW, SizeChangesDef::Often);
         value.check.drawn.check = Check::Number {
-            reader: DigitReader::new(InkRule::Color {
-                color: RED,
-                tolerance: 10,
-            }),
+            reader: DigitReader::new(),
             whole: false,
         };
         let job = job(vec![value]);
@@ -985,8 +977,8 @@ mod tests {
             problems(&readings),
             [
                 "value 0 cannot be read where its region scales to at the window's size now: \
-                 no pixel in the region stands out from its background, or has the \
-                 reference's text color; if the region is off the value there, fix the value at this size in AppyTappy Setup"
+                 nothing in the region stands out from its background; if the region is off \
+                 the value there, fix the value at this size in AppyTappy Setup"
             ]
         );
     }
@@ -995,21 +987,19 @@ mod tests {
     fn a_number_that_stays_unreadable_one_way_is_said_once_with_what_it_first_read() {
         let (events, readings) = mpsc::channel::<Reading>();
         let (control, _control) = mpsc::channel();
-        let mut value = red_at("count", 0, 0);
-        value.check.drawn.region = Region::new(0, 0, 3, 2).expect("not empty");
+        let mut value = red_at("count", 1, 1);
+        value.check.drawn.region = Region::new(1, 1, 3, 2).expect("not empty");
         value.check.drawn.check = Check::Number {
-            reader: DigitReader::new(InkRule::Color {
-                color: RED,
-                tolerance: 10,
-            }),
+            reader: DigitReader::new(),
             whole: false,
         };
         let job = job(vec![value]);
         let mut frames = frames_at(&job, WINDOW, events, control);
         // One character, then two, of a reference that learned none.
-        let one = frame_image(3, 2, |x, _| x == 0);
-        let two = frame_image(3, 2, |x, _| x != 1);
-        let none = frame_image(3, 2, |_, _| false);
+        let within = |y: u32| (1..3).contains(&y);
+        let one = frame_image(5, 4, |x, y| x == 1 && within(y));
+        let two = frame_image(5, 4, |x, y| (x == 1 || x == 3) && within(y));
+        let none = frame_image(5, 4, |_, _| false);
         frames.handle(Ok(frame(&one, WINDOW)));
         frames.handle(Ok(frame(&two, WINDOW)));
         assert_eq!(
@@ -1028,9 +1018,7 @@ mod tests {
         }
         assert_eq!(
             problems(&readings),
-            [
-                "value 0 cannot be read: no pixel in the region stands out from its background, or has the reference's text color"
-            ]
+            ["value 0 cannot be read: nothing in the region stands out from its background"]
         );
     }
 
@@ -1038,15 +1026,12 @@ mod tests {
     fn a_value_says_a_problem_again_once_it_was_read_in_between() {
         let (events, readings) = mpsc::channel::<Reading>();
         let (control, _control) = mpsc::channel();
-        let mut value = red_at("count", 0, 0);
-        value.check.drawn.region = Region::new(0, 0, 2, 1).expect("not empty");
+        let mut value = red_at("count", 1, 1);
+        value.check.drawn.region = Region::new(1, 1, 2, 1).expect("not empty");
         // A reader that knows a red pixel as a 1.
-        let mut reader = DigitReader::new(InkRule::Color {
-            color: RED,
-            tolerance: 10,
-        });
+        let mut reader = DigitReader::new();
         reader
-            .learn(&frame_image(1, 1, |_, _| true), "1")
+            .learn(&frame_image(3, 3, |x, y| (x, y) == (1, 1)), "1")
             .expect("one character");
         value.check.drawn.check = Check::Number {
             reader,
@@ -1054,9 +1039,9 @@ mod tests {
         };
         let job = job(vec![value]);
         let mut frames = frames_at(&job, WINDOW, events, control);
-        let none = frame_image(2, 1, |_, _| false);
-        let one = frame_image(2, 1, |x, _| x == 0);
-        let no_ink = "value 0 cannot be read: no pixel in the region stands out from its background, or has the reference's text color";
+        let none = frame_image(4, 3, |_, _| false);
+        let one = frame_image(4, 3, |x, y| (x, y) == (1, 1));
+        let no_ink = "value 0 cannot be read: nothing in the region stands out from its background";
         frames.handle(Ok(frame(&none, WINDOW)));
         frames.handle(Ok(frame(&none, WINDOW)));
         assert_eq!(problems(&readings), [no_ink]);

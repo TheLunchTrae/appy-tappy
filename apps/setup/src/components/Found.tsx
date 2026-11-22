@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { type FoundRow, addLabel, keptState, listed } from '../lib/found.ts';
-import { CHECK_CHARACTERS_HINT, FIND_LIKE_HINT, FOUND_HINT, REREAD_HINT } from '../lib/hints.ts';
+import { CHECK_CHARACTERS_HINT, FIND_LIKE_HINT, FOUND_HINT } from '../lib/hints.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { background } from '../lib/repeat.ts';
 import type { Finder } from '../lib/useFound.ts';
@@ -70,7 +70,6 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
   const { view, blocked: addBlocked, error, searching, flags, crops } = finder;
   // Finds that show characters the reference does not need are left out of the list.
   const rows = listed(finder.rows);
-  const reread = finder.rereadOffer;
   const unlisted = finder.rows.length - rows.length;
   const title = useRef<HTMLHeadingElement>(null);
   const find = useRef<HTMLButtonElement>(null);
@@ -171,35 +170,7 @@ export function FoundPanel({ finder, findBlocked, onFind, onCheck }: PanelProps)
                 Deselect flagged
               </button>
             )}
-            {reread === null ? null : (
-              <span className="with-hint">
-                <button
-                  type="button"
-                  className="btn small"
-                  // Not disabled while it waits, so it keeps focus and a screen reader reads why.
-                  aria-disabled={reread.blocked !== null}
-                  aria-describedby={reread.blocked === null ? 'hint-reread' : 'hint-reread reread-blocked'}
-                  onClick={() => {
-                    if (reread.blocked !== null) {
-                      return;
-                    }
-                    background(finder.reread());
-                    title.current?.focus();
-                  }}
-                >
-                  Reread
-                </button>
-                <Hint topic="Reread" id="hint-reread">
-                  {REREAD_HINT}
-                </Hint>
-              </span>
-            )}
           </div>
-          {reread === null || reread.blocked === null ? null : (
-            <p id="reread-blocked" className="note">
-              {reread.blocked}
-            </p>
-          )}
           <div className="row">
             <button
               type="button"

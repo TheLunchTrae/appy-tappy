@@ -13,7 +13,7 @@ use appytappy_sources::screen::{FrameHandler, Image, Size};
 use crate::applications::AppSpec;
 use crate::owner::test_support::{
     BAR, Harness, NO_STORE, add_example_app, frame_image, harness, harness_with, scratch_store,
-    spec, with_saved_bar,
+    spec, text_frame, with_saved_bar,
 };
 use crate::owner::{FixSpec, ReferenceSaveSpec};
 use crate::reading::Reading;
@@ -750,7 +750,7 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
         height: 8,
     };
     for (index, image) in [
-        frame_image(),
+        text_frame(),
         red_image(LARGER),
         red_image(WIDER),
         red_image(widest),
@@ -761,16 +761,15 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
         harness.deliver(&mut handler, Ok(image));
         assert_eq!(harness.ask(Owner::screenshot), Ok(index));
     }
-    // Three references that read the red square of screenshot 0
+    // Three references that read the first stroke of screenshot 0
     // differently.
     for (name, text) in [("Digits", "1"), ("Small", "7"), ("Tiny", "4")] {
         let reference = ReferenceSaveSpec {
             app: "example".to_owned(),
             reference_name: name.to_owned(),
             characters: serde_json::from_str(&format!(
-                r#"{{"region":{{"x":0,"y":0,"width":2,"height":2}},
-                    "screenshot":0,"reference":null,"ink":{{"red":255,"green":0,"blue":0}},
-                    "tolerance":0,"labels":[{{"screenshot":0,"text":"{text}"}}]}}"#
+                r#"{{"region":{{"x":0,"y":0,"width":4,"height":6}},
+                    "screenshot":0,"reference":null,"labels":[{{"screenshot":0,"text":"{text}"}}]}}"#
             ))
             .expect("valid JSON"),
         };
@@ -858,18 +857,17 @@ fn a_list_of_characters_past_the_most_is_refused_only_where_it_is_set_or_changed
     let mut harness = harness_with(false, Ok(stores));
     add_example_app(&mut harness);
     let mut handler = harness.pick();
-    for (index, image) in [frame_image(), red_image(LARGER)].iter().enumerate() {
+    for (index, image) in [text_frame(), red_image(LARGER)].iter().enumerate() {
         harness.deliver(&mut handler, Ok(image));
         assert_eq!(harness.ask(Owner::screenshot), Ok(index));
     }
-    // The red square of screenshot 0 taught as a 1.
+    // The first stroke of screenshot 0 taught as a 1.
     let reference = ReferenceSaveSpec {
         app: "example".to_owned(),
         reference_name: "Digits".to_owned(),
         characters: serde_json::from_str(
-            r#"{"region":{"x":0,"y":0,"width":2,"height":2},
-                "screenshot":0,"reference":null,"ink":{"red":255,"green":0,"blue":0},
-                "tolerance":0,"labels":[{"screenshot":0,"text":"1"}]}"#,
+            r#"{"region":{"x":0,"y":0,"width":4,"height":6},
+                "screenshot":0,"reference":null,"labels":[{"screenshot":0,"text":"1"}]}"#,
         )
         .expect("valid JSON"),
     };

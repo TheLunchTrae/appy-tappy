@@ -53,8 +53,8 @@ mod sightings;
 
 use std::time::{Duration, Instant};
 
-use appytappy_config::app_file::{ColorDef, RegionDef, SizeDef};
-use appytappy_sources::screen::digits::{DigitReader, InkRule, ReadError, Shape};
+use appytappy_config::app_file::{RegionDef, SizeDef};
+use appytappy_sources::screen::digits::{self, DigitReader, ReadError, Shape, Tone};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{FrameMeaning, Image, Region, Size};
 use serde::{Deserialize, Serialize};
@@ -232,6 +232,9 @@ struct Scan {
     /// the region showed when the recording started, and those of each
     /// other example.
     sizes: Sizes,
+    /// What told the region's text from the rest of its screenshot when
+    /// the recording started: what each look takes for text.
+    tone: Tone,
     /// Whether a look is out, and when the last went out.
     gate: Gate,
     /// Where the last look found text, while it records.
@@ -262,8 +265,8 @@ pub(crate) struct Recording {
     pub(crate) id: Ticket,
     /// The region of the window it records.
     pub(crate) region: Region,
-    /// How it tells ink from background, which `reader` reads by.
-    ink_rule: InkRule,
+    /// Splits each frame's text into characters. It learns none, so every
+    /// recording splits the same pixels the same way.
     reader: DigitReader,
     /// The window's size when the region was drawn.
     window_size: Size,
@@ -288,22 +291,19 @@ pub(crate) struct Recording {
 }
 
 impl Recording {
-    /// Starts recording `region`, drawn on a window of `window_size`,
-    /// telling ink from background by `ink_rule`. It `follows`
-    /// the window to another size, and is placed at the size it was drawn
+    /// Starts recording `region`, drawn on a window of `window_size`. It
+    /// `follows` the window to another size, and is placed at the size it was drawn
     /// at until frames settle at another.
     pub(crate) const fn new(
         id: Ticket,
         region: Region,
-        ink_rule: InkRule,
         (window_size, follows): (Size, Follows),
         started: Instant,
     ) -> Self {
         Self {
             id,
             region,
-            ink_rule,
-            reader: DigitReader::new(ink_rule),
+            reader: DigitReader::new(),
             window_size,
             follows,
             settle: Settle::new(window_size),
@@ -315,12 +315,13 @@ impl Recording {
         }
     }
 
-    /// The same recording, looking over the whole window for text with
-    /// characters `sample` pixels tall, as the region showed when it
-    /// started, rather than in the region alone.
-    pub(crate) fn across_window(mut self, sample: u32) -> Self {
+    /// The same recording, looking over the whole window for text of
+    /// `tone` with characters `sample` pixels tall, as the region showed
+    /// when it started, rather than in the region alone.
+    pub(crate) fn across_window(mut self, tone: Tone, sample: u32) -> Self {
         self.looking = Looking::Window(Scan {
             sizes: Sizes::of(sample),
+            tone,
             gate: Gate::Idle(None),
             spots: Vec::new(),
         });
@@ -448,7 +449,7 @@ impl Recording {
         }
         let region = self.place(frame.size(), at)?;
         // A region placed at the frame's size lies inside the frame.
-        let crop = self.reader.cut(frame, region)?;
+        let crop = digits::cut(frame, region)?;
         let shapes = match self.reader.shapes(&crop) {
             Ok(shapes) => shapes,
             // A crop with no ink, such as under a menu, is a moment to
@@ -506,6 +507,7 @@ impl Recording {
                 scaled.ok()
             }),
             near,
+            tone: scan.tone,
             reader: self.reader.clone(),
         })
     }
@@ -629,20 +631,10 @@ impl Recording {
         }
     }
 
-    /// Whether it records `region` of a window of `window_size`, telling
-    /// ink from background by `ink_rule` and looking where `scope` says, so
-    /// going on with it records the same thing.
-    pub(crate) fn records(
-        &self,
-        region: Region,
-        ink_rule: InkRule,
-        window_size: Size,
-        scope: Scope,
-    ) -> bool {
-        self.region == region
-            && self.scope() == scope
-            && self.ink_rule == ink_rule
-            && self.window_size == window_size
+    /// Whether it records `region` of a window of `window_size`, looking
+    /// where `scope` says, so going on with it records the same thing.
+    pub(crate) fn records(&self, region: Region, window_size: Size, scope: Scope) -> bool {
+        self.region == region && self.scope() == scope && self.window_size == window_size
     }
 
     /// The window's size when the region was drawn.
@@ -657,10 +649,6 @@ impl Recording {
 
     /// What the UI shows of it at `now`.
     pub(crate) fn view(&self, now: Instant) -> RecordingView {
-        let (ink, tolerance) = match self.ink_rule {
-            InkRule::Contrast { tolerance } => (None, tolerance),
-            InkRule::Color { color, tolerance } => (Some(color.into()), tolerance),
-        };
         RecordingView {
             id: self.id.number(),
             recording: self.life.is_recording(),
@@ -672,8 +660,6 @@ impl Recording {
             problem: self.life.problem().map(str::to_owned),
             settings: Settings {
                 region: self.region.into(),
-                ink,
-                tolerance,
                 window_size: self.window_size.into(),
                 scope: self.scope(),
             },
@@ -774,8 +760,7 @@ pub(crate) struct RecordingView {
     pub(crate) shapes: Vec<ShapeView>,
 }
 
-/// What a recording records: the region of a window of one size, and what
-/// counts as ink there.
+/// What a recording records: the region of a window of one size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(rename = "RecordingSettings"))]
@@ -783,15 +768,6 @@ pub(crate) struct RecordingView {
 pub(crate) struct Settings {
     /// The region of the window.
     pub(crate) region: RegionDef,
-    /// The reference's text color, or `None` when it finds its
-    /// characters by contrast.
-    #[cfg_attr(test, ts(optional))]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) ink: Option<ColorDef>,
-    /// The reference's tolerance: how far a pixel may be from the text
-    /// color and still be ink, or from the background and still be
-    /// background.
-    pub(crate) tolerance: u8,
     /// The window's size when the region was drawn.
     pub(crate) window_size: SizeDef,
     /// Where it looks for characters.
@@ -854,7 +830,6 @@ mod tests {
     use std::collections::BTreeSet;
 
     use appytappy_config::app_file::PinDef;
-    use appytappy_sources::screen::Rgb;
     use proptest::prelude::*;
 
     use super::*;
@@ -883,20 +858,22 @@ mod tests {
         }
     }
 
-    const RED: Rgb = Rgb {
+    /// Text of the color of [`INK`].
+    const RED: Tone = Tone::Color(appytappy_sources::screen::Rgb {
         red: 255,
         green: 0,
         blue: 0,
-    };
+    });
+
+    /// A square of ink, 2 by 2, inside an 8 by 4 frame.
+    fn dot(x: u32, y: u32) -> bool {
+        (3..5).contains(&x) && (1..3).contains(&y)
+    }
 
     fn recording(started: Instant) -> Recording {
         Recording::new(
             Ticket::numbered(1),
             region(),
-            InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            },
             (size(), Follows::Drawn),
             started,
         )
@@ -908,10 +885,6 @@ mod tests {
         Recording::new(
             Ticket::numbered(1),
             region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            },
             (Size { width, height }, Follows::Drawn),
             started,
         )
@@ -932,14 +905,18 @@ mod tests {
         x < 2
     }
 
-    /// A frame 48 pixels wide and 32 tall that shows `characters` left to
-    /// right, each in a slot 12 pixels wide.
+    /// A frame 50 pixels wide and 34 tall that shows `characters` left to
+    /// right, each in a slot 12 pixels wide, with a pixel of paper all
+    /// around them.
     fn showing(characters: &[fn(u32, u32) -> bool]) -> Image {
-        frame(48, 32, |x, y| {
+        frame(50, 34, |x, y| {
+            let Some((x, y)) = x.checked_sub(1).zip(y.checked_sub(1)) else {
+                return false;
+            };
             usize::try_from(x / 12)
                 .ok()
                 .and_then(|slot| characters.get(slot))
-                .is_some_and(|character| character(x % 12, y))
+                .is_some_and(|character| y < 32 && character(x % 12, y))
         })
     }
 
@@ -960,10 +937,7 @@ mod tests {
             .offer(&frame(16, 32, zero), start)
             .expect("a new reading");
         assert_eq!(first.index, 0);
-        // A speck inside the 0 fills a quarter of one sampled cell, which
-        // stays empty: the same reading.
-        let speck = frame(16, 32, |x, y| zero(x, y) || (x, y) == (4, 16));
-        assert_eq!(recording.offer(&speck, start), None);
+        assert_eq!(recording.offer(&frame(16, 32, zero), start), None);
         // A bar across it is a new character.
         assert_eq!(
             recording
@@ -982,7 +956,7 @@ mod tests {
     #[test]
     fn a_reading_is_kept_only_for_a_shape_no_kept_reading_has() {
         let start = Instant::now();
-        let mut recording = recording_of(48, 32, start);
+        let mut recording = recording_of(50, 34, start);
         let kept = |recording: &mut Recording, characters: &[fn(u32, u32) -> bool]| {
             recording
                 .offer(&showing(characters), start)
@@ -1019,7 +993,7 @@ mod tests {
     #[test]
     fn a_shape_first_kept_beside_a_half_drawn_one_is_kept_again_on_recording_more() {
         let start = Instant::now();
-        let mut recording = recording_of(48, 32, start);
+        let mut recording = recording_of(50, 34, start);
         let kept = |recording: &mut Recording, characters: &[fn(u32, u32) -> bool]| {
             recording
                 .offer(&showing(characters), start)
@@ -1046,15 +1020,15 @@ mod tests {
         let start = Instant::now();
         let mut recording = recording_of(16, 16, start);
         // A percent sign whose two dots and stroke share no column, so the
-        // check's sampling finds three characters.
+        // check's sampling finds three characters, the dots of one shape.
         let percent = |x: u32, y: u32| {
             (x < 4 && y < 4) || ((6..10).contains(&x) && x + y / 4 == 9) || (x >= 12 && y >= 12)
         };
         assert!(recording.offer(&frame(16, 16, percent), start).is_some());
-        assert_eq!(recording.view(start).readings[0].shapes, [0, 1, 2]);
-        // It is the same three shapes each time it shows.
+        assert_eq!(recording.view(start).readings[0].shapes, [0, 1, 0]);
+        // It is the same shapes each time it shows.
         assert_eq!(recording.offer(&frame(16, 16, percent), start), None);
-        assert_eq!(sightings(&recording, start), [(2, 1), (2, 1), (2, 1)]);
+        assert_eq!(sightings(&recording, start), [(2, 1), (2, 1)]);
     }
 
     /// The rows of the marks a generated frame draws, each three pixels
@@ -1090,7 +1064,7 @@ mod tests {
         ) {
             let start = Instant::now();
             let mut recording = recording_of(20, 6, start);
-            let reader = DigitReader::new(InkRule::Color { color: RED, tolerance: 0 });
+            let reader = DigitReader::new();
             // How many different readings among `shown` show `shape`.
             let readings_of = |shown: &[Vec<Shape>], shape: &Shape| {
                 let with = shown.iter().filter(|reading| reading.contains(shape));
@@ -1248,7 +1222,7 @@ mod tests {
         let mut recording = recording(start);
         assert_eq!(recording.offer(&frame(8, 4, |_, _| false), start), None);
         assert_eq!(recording.view(start).problem, None);
-        assert!(recording.offer(&frame(8, 4, |_, _| true), start).is_some());
+        assert!(recording.offer(&frame(8, 4, dot), start).is_some());
         assert_eq!(recording.readings().len(), 1);
     }
 
@@ -1256,7 +1230,7 @@ mod tests {
     fn a_recording_that_does_not_follow_its_window_waits_for_the_size_it_was_drawn_at() {
         let start = Instant::now();
         let mut recording = recording(start);
-        let wider = frame(9, 4, |_, _| true);
+        let wider = frame(9, 4, dot);
         // A new size says nothing until frames have shown it for a while.
         assert_eq!(recording.offer(&wider, start), None);
         assert_eq!(recording.offer(&wider, after(start, 249)), None);
@@ -1279,7 +1253,7 @@ mod tests {
         );
         assert_eq!(recording.readings().len(), 0);
         // Back at its size, once that has settled, it records again.
-        let fits = frame(8, 4, |_, _| true);
+        let fits = frame(8, 4, dot);
         assert_eq!(recording.offer(&fits, after(start, 300)), None);
         assert!(recording.offer(&fits, after(start, 550)).is_some());
         let view = recording.view(after(start, 550));
@@ -1304,10 +1278,6 @@ mod tests {
         Recording::new(
             Ticket::numbered(1),
             region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            },
             (size, Follows::Scaled(PinDef::TopLeft)),
             started,
         )
@@ -1346,14 +1316,15 @@ mod tests {
                 height: 64
             }
         );
-        // A new shape there is kept from the scaled region alone.
+        // A new shape there is kept from the scaled region alone, with
+        // the column beside it that tells a reader its background.
         let eights = frame(32, 64, larger(2, eight));
         let new = recording.offer(&eights, after(start, 600));
         assert_eq!(new.map(|new| new.index), Some(1));
         assert_eq!(
             recording.readings()[1].image.size(),
             Size {
-                width: 16,
+                width: 17,
                 height: 64
             }
         );
@@ -1419,16 +1390,7 @@ mod tests {
             height: 32,
         };
         let follows = Follows::Scaled(PinDef::TopLeft);
-        let mut recording = Recording::new(
-            Ticket::numbered(1),
-            region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            },
-            (drawn, follows),
-            start,
-        );
+        let mut recording = Recording::new(Ticket::numbered(1), region, (drawn, follows), start);
         // As tall and narrower: pinned left, the region keeps its place,
         // which is past the right edge.
         let narrow = frame(12, 32, |_, _| true);
@@ -1497,13 +1459,15 @@ mod tests {
     #[test]
     fn a_full_recording_keeps_and_counts_no_more_and_says_why() {
         let start = Instant::now();
-        let mut recording = recording_of(18, 16, start);
+        let mut recording = recording_of(20, 18, start);
         // One character 16 pixels tall, of each width from 2 to 17 with a
         // pixel cut from each row of its last column in turn, so no two
         // crops have the same shape.
         let notched = |width: u32, row: u32| {
-            frame(18, 16, move |x, y| {
-                x < width && (x, y) != (width.saturating_sub(1), row)
+            frame(20, 18, move |x, y| {
+                (1..=width).contains(&x)
+                    && (1..17).contains(&y)
+                    && (x, y) != (width, row.saturating_add(1))
             })
         };
         for width in 2..18 {
@@ -1543,7 +1507,7 @@ mod tests {
         let start = Instant::now();
         let second = Duration::from_secs(1);
         let mut recording = recording(start);
-        let shown = frame(8, 4, |x, _| x < 2);
+        let shown = frame(8, 4, dot);
         recording.offer(&shown, start + second).expect("new");
         assert_eq!(recording.view(start + 3 * second).elapsed_ms, 3000);
         recording.life.stop(start + 4 * second);
@@ -1570,7 +1534,7 @@ mod tests {
             .iter()
             .map(|character| (character.left, character.right))
             .collect();
-        assert_eq!(columns, [(0, 2)]);
+        assert_eq!(columns, [(3, 5)]);
         assert_eq!(
             recording.view(start).readings[0].text,
             Text::Read("12".to_owned())
@@ -1578,87 +1542,20 @@ mod tests {
     }
 
     #[test]
-    fn it_records_only_the_same_region_ink_window_and_scope() {
+    fn it_records_only_the_same_region_window_and_scope() {
         let recording = recording(Instant::now());
-        assert!(recording.records(
-            region(),
-            InkRule::Color {
-                color: RED,
-                tolerance: 0
-            },
-            size(),
-            Scope::Place
-        ));
+        assert!(recording.records(region(), size(), Scope::Place));
         let other_region = Region::new(1, 0, 7, 4).expect("not empty");
-        assert!(!recording.records(
-            other_region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 0
-            },
-            size(),
-            Scope::Place
-        ));
-        assert!(!recording.records(
-            region(),
-            InkRule::Color {
-                color: RED,
-                tolerance: 9
-            },
-            size(),
-            Scope::Place
-        ));
-        let green = Rgb { green: 1, ..RED };
-        assert!(!recording.records(
-            region(),
-            InkRule::Color {
-                color: green,
-                tolerance: 0
-            },
-            size(),
-            Scope::Place
-        ));
+        assert!(!recording.records(other_region, size(), Scope::Place));
         let other_size = Size {
             width: 9,
             height: 4,
         };
-        assert!(!recording.records(
-            region(),
-            InkRule::Color {
-                color: RED,
-                tolerance: 0
-            },
-            other_size,
-            Scope::Place
-        ));
-        assert!(!recording.records(
-            region(),
-            InkRule::Color {
-                color: RED,
-                tolerance: 0
-            },
-            size(),
-            Scope::Window
-        ));
-        let window = recording.across_window(4);
-        assert!(window.records(
-            region(),
-            InkRule::Color {
-                color: RED,
-                tolerance: 0
-            },
-            size(),
-            Scope::Window
-        ));
-        assert!(!window.records(
-            region(),
-            InkRule::Color {
-                color: RED,
-                tolerance: 0
-            },
-            size(),
-            Scope::Place
-        ));
+        assert!(!recording.records(region(), other_size, Scope::Place));
+        assert!(!recording.records(region(), size(), Scope::Window));
+        let window = recording.across_window(RED, 4);
+        assert!(window.records(region(), size(), Scope::Window));
+        assert!(!window.records(region(), size(), Scope::Place));
     }
 
     /// A 60 by 40 frame with ink inside each of `blocks`, as left, top,
@@ -1680,17 +1577,8 @@ mod tests {
             width: 60,
             height: 40,
         };
-        Recording::new(
-            Ticket::numbered(1),
-            region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            },
-            (size, Follows::Drawn),
-            started,
-        )
-        .across_window(8)
+        Recording::new(Ticket::numbered(1), region, (size, Follows::Drawn), started)
+            .across_window(RED, 8)
     }
 
     const STROKE: (u32, u32, u32, u32) = (2, 2, 3, 8);
@@ -1737,12 +1625,13 @@ mod tests {
         };
         assert_eq!(view.spots, [spot(0, 0, 7, 12), spot(28, 18, 10, 12)]);
         assert_eq!(view.settings.scope, Scope::Window);
-        // The kept picture is the run's own, not the region's.
+        // The kept picture is the run's own with a pixel around it, not
+        // the region's.
         assert_eq!(
             recording.readings()[1].image.size(),
             Size {
-                width: 10,
-                height: 12
+                width: 12,
+                height: 14
             }
         );
     }
@@ -2010,17 +1899,8 @@ mod tests {
             width: 60,
             height: 40,
         };
-        let mut recording = Recording::new(
-            Ticket::numbered(1),
-            region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            },
-            (drawn, follows),
-            start,
-        )
-        .across_window(8);
+        let mut recording = Recording::new(Ticket::numbered(1), region, (drawn, follows), start)
+            .across_window(RED, 8);
         recording.look_for([16]);
         assert_eq!(
             looked_over(&mut recording, &blocks(&[STROKE]), start),
@@ -2089,17 +1969,7 @@ mod tests {
             height: 40,
         };
         let follows = Follows::Scaled(PinDef::TopLeft);
-        Recording::new(
-            Ticket::numbered(1),
-            region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            },
-            (drawn, follows),
-            started,
-        )
-        .across_window(8)
+        Recording::new(Ticket::numbered(1), region, (drawn, follows), started).across_window(RED, 8)
     }
 
     #[test]
@@ -2159,17 +2029,8 @@ mod tests {
             width: 60,
             height: 40,
         };
-        let mut recording = Recording::new(
-            Ticket::numbered(1),
-            region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 0,
-            },
-            (drawn, follows),
-            start,
-        )
-        .across_window(16);
+        let mut recording = Recording::new(Ticket::numbered(1), region, (drawn, follows), start)
+            .across_window(RED, 16);
         let half = frame(30, 20, |_, _| false);
         assert!(recording.look(&half, start).is_none());
         let job = recording.look(&half, after(start, 250)).expect("due");
@@ -2230,10 +2091,6 @@ mod tests {
         let view = Recording::new(
             Ticket::numbered(1),
             region,
-            InkRule::Color {
-                color: RED,
-                tolerance: 7,
-            },
             (size(), Follows::Drawn),
             Instant::now(),
         )
@@ -2242,8 +2099,8 @@ mod tests {
         assert_eq!(
             json,
             concat!(
-                r#"{"region":{"x":2,"y":1,"width":5,"height":3},"ink":{"red":255,"green":0,"blue":0},"#,
-                r#""tolerance":7,"windowSize":{"width":8,"height":4},"scope":"place"}"#
+                r#"{"region":{"x":2,"y":1,"width":5,"height":3},"#,
+                r#""windowSize":{"width":8,"height":4},"scope":"place"}"#
             )
         );
     }

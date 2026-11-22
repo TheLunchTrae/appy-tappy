@@ -4,10 +4,8 @@ import type { StateView } from '../src/lib/bindings.ts';
 import { averageDifference, channelsText, cssColor, distanceText, percentOf } from '../src/lib/workings.ts';
 
 describe('distanceText', () => {
-  test('gives the cells apart of the cells set, then the cells that differ', () => {
-    expect(distanceText({ character: '7', apart: 3, differing: 5, set: 67, matches: false })).toBe(
-      '3 of 67 apart, 5 differ',
-    );
+  test('gives how far apart the shapes are', () => {
+    expect(distanceText({ character: '7', distance: 120, matches: true })).toBe('120 apart');
   });
 });
 

@@ -906,9 +906,8 @@ mod tests {
         assert_eq!(
             view(&overlay, false).values[0].problem.as_deref(),
             Some(
-                "Can't read: nothing in its region stands out from the background, or has the \
-                 text color of Digits. If the number shows there now, edit the value to draw its \
-                 region again."
+                "Can't read: nothing in its region stands out from the background. If the number \
+                 shows there now, edit the value to draw its region again."
             )
         );
     }

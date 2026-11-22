@@ -812,12 +812,18 @@ mod tests {
     fn a_number_reads_with_its_applications_reference() {
         let red = [0, 0, 255, 255];
         let gray = [40, 40, 40, 255];
+        // Two red characters a pixel wide, with gray around them.
+        let rows = [
+            [gray, gray, gray, gray, gray],
+            [gray, red, gray, red, gray],
+            [gray, gray, gray, gray, gray],
+        ];
         let picture = Image::new(
             Size {
-                width: 3,
-                height: 1,
+                width: 5,
+                height: 3,
             },
-            [red, gray, red].concat(),
+            rows.concat().concat(),
         )
         .expect("matching length")
         .encode_png()
@@ -832,8 +838,6 @@ mod tests {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: Some(RED),
-            tolerance: 10,
             samples: vec![SampleDef {
                 image: sample_name("digits", 1),
                 text: "11".to_owned(),

@@ -79,10 +79,10 @@ it was about has gone. These guards reject stale state and messages:
   automation editor's watch takes the slot outside that line
   (`Owner::watch`), so such a pick can still replace a watch; the owner then
   refuses the watch, and the editor watches again. The owner answers nothing
-  for a picture asked of another search than the one it holds and rereads
-  nothing for one (`apps/setup/src-tauri/src/owner/found.rs`). The page
+  for a picture asked of another search than the one it holds
+  (`apps/setup/src-tauri/src/owner/found.rs`). The page
   drops pictures fetched for a replaced or dismissed search, or after its
-  editor closes (`ask` in `useFound`); a reread keeps its picture asks.
+  editor closes (`ask` in `useFound`).
   An ask about another watch than the one the owner holds is refused. A reading's
   picture is asked for with its recording's number: the owner answers
   nothing for a recording that was discarded or replaced (`recorded_pixels`
@@ -115,28 +115,21 @@ it was about has gone. These guards reject stale state and messages:
   are the same.
 - **Box character keys.** The [character check](#character-check) asks
   which characters each box of the reference shows under a key made of the
-  box's screenshot and region and the reference's text color, or that it
-  has none, and tolerance
+  box's screenshot and region
   (`boxCharactersKey` in `apps/setup/src/lib/useBoxCharacters.ts`). An
   answer for a key that no box has anymore, such as where a box was before
   it moved, is dropped (`arrived`).
-- **Contrast fit keys.** The [contrast tolerance](#contrast-tolerance) of a
-  reference being taught is asked for under a key made of everything the
-  answer depends on: the region, the samples, and the tolerance
-  (`fitKey` in `apps/setup/src/lib/useContrastTolerance.ts`). An answer
-  under another key than the reference asks under now is dropped
-  (`fitArrived`), and settles nothing (`fitSettles`).
 - **Unlearned sample keys.** The
   [saved pictures a reference can't learn](#saved-pictures-a-reference-cant-learn)
-  are asked for under a key made of the saved reference, the text color,
-  the tolerance, the pictures left out, how it is saved, and its saved
+  are asked for under a key made of the saved reference, the pictures left
+  out, and its saved
   pictures' file names (`unlearnedKey` in
   `apps/setup/src/lib/useUnlearned.ts`). An answer under another key than
   the editor asks under now is not shown (`unlearnedArrived`), and a
   picture fetched for one is dropped when it arrives (`cropArrived`).
 - **Reading risk keys.** The [reading risks](#reading-risks)
   of a reference being taught are asked for under a key made of its whole
-  spec: the region, the samples, the text color, and the tolerance
+  spec: the region and the samples
   (`riskKey` in `apps/setup/src/lib/useReadingRisks.ts`). An answer under
   another key than the reference asks under now is not shown
   (`risksArrived`), and neither is a failure under one. A change of key
@@ -192,7 +185,7 @@ it was about has gone. These guards reject stale state and messages:
   went. `useNewest` is for asks an event starts: each `begin` makes the
   asks before it stale, and a poll that `join`s the newest ask is dropped
   once any command begins another, as a recording's or a search's state
-  read before a start, stop, discard, or reread is. `drop` makes them stale
+  read before a start, stop, or discard is. `drop` makes them stale
   without asking: the click target drops a selection still asked for when
   the user draws a box by hand or shows another screenshot.
 
@@ -1529,7 +1522,7 @@ stateDiagram-v2
   reads nothing. A value's trial tried then is judged against the saved
   files but not kept to read with (`Owner::go_live`), so it is tried again
   once the capture runs. A saved reference with no box and no recording
-  saves its name, text color, and tolerance with its samples
+  saves its name with its samples
   as they are but for the ones left out (`save_reference_settings`), which
   needs no screenshot;
   teaching it more needs a box on a screenshot.
@@ -1986,9 +1979,7 @@ stateDiagram-v2
 ```
 
 - **What to ask** (`plan`) is the screenshot shown, a rectangle of it, and the
-  rule: a reference's characters on the whole screenshot, by its text color
-  or by contrast with the background of the selected box, or a bar's or a
-  color check's colors in the region.
+  rule: a bar's or a color check's colors in the region.
 - **In flight** awaits one request's answer. The transition (`step`) sends a
   request at once while none is awaited and gives it the next number. One
   request counts at a time, so the tint follows a dragged slider as fast as
@@ -2001,8 +1992,7 @@ stateDiagram-v2
   screenshot that is gone or a region that reaches past the window. A failure
   tints nothing, and the next change to what is asked leaves it.
 - **Blocked** has nothing to ask and says why under the switch: the live view
-  shows instead of a screenshot, a color is not picked, a reference without
-  a text color has no box selected on the screenshot, the region is not
+  shows instead of a screenshot, a color is not picked, the region is not
   drawn, or an edited value's region belongs to screenshots of another size
   than the one shown. Like **Off**, it forgets the request in flight, the queued request,
   and the answer, so nothing more is sent and an answer still on its way is
@@ -2129,7 +2119,7 @@ stateDiagram-v2
   recording stays full when it stops and when **Record more** goes on with
   it: **Stop** and review what it found, or **Discard** it to start a new
   one.
-- **Record more** needs the same region, text color, tolerance, window size, and
+- **Record more** needs the same region, window size, and
   choice of where to look, and clears the problem. The window size is that
   of the screenshot the region was drawn on, whatever size the window has
   since. The boxes may differ, since they only add sizes to look for, and so
@@ -2138,9 +2128,7 @@ stateDiagram-v2
   (`Recording::resume`). The page sends the
   stopped recording's own choice of where to look, so only the others can
   differ. When any of them differs (`settingsDiffer`), **Use its
-  settings** shows and puts the text color and the tolerance back
-  (`withRecordedInk`). The [contrast tolerance](#contrast-tolerance) waits
-  while the capture holds a recording, so it is never what differs. A reference taught by itself read at a box, and the
+  settings** shows. A reference taught by itself read at a box, and the
   [Reference boxes](#reference-boxes) machine keeps the ID of the box each
   new recording starts at (`recorded`). **Use its settings**
   puts that box back where the recording read, first in the list
@@ -2519,8 +2507,7 @@ stateDiagram-v2
 - **Selected.** The stage draws the selected box as the region surface's
   region while the screenshot shown is the one the box is on, and the other
   boxes there as outlines. Selecting a box in the list shows its screenshot.
-  **Find more like it** samples the selected box, and the matching pixels
-  preview counts the pixels in it.
+  **Find more like it** samples the selected box.
 - **A drag** on the screenshot shown hands over a region as drawn or
   adjusted ([Region drag](#region-drag)). A drawn one adds a box there and
   selects it, and focus moves to its text in the list. An adjusted one
@@ -2851,8 +2838,7 @@ stateDiagram-v2
 The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
 loads its model on the first line it gets, then reads each recorded reading and
 each find of a search, and sends the text back with the recording's or the
-search's ticket and the line's index (`ocr::Source`). It reads a find again when
-the user asks for a [reread](#found-text), as a new job of the same search.
+search's ticket and the line's index (`ocr::Source`).
 It skips a queued job of a recording or search older than the newest of its
 kind. The owner drops text
 for a recording or search that is gone. If the thread has stopped, the owner
@@ -2870,7 +2856,6 @@ stateDiagram-v2
     [*] --> None
     None --> Found: Find more like it finds ink in the box
     Found --> Found: Find more like it again replaces it, with a new ID
-    Found --> Found: Reread sends finds to the text reader again
     Found --> None: Find more like it fails, such as for a box with no ink
     Found --> None: Add or Not these
     Found --> None: Change window, a window is picked, the editor closes, or the flow closes
@@ -2884,34 +2869,18 @@ stateDiagram-v2
     [*] --> Failed: the find has no ink, or the text reader has stopped
     Pending --> Read: the text reader answers for the search's ticket
     Pending --> Failed: the text reader answers that it could not read it
-    Read --> Pending: Reread names the find
-    Failed --> Pending: Reread names the find
-    Read --> Failed: Reread names the find, and it shows no ink in the color now
 ```
 
 - Each find starts `Pending` and turns `Read` or `Failed` when the text
   reader answers for the search's ticket. The UI polls only while one is pending.
   Reads queued for a forgotten search still run; the owner drops their text,
   and a newer search's jobs make the reader skip the rest.
-- **Reread** (`reread_found`) names the search by its ID and the finds by
-  index. The owner cuts each named find's ink again from the pixels it kept,
-  with the text color and tolerance the draft has now, and sends it
-  to the text reader, so the find is `Pending` again. A find that shows no
-  ink with them is `Failed`, and so is every find once the reader has stopped.
-  A find that is still `Pending` is left waiting, so one read at a time is
-  out for a find, and the reader's next answer for it is for its newest
-  read. A reread that names a search that was replaced or forgotten reads
-  nothing and answers nothing. A find named twice is read once. The reader
-  reads the same ink as the same text, so a reread changes a find's text
-  only after the text color or the tolerance changed, and each find's view
-  carries the text color and tolerance its ink was last cut with
-  (`read_with`).
 - The UI keeps each find's tick, its text, and whether the user typed it
-  (`useFound`) until a new search or a dismissal; a reread keeps them.
+  (`useFound`) until a new search or a dismissal.
   **Add** and **Not these** also pass over the finds not added, ticked or
-  not and listed or not: the UI keeps their regions by screenshot, with the
-  text color each was read with (`passOver`), and each later search on that
-  screenshot with that text color sends them (`skippedOn`), so the owner
+  not and listed or not: the UI keeps their regions by screenshot
+  (`passOver`), and each later search on that
+  screenshot sends them, so the owner
   leaves out a find at exactly such a region and the list reaches finds it
   hasn't offered. The owner counts the finds it left out that way
   (`passed`), and **Show them again** forgets the screenshot's and searches
@@ -2923,17 +2892,13 @@ stateDiagram-v2
   moved on from are ignored by the UI's turn. Picture callbacks end when
   the search is replaced or dismissed, or its editor closes, through the
   cleanup of their effect (`ask` in `useFound`); a late picture cannot
-  replace the current search's pictures. A reread keeps that effect and
-  accepts its pending pictures. It also starts a new turn, so the search's state as it
-  was read before the reread does not put the finds back and end the wait for
-  their text.
+  replace the current search's pictures.
 - The UI's `searching` flag (`useFound`) says a search is under way, and
   the editor shows it. **Find more like it** and **Show them again** set
   it. The newest search's answer or failure clears it, and so does a
   dismissal: **Add**, **Not these**, or the editor closing. An answer to a
   search the user moved on from leaves it as the newer search set it, by
-  the UI's turn. **Reread** does nothing while it is set, since the search
-  under way replaces the one whose finds it would read.
+  the UI's turn.
 - A ticked find is flagged without asking the owner when it has no text, or
   when the reader's guess has a letter while the reference has learned none
   (`foundRows`), and otherwise when the reference cannot learn it after the
@@ -2941,13 +2906,6 @@ stateDiagram-v2
   pending or flagged and the owner has answered for the current text.
 - **Deselect flagged** unticks every flagged find (`withoutFlagged`), which
   leaves **Add** the rest. It shows while a ticked find is flagged.
-- The UI offers **Reread** for the listed finds the reader could not read
-  and the flagged ones whose text is the reader's guess (`rereadOffer`). Text
-  the user typed is never read again. It reads again each find whose read
-  failed, since a failure can pass, and each guess last read with another
-  text color or tolerance than the draft has now. When that leaves none, the
-  button stays, does nothing, and says to set a text color or change its
-  tolerance.
 - The screenshot outlines the finds the list holds (`listed`), each under
   its number in the search, so a skipped find leaves a gap in the numbers.
   A find ticked while it was being read is skipped like any other once its
@@ -2959,8 +2917,7 @@ stateDiagram-v2
   regions of the boxes there, and the finder leaves out runs that meet them
   before it caps the list, so it offers the rest.
 - **Failures.** A search that fails forgets the search before it and says
-  why. A reread that fails leaves the finds as they were and says why above
-  the list. A failed check of which finds the reference can learn flags
+  why. A failed check of which finds the reference can learn flags
   none, since the save learns the text again.
 
 ### Delete question
@@ -3148,8 +3105,8 @@ stateDiagram-v2
   no tick (`ticks`): it gets the answers in its text, gets its whole text
   from them when it has none, and is never left out, so the tile of a
   shape that is no character names the boxes that still teach it. A box's
-  characters come from `box_characters`, asked once for each place, text
-  color, and tolerance (`useBoxCharacters.ts`); until they arrive the box
+  characters come from `box_characters`, asked once for each place
+  (`useBoxCharacters.ts`); until they arrive the box
   waits like text still being read, and joins when they do. A box that
   shows no characters is asked nothing: no text fits it, and it has no tick
   to leave it out with, so it is never on the `Unfitted` stop. Each place
@@ -3296,100 +3253,37 @@ on the next render (`settle`) or the next answer:
 - **No places at all.** The check is `Done` and says there is nothing to
   check.
 
-### Contrast tolerance
-
-A reference that finds its characters by contrast takes its tolerance from
-its samples, as [Setup app](Setup-app.md#contrast-tolerance) describes. The
-page keeps the draft's tolerance at the owner's answer
-(`apps/setup/src/lib/useContrastTolerance.ts`, used by
-`useReferenceTeaching.ts`). Its state is the key the reference asks under
-now (`fitKey`), which names the region, the samples, and the tolerance, or
-no key at all. The owner keeps nothing for it; each request is one
-`contrast_tolerance` command.
-
-```mermaid
-stateDiagram-v2
-    [*] --> Resting
-    Resting --> Asking: a sample is typed, kept, or changed, or the region moves, and a quarter of a second passes
-    Asking --> Settled: the answer is the tolerance asked about
-    Asking --> Asking: the answer is another tolerance, which the draft takes and asks about
-    Asking --> Asking: a sample or the region changes, which asks under a new key
-    Asking --> Unanswered: the request fails
-    Settled --> Asking: a sample or the region changes
-    Unanswered --> Asking: a sample or the region changes
-    Asking --> Resting: a text color is picked, a recording starts, or the editor closes
-    Settled --> Resting: a text color is picked, a recording starts, or the editor closes
-    Unanswered --> Resting: a text color is picked, a recording starts, or the editor closes
-```
-
-- **Resting** asks nothing: no reference is taught, it has no sample to
-  learn yet, it has a text color, whose tolerance is the user's, or the
-  capture holds a recording, which records and goes on with the tolerance it
-  started with. Discarding the recording, or saving and leaving the editor,
-  ends that wait.
-- **Asking** waits a quarter of a second under the key and then has a
-  request out for it. A change within the wait starts it again under the
-  new key, so a label that is being typed asks once. The owner answers the
-  tolerance asked about while no other learns more of the samples, so an
-  answer that changes the tolerance is followed by one more request, which
-  settles.
-- **Settled** has the tolerance the owner chose, and asks again only under a
-  new key.
-- **Unanswered** is a failed request, such as for a box on a screenshot of
-  another window size. The tolerance stays, the failure is logged, and the
-  reference's own messages say what is wrong with the sample: the box's row,
-  the character check, and the save. A change to a sample or the region asks
-  again.
-- **Settled** is what the page tells the [reading risks
-  check](#reading-risks), which waits for it, so it asks about the
-  tolerance the reference keeps (`fitSettles`). A key that names no fit,
-  such as one with a text color, counts as settled. Each new key starts
-  unsettled, even a key the page settled before, since a reference saved
-  again keeps its ID and so its key.
-- An answer sets the tolerance only under the key the reference asks under
-  now (`fitArrived`). One that arrives after a sample changed, a text color
-  was picked, a recording started, or the editor closed is dropped, since
-  each of those changes the key or leaves none.
-- Picking a text color for a reference that has none, or removing it,
-  starts the tolerance at 40 (`withTextColor`), since the two ways measure
-  different distances. One text color in place of another keeps the
-  tolerance.
-
 ### Reading risks
 
 The reference editor warns about what may keep the reference from reading
-as its samples do: two learned characters it may read as each other, as
-[Setup app](Setup-app.md#look-alike-characters) describes, and an outline or
-a shadow its tolerance leaves out, as
-[Hidden outlines](Setup-app.md#hidden-outlines) describes
+as its samples do: two learned characters it can't tell apart, as
+[Setup app](Setup-app.md#look-alike-characters) describes
 (`apps/setup/src/lib/useReadingRisks.ts`, used by
 `useReferenceTeaching.ts`). Its state is the key the reference asks under
 now (`riskKey`), or none, and the last answer with the key it was asked
 under. The owner keeps nothing for it; each request is one `reading_risks`
-command, which teaches the reference, compares its shapes, and looks at its
-samples. For a reference that can't learn one of its lessons, a box, a kept
+command, which teaches the reference and compares its shapes. For a
+reference that can't learn one of its lessons, a box, a kept
 reading, or a saved picture, the command answers no risks rather than
 failing.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Resting
-    Resting --> Asking: the reference builds, its tolerance is fitted, and a quarter of a second passes
+    Resting --> Asking: the reference builds, and a quarter of a second passes
     Asking --> Shown: the answer arrives under the key asked
-    Asking --> Asking: a sample, the region, the text color, or the tolerance changes
+    Asking --> Asking: a sample or the region changes
     Asking --> Unanswered: the request fails
-    Shown --> Asking: a sample, the region, the text color, or the tolerance changes
-    Unanswered --> Asking: a sample, the region, the text color, or the tolerance changes
-    Asking --> Resting: the reference no longer builds, its tolerance is being fitted, or the editor closes
-    Shown --> Resting: the reference no longer builds, its tolerance is being fitted, or the editor closes
-    Unanswered --> Resting: the reference no longer builds, its tolerance is being fitted, or the editor closes
+    Shown --> Asking: a sample or the region changes
+    Unanswered --> Asking: a sample or the region changes
+    Asking --> Resting: the reference stops building, or the editor closes
+    Shown --> Resting: the reference stops building, or the editor closes
+    Unanswered --> Resting: the reference stops building, or the editor closes
 ```
 
 - **Resting** asks nothing and warns about nothing: no reference is taught,
-  what it is taught from does not build, which the boxes and the save say,
-  or a reference found by contrast waits for its
-  [contrast tolerance](#contrast-tolerance) to settle, since the fit would
-  change the key and drop the answer.
+  or what it is taught from does not build, which the boxes and the save
+  say.
 - **Asking** waits a quarter of a second under the key and then has a
   request out for it. It shows no warning: each change of the key drops the
   last answer (`risksArrived`, and the effect's cleanup clears it), so the
@@ -3400,9 +3294,7 @@ stateDiagram-v2
   needs, or about every pair when it needs none (`neededPairs`). A reference
   made or edited by itself takes the characters that the values reading with
   it need between them (`readersNeed`), and every pair when one of them needs
-  none or none reads with it. It warns about no pair when none is left. It
-  also warns when the answer says the tolerance leaves an outline or a
-  shadow out, whatever the value needs. The answer for a reference that
+  none or none reads with it. It warns about no pair when none is left. The answer for a reference that
   can't learn a lesson warns about nothing (`risksAnswered`): it has no
   shapes to compare, and the reading of its
   [live check](#live-check) says which lesson it can't learn and why, so the
@@ -3410,14 +3302,14 @@ stateDiagram-v2
 - **Unanswered** is a failed request, such as one for a screenshot that is
   gone. The failure is logged, and the editor says that it can't check for
   characters that look alike, and why (`risksFailed`), in place of the
-  warnings, so a failed check does not look like a check that found nothing.
+  warning, so a failed check does not look like a check that found nothing.
   The failure is kept under the key it was asked under, like an answer, so
   it goes when the key changes.
 
 ### Saved reference marks
 
 The References page marks each saved reference that may not read as its
-samples do, for the same two reasons its editor warns about under
+samples do, for the reason its editor warns about under
 [Reading risks](#reading-risks) (`RiskMark` in
 `apps/setup/src/components/RiskMark.tsx`, `useSavedRiskMark` in
 `apps/setup/src/lib/useReadingRisks.ts`). Each row has its own state: the key
@@ -3441,12 +3333,11 @@ stateDiagram-v2
 - **Asking** has a request out and shows no mark. The page shows before the
   first request is sent, since the effect that sends it runs after the row
   is drawn, and the rows ask one after another on the owner's thread.
-- **Marked** shows **May misread** and a **?** that says the reasons to the
+- **Marked** shows **May misread** and a **?** that says the reason to the
   pointer and the keyboard (`Hint`, `riskMark`): a pair of
   characters with one that the values reading with the reference need, or
-  any pair when one of them needs none or none reads with it, and an outline
-  or a shadow its tolerance leaves out.
-- **Unmarked** shows nothing: the reference has neither risk, or the request
+  any pair when one of them needs none or none reads with it.
+- **Unmarked** shows nothing: the reference has no such pair, or the request
   failed. A failure is logged and is not a state of its own, since a
   reference that can't learn its saved pictures says so in its editor and on
   each value that reads with it.
@@ -3457,8 +3348,8 @@ stateDiagram-v2
 
 ### Saved pictures a reference can't learn
 
-The reference editor lists the saved samples that the reference can't learn
-with the text color and tolerance it has now, as
+The reference editor lists the saved samples that the reference can't
+learn, as
 [Setup app](Setup-app.md#saved-pictures-a-reference-cant-learn) describes
 (`apps/setup/src/lib/useUnlearned.ts`, used by `useReferenceTeaching.ts`).
 Its state is the key the editor asks under now (`unlearnedKey`), or none,
@@ -3470,12 +3361,12 @@ command, and one `sample_picture` command for each sample it names.
 ```mermaid
 stateDiagram-v2
     [*] --> Resting
-    Resting --> Asking: a saved reference builds, its tolerance is fitted, and a quarter of a second passes
+    Resting --> Asking: a saved reference builds, and a quarter of a second passes
     Asking --> Shown: the answer arrives under the key asked
-    Asking --> Asking: the text color, the tolerance, or the pictures left out change
+    Asking --> Asking: the pictures left out change
     Asking --> Unanswered: the request fails
-    Shown --> Asking: the text color, the tolerance, or the pictures left out change, or the tolerance is fitted again
-    Unanswered --> Asking: the text color, the tolerance, or the pictures left out change
+    Shown --> Asking: the pictures left out change
+    Unanswered --> Asking: the pictures left out change
     Asking --> Resting: the reference no longer builds or the editor closes
     Shown --> Resting: the reference no longer builds or the editor closes
     Unanswered --> Resting: the reference no longer builds or the editor closes
@@ -3484,16 +3375,11 @@ stateDiagram-v2
 - **Resting** asks nothing and lists nothing: no editor is open, the
   reference is new, or what it saves does not build.
 - **Asking** waits a quarter of a second under the key and then has a
-  request out for it. A reference taught by contrast asks once its
-  [contrast tolerance](#contrast-tolerance) is settled, so it is judged with
-  the tolerance it keeps; one that saves its settings alone does not wait,
-  since the owner fits its tolerance for the answer. An answer shows only
+  request out for it. An answer shows only
   under the key it was asked under (`unlearnedArrived`), so the list is
   empty while a new key asks. The boxes and readings the draft adds are not
-  in the key: the reference learns its saved samples before them. Typing a
-  label therefore keeps the list while the tolerance is fitted again, and
-  the ask that follows answers under the same key unless the fit changed
-  the tolerance.
+  in the key: the reference learns its saved samples before them, so typing
+  a label keeps the list.
 - **Shown** lists the samples of the answer, each with its picture once it
   arrives, or nothing when the reference learns every saved sample. With a
   sample listed, the trial fails and names it, and **Save reference** waits
@@ -3508,7 +3394,7 @@ stateDiagram-v2
   save say what is wrong, and a learn error on a saved sample says where
   the picture is removed.
 - The samples left out end with the editor: opening it on a reference and
-  leaving it clear `dropped` (`toReference`, `fromReference`), and a save
+  leaving it clear `dropped` (`withoutTeaching`), and a save
   writes the reference without them and closes the editor. A
   [draft](Setup-app.md#drafts) reopens the saved pictures for review
   (`restoreSetup`), since even the same file name and label can now refer
@@ -3675,8 +3561,8 @@ ask. **Kept** answers every ask about that reference from memory, a few for
 each edit in the editor. A reference is kept only when every sample's
 picture could be read, so one that is missing a picture is read again on
 each ask and learned once the picture is back. It keeps the pictures, not a
-reader learned from them: the text color and tolerance being taught decide what
-the samples teach, so each ask learns them again. `Owner::write_app` empties
+reader learned from them: the samples the editor left out decide what
+the rest teach, so each ask learns them again. `Owner::write_app` empties
 it before any existing application is written or removed, whether that works
 or fails, and keeping another reference replaces it. A new application, saved
 in the editor or imported, has no reference kept, since its ID is new. A file

@@ -103,8 +103,11 @@ jobs:
     strategy:
       fail-fast: false
       # The list's length sets the shard count; its values are not read.
+      # A runner tests 60 to 110 mutants an hour, fewer where mutants time
+      # out, and a rewrite of a module selects about 540, so twelve shards
+      # keep each well inside the limit.
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     env:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}

@@ -27,7 +27,7 @@ const app: AppSummary = {
     },
     sizeChanges: 'often',
     antiCheat: 'none',
-    references: [{ id: 'font', name: 'Percent font', origin: { kind: 'byHand' }, tolerance: 40, samples: [] }],
+    references: [{ id: 'font', name: 'Percent font', origin: { kind: 'byHand' }, samples: [] }],
     values: [
       {
         id: 'icon',
@@ -133,7 +133,7 @@ afterEach(async () => {
 });
 
 // What the References page is answered for each reference's mark.
-const NO_RISKS = { lookalikes: [], hidesTone: false };
+const NO_RISKS = { lookalikes: [] };
 
 /** Answers `command` as `answer` does, and each reference's mark with no risks. */
 function mockCommands(answer: (command: string) => unknown = () => undefined): void {

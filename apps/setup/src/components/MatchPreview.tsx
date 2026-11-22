@@ -8,21 +8,16 @@ import {
   SELECTED_TINT,
   type Tint,
   barLegend,
-  inkLines,
   nearLine,
   paint,
   tintsFor,
 } from '../lib/matchPreview.ts';
 import { hex } from '../lib/pixels.ts';
-import type { Rect, Size } from '../lib/region.ts';
+import type { Size } from '../lib/region.ts';
 import type { MatchPreview, SelectedPreview } from '../lib/useMatchPreview.ts';
 
 /** What each target's switch is called, and what its tint means. */
 const SWITCHES = {
-  ink: {
-    name: 'Show matching pixels',
-    help: "Tints every pixel on the screenshot that counts as part of the characters: what stands out as the selected box's characters do from its background, or what is within the tolerance of the text color.",
-  },
   barFill: {
     name: 'Show matching pixels',
     help: 'Tints the pixels in the region that count as filled and as empty.',
@@ -47,17 +42,10 @@ function Key({ tint }: { readonly tint: Tint | null }) {
 }
 
 /** What the answer found, in words, so the tint is not the only sign. */
-function Found({ tint, region }: { readonly tint: Answered; readonly region: Rect | null }): ReactNode {
+function Found({ tint }: { readonly tint: Answered }): ReactNode {
   const { request, view } = tint;
   const tints = tintsFor(request.rule);
   switch (view.kind) {
-    case 'ink':
-      return (
-        <p className="note">
-          <Key tint={tints[0] ?? null} />
-          {inkLines(view.ink, request.area, region, request.rule.kind === 'contrast' ? 'contrast' : 'ink').join(' ')}
-        </p>
-      );
     case 'barFill': {
       const legend = barLegend(view.filled, view.empty, request.area, tints);
       return (
@@ -128,14 +116,7 @@ function Results({ updating, children }: { readonly updating: boolean; readonly 
 }
 
 /** The preview's switch, and under it what the tint shows or why there is none. */
-export function MatchPreviewField({
-  preview,
-  region,
-}: {
-  readonly preview: MatchPreview;
-  /** The draft's region, which a reference's count is for. */
-  readonly region: Rect | null;
-}) {
+export function MatchPreviewField({ preview }: { readonly preview: MatchPreview }) {
   const { target, on, plan, tint, updating, error } = preview;
   if (target === null) {
     return null;
@@ -169,7 +150,7 @@ export function MatchPreviewField({
           <p className="note">Looking for matching pixels…</p>
         ) : (
           <div className="match-answer">
-            <Found tint={tint} region={region} />
+            <Found tint={tint} />
           </div>
         )}
       </Results>

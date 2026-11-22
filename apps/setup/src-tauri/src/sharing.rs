@@ -409,8 +409,8 @@ impl Error for ShareError {
 mod tests {
     use appytappy_config::anti_cheat::AntiCheatClass;
     use appytappy_config::app_file::{
-        BuildDef, CheckedDef, ColorDef, FORMAT, FixDef, OverlayDef, OverlayModeDef, ReferenceDef,
-        RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
+        BuildDef, CheckedDef, FORMAT, FixDef, OverlayDef, OverlayModeDef, ReferenceDef, RegionDef,
+        SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
     use appytappy_config::window_match::WindowFacts;
     use appytappy_sources::screen::{Image, Size};
@@ -490,12 +490,6 @@ mod tests {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: Some(ColorDef {
-                red: 255,
-                green: 0,
-                blue: 0,
-            }),
-            tolerance: 0,
             samples: (1..=samples)
                 .map(|number| SampleDef {
                     image: sample_name("digits", number),
@@ -505,20 +499,25 @@ mod tests {
         }
     }
 
-    /// A picture of `11`: two red columns on gray, 4 by 2 pixels drawn
-    /// `scale` times larger.
+    /// A picture of `11`: two red strokes with gray around them, 5 by 4
+    /// pixels drawn `scale` times larger.
     fn eleven(scale: u32) -> Vec<u8> {
         let wide = usize::try_from(scale).expect("small");
-        let row = [[0, 0, 255, 255], [40, 40, 40, 255]]
-            .repeat(2)
-            .iter()
-            .flat_map(|pixel| pixel.repeat(wide))
-            .collect::<Vec<u8>>();
-        let size = Size {
-            width: scale.saturating_mul(4),
-            height: scale.saturating_mul(2),
+        let (red, gray) = ([0, 0, 255, 255], [40, 40, 40, 255]);
+        let row = |cells: [[u8; 4]; 5]| {
+            cells
+                .iter()
+                .flat_map(|pixel| pixel.repeat(wide))
+                .collect::<Vec<u8>>()
+                .repeat(wide)
         };
-        Image::new(size, row.repeat(wide.saturating_mul(2)))
+        let blank = row([gray; 5]);
+        let strokes = row([gray, red, gray, red, gray]);
+        let size = Size {
+            width: scale.saturating_mul(5),
+            height: scale.saturating_mul(4),
+        };
+        Image::new(size, [blank.clone(), strokes.repeat(2), blank].concat())
             .expect("matching length")
             .encode_png()
             .expect("encodes")

@@ -197,7 +197,7 @@ mod tests {
     use std::fs;
     use std::sync::mpsc;
 
-    use appytappy_sources::screen::digits::{DigitReader, InkRule};
+    use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::{Image, Region};
 
     use super::*;
@@ -245,7 +245,7 @@ mod tests {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/readings.png");
         let sheet = Image::decode_png(&fs::read(fixture).expect("the fixture reads"))
             .expect("the fixture is a PNG");
-        let reader = DigitReader::new(InkRule::Contrast { tolerance: 60 });
+        let reader = DigitReader::new();
         let read: Vec<Text> = READINGS
             .iter()
             .map(|&((top, height), _)| {

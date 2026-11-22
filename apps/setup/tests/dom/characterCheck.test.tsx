@@ -82,8 +82,6 @@ function Review() {
   const review = useReview(null, draft, setDraft, null, NEEDS, focus);
   const check = useCharacterCheck(finder, review, recorder, NEEDS, {
     boxes: draft.boxes,
-    ink: draft.ink,
-    tolerance: draft.tolerance,
     recorded: draft.recorded,
     full: new Map(),
     retype: () => undefined,

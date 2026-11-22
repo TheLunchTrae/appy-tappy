@@ -13,7 +13,7 @@
   --holds: #5bc48a;
   --warn: #e8845b;
   --live: #e05555;
-  /* The tile a reference's characters sit on. Dark text takes a white tile instead, so any text color shows. */
+  /* The tile a reference's characters sit on. */
   --glyph: #000;
   color-scheme: dark;
   font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
@@ -2084,8 +2084,7 @@ div.match-answer {
   gap: 6px;
 }
 
-/* Characters only the text reader's guess shows: outlined, since the user has yet to check them. A text color's
-   tile stays inside the dashes, which show on the panel. */
+/* Characters only the text reader's guess shows: outlined, since the user has yet to check them. */
 .glyphs.unchecked .glyph {
   border: 1px dashed var(--muted);
   background: none;
@@ -3186,23 +3185,6 @@ tr.draft-row > td:not(.end):not(.row-actions) {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-/* A setting most users leave alone, folded under its name until they open it. */
-.tucked {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.tucked > summary {
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.tucked[open] > summary {
-  margin-bottom: 10px;
 }
 
 /* Debug details under a live reading. */

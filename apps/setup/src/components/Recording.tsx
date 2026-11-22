@@ -8,9 +8,9 @@ import type { RecordFocus } from '../lib/useReview.ts';
 import { Hint } from './Hint.tsx';
 import { Question, useQuestion } from './Question.tsx';
 import { PictureCanvas } from './canvas.tsx';
-import { CharacterChips, MissingChips, glyphStyle } from './CharacterChips.tsx';
+import { CharacterChips, MissingChips } from './CharacterChips.tsx';
 import type { Discovery } from '../lib/discovery.ts';
-import type { Color, Picture } from '../lib/pixels.ts';
+import type { Picture } from '../lib/pixels.ts';
 import {
   type ReviewEntry,
   type Untaught,
@@ -186,12 +186,10 @@ function guess(reading: RecordedReading): { readonly text: string; readonly pend
 function Discovered({
   found,
   needs,
-  ink,
 }: {
   readonly found: Discovery;
   /** Whether the value the reference is taught for needs characters, so that some can be missing. */
   readonly needs: boolean;
-  readonly ink: Color | undefined;
 }) {
   return (
     <dl className="discovered" aria-live="polite">
@@ -213,7 +211,7 @@ function Discovered({
           <dd>
             <span className="glyphs unchecked" role="img" aria-label={`Characters: ${found.unchecked.join(' ')}`}>
               {found.unchecked.map((character) => (
-                <span key={character} className="glyph" style={glyphStyle(ink)} aria-hidden="true">
+                <span key={character} className="glyph" aria-hidden="true">
                   {character}
                 </span>
               ))}
@@ -229,7 +227,7 @@ function Discovered({
         <div>
           <dt>Found</dt>
           <dd>
-            <CharacterChips characters={found.found} ink={ink} />
+            <CharacterChips characters={found.found} />
           </dd>
         </div>
       )}
@@ -273,7 +271,7 @@ interface PanelProps {
   /** Discards the recording, and settles once it is gone or the discard failed. */
   readonly onDiscard: () => Promise<void>;
   readonly onReview: () => void;
-  /** Whether the draft's region, color or tolerance differ from the stopped recording's. */
+  /** Whether the draft's region differs from the stopped recording's. */
   readonly settingsChanged: boolean;
   /** Puts the stopped recording's settings back on the draft. */
   readonly onUseSettings: () => void;
@@ -369,7 +367,7 @@ export function RecordPanel(props: PanelProps) {
           <p className="note">{spotsNote(view.spots.length)}</p>
         ) : null}
         {warn}
-        <Discovered found={found} needs={needs} ink={view.settings.ink} />
+        <Discovered found={found} needs={needs} />
         {count === 0 ? null : (
           <ul className="found">
             {newest.map(({ reading, index }) => {
@@ -418,11 +416,9 @@ export function RecordPanel(props: PanelProps) {
       </h3>
       <p className="note">{keptNote(count, kept, null)}</p>
       {warn}
-      {count === 0 ? null : <Discovered found={found} needs={needs} ink={view.settings.ink} />}
+      {count === 0 ? null : <Discovered found={found} needs={needs} />}
       {settingsChanged ? (
-        <p className="note">
-          The region, text color, or tolerance changed since recording. Record more needs the recording&apos;s own.
-        </p>
+        <p className="note">The region changed since recording. Record more needs the recording&apos;s own.</p>
       ) : null}
       <div className="row">
         <button type="button" className="btn" onClick={props.onReview}>
@@ -470,9 +466,7 @@ function Adds({
         {added.map((each, index) => (
           <li key={index}>
             <span className="glyphs">
-              <span className="glyph" style={glyphStyle(view.settings.ink)}>
-                {each.character}
-              </span>
+              <span className="glyph">{each.character}</span>
             </span>
             {sighted(each.shape)}
           </li>
@@ -533,9 +527,7 @@ export function ReviewSheet(props: SheetProps) {
           {view.sizes.length < 2 ? null : (
             <TextSizes view={view} lead="This recording looked for" id="hint-review-sizes" />
           )}
-          {view.readings.length === 0 ? null : (
-            <Discovered found={found} needs={needs.length > 0} ink={view.settings.ink} />
-          )}
+          {view.readings.length === 0 ? null : <Discovered found={found} needs={needs.length > 0} />}
           {/* Keep is described by why it waits, or else by what keeping now would leave untaught. */}
           <p
             id={blocked === null && untaught.readings.length > 0 ? undefined : 'keep-blocked'}
