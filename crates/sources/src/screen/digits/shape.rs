@@ -441,3 +441,99 @@ fn shared(outer: &Range<u32>, span: Range<u64>, side: u64) -> Vec<(usize, usize,
     }
     all
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The place of a character `columns` wide in `rows` of a line that
+    /// starts at row 0 and is `line` pixels tall.
+    fn place(columns: u32, rows: Range<u32>, line: u32) -> Place {
+        let bounds = Bounds {
+            columns: 0..columns,
+            rows,
+        };
+        Place::of(
+            &bounds,
+            Line {
+                top: 0,
+                height: line,
+            },
+        )
+    }
+
+    #[test]
+    fn characters_are_unlike_past_a_quarter_line_s_height_or_top_or_twice_as_wide() {
+        let tall = place(8, 0..32, 32);
+        // A quarter of the line shorter is still compared, and a pixel
+        // more is not.
+        assert!(!tall.unlike(place(8, 0..24, 32)));
+        assert!(tall.unlike(place(8, 0..23, 32)));
+        // So it is with where each starts.
+        let high = place(8, 0..16, 32);
+        assert!(!high.unlike(place(8, 8..24, 32)));
+        assert!(high.unlike(place(8, 9..25, 32)));
+        // And one twice as wide for its height is compared, and a pixel
+        // wider is not.
+        assert!(!high.unlike(place(16, 0..16, 32)));
+        assert!(high.unlike(place(17, 0..16, 32)));
+        // Heights and tops are measured against the line, so the same
+        // character drawn twice as large stands in the same place.
+        assert!(!tall.unlike(place(16, 0..64, 64)));
+        assert!(tall.unlike(place(16, 0..40, 64)));
+        assert!(place(8, 20..36, 64).unlike(place(4, 0..8, 32)));
+    }
+
+    #[test]
+    fn a_shape_is_the_cells_at_least_half_ink() {
+        // A block of a pixel to each cell, whole or with a hole in it.
+        let bounds = Bounds {
+            columns: 1..33,
+            rows: 1..33,
+        };
+        let line = Line { top: 1, height: 32 };
+        let block = |hole: Range<u32>| {
+            let ink = |x: u32, y: u32| {
+                bounds.columns.contains(&x)
+                    && bounds.rows.contains(&y)
+                    && !(hole.contains(&x) && hole.contains(&y))
+            };
+            Sample::of(
+                |x, y| if ink(x, y) { u8::MAX } else { 0 },
+                &bounds,
+                Place::of(&bounds, line),
+            )
+        };
+        assert_eq!(block(0..0).shape(), [u32::MAX; 32]);
+        let mut holed = [u32::MAX; 32];
+        for row in holed.iter_mut().skip(8).take(16) {
+            *row = 0xFF00_00FF;
+        }
+        assert_eq!(block(9..25).shape(), holed);
+        let shown = format!("{:?}", block(0..0));
+        assert!(
+            shown.starts_with("Sample { shape: [4294967295, "),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("place: Place { height: 32, top: 0,"),
+            "{shown}"
+        );
+    }
+
+    #[test]
+    fn an_edge_lies_as_far_out_as_the_pixel_past_it_is_the_character_s() {
+        // The pixel before the first is all the character's too, so the
+        // character starts a whole pixel earlier.
+        assert_eq!(edges(&(0..3), &(1..2), &[255, 255, 0]), (0, 512));
+        assert_eq!(edges(&(0..3), &(1..2), &[0, 255, 0]), (256, 512));
+    }
+
+    #[test]
+    fn only_the_pixels_within_a_character_s_span_share_the_grid() {
+        // One pixel that fills the grid's side: a part in each cell, and
+        // none from the pixels beside it.
+        let all: Vec<(usize, usize, u64)> = (0..32).map(|cell| (1, cell, 256)).collect();
+        assert_eq!(shared(&(0..3), 256..512, 256), all);
+    }
+}
