@@ -200,8 +200,8 @@ review finding.
 
 A mutant that makes a loop run forever fails its tests by the test timeout,
 but one that also grows memory can outlast it: on a runner with swap, the
-machine slows until the job's limit cancels the shard, and the shard loses
-its log. Both workflows' shards turn swap off, so the kernel's out-of-memory
+machine slows until the shard's time limit stops it, and the mutant is never
+counted. Both workflows' shards turn swap off, so the kernel's out-of-memory
 killer ends such a test and the mutant counts as caught. A fill that pushes a
 pixel only when its slot is not yet set is one, since deleting the `!` in
 `!*slot` pushes the same pixels forever. Write such a guard as a pattern,
