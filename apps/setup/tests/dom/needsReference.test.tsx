@@ -122,8 +122,8 @@ test("a reference's draft saved beside a value's goes again when the value's fai
     throw new Error('the draft is set above');
   }
   expect(await saveBeside(reference, async () => ({ id: 'value-1', def: reference }))).toEqual({
-    id: 'reference-1',
-    def: reference,
+    first: { id: 'reference-1', def: reference },
+    own: { id: 'value-1', def: reference },
   });
   expect(calls).toEqual([['save_draft', { id: null, draft: reference, screenshots: true }]]);
   calls.length = 0;

@@ -215,10 +215,10 @@ export function referenceWait(def: DraftDef, references: readonly ReferenceDef[]
 }
 
 /**
- * The value draft `resumed` as Finish opens it once `reference` is saved: with that reference picked, on the step
- * that checks how the value reads and saves it.
+ * The value draft `resumed` as it opens once the reference `reference` is saved: with that reference picked, on the
+ * step that checks how the value reads and saves it.
  */
-export function finishedWith(resumed: Resumed, reference: ReferenceDef): Resumed {
+export function finishedWith(resumed: Resumed, reference: string): Resumed {
   const { def } = resumed;
   if (def.kind !== 'value' || !isKept<CaptureKept>(def.state, 'value')) {
     return resumed;
@@ -228,13 +228,13 @@ export function finishedWith(resumed: Resumed, reference: ReferenceDef): Resumed
     ...resumed,
     def: {
       ...def,
-      state: keep('value', { ...stored, step: 'check', draft: { ...stored.draft, reference: reference.id } }),
+      state: keep('value', { ...stored, step: 'check', draft: { ...stored.draft, reference } }),
     },
   };
 }
 
 /**
- * The draft of a new reference that **Save and make a reference** opens for the value `setup` sets up for the
+ * The draft of a new reference that **New reference** opens for the value `setup` sets up for the
  * application `app`: one box at the value's region, on the screenshot it is drawn on, to read the characters the
  * value needs, or the digits while it needs none in particular. Null while the value has no region.
  */

@@ -342,7 +342,7 @@ export function App() {
         open(after.flow, 'flow');
         break;
       case 'listed':
-        goTo(LISTED_ON[after.of]);
+        goTo(LISTED_ON[ended.kind]);
         break;
       case 'page':
         open(null);
@@ -389,14 +389,14 @@ export function App() {
           }}
           onMakeReference={
             flow.kind === 'value' && makesReference(flow)
-              ? (reference) => {
+              ? (reference, value) => {
                   open(
                     {
                       kind: 'reference',
                       existing: null,
                       app: reference.def.app,
                       resumed: reference,
-                      forValue: true,
+                      forValue: value,
                     },
                     'flow',
                   );
@@ -420,7 +420,7 @@ export function App() {
             end(flow, 'canceled');
           }}
           onSaved={(id) => {
-            end(flow, { app: id, value: null });
+            end(flow, { app: id, value: null, reference: null });
           }}
           onDrafted={() => {
             end(flow, 'drafted');
@@ -529,10 +529,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'reference', existing: null, app: null, resumed: null, forValue: false });
+              open({ kind: 'reference', existing: null, app: null, resumed: null, forValue: null });
             }}
             onEdit={(existing) => {
-              open({ kind: 'reference', existing, app: null, resumed: null, forValue: false });
+              open({ kind: 'reference', existing, app: null, resumed: null, forValue: null });
             }}
             onFinish={finish}
             onDeleteDraft={removeDraft}

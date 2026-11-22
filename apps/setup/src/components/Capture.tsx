@@ -189,10 +189,10 @@ interface Props {
   /** Closes the flow once its draft is saved or deleted. */
   readonly onDrafted: () => void;
   /**
-   * Closes a new value's flow once **Save and make a reference** saved it as a draft, and opens the draft of a
-   * reference it saved beside it; null where the button is not offered.
+   * Closes a new value's flow once **New reference** kept it as the draft `value`, and opens `reference`, the draft
+   * of a reference saved beside it; null where **New reference** is not offered.
    */
-  readonly onMakeReference: ((reference: Resumed) => void) | null;
+  readonly onMakeReference: ((reference: Resumed, value: Resumed) => void) | null;
   /** Hears what leaving the capture would lose. */
   readonly onHeld: (held: Held) => void;
   /** Hears how to save the capture's draft. */
@@ -269,6 +269,8 @@ export function Capture({
   );
   // Whether the user said the value's content may move around inside the window.
   const [mayMove, setMayMove] = useState(start.mayMove);
+  // Whether **New reference** is picked in place of a saved reference.
+  const [newReference, setNewReference] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const stage = useScreenshotStage(opening.shots);
@@ -365,7 +367,7 @@ export function Capture({
     onSaving: setSaving,
     onSaved: async (saved) => {
       await drafting.finished();
-      onSaved({ app: saved.app, value: null });
+      onSaved({ app: saved.app, value: null, reference: saved.reference });
     },
   });
   const { recording, finder, reviewed, sheeted, checking } = teaching;
@@ -613,7 +615,7 @@ export function Capture({
   const sends = (): (() => Promise<Made>) | null => {
     const changes = edit.built;
     if (changes !== null) {
-      return changes.ok ? async () => editValue(changes.spec, dropFixes) : null;
+      return changes.ok ? async () => ({ ...(await editValue(changes.spec, dropFixes)), reference: null }) : null;
     }
     const screenshot = draft.drawnOn;
     if (!valueCheck.ok || screenshot === null) {
@@ -621,15 +623,20 @@ export function Capture({
     }
     const { spec } = valueCheck;
     if (fixing !== null) {
-      return async () => saveFix({ app: choice.app, value: fixing.id, check: spec, screenshot });
+      return async () => ({
+        ...(await saveFix({ app: choice.app, value: fixing.id, check: spec, screenshot })),
+        reference: null,
+      });
     }
     // A new value saves only with a side.
     if (pin === null) {
       return null;
     }
     const readingArea = isReadingArea(moving);
-    return async () =>
-      saveValue({ app: choice.app, valueName: valueName.trim(), check: spec, screenshot, pin, readingArea });
+    return async () => ({
+      ...(await saveValue({ app: choice.app, valueName: valueName.trim(), check: spec, screenshot, pin, readingArea })),
+      reference: null,
+    });
   };
 
   const save = async (): Promise<void> => {
@@ -729,8 +736,8 @@ export function Capture({
   // A new number that needs nothing but a reference saves as a draft, which the Values page lists until its
   // application has a reference it can read with.
   const keepsWithoutReference = mode.kind === 'value' && keptForReference(hasSide, draft.drawnOn, missing);
-  // **Save and make a reference** is offered where the application has no reference to pick.
-  const offersReference = onMakeReference !== null && file?.references.length === 0;
+  // Whether **New reference** is picked where it is offered, which makes the step's Next make the reference.
+  const makesNew = onMakeReference !== null && newReference;
   // Saves a reference's draft, starting from the value's screenshot and region, then the value's draft beside it,
   // and opens the reference's. A value whose draft fails to save takes the reference's draft back.
   const makeReference = async (): Promise<void> => {
@@ -742,7 +749,7 @@ export function Capture({
     try {
       const saved = await saveBeside(reference, drafting.save);
       if (saved !== null) {
-        onMakeReference(saved);
+        onMakeReference(saved.first, saved.own);
       }
     } catch (error: unknown) {
       setSaveError(errorText(error));
@@ -793,8 +800,18 @@ export function Capture({
       whole={draft.whole}
       characters={draft.characters}
       onSelect={(reference) => {
+        setNewReference(false);
         setDraft((current) => ({ ...current, reference }));
       }}
+      newPicked={makesNew}
+      onNew={
+        onMakeReference === null
+          ? null
+          : () => {
+              setNewReference(true);
+              setDraft((current) => ({ ...current, reference: null }));
+            }
+      }
       onWhole={(whole) => {
         setDraft((current) => ({ ...current, whole }));
       }}
@@ -1148,25 +1165,12 @@ export function Capture({
                   {appFile.error}
                 </p>
               )}
-              {offersReference ? (
-                <div>
-                  <p className="note">
-                    Save and make a reference keeps this value as a draft and opens a new reference, starting from this
-                    screenshot and region. Once the reference is saved, finish the value on the Values page.
-                  </p>
-                  {keepsWithoutReference ? null : <p className="note">{missing[0]}</p>}
-                  <button
-                    type="button"
-                    className="btn"
-                    aria-busy={saving}
-                    disabled={!keepsWithoutReference || busy}
-                    onClick={() => {
-                      background(makeReference());
-                    }}
-                  >
-                    Save and make a reference
-                  </button>
-                </div>
+              {makesNew ? (
+                <p className="note">
+                  {keepsWithoutReference
+                    ? 'Next keeps this value as a draft and opens New reference, starting from this screenshot and region. Saving the reference brings you back to Check and save with it picked.'
+                    : missing[0]}
+                </p>
               ) : null}
               <div className="sep" />
               {saveError === null ? null : (
@@ -1186,15 +1190,29 @@ export function Capture({
                   Back
                 </button>
                 {draftButton}
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => {
-                    goTo('check');
-                  }}
-                >
-                  Next: check and save
-                </button>
+                {makesNew ? (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    aria-busy={saving}
+                    disabled={!keepsWithoutReference || busy}
+                    onClick={() => {
+                      background(makeReference());
+                    }}
+                  >
+                    Next: make a reference
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => {
+                      goTo('check');
+                    }}
+                  >
+                    Next: check and save
+                  </button>
+                )}
               </div>
             </>
           ) : (

@@ -94,15 +94,17 @@ every character the value needs is saved, the row says
 **Check and save** with it picked. With more than one that fits, it picks the
 newest.
 
-While the application has no reference at all, **Characters** offers
-**Save and make a reference**. It keeps the value as a draft and opens
-**New reference** on its own, starting from the value's screenshot and region
-once you capture the window again. The new reference reads the characters the
-value needs, or the digits while it needs none in particular. Saving the
-reference brings you to the Values page, where the value's row shows
-**Finish** once the reference has learned every character the value needs.
-A value you make for an automation doesn't offer it: **Save value** keeps
-that value as a draft and returns to the automation without it.
+To make the reference as you go, pick **New reference** at the end of the
+references under **Characters**. The step's button becomes
+**Next: make a reference**, which keeps the value as a draft and opens
+**New reference** on its own page, starting from the value's screenshot and
+region once you capture the window again. The new reference reads the
+characters the value needs, or the digits while it needs none in particular.
+Saving the reference brings you back to the value on **Check and save**, with
+the new reference picked, once you capture the window again. If you save the
+reference as a draft or cancel it instead, the value stays a draft. A value
+you make for an automation doesn't offer **New reference**: **Save value**
+keeps that value as a draft and returns to the automation without it.
 
 To use other keys for the screenshot shortcut, select **Change shortcut** and
 press them, or change it in [Settings](Settings.md). F1 to F24, Print Screen,

@@ -15,16 +15,20 @@ interface Props {
   /** The characters the value needs, or none for every character its reference knows. */
   readonly characters: readonly string[];
   readonly onSelect: (reference: string) => void;
+  /** Whether **New reference** is picked, which makes the value's reference next, on its own page. */
+  readonly newPicked: boolean;
+  /** Picks **New reference**, or null where the value cannot make one, such as one made for an automation. */
+  readonly onNew: (() => void) | null;
   readonly onWhole: (whole: boolean) => void;
   readonly onCharacters: (characters: readonly string[]) => void;
 }
 
 /**
- * How a number value is read: the characters it needs, one of its application's saved references, and whether only
- * whole numbers count. References are made and taught on the References page, never from here.
+ * How a number value is read: the characters it needs, one of its application's saved references or **New
+ * reference**, and whether only whole numbers count. A new reference is made on its own page, never from here.
  */
 export function ReferencePicker(props: Props) {
-  const { appName, file, selected, whole, characters } = props;
+  const { appName, file, selected, whole, characters, newPicked, onNew } = props;
   const references = file?.references ?? [];
   const chosen = references.find((reference) => reference.id === selected) ?? null;
   // What the value needs that a reference reads, which is what it can still have to learn.
@@ -39,10 +43,10 @@ export function ReferencePicker(props: Props) {
           <Hint topic="Reference">{REFERENCE_HINT}</Hint>
         </span>
         <span className="note">
-          The shapes of the characters this value is read with. Pick one made for {appName}. References are made and
-          taught on the References page.
+          The shapes of the characters this value is read with. Pick one made for {appName}
+          {onNew === null ? '. References are made and taught on the References page.' : ', or make a new one.'}
         </span>
-        {references.length === 0 ? (
+        {references.length === 0 && onNew === null ? (
           <p className="note">
             {appName} has no references yet. Once one is made on the References page, pick it here. Until then, Save
             value keeps this value as a draft.
@@ -56,7 +60,7 @@ export function ReferencePicker(props: Props) {
                   key={reference.id}
                   type="button"
                   className="ref"
-                  aria-pressed={reference.id === selected}
+                  aria-pressed={!newPicked && reference.id === selected}
                   onClick={() => {
                     props.onSelect(reference.id);
                   }}
@@ -70,6 +74,14 @@ export function ReferencePicker(props: Props) {
                 </button>
               );
             })}
+            {onNew === null ? null : (
+              <button type="button" className="ref" aria-pressed={newPicked} onClick={onNew}>
+                <span className="ref-head">
+                  <b>New reference</b>
+                  <small>{references.length === 0 ? `${appName} has none yet` : 'Made next, on its own page'}</small>
+                </span>
+              </button>
+            )}
           </div>
         )}
         {chosen !== null && unreadBy(chosen, characters).length > 0 ? (

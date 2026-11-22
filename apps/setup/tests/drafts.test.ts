@@ -571,7 +571,7 @@ describe('a value kept without a reference', () => {
   });
 
   test('finishes on the check step with the reference picked', () => {
-    const finished = finishedWith({ id: 'draft-1', def: kept(number) }, reference('percent', '1%'));
+    const finished = finishedWith({ id: 'draft-1', def: kept(number) }, 'percent');
     const setup = keptSetup(finished.def);
     expect(finished.id).toBe('draft-1');
     expect(setup?.step).toBe('check');
