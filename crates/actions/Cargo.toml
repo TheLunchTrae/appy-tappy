@@ -25,7 +25,7 @@ mutants.workspace = true
 # already uses for requests that finish later; naming it lets the adapter
 # wait for a media request with a timeout. It has to be the release line
 # that `windows` depends on, or its async types differ from the ones
-# `windows` returns, so the two move to a new line together.
+# `windows` returns and the adapter doesn't compile.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Foundation_Collections",

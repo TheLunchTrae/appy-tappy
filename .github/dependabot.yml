@@ -27,17 +27,6 @@ updates:
     groups:
       rust:
         patterns: ['*']
-    # `windows` and `windows-future` move to a new release line together, by
-    # hand; crates/actions/Cargo.toml says why. Patch releases still come.
-    ignore:
-      - dependency-name: windows
-        update-types:
-          - version-update:semver-major
-          - version-update:semver-minor
-      - dependency-name: windows-future
-        update-types:
-          - version-update:semver-major
-          - version-update:semver-minor
 
   # The Markdown tooling at the root and the setup UI each have a Bun lockfile.
   - package-ecosystem: bun
