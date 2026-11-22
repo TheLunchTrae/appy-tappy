@@ -3654,6 +3654,62 @@ mod tests {
         assert_eq!(shade_sweep(40), (70, 72));
     }
 
+    /// The columns of `left` before `edge`, and those of `right` from it:
+    /// two pictures of one size.
+    fn side_by_side(left: &Image, right: &Image, edge: u32) -> Image {
+        let size = left.size();
+        let bgra = (0_u32..)
+            .zip(left.pixels().iter().zip(right.pixels()))
+            .flat_map(|(at, (left, right))| {
+                if at.rem_euclid(size.width) < edge {
+                    *left
+                } else {
+                    *right
+                }
+            })
+            .collect();
+        Image::new(size, bgra).unwrap()
+    }
+
+    #[test]
+    fn light_text_on_a_gray_panel_beside_a_white_one_never_reads_as_a_wrong_number() {
+        // Black digits on white, and from a line down the picture, light
+        // digits on gray: one cell beside another. The gray is as white
+        // under a shade would be, and the light digits are lighter than
+        // any shade leaves them. Taken for shaded, they would go white
+        // with the panel, and the digits before the line read alone.
+        let reader = taught(28, &["1250", "3467", "89"]);
+        let size = canvas(28);
+        let on_white = Colors {
+            ink: [0, 0, 0],
+            outline: [255, 255, 255],
+            background: [255, 255, 255],
+        };
+        for (gray, ink) in [
+            (100, [255, 220, 200]),
+            (150, [255, 255, 255]),
+            (204, [200, 255, 255]),
+        ] {
+            let on_gray = Colors {
+                ink,
+                outline: [gray, gray, gray],
+                background: [gray, gray, gray],
+            };
+            let [left, right] = [on_white, on_gray].map(|colors| {
+                let pen = Pen {
+                    colors,
+                    ..pen(28, 0.3)
+                };
+                draw_text("1250", pen, size)
+            });
+            for edge in [size.width.div_euclid(6), size.width.div_euclid(4)] {
+                let said = reader.read(&side_by_side(&left, &right, edge), false);
+                let wrong = said.as_ref().is_ok_and(|said| *said != number(1250.0));
+                assert!(!wrong, "{gray} {edge}: {said:?}");
+            }
+        }
+    }
+
     #[test]
     fn a_picture_with_a_shade_over_a_part_of_it_teaches_the_shapes_without_the_shade() {
         let size = canvas(28);

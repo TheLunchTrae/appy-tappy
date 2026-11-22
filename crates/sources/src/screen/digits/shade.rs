@@ -51,6 +51,13 @@ const OFF: u8 = 12;
 /// blue, for it to tell how much of a color a shade leaves there.
 const FAINT: u8 = 48;
 
+/// The lightest color.
+const WHITE: Rgb = Rgb {
+    red: u8::MAX,
+    green: u8::MAX,
+    blue: u8::MAX,
+};
+
 /// One in this many of the pixels that tell where a shade's edge is may
 /// lie on the wrong side of it, and each side has at least this many of
 /// them.
@@ -67,37 +74,41 @@ pub(super) fn lit(
     colors: &[Rgb],
     own: &[Option<u8>],
 ) -> Option<Vec<Rgb>> {
-    let mut pairs = pairs(colors);
-    if pairs.is_empty() {
-        return None;
+    // A pair tells of a shade only with enough pixels of each of its
+    // colors ([`Tally::edge`]). Most images have no such pair: the blend
+    // along an edge is a part of its color too, and no pixel is all of
+    // it.
+    let mut all = vec![0_u32; colors.len()];
+    for color in own.iter().flatten() {
+        if let Some(count) = all.get_mut(usize::from(*color)) {
+            *count = count.saturating_add(1);
+        }
     }
-    let all = held(
-        own.iter().copied().zip(pixels.iter().copied()),
-        colors.len(),
-    );
-    // The pair of colors with the most pixels of both says the most of
-    // where a shade is, so it is asked first, and of pairs with as many,
-    // the more common colors.
-    let fewer = |pair: &Pair| {
-        let all = |color: u8| all.get(usize::from(color)).map_or(0, |&(count, _)| count);
-        all(pair.light).min(all(pair.dark))
+    let enough = |color: u8| {
+        all.get(usize::from(color))
+            .is_some_and(|&count| count >= STRAY)
     };
-    pairs.sort_by_key(|pair| std::cmp::Reverse(fewer(pair)));
     let width = index(size.width).max(1);
-    pairs.into_iter().find_map(|pair| {
-        let shade = Shade::over(pixels, own, colors.len(), pair, size)?;
-        let lit = |(at, &pixel)| whole(pixel, shade.left(at, width));
-        Some((0..).zip(pixels).map(lit).collect())
-    })
+    // The more common colors come first among an image's, and so do
+    // their pairs.
+    pairs(colors)
+        .into_iter()
+        .filter(|pair| [pair.light, pair.dark].into_iter().all(enough))
+        .find_map(|pair| {
+            let shade = Shade::over(pixels, own, colors.len(), pair, size)?;
+            let lit = |(at, &pixel)| whole(pixel, shade.left(at, width));
+            Some((0..).zip(pixels).map(lit).collect())
+        })
 }
 
 /// How many of `pixels` have each of `colors` colors, by its place, and
 /// what those pixels show: the middle one's red, green, and blue, each
-/// for itself. A color's place among an image's colors holds the colors
-/// near it too, and the middle is what most of its pixels show, where
-/// their average is somewhere between. Each pixel comes with its color's
-/// place, or with none where it is not counted.
-fn held(pixels: impl Iterator<Item = (Option<u8>, Rgb)>, colors: usize) -> Vec<(u32, Rgb)> {
+/// for itself, or `None` for a color none of them has. A color's place
+/// among an image's colors holds the colors near it too, and the middle
+/// is what most of its pixels show, where their average is somewhere
+/// between. Each pixel comes with its color's place, or with none where
+/// it is not counted.
+fn held(pixels: impl Iterator<Item = (Option<u8>, Rgb)>, colors: usize) -> Vec<Option<(u32, Rgb)>> {
     let mut held: Vec<[Vec<u8>; 3]> = vec![Default::default(); colors];
     for (color, pixel) in pixels {
         if let Some(held) = color.and_then(|color| held.get_mut(usize::from(color))) {
@@ -108,15 +119,19 @@ fn held(pixels: impl Iterator<Item = (Option<u8>, Rgb)>, colors: usize) -> Vec<(
     }
     held.into_iter()
         .map(|mut held| {
-            let count = held.each_ref().map(Vec::len)[0];
+            let count = held.first().map_or(0, Vec::len);
             let [red, green, blue] = held.each_mut().map(|held| {
                 held.sort_unstable();
-                held.get(held.len().div_euclid(2)).copied().unwrap_or(0)
+                held.get(held.len().div_euclid(2)).copied()
             });
-            (
+            Some((
                 u32::try_from(count).unwrap_or(u32::MAX),
-                Rgb { red, green, blue },
-            )
+                Rgb {
+                    red: red?,
+                    green: green?,
+                    blue: blue?,
+                },
+            ))
         })
         .collect()
 }
@@ -128,8 +143,6 @@ struct Pair {
     light: u8,
     /// The color it shows as under the shade, by its place.
     dark: u8,
-    /// How much of a color the shade leaves, of [`WHOLE`].
-    part: u32,
 }
 
 /// Each two of `colors` of which one is the other under a shade, in the
@@ -140,9 +153,8 @@ fn pairs(colors: &[Rgb]) -> Vec<Pair> {
         .flat_map(|(light, &lighter)| {
             (0..=u8::MAX)
                 .zip(colors)
-                .filter_map(move |(dark, &darker)| {
-                    part(lighter, darker).map(|part| Pair { light, dark, part })
-                })
+                .filter(move |&(_, &darker)| part(lighter, darker).is_some())
+                .map(move |(dark, _)| Pair { light, dark })
         })
         .collect()
 }
@@ -205,7 +217,7 @@ fn whole(color: Rgb, part: u32) -> Rgb {
 
 /// A shade over a part of an image: every row, or every column, from its
 /// edge to the image's.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 struct Shade {
     /// Whether its edge runs down the image, so that it lies over
     /// columns, and not across it, over rows.
@@ -238,6 +250,8 @@ impl Shade {
     /// 4. A shade's edge can be soft, and may lie a row off. So the row
     ///    on each side of it keeps as much as it shows of the row beyond
     ///    it, further from the edge ([`kept`]).
+    /// 5. No pixel under the shade is lighter than the shade leaves white,
+    ///    by more than [`OFF`].
     fn over(
         pixels: &[Rgb],
         own: &[Option<u8>],
@@ -289,28 +303,30 @@ impl Shade {
             Lies::Before => (after, before),
             Lies::After => (before, after),
         };
-        let shows = |shown: &[(u32, Rgb)], pixel: Rgb| {
+        let shows = |shown: &[Option<(u32, Rgb)>], pixel: Rgb| {
             shown
                 .iter()
-                .any(|&(count, color)| count > 0 && color.near(pixel, OFF))
+                .flatten()
+                .any(|&(_, color)| color.near(pixel, OFF))
         };
         // How much the shade leaves, by what the pair's pixels show on
         // each side.
-        let of =
-            |side: &[(u32, Rgb)], color: u8| side.get(usize::from(color)).map(|&(_, color)| color);
+        let of = |side: &[Option<(u32, Rgb)>], color: u8| {
+            let &(_, color) = side.get(usize::from(color))?.as_ref()?;
+            Some(color)
+        };
         let part = part(of(&light, pair.light)?, of(&dark, pair.dark)?)?;
         let (mut known, mut against) = (0_u32, 0_u32);
-        for &(count, under) in &dark {
-            let shades =
-                |&(count, color): &(u32, Rgb)| count > 0 && shaded(color, part).near(under, OFF);
+        for &(count, under) in dark.iter().flatten() {
+            let shades = |&(_, color): &(u32, Rgb)| shaded(color, part).near(under, OFF);
             // A color so dark that the shade leaves it about as it is
             // shows the same on both sides, and says nothing.
-            let same = |&(count, color): &(u32, Rgb)| {
-                count > 0 && color.near(under, OFF) && !shaded(color, part).near(color, OFF)
+            let same = |&(_, color): &(u32, Rgb)| {
+                color.near(under, OFF) && !shaded(color, part).near(color, OFF)
             };
-            if light.iter().any(shades) {
+            if light.iter().flatten().any(shades) {
                 known = known.saturating_add(count);
-            } else if light.iter().any(same) {
+            } else if light.iter().flatten().any(same) {
                 against = against.saturating_add(count);
             }
         }
@@ -375,6 +391,22 @@ impl Shade {
                     .div_euclid(WHOLE)
                     .clamp(part, WHOLE);
             }
+        }
+        // A black sheet leaves white no lighter than its part of it, so a
+        // pixel lighter than that lies under no such sheet. Beside the
+        // shade, that part is the whole, and no pixel is lighter. Made light
+        // again, it would be white whatever it showed, and text that
+        // light would be gone.
+        let lighter = |(at, pixel): (usize, &Rgb)| {
+            let left = left.get(line(at)).copied().unwrap_or(WHOLE);
+            let most = channels(shaded(WHITE, left)).map(|most| most.saturating_add(OFF));
+            channels(*pixel)
+                .into_iter()
+                .zip(most)
+                .any(|(shows, most)| shows > most)
+        };
+        if (0..).zip(pixels).any(lighter) {
+            return None;
         }
         Some(Self {
             down: is_down,
@@ -572,7 +604,6 @@ mod tests {
         rgb(level, level, level)
     }
 
-    const WHITE: Rgb = gray(255);
     const BLUE: Rgb = rgb(60, 120, 200);
 
     /// The side of a picture's edge its shade lies on, and the edge's
@@ -687,18 +718,7 @@ mod tests {
         let colors = [BLUE, WHITE, rgb(30, 60, 100), gray(127)];
         assert_eq!(
             pairs(&colors),
-            [
-                Pair {
-                    light: 0,
-                    dark: 2,
-                    part: 128
-                },
-                Pair {
-                    light: 1,
-                    dark: 3,
-                    part: 127
-                },
-            ]
+            [Pair { light: 0, dark: 2 }, Pair { light: 1, dark: 3 }]
         );
     }
 
@@ -722,7 +742,7 @@ mod tests {
         ];
         assert_eq!(
             held(pixels.into_iter(), 3),
-            [(1, rgb(7, 8, 9)), (3, rgb(20, 0, 50)), (0, gray(0))]
+            [Some((1, rgb(7, 8, 9))), Some((3, rgb(20, 0, 50))), None]
         );
     }
 
@@ -747,6 +767,25 @@ mod tests {
         }
         // No shade, and nothing to lift.
         assert_eq!(lit_of(&plain, &colors_of(&plain)), None);
+    }
+
+    #[test]
+    fn sixteen_pixels_of_each_of_two_colors_tell_of_a_shade() {
+        // A row of `light` white pixels above a row of 16 that are half
+        // as light, on black, which shows the same under any shade.
+        let rows = |light: usize| -> Vec<Rgb> {
+            (0..256_usize)
+                .map(|at| match (at.rem_euclid(16), at.div_euclid(16)) {
+                    (x, 3) if x < light => WHITE,
+                    (_, 12) => gray(127),
+                    _ => gray(0),
+                })
+                .collect()
+        };
+        let colors = [gray(0), WHITE, gray(127)];
+        let lit = lit_of(&rows(16), &colors).unwrap();
+        assert_eq!(lit.get(192), Some(&gray(255)));
+        assert_eq!(lit_of(&rows(15), &colors), None);
     }
 
     #[test]
@@ -844,27 +883,66 @@ mod tests {
 
     #[test]
     fn a_few_pixels_that_show_the_light_side_s_ground_lie_under_a_shade() {
-        // The shaded half's ground, but for a stripe of the ground as
-        // it shows beside the shade: one in 16 of what the shade's
-        // side shows shaded is too many, and fewer is not.
-        let plain = block(WHITE, BLUE);
-        let striped = |stripe: usize| -> Vec<Rgb> {
-            let shaded = under(&plain, |_, y| if y >= 8 { 128 } else { 256 });
+        // A shade over the lower half, 128 pixels. In its last row,
+        // `plain` pixels show the ground as it is beside the shade, and
+        // `other` more a color the light side has none of, which says
+        // nothing. One in 16 of those that show a color shaded is too
+        // many as it is, and fewer is not.
+        let ground = gray(100);
+        let green = rgb(0, 90, 0);
+        let picture = |plain: usize, other: usize| -> Vec<Rgb> {
+            let shaded = under(&block(WHITE, ground), |_, y| if y >= 8 { 128 } else { 256 });
             (0_usize..)
                 .zip(shaded)
-                .map(|(at, pixel)| {
-                    if at.div_euclid(16) == 15 && at.rem_euclid(16) < stripe {
-                        BLUE
-                    } else {
-                        pixel
-                    }
+                .map(|(at, pixel)| match at.checked_sub(240) {
+                    Some(across) if across < plain => ground,
+                    Some(across) if across.saturating_sub(plain) < other => green,
+                    _ => pixel,
                 })
                 .collect()
         };
-        let colors = [BLUE, WHITE, rgb(30, 60, 100), gray(127)];
-        // 128 pixels under the shade, less the stripe's.
-        assert!(lit_of(&striped(7), &colors).is_some());
-        assert_eq!(lit_of(&striped(8), &colors), None);
+        let colors = [ground, WHITE, gray(50), gray(127), green];
+        // 7 against 112 shaded, and against 113.
+        assert_eq!(lit_of(&picture(7, 9), &colors), None);
+        assert!(lit_of(&picture(7, 8), &colors).is_some());
+    }
+
+    #[test]
+    fn a_pixel_lighter_than_a_shade_leaves_white_lies_under_none() {
+        // A white panel beside a gray one that is half as light, and on
+        // the gray one a mark: no shade leaves a mark lighter than half
+        // of white, give or take 12.
+        let panels = |mark: Rgb| -> Vec<Rgb> {
+            (0..256_usize)
+                .map(|at| match (at.rem_euclid(16), at.div_euclid(16)) {
+                    (0..8, _) => WHITE,
+                    (10..14, 6..10) => mark,
+                    _ => gray(127),
+                })
+                .collect()
+        };
+        let lit = |mark: Rgb| lit_of(&panels(mark), &[WHITE, gray(127)]);
+        assert!(lit(gray(138)).is_some());
+        assert_eq!(lit(gray(139)), None);
+        assert_eq!(lit(rgb(0, 139, 0)), None);
+        assert_eq!(lit(WHITE), None);
+    }
+
+    #[test]
+    fn a_row_at_a_shade_s_edge_is_made_no_lighter_than_the_shade_s_part() {
+        // The first row under the shade keeps a quarter where the rest
+        // keep half, as a line along a sheet's edge does: it comes back
+        // half as light as it was, and no lighter.
+        let plain = block(gray(200), gray(120));
+        let shaded = under(&plain, |_, y| match y {
+            0..8 => 256,
+            8 => 64,
+            _ => 128,
+        });
+        let colors = [gray(120), gray(200), gray(60), gray(100)];
+        let lit = lit_of(&shaded, &colors).unwrap();
+        let half: Vec<Rgb> = under(&plain, |_, y| if y == 8 { 128 } else { 256 });
+        assert!(restores(&lit, &half), "{lit:?}");
     }
 
     /// A tally of `light` and `dark` pixels in each row.
@@ -960,11 +1038,7 @@ mod tests {
                 })
                 .unzip()
         };
-        let pair = Pair {
-            light: 0,
-            dark: 1,
-            part: 127,
-        };
+        let pair = Pair { light: 0, dark: 1 };
         let shade = |color: &dyn Fn(usize, usize) -> Option<u8>| {
             let (pixels, own) = picture(color);
             Shade::over(&pixels, &own, 2, pair, SIZE).unwrap()
