@@ -49,6 +49,12 @@ jobs:
           install_args: rust github:sourcefrog/cargo-mutants bun
           cache: true
           cache_save: ${{ github.ref == 'refs/heads/main' }}
+      # A mutant that grows memory without end should die by the kernel's
+      # out-of-memory killer, which fails its tests, rather than push the
+      # runner into swap, where it slows until the job's limit cancels the
+      # shard and loses its log.
+      - name: Turn off swap
+        run: sudo swapoff -a
       - name: Install the webview build libraries
         run: |
           sudo apt-get update

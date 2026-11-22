@@ -147,6 +147,13 @@ jobs:
           else
             echo 'No mutants selected for this shard.'
           fi
+      # A mutant that grows memory without end should die by the kernel's
+      # out-of-memory killer, which fails its tests, rather than push the
+      # runner into swap, where it slows until the job's limit cancels the
+      # shard and loses its log.
+      - name: Turn off swap
+        if: steps.selection.outputs.build == 'true'
+        run: sudo swapoff -a
       - name: Install the webview build libraries
         if: steps.selection.outputs.build == 'true'
         run: |

@@ -120,6 +120,21 @@ request, CI compares the tested merge commit with its first parent. On a
 push to main, CI compares with the previous tip, which covers the whole
 merged pull request or stack.
 
+The shard count is set for the shortest wall time. The repository is
+public, so GitHub's standard runners cost nothing, but its free plan runs at
+most 20 of the account's jobs at once. The quality workflow's `quality`,
+`windows`, and `footprint` jobs start beside the shards, so 17 shards all
+start at once. Each shard spends about three minutes on setup, the build,
+and the baseline, and a shard past the 17th would also wait for one of those
+jobs to finish, so it would add more time than its share of the mutants
+saves. `.cargo/mutants.toml` deals the mutants out round-robin, so each shard
+gets a share of every file: a mutant in a crate deep in the workspace, such as
+the number reader's, rebuilds and retests every package above it, and a
+slice of them would run far longer than the other shards. A rewrite of the
+number reader selects about 530 mutants, and its 17 shards each take 16 to
+25 minutes. The mutation step stops before the job's `timeout-minutes`, so a
+shard that runs too long keeps its log and uploads its `mutants.out/`.
+
 The **Mutation sweep** workflow, `.github/workflows/mutation-sweep.yml`, runs
 `rust:mutants` over the whole workspace in shards. Only a manual run starts it,
 and it is not a merge gate: run it on `main` as a final check before a
@@ -131,11 +146,13 @@ crate's mutants and they take similar time, and each shard keeps its
 fails when a mutant survives or times out, or when the unmutated baseline
 fails; its `mutants.out/` says which.
 
-The shard count rests on an estimate of about 200 mutants an hour for a
-runner, taken from the diff lane, so keep each shard under about 350 mutants,
-which keeps it well inside the job's `timeout-minutes`. Check the shards'
-times after a sweep, and add shards to the workflow's matrix as they near
-that limit or as the workspace grows, rather than raise the limit.
+The sweep has no other jobs, so it runs 20 shards, all the free plan runs at
+once; other workflows' jobs wait for a runner while it runs. A runner tests
+about 100 mutants an hour in the diff lane, so each shard's share of the
+workspace's 4,400 mutants takes a little over two hours, inside the job's
+`timeout-minutes`. Check the shards' times after a sweep. As the workspace
+grows past what 20 shards test inside the limit, raise the limit, since a
+shard past the 20th waits for a runner.
 `cargo mutants --list --workspace --all-features | wc -l` counts the mutants
 without building anything.
 
@@ -181,6 +198,17 @@ shard of a small change can, but only when each mutant's log shows a compiler
 error in the mutated file: a broken build directory, or a build killed for
 memory or disk, also leaves every mutant unviable. A surviving mutant is a
 review finding.
+
+A mutant that makes a loop run forever fails its tests by the test timeout,
+but one that also grows memory can outlast it: on a runner with swap, the
+machine slows until the job's limit cancels the shard, and the shard loses
+its log. Both workflows' shards turn swap off, so the kernel's out-of-memory
+killer ends such a test and the mutant counts as caught. A fill that pushes a
+pixel only when its slot is not yet set is one, since deleting the `!` in
+`!*slot` pushes the same pixels forever. Write such a guard as a pattern,
+such as `let Some(slot @ &mut false) = held.get_mut(next)`, because
+cargo-mutants does not mutate patterns. Keep `max_shrink_iters` low on slow
+properties too, since a mutant that fails one can time out while it shrinks.
 
 `scripts/select-mutants.sh` writes the diff to its path argument and lists
 its selected mutants without building or downloading the text model. Both
