@@ -1104,8 +1104,13 @@ stateDiagram-v2
     Page --> Open: New or Edit opens a flow with none waiting
     Page --> Open: Finish or Finish draft opens the draft's flow where it left off, with none waiting
     Open --> Open: the open flow opens another and waits under it
-    Open --> Open: Cancel with a flow waiting shows that flow as it was left
-    Open --> Page: Cancel with none waiting
+    Open --> Open: Discard or Cancel, with nothing unsaved in the open flow and a flow waiting, shows that flow as it was left
+    Open --> Page: Discard or Cancel, with nothing unsaved in the open flow and none waiting
+    Open --> Discarding: Discard or Cancel while the open flow holds unsaved work
+    Discarding --> Open: Stay
+    Discarding --> Open: Discard, or Save as draft once the draft is saved, with a flow waiting, which shows again as it was left
+    Discarding --> Page: Discard, or Save as draft once the draft is saved, with none waiting
+    Discarding --> Discarding: the draft save fails, the question shows why
     Open --> Saving: Save
     Saving --> Open: the save fails, the flow shows why
     Saving --> Open: saved with a flow waiting, which shows again with what was made
@@ -1122,8 +1127,8 @@ stateDiagram-v2
     DeletingDraft --> Page: the draft is deleted, the page that lists it opens
     DeletingDraft --> Open: the delete fails, the flow shows why
     Open --> Page: a tab is pressed and no flow holds unsaved work
-    Open --> Asking: a tab is pressed and the open flow or a waiting one holds unsaved work
-    Asking --> Page: Leave drops every flow
+    Open --> Asking: a tab is pressed, or the window is closed, and the open flow or a waiting one holds unsaved work
+    Asking --> Page: Leave drops every flow, or closes the window when that was asked
     Asking --> Open: Stay
     Asking --> KeepingHere: Save as draft, and the open flow holds work a draft keeps
     Asking --> KeepingUnder: Save as draft, and only an automation that waits holds work
@@ -1184,7 +1189,15 @@ draft opens from its page with none waiting:
   first, and `leaveQuestion` names what the open flow loses, the automation's
   unsaved changes, and what **Save as draft** keeps of them. **Leave** drops
   every flow, and **Stay** keeps the stack as it is. While a save runs, the
-  tabs and the question's answers wait.
+  tabs and the question's answers wait. Closing the window asks the same
+  question (`onCloseRequested` in `App.tsx`), and **Leave** then closes it;
+  while a save runs, the window stays open. The question shows in a modal
+  dialog.
+- **Discard and Cancel.** They end the open flow alone, so they ask only when
+  the open flow reports unsaved work: `discardQuestion` names what it loses
+  and offers **Save as draft**, which saves the open flow's draft and ends it
+  as its own **Save as draft** does. A flow that waits under it shows again
+  as it was left.
 - **A saved draft is what a flow holds, written down.** A flow's unsaved work
   and its draft are one thing: an automation's draft keeps the
   `AutomationSetup` its flow carries while it waits, the editor's draft and

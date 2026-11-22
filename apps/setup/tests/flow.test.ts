@@ -17,6 +17,7 @@ import {
   afterFlow,
   applicationFor,
   automationDraft,
+  discardQuestion,
   draftUnder,
   heldInAll,
   holdsAutomation,
@@ -325,8 +326,9 @@ describe('leaving a stack of flows', () => {
   });
 
   test('the question names what the open flow loses, and what a draft keeps of it', () => {
-    const lost = 'Leave without saving? The screenshots, the region and any recording are lost.';
+    const lost = 'The screenshots, the region and any recording are lost.';
     expect(leaveQuestion(value, 'unsaved', true)).toEqual({
+      title: 'Leave without saving?',
       text: `${lost} Save as draft keeps this value, without a recording.`,
       drafts: true,
     });
@@ -334,17 +336,18 @@ describe('leaving a stack of flows', () => {
       `${lost} Save as draft keeps this value, without a recording.`,
     );
     expect(leaveQuestion(reference, 'unsaved', true).text).toBe(
-      `Leave without saving? The screenshots, the boxes and any recording are lost. Save as draft keeps this reference, without a recording.`,
+      `The screenshots, the boxes and any recording are lost. Save as draft keeps this reference, without a recording.`,
     );
     expect(leaveQuestion(automation, 'unsaved', true)).toEqual({
-      text: 'Leave without saving? The changes to this automation are lost. Save as draft keeps this automation.',
+      title: 'Leave without saving?',
+      text: 'The changes to this automation are lost. Save as draft keeps this automation.',
       drafts: true,
     });
     expect(leaveQuestion(application, 'unsaved', true).text).toBe(
-      'Leave without saving? The changes to this application are lost. Save as draft keeps this application.',
+      'The changes to this application are lost. Save as draft keeps this application.',
     );
     // A flow that cannot save its draft offers none.
-    expect(leaveQuestion(value, 'unsaved', false)).toEqual({ text: lost, drafts: false });
+    expect(leaveQuestion(value, 'unsaved', false)).toMatchObject({ text: lost, drafts: false });
   });
 
   test('a fix can be a draft and an edit cannot, and the question says so', () => {
@@ -357,31 +360,55 @@ describe('leaving a stack of flows', () => {
     });
     // An edit leaves the saved value as it is, so only its changes go; a fix loses what a new value does.
     for (const savable of [true, false]) {
-      expect(leaveQuestion(changing('edit'), 'unsaved', savable)).toEqual({
-        text: 'Leave without saving? The screenshots and the changes to this value are lost. An edit cannot be saved as a draft.',
+      expect(leaveQuestion(changing('edit'), 'unsaved', savable)).toMatchObject({
+        text: 'The screenshots and the changes to this value are lost. An edit cannot be saved as a draft.',
         drafts: false,
       });
     }
-    expect(leaveQuestion(changing('fix'), 'unsaved', true)).toEqual({
-      text: 'Leave without saving? The screenshots, the region and any recording are lost. Save as draft keeps this fix, without a recording.',
+    expect(leaveQuestion(changing('fix'), 'unsaved', true)).toMatchObject({
+      text: 'The screenshots, the region and any recording are lost. Save as draft keeps this fix, without a recording.',
       drafts: true,
     });
   });
 
   test('the question names the automation that waits too, which a draft of its own keeps', () => {
-    expect(leaveQuestion(forChanged, 'unsaved', true)).toEqual({
-      text: 'Leave without saving? The screenshots, the region and any recording are lost. The unsaved changes to the automation are lost too. Save as draft keeps both, each as its own draft, without a recording.',
+    expect(leaveQuestion(forChanged, 'unsaved', true)).toMatchObject({
+      text: 'The screenshots, the region and any recording are lost. The unsaved changes to the automation are lost too. Save as draft keeps both, each as its own draft, without a recording.',
       drafts: true,
     });
     expect(leaveQuestion(applicationFor(forChanged, 'example', null, null), 'unsaved', true).text).toBe(
-      'Leave without saving? The changes to this application are lost. The unsaved changes to the automation are lost too. Save as draft keeps both, each as its own draft.',
+      'The changes to this application are lost. The unsaved changes to the automation are lost too. Save as draft keeps both, each as its own draft.',
     );
+  });
+
+  test('Discard asks about the open flow alone, since a flow under it shows again as it was left', () => {
+    expect(discardQuestion(forChanged, true)).toEqual({
+      title: 'Discard without saving?',
+      text: 'The screenshots, the region and any recording are lost. Save as draft keeps this value, without a recording.',
+      drafts: true,
+    });
+    expect(discardQuestion(automation, false)).toEqual({
+      title: 'Discard without saving?',
+      text: 'The changes to this automation are lost.',
+      drafts: false,
+    });
+    const edit: ValueFlow = {
+      kind: 'value',
+      changing: { app: 'example', value: progress, how: 'edit' },
+      app: null,
+      opener: null,
+      resumed: null,
+    };
+    expect(discardQuestion(edit, true)).toMatchObject({
+      text: 'The screenshots and the changes to this value are lost. An edit cannot be saved as a draft.',
+      drafts: false,
+    });
   });
 
   test('the question names only the automation while the open flow holds nothing', () => {
     for (const savable of [true, false]) {
-      expect(leaveQuestion(forChanged, 'nothing', savable)).toEqual({
-        text: 'Leave without saving? The unsaved changes to the automation are lost. Save as draft keeps the automation.',
+      expect(leaveQuestion(forChanged, 'nothing', savable)).toMatchObject({
+        text: 'The unsaved changes to the automation are lost. Save as draft keeps the automation.',
         drafts: true,
       });
     }
