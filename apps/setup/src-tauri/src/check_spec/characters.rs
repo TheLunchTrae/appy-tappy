@@ -436,8 +436,8 @@ impl CharactersSpec {
         })
     }
 
-    /// The pictures and texts of the labeled screenshots and then, of the
-    /// recorded readings, `recorded`: the samples these characters add to
+    /// The pictures and texts of the recorded readings, `recorded`, and
+    /// then of the labeled screenshots: the samples these characters add to
     /// the saved ones, in the order the reference learns them.
     fn new_samples<'a>(
         &'a self,
@@ -485,10 +485,10 @@ impl CharactersSpec {
     /// recorded readings: `None` for one it learns. It learns the saved
     /// samples and the labeled screenshots first and then the readings in
     /// order, but leaves out each reading it cannot learn, so the ones
-    /// after it are judged on the ones that worked. A reading fails only on
-    /// its own picture or a full reference, since a lesson never refuses a
-    /// shape for its character, so this order finds what [`Self::teach`]'s
-    /// does. Review flags the readings this finds, so the reference saved
+    /// after it are judged on the ones that worked. A lesson never refuses
+    /// a shape for its character, so a reading fails here on its own
+    /// picture, or on a reference that is full, which [`Self::teach`] may
+    /// blame on a box instead since it learns the boxes last. Review flags the readings this finds, so the reference saved
     /// from the kept ones learns them all.
     ///
     /// # Errors

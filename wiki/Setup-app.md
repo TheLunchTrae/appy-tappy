@@ -614,13 +614,15 @@ the shapes alone, so tiles stay put while the user types.
 
 Kept readings are named by index in the spec the UI sends, so their pixels
 never cross into the UI except as thumbnails. A reference learns its saved
-pictures first, then the labeled screenshots, then the kept readings, and
+pictures first, then the kept readings, then the labeled screenshots, and
 saves the new ones as samples after its old ones. Review sends the characters
-it would save and asks which kept readings it could not learn. The owner
-learns them as saving would, in that order, and leaves out each reading
-that fails, so a
-conflict such as one shape typed as `l` in one reading and `1` in another is
-flagged on the reading that causes it. **Record more** goes on with the stopped
+it would save and asks which kept readings it could not learn, such as one
+whose text has more characters than its picture shows. The owner learns the
+saved pictures and the boxes, then each reading, and leaves out each reading
+that fails. A shape typed as `l` in one reading and `1` in another is no
+failure: the later reading's text is learned, and review flags both
+(`disagreements` in `lib/review.ts`) so the user can fix the wrong one.
+**Record more** goes on with the stopped
 recording only when the region and window size are the
 ones it was recorded with, and otherwise says so rather than start over. The
 window size is the one the region was drawn at, not the one the window has

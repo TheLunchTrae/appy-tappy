@@ -524,8 +524,8 @@ stray shape and draw a box around it instead.
    - A reading whose text gives a shape another character than another
      reading's text gives it, such as a `1` read as `l`, is flagged, and so
      is the other reading, whether they are kept or left out. Neither starts
-     left out. Fix the text that is wrong. While both are kept, **Keep**
-     waits.
+     left out. Fix the text that is wrong. If you keep both as they are, the
+     reference learns the later reading's text.
 
    A reading's **Keep** is set once, when review first shows the reading
    with its text read, and after that only you change it. A reading still
