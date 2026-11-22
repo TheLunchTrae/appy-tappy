@@ -1406,6 +1406,15 @@ fn saved_checks_keep_their_settings() {
          References page to read them, or change the characters the value needs."
     );
     assert_eq!(
+        SpecError::NotRead {
+            reference: "Digits".to_owned(),
+            characters: "%".to_owned(),
+        }
+        .to_string(),
+        "Digits reads none of the characters this value needs, \"%\". Edit Digits to read them, \
+         or change the characters the value needs."
+    );
+    assert_eq!(
         SpecError::OtherApplication.to_string(),
         "That reference belongs to another application. Pick one of this application's."
     );
