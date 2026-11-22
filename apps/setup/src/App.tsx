@@ -36,6 +36,7 @@ import {
   type Made,
   type Opener,
   afterFlow,
+  makesReference,
   applicationFor,
   heldInAll,
   holdsAutomation,
@@ -341,7 +342,7 @@ export function App() {
         open(after.flow, 'flow');
         break;
       case 'listed':
-        goTo(LISTED_ON[ended.kind]);
+        goTo(LISTED_ON[after.of]);
         break;
       case 'page':
         open(null);
@@ -386,6 +387,23 @@ export function App() {
           onDrafted={() => {
             end(flow, 'drafted');
           }}
+          onMakeReference={
+            flow.kind === 'value' && makesReference(flow)
+              ? (reference) => {
+                  open(
+                    {
+                      kind: 'reference',
+                      existing: null,
+                      app: reference.def.app,
+                      resumed: reference,
+                      forValue: true,
+                    },
+                    'flow',
+                  );
+                  background(refresh());
+                }
+              : null
+          }
           {...pickerFor(flow)}
           onHeld={setReported}
           onDraft={reportDraft}
@@ -511,10 +529,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'reference', existing: null, app: null, resumed: null });
+              open({ kind: 'reference', existing: null, app: null, resumed: null, forValue: false });
             }}
             onEdit={(existing) => {
-              open({ kind: 'reference', existing, app: null, resumed: null });
+              open({ kind: 'reference', existing, app: null, resumed: null, forValue: false });
             }}
             onFinish={finish}
             onDeleteDraft={removeDraft}

@@ -44,8 +44,8 @@ export function ReferencePicker(props: Props) {
         </span>
         {references.length === 0 ? (
           <p className="note">
-            {appName} has no references yet. Make one on the References page, then pick it here. Save as draft keeps
-            this value until then.
+            {appName} has no references yet. Once one is made on the References page, pick it here. Until then, Save
+            value keeps this value as a draft.
           </p>
         ) : (
           <div className="refs" role="group" aria-labelledby="reference-title">

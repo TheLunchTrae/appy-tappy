@@ -1110,6 +1110,9 @@ stateDiagram-v2
     Saving --> Open: the save fails, the flow shows why
     Saving --> Open: saved with a flow waiting, which shows again with what was made
     Saving --> Page: saved with none waiting, the page that lists it opens
+    Saving --> Page: a reference made for a value draft is saved, the Values page opens
+    Open --> SavingDraft: Save and make a reference in a new value opened from its page
+    SavingDraft --> Open: the reference's draft and the value's are saved, the reference flow opens on the first
     Saving --> Saving: the tabs, Cancel, and Leave wait until the save ends
     Open --> SavingDraft: Save as draft in the open flow
     SavingDraft --> Open: the draft save fails, the flow shows why
@@ -1160,7 +1163,12 @@ draft opens from its page with none waiting:
   flow, with the number of the newest read of the saved lists started before
   the save was heard. **Cancel** shows the opener as it was left. With none waiting, a save
   opens the page that lists what was saved and **Cancel** the page under the
-  flow.
+  flow. **Save and make a reference** saves a reference's draft and the new
+  value's draft beside it (`saveBeside`, which deletes the reference's draft
+  again when the value's fails), then opens the reference flow on that draft
+  with `forValue` set. That flow's save opens the Values page, where the
+  value's draft finishes with the reference; its draft and **Cancel** end as
+  any reference flow's.
 - **Tab.** What leaving loses is what the open flow reports
   (`apps/setup/src/lib/unsaved.ts`) together with the draft of an automation
   that waits (`heldInAll`). A fix and an edit start from the screenshot the

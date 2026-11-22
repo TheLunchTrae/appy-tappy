@@ -10,15 +10,20 @@ export function DraftPill({ changes = false }: { readonly changes?: boolean }) {
   return <span className={changes ? 'pill changes' : 'pill draft'}>{changes ? 'Draft changes' : 'Draft'}</span>;
 }
 
-/** What a draft row says under its name: what is still to do, or why it cannot be finished. */
+/**
+ * What a draft row says under its name: why it cannot be finished, or else `ready`, what finishing it gives it, or
+ * else what is still to do.
+ */
 export function DraftNote({
   missing,
   problem,
+  ready = null,
 }: {
   readonly missing: readonly string[];
   readonly problem: string | null;
+  readonly ready?: string | null;
 }) {
-  return <small className="warn draft-missing">{problem ?? unfinishedText(missing)}</small>;
+  return <small className="warn draft-missing">{problem ?? ready ?? unfinishedText(missing)}</small>;
 }
 
 interface ActionsProps {
@@ -141,6 +146,8 @@ export function DeleteDraft({ changes, disabled, onDelete }: DeleteProps) {
 interface CaptureRowProps {
   readonly resumed: Resumed;
   readonly problem: string | null;
+  /** What finishing the draft gives it, which the row says in place of what it still needs, or null. */
+  readonly ready?: string | null;
   /** The cells between the name and the buttons, which differ from page to page. */
   readonly cells: (setup: CaptureSetup | null) => ReactNode;
   readonly onFinish: () => void;
@@ -148,7 +155,7 @@ interface CaptureRowProps {
 }
 
 /** A value, fix, or reference draft's row: its name and what is left to do, the page's cells, and its buttons. */
-export function CaptureDraftRow({ resumed, problem, cells, onFinish, onDelete }: CaptureRowProps) {
+export function CaptureDraftRow({ resumed, problem, ready = null, cells, onFinish, onDelete }: CaptureRowProps) {
   const { def } = resumed;
   const fix = def.kind === 'fix';
   const name = fix ? `Fix of ${def.name}` : def.name;
@@ -156,7 +163,7 @@ export function CaptureDraftRow({ resumed, problem, cells, onFinish, onDelete }:
     <tr className="draft-row">
       <td>
         {name} <DraftPill changes={fix || def.changes !== null} />
-        <DraftNote missing={def.missing} problem={problem} />
+        <DraftNote missing={def.missing} problem={problem} ready={ready} />
       </td>
       {cells(keptSetup(def))}
       <td className="end">

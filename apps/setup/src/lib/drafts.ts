@@ -140,6 +140,8 @@ interface DraftSaving {
   readonly saving: boolean;
   /** Why the last save or delete of the draft failed, or null. */
   readonly error: string | null;
+  /** Saves the draft and keeps the flow open, for a flow that closes itself once the save worked. */
+  readonly save: DraftSaver;
   /** Saves the draft and, once that worked, closes the flow. */
   readonly saveAndClose: () => Promise<void>;
   /** Deletes the draft the flow finishes and, once that worked, closes the flow without saving its item. */
@@ -197,6 +199,7 @@ export function useDraft(
   return {
     saving,
     error,
+    save,
     saveAndClose: async () => {
       if (!('failed' in (await save()))) {
         onClosed();
@@ -229,4 +232,18 @@ export function useDraft(
       }
     },
   };
+}
+
+/**
+ * Saves `first`, a new draft, with the capture's screenshots, then the flow's own draft with `save`, and answers
+ * `first` as it is saved. When the flow's draft fails to save, `first` is deleted again, so neither is kept, and the
+ * answer is null; `save` says why. A failure to save or delete `first` throws.
+ */
+export async function saveBeside(first: DraftDef, save: DraftSaver): Promise<Resumed | null> {
+  const id = await saveDraft(null, first, true);
+  if ('failed' in (await save())) {
+    await deleteDraft(id);
+    return null;
+  }
+  return { id, def: first };
 }

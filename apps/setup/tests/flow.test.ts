@@ -21,6 +21,7 @@ import {
   keepStep,
   keptAutomation,
   leaveQuestion,
+  makesReference,
   resumedFlow,
   savedNote,
   startOf,
@@ -73,7 +74,7 @@ const typed = { ...EMPTY_DRAFT, name: 'Pause music' };
 /** A new automation with a name typed, as it waits under a flow it opened. */
 const waits = waiting(automation, typed);
 const value: ValueFlow = { kind: 'value', changing: null, app: null, opener: null, resumed: null };
-const reference: RefFlow = { kind: 'reference', existing: null, app: null, resumed: null };
+const reference: RefFlow = { kind: 'reference', existing: null, app: null, resumed: null, forValue: false };
 const application: ApplicationFlow = { kind: 'application', existing: null, opener: null, resumed: null };
 
 const canceled: Ended = { kind: 'canceled' };
@@ -186,17 +187,28 @@ describe('a flow opened for another ends', () => {
 
 describe('a flow opened from a page ends', () => {
   test('shows the page that lists what it saved, and the page under it when canceled', () => {
-    expect(afterFlow(application, savedPlayer, true)).toEqual({ kind: 'listed' });
-    expect(afterFlow(value, saved({ app: 'example', value: 'progress' }), true)).toEqual({ kind: 'listed' });
-    expect(afterFlow(automation, saved(null), true)).toEqual({ kind: 'listed' });
+    expect(afterFlow(application, savedPlayer, true)).toEqual({ kind: 'listed', of: 'application' });
+    expect(afterFlow(value, saved({ app: 'example', value: 'progress' }), true)).toEqual({
+      kind: 'listed',
+      of: 'value',
+    });
+    expect(afterFlow(automation, saved(null), true)).toEqual({ kind: 'listed', of: 'automation' });
+    expect(afterFlow(reference, savedPlayer, true)).toEqual({ kind: 'listed', of: 'reference' });
     expect(afterFlow(application, canceled, true)).toEqual({ kind: 'page' });
     expect(afterFlow(reference, canceled, true)).toEqual({ kind: 'page' });
   });
 
   test('shows the page that lists its draft once the draft is saved or deleted', () => {
-    expect(afterFlow(automation, drafted, true)).toEqual({ kind: 'listed' });
-    expect(afterFlow(value, drafted, true)).toEqual({ kind: 'listed' });
+    expect(afterFlow(automation, drafted, true)).toEqual({ kind: 'listed', of: 'automation' });
+    expect(afterFlow(value, drafted, true)).toEqual({ kind: 'listed', of: 'value' });
     expect(afterFlow(value, drafted, false)).toEqual({ kind: 'nothing' });
+  });
+
+  test('a reference made for a value draft shows the Values page once saved, and its own draft on References', () => {
+    const forValue: RefFlow = { ...reference, forValue: true };
+    expect(afterFlow(forValue, savedPlayer, true)).toEqual({ kind: 'listed', of: 'value' });
+    expect(afterFlow(forValue, drafted, true)).toEqual({ kind: 'listed', of: 'reference' });
+    expect(afterFlow(forValue, canceled, true)).toEqual({ kind: 'page' });
   });
 });
 
@@ -495,6 +507,7 @@ describe('a draft opens the flow that finishes it', () => {
       existing: { app: 'example', reference: percent },
       app: 'example',
       resumed: reference,
+      forValue: false,
     });
     expect(resumedFlow(of('reference', 'gone', 'example'), [saved], [])).toMatchObject({ existing: null });
     expect(resumedFlow(of('reference', null, 'example'), [saved], [])).toMatchObject({ existing: null });
@@ -701,4 +714,18 @@ describe('leaving a stack of flows with Save as draft', () => {
       effects: [],
     });
   });
+});
+
+test('only a new value opened from its page makes a reference in its place', () => {
+  expect(makesReference({ kind: 'value', changing: null, app: null, opener: null, resumed: null })).toBe(true);
+  expect(makesReference(valueFor(waits, 'example'))).toBe(false);
+  expect(
+    makesReference({
+      kind: 'value',
+      changing: { app: 'example', value: progress, how: 'fix' },
+      app: null,
+      opener: null,
+      resumed: null,
+    }),
+  ).toBe(false);
 });

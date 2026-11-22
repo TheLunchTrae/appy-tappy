@@ -58,7 +58,9 @@ back to the automation with the value picked.
 3. **Characters,** for a **Number**. Say which characters it needs and pick
    the reference the number reads with, as [Checks](#checks) describes.
    References are made and taught on their own page, never in this step:
-   see [Make a reference](References.md#make-a-reference). This step and
+   see [Make a reference](References.md#make-a-reference). A value can
+   wait for one, as [A value without a reference](#a-value-without-a-reference)
+   describes. This step and
    **Check and save** don't show the region, apart from a recording's
    outline; go back to **Where to read** to change it. Then select
    **Next: check and save**.
@@ -80,6 +82,27 @@ back to the automation with the value picked.
 
 The steps show above the fields, each with its number, and a tick once it has
 what it sets. Select a step to go to it.
+
+### A value without a reference
+
+A **Number** reads with a reference, but you don't need one to set the value
+up. Once it has a name and a region but no reference, **Save value** keeps
+the value as a [draft](Drafts.md), and the Values page lists it under its application as
+**Needs a reference**, with no **Finish** yet. Once a reference that has learned
+every character the value needs is saved, the row says
+**Ready to finish with** that reference, and **Finish** opens the value on
+**Check and save** with it picked. With more than one that fits, it picks the
+newest.
+
+While the application has no reference at all, **Characters** offers
+**Save and make a reference**. It keeps the value as a draft and opens
+**New reference** on its own, starting from the value's screenshot and region
+once you capture the window again. The new reference reads the characters the
+value needs, or the digits while it needs none in particular. Saving the
+reference brings you to the Values page, where the value's row shows
+**Finish** once the reference has learned every character the value needs.
+A value you make for an automation doesn't offer it: **Save value** keeps
+that value as a draft and returns to the automation without it.
 
 To use other keys for the screenshot shortcut, select **Change shortcut** and
 press them, or change it in [Settings](Settings.md). F1 to F24, Print Screen,
@@ -300,9 +323,9 @@ instant can then be missed.
   characters the value needs lists them after **Missing**; it still reads the
   characters it knows. To make a reference, or teach one a digit it does not
   know yet, go to the References page, as
-  [Make a reference](References.md#make-a-reference) describes. While the
-  application has no reference, the step says so: select **Save as draft**,
-  make the reference, then [finish the draft](Drafts.md) and pick it. Turn on
+  [Make a reference](References.md#make-a-reference) describes. While no
+  reference is picked, the value is kept as a draft, as
+  [A value without a reference](#a-value-without-a-reference) describes. Turn on
   **Whole number only** to ignore every digit after the
   decimal point, so `87.5%` reads as 87. The reference still has to know the
   point, so teach it on a screenshot that shows one.

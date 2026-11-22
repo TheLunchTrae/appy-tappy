@@ -66,7 +66,10 @@ or delete it ([What AppyTappy keeps](Getting-started.md#what-appytappy-keeps)).
 Drafts show on the page that lists what they make, with a **Draft** mark and
 what each still needs. An automation or application draft shows under the
 saved ones. A value, fix, or reference draft shows under its application. A
-value can have several fix drafts. AppyTappy doesn't match them to window
+value can have several fix drafts. A value kept without a reference has
+**Finish** once its application has a reference it can read with, as
+[A value without a reference](Values.md#a-value-without-a-reference)
+describes. AppyTappy doesn't match them to window
 sizes: **Fix at this size** always starts a new fix, and you finish a fix
 draft from its own row.
 

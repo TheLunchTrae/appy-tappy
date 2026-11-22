@@ -1,9 +1,10 @@
 // What a draft of a value, a fix, or a reference keeps of the capture screen, and what it still needs.
 
 import type { AppSummary, DraftDef, ReferenceDef, ValueDef } from './bindings.ts';
-import { type Built, type CheckKind, type Draft, fixDraft } from './check.ts';
-import { type Kept, draftProblem, isKept } from './drafts.ts';
+import { type Built, type CheckKind, type Draft, EMPTY_DRAFT, NEEDS_REFERENCE, fixDraft } from './check.ts';
+import { type Kept, type Resumed, draftProblem, isKept, keep } from './drafts.ts';
 import { DIGITS, expectedSet } from './expected.ts';
+import { referenceCharacters } from './reference.ts';
 import { NAME_THE_REFERENCE } from './teaching.ts';
 import { sameContent } from './unsaved.ts';
 
@@ -176,4 +177,87 @@ export function captureProblem(def: DraftDef, apps: readonly AppSummary[]): stri
   return value !== undefined && fixOutdated(def, value)
     ? 'The value it fixes was changed since, so this fix no longer fits it.'
     : null;
+}
+
+/**
+ * What a value draft kept without a reference waits for: a number kept without one either waits for its
+ * application to have a reference it can read with, or is ready to finish with the one it has.
+ */
+export type ReferenceWait =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'waiting' }
+  | { readonly kind: 'ready'; readonly reference: ReferenceDef };
+
+/**
+ * Whether **Save value** keeps a new value as a draft for want of a reference alone: it has its side and its
+ * screenshot, and of what `missing` lists, the reference is all that is left, since the capture asks for a name and
+ * a region first.
+ */
+export function keptForReference(hasSide: boolean, drawnOn: number | null, missing: readonly string[]): boolean {
+  return hasSide && drawnOn !== null && missing.includes(NEEDS_REFERENCE);
+}
+
+/**
+ * What the draft `def` waits for of `references`, its application's saved references. A number kept without a
+ * reference, and nothing else the capture asks for first, is ready with the newest that has learned some
+ * characters and every character the value needs; any other draft waits for none.
+ */
+export function referenceWait(def: DraftDef, references: readonly ReferenceDef[]): ReferenceWait {
+  const draft = def.kind === 'value' ? keptSetup(def)?.draft : undefined;
+  if (draft?.kind !== 'number' || draft.reference !== null || !def.missing.includes(NEEDS_REFERENCE)) {
+    return { kind: 'none' };
+  }
+  const reference = references.findLast((each) => {
+    const reads = referenceCharacters(each);
+    return reads.length > 0 && draft.characters.every((character) => reads.includes(character));
+  });
+  return reference === undefined ? { kind: 'waiting' } : { kind: 'ready', reference };
+}
+
+/**
+ * The value draft `resumed` as Finish opens it once `reference` is saved: with that reference picked, on the step
+ * that checks how the value reads and saves it.
+ */
+export function finishedWith(resumed: Resumed, reference: ReferenceDef): Resumed {
+  const { def } = resumed;
+  if (def.kind !== 'value' || !isKept<CaptureKept>(def.state, 'value')) {
+    return resumed;
+  }
+  const stored = def.state.state;
+  return {
+    ...resumed,
+    def: {
+      ...def,
+      state: keep('value', { ...stored, step: 'check', draft: { ...stored.draft, reference: reference.id } }),
+    },
+  };
+}
+
+/**
+ * The draft of a new reference that **Save and make a reference** opens for the value `setup` sets up for the
+ * application `app`: one box at the value's region, on the screenshot it is drawn on, to read the characters the
+ * value needs, or the digits while it needs none in particular. Null while the value has no region.
+ */
+export function referenceForValue(app: string, setup: CaptureSetup): DraftDef | null {
+  const { region, drawnOn, characters } = setup.draft;
+  if (region === null || drawnOn === null) {
+    return null;
+  }
+  const reads = characters.length > 0 ? characters : DIGITS.characters;
+  const reference: CaptureSetup = {
+    valueName: '',
+    step: 'where',
+    mayMove: false,
+    editing: { existing: null, name: '', reads },
+    draft: { ...EMPTY_DRAFT, boxes: [{ id: 0, screenshot: drawnOn, region, text: '' }] },
+  };
+  return {
+    kind: 'reference',
+    app,
+    changes: null,
+    name: 'New reference',
+    missing: [NAME_THE_REFERENCE],
+    pictures: [],
+    state: keep('reference', storeSetup(reference)),
+  };
 }
