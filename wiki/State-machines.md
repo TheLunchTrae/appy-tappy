@@ -2789,6 +2789,7 @@ stateDiagram-v2
     Idle --> Idle: the look thread is gone, which stops the recording
     Out --> Abandoned: Record more after a stop, or a frame the recording is not placed at arrives
     Abandoned --> Out: the look answers or fails, its answer is dropped, and the newest frame goes out
+    Abandoned --> Idle: the look answers or fails while the recording is not placed at the newest frame's size
 ```
 
 - **Idle** holds when the last frame that went out arrived. A frame less
@@ -2801,7 +2802,7 @@ stateDiagram-v2
 - **Abandoned** is a look that is out and whose answer no longer counts. It
   skips every frame like **Out**. When the answer comes it is dropped and
   the window's newest frame goes out at once, since a still window sends no
-  next frame.
+  next frame, unless the recording is not placed at that frame's size yet.
 - The answer (`Event::Looked`) carries the recording's ticket and when its
   frame arrived. The owner drops one for a recording that was discarded or
   replaced. The recording counts and keeps the runs it holds, and sends each
