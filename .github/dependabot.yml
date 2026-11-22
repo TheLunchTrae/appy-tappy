@@ -27,6 +27,15 @@ updates:
     groups:
       rust:
         patterns: ['*']
+    # `windows-future` has to be the release line the `windows` crate itself
+    # depends on, or its async types don't match the ones `windows` returns
+    # and the Windows adapter doesn't compile. A new line moves by hand
+    # together with `windows`.
+    ignore:
+      - dependency-name: windows-future
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
 
   # The Markdown tooling at the root and the setup UI each have a Bun lockfile.
   - package-ecosystem: bun
