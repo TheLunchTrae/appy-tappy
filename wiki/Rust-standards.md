@@ -131,8 +131,8 @@ saves. `.cargo/mutants.toml` deals the mutants out round-robin, so each shard
 gets a share of every file: a mutant in a crate deep in the workspace, such as
 the number reader's, rebuilds and retests every package above it, and a
 slice of them would run far longer than the other shards. A rewrite of the
-number reader selects about 530 mutants, and its 17 shards each take 16 to
-25 minutes. The mutation step stops before the job's `timeout-minutes`, so a
+number reader selects about 530 mutants, and its 17 shards each take 17 to
+26 minutes. The mutation step stops before the job's `timeout-minutes`, so a
 shard that runs too long keeps its log and uploads its `mutants.out/`.
 
 The **Mutation sweep** workflow, `.github/workflows/mutation-sweep.yml`, runs
