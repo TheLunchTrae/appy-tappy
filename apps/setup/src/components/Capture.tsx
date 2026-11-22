@@ -749,7 +749,10 @@ export function Capture({
   // application has a reference it can read with.
   const keepsWithoutReference = mode.kind === 'value' && keptForReference(hasSide, draft.drawnOn, missing);
   // Whether **New reference** is picked where it is offered, which makes the step's Next make the reference.
-  const makesNew = onMakeReference !== null && newReference;
+  // A number that is not a fix picks its reference and characters in its second step, Characters.
+  const picksReference = draft.kind === 'number' && fixing === null;
+  // New reference stays picked while the check is another kind, and offers nothing then.
+  const makesNew = picksReference && onMakeReference !== null && newReference;
   // Saves a reference's draft, starting from the value's screenshot and region, then the value's draft beside it,
   // and opens the reference's. A value whose draft fails to save takes the reference's draft back.
   const makeReference = async (): Promise<void> => {
@@ -775,9 +778,6 @@ export function Capture({
   // The saved reference a fix of a number shares with its first drawing.
   const fixedCheck = fixing?.screen.check;
   const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
-  // A number's characters and its check are steps of their own; other kinds read and save in their second step.
-  // A number that is not a fix picks its reference and characters in its second step, Characters.
-  const picksReference = draft.kind === 'number' && fixing === null;
   // The value's place is drawn over the live window, and the press takes the screenshot it goes on.
   const liveFrame = liveDrawFrame({
     settingPlace: step === 'where' && editing === null,
@@ -1237,6 +1237,7 @@ export function Capture({
                   <button
                     type="button"
                     className="btn primary"
+                    aria-busy={saving}
                     disabled={!canSave && !(keepsWithoutReference && !busy)}
                     onClick={() => {
                       background(keepsWithoutReference ? drafting.saveAndClose() : save());

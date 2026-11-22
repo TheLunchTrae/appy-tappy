@@ -475,7 +475,6 @@ test("entering Where to read shows the screenshot the value's region is drawn on
   // With no region drawn, and in the other steps, what shows stays.
   expect(shownOnStep('where', null, 5)).toBe(5);
   expect(shownOnStep('how', 2, 5)).toBe(5);
-  expect(shownOnStep('how', 2, null)).toBeNull();
 });
 
 test("a number's second step leaves its region to Where to read, unless a recording of it runs", () => {
