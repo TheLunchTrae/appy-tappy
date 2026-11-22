@@ -2168,7 +2168,7 @@ a `Settle` that says when frames have kept a new size. `Follows`
 are at another window size. It asks the application's answer on how often
 its window changes size: **Often** scales them as a saved value scales
 ([Window sizes](Screen-regions.md#window-sizes)), with the region staying at
-the side the value stays at, and **Rarely** records only at the size the
+the side it is nearest, and **Rarely** records only at the size the
 region was drawn at. A recording of the region alone records the scaled
 region's pixels, so the region must lie inside the window
 (`Follows::region`). A recording of the whole window only looks near the

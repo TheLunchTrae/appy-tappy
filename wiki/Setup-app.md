@@ -546,8 +546,7 @@ character is one shape.
   application whose window changes size often, the region is scaled with
   `scale::scaled` and a text size with `scale::scaled_length`, both by the
   window's new height over the height it was drawn at. The region stays at
-  the side the page sends (`RecordSpec::pin`), or the side the region is
-  nearest when it sends none (`PinDef::guess`), as the live check places a
+  the side it is nearest (`PinDef::guess`), as the live check places a
   reference. For an
   application whose window rarely changes size, nothing is guessed: the
   recording waits for the size the region was drawn at. A recording of the
