@@ -17,3 +17,10 @@ exclude_globs = [
 # runner. Keep this floor above how long the whole workspace's tests take
 # under that load.
 minimum_test_timeout = 120
+
+# Both lanes' shards take the mutants round-robin rather than in slices, so
+# each gets a share of every file's mutants. A slice holds one file's
+# neighboring mutants, and a file deep in the workspace, such as the number
+# reader's, rebuilds and retests every package above it for each mutant, so
+# its slice runs far longer than the rest.
+sharding = "round-robin"

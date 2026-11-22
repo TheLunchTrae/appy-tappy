@@ -969,6 +969,11 @@ fn visit(width: usize, at: usize, mut visit: impl FnMut(usize)) {
 /// Marks in `held` every pixel that the `reached` ones reach, step by step
 /// to a neighbor that `passes(from, to)`. The `reached` ones are held
 /// already.
+///
+/// Only a pixel not held yet is reached again, so the loop ends. A pattern
+/// says so rather than a test of the slot, which mutation testing could
+/// invert into a loop that never ends and grows `reached` until the
+/// machine runs out of memory.
 fn spread(
     width: usize,
     held: &mut [bool],
@@ -977,8 +982,7 @@ fn spread(
 ) {
     while let Some(at) = reached.pop() {
         visit(width, at, |next| {
-            if let Some(slot) = held.get_mut(next)
-                && !*slot
+            if let Some(slot @ &mut false) = held.get_mut(next)
                 && passes(at, next)
             {
                 *slot = true;

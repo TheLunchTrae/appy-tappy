@@ -155,7 +155,10 @@ pub(crate) fn grow(image: &Image, x: u32, y: u32, tolerance: u8) -> Option<Selec
             let near = image
                 .pixel(x, y)
                 .is_some_and(|color| seed.near(color, tolerance));
-            if near && let Some(slot) = filled.get_mut(at).filter(|slot| !**slot) {
+            // A pattern, not a test of the slot, keeps each pixel from being
+            // pushed twice, so no mutant of the test can make this fill
+            // loop until memory runs out.
+            if near && let Some(slot @ &mut false) = filled.get_mut(at) {
                 *slot = true;
                 pending.push((x, y));
             }
@@ -191,9 +194,10 @@ fn fill_holes(selection: &Selection) -> Selection {
         for (column, row) in neighbors(column, row, size) {
             let x = region.x().saturating_add(column);
             let y = region.y().saturating_add(row);
+            // As in `grow`, a pattern keeps each pixel from being pushed twice.
             if !selection.contains(x, y)
-                && let Some(slot) = index(column, row, size).and_then(|at| outside.get_mut(at))
-                && !*slot
+                && let Some(slot @ &mut false) =
+                    index(column, row, size).and_then(|at| outside.get_mut(at))
             {
                 *slot = true;
                 pending.push((column, row));

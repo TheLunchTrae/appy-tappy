@@ -99,9 +99,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/footprint.ps1 -Runti
 # model is one, so both lanes point the setup app's tests at the one
 # ocr:model downloaded with APPYTAPPY_TEXT_READER_MODEL.
 #
-# The mutation sweep workflow runs this lane. Its shards take the mutants
-# round-robin, so each shard gets a share of every crate's mutants and the
-# shards take similar time.
+# The mutation sweep workflow runs this lane. `.cargo/mutants.toml` sets how
+# both lanes' shards take the mutants.
 [tasks."rust:mutants"]
 description = "Mutation-test the whole workspace; a surviving mutant is a review finding"
 depends = ["ocr:model"]
@@ -113,7 +112,7 @@ export APPYTAPPY_TEXT_READER_MODEL="$PWD/apps/setup/src-tauri/models/text-recogn
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
   cargo test --no-run --workspace --all-features --locked
 fi
-cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} ${MUTANTS_SHARD:+--sharding=round-robin}
+cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"}
 sh scripts/check-mutants.sh full mutants.out
 """
 
