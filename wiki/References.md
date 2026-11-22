@@ -97,9 +97,7 @@ percentage doesn't pick up the names and labels around it.
 
 Turn on every character its values show. A value can need fewer of them, but
 not more: a value reads only the characters both it and its reference read.
-To read every character the reference learns, turn them all off. A reference
-saved before it had this choice reads every character it learns until you
-choose.
+To read every character the reference learns, turn them all off.
 
 It still learns every character a box shows, since a box's text has a
 character for each one, as [Boxes](#boxes) describes. A character it learns
@@ -114,9 +112,10 @@ can read it.
 When you turn off a character that a saved value needs, a note under
 **Characters it reads** names the value and the character, such as
 `Progress needs %, which it would no longer read.` Turn the character back
-on, or change what the value needs. If you save anyway, the value names
-this reference when you next save it, and AppyTappy doesn't read the
-characters the reference no longer reads.
+on, or change what the value needs. If you save anyway, the value stops
+reading those characters. When the reference reads none of the characters
+a value needs, AppyTappy doesn't read the value, and saving the value names
+this reference to edit.
 
 ## Boxes
 

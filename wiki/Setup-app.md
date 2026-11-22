@@ -1043,6 +1043,7 @@ saved file still names.
       "id": "percent_font",
       "name": "Percent font",
       "origin": { "kind": "recording" },
+      "characters": "0123456789.%",
       "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }]
     }
   ]
@@ -1128,12 +1129,16 @@ check may have it, and it changes nothing the value reads. Each of its `fixes` h
 region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
 
+A reference's `characters` is the characters it reads, such as
+`"0123456789.%"`, and is left out when it reads every character it learns.
 A number check's `characters` is the characters the value needs of its
 reference, such as `"0123456789%"`, and is left out when it reads every
-character the reference knows. Whitespace in it does not count, and neither
-does a character the reference has yet to learn. A check that names
-characters names at least one, or the file does not load; a value whose
-reference, or whose fix's reference, knows none of them is not read. The
+character the reference reads. The value reads only the characters both
+lists hold. Whitespace in either does not count, and neither does a
+character the reference has yet to learn. A check that names characters
+names at least one, or the file does not load; a value whose reference, or
+whose fix's reference, reads none of them, or knows none of them, is not
+read. The
 setup app writes each character once, the digits first, then the rest by
 code point. Its live check reads with the same glyphs, since `saved::build` chooses
 them for both.

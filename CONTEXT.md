@@ -79,8 +79,9 @@ parts fit.
   labeled pictures of its text. A number check reads with one, at any size
   and in any color. A reference reads only the characters chosen for it,
   which the UI calls **Characters it reads**, or every character it learns
-  when none are chosen. Finding text like a box and recording look only for
-  those characters too.
+  when none are chosen. Finding text like a box lists only text that may show
+  those characters, and a recording's review starts readings without them
+  unkept.
 - **Rule.** A condition on signals, the actions to run when it starts to hold,
   a cooldown, and whether those actions restore.
 - **Runtime.** The always-on background program.
