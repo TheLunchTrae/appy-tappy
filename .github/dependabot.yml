@@ -27,11 +27,13 @@ updates:
     groups:
       rust:
         patterns: ['*']
-    # `windows-future` has to be the release line the `windows` crate itself
-    # depends on, or its async types don't match the ones `windows` returns
-    # and the Windows adapter doesn't compile. A new line moves by hand
-    # together with `windows`.
+    # `windows` and `windows-future` move to a new release line together, by
+    # hand; crates/actions/Cargo.toml says why. Patch releases still come.
     ignore:
+      - dependency-name: windows
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
       - dependency-name: windows-future
         update-types:
           - version-update:semver-major
