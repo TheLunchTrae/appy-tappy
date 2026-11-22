@@ -1172,7 +1172,7 @@ draft opens from its page with none waiting:
   value's draft beside it (`saveBeside`, which deletes the reference's draft
   again when the value's fails), then opens the reference flow on that draft
   with the value's draft as `forValue`. That flow's save opens the value flow
-  on the value's draft, on **Check and save** with the saved reference picked
+  on the value's draft, on **Characters** with the saved reference picked
   (`finishedWith`), whatever the reference has learned so far, so the check
   shows what it still can't read; its draft and **Cancel** end as any
   reference flow's, and the value stays a draft. Whether **New reference** is
@@ -2469,18 +2469,14 @@ it is and that screenshot is removed again.
 ### Value steps
 
 The capture screen sets a value up in steps, one field `step` of
-`CaptureSetup` (`apps/setup/src/lib/captureDraft.ts`): `where`, `how`, and
-`check`. `stepTabs` in `apps/setup/src/components/capture/Stepper.tsx` names
-them.
+`CaptureSetup` (`apps/setup/src/lib/captureDraft.ts`): `where` and `how`.
+`stepTabs` in `apps/setup/src/components/capture/Stepper.tsx` names them.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Where
     Where --> How: Next, or the step's tab
-    How --> Check: Next, or the step's tab, for a number
     How --> Where: Back, or the step's tab
-    Check --> How: Back, or the step's tab
-    Check --> Where: the step's tab
 ```
 
 - **Where** (**Where to read**) names the value, picks its check, and sets
@@ -2497,12 +2493,9 @@ stateDiagram-v2
   characters the value needs and one of the application's saved references.
   It makes, edits, and records for no reference: a reference is set up only
   in a reference's own capture, from the References page. For every
-  other value it is **How to read it**: the check's fields, the reading on
-  the live window, and the save.
-- **Check** (**Check and save**) exists for a number that is not a fix: the
-  reading on the live window and the save. A value of another kind whose
-  `step` is `check`, such as after its check changed, shows **How**
-  (`shownStep`).
+  other value it is **How to read it**: the check's fields. Either way the
+  step holds the reading on the live window and the save; a number's
+  reading shows first, above its reference.
 - A tab is ticked once its step has what it sets: a name and a region for
   **Where**, and a reference for **Characters**. No step blocks the next;
   the save button waits until the whole value can be saved.

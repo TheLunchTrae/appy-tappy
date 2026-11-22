@@ -55,20 +55,19 @@ back to the automation with the value picked.
    can leave it alone. Then select **Next: characters** for a **Number**, or
    **Next: how to read it** for the other checks.
 
-3. **Characters,** for a **Number**. Say which characters it needs and pick
-   the reference the number reads with, as [Checks](#checks) describes.
-   References are made and taught on their own page, never in this step:
-   see [Make a reference](References.md#make-a-reference). A value can
-   wait for one, as [A value without a reference](#a-value-without-a-reference)
-   describes. This step and
-   **Check and save** don't show the region, apart from a recording's
-   outline; go back to **Where to read** to change it. Then select
-   **Next: check and save**.
-4. **Check and save,** for a **Number**, or **How to read it** for the other
-   checks, which set up the check here, as [Checks](#checks) describes, and
-   take more screenshots where the check needs them, such as one for each
-   look of a **State**. AppyTappy can also take those for you while you use
-   the application: [record them](#record-screenshots). The box in this
+3. **Characters,** for a **Number**, or **How to read it** for the other
+   checks. For a **Number**, the box at the top shows what it reads now.
+   Below it, say which characters it needs and pick the reference the number
+   reads with, as [Checks](#checks) describes. References are made and taught
+   on their own page, never in this step: see
+   [Make a reference](References.md#make-a-reference). A value can wait for
+   one, as [A value without a reference](#a-value-without-a-reference)
+   describes. This step doesn't show a number's region, apart from a
+   recording's outline; go back to **Where to read** to change it. The other
+   checks set up the check here, as [Checks](#checks) describes, and take
+   more screenshots where the check needs them, such as one for each look of
+   a **State**. AppyTappy can also take those for you while you use the
+   application: [record them](#record-screenshots). The box in this
    step shows what AppyTappy reads on the live window, a few times a second,
    where and how an automation reads the value once it is saved. While the
    window has a size the value isn't read at, the box says so, as
@@ -76,7 +75,7 @@ back to the automation with the value picked.
    If the check cannot work, such as a bar whose filled and empty colors are
    the same, it says why there, and so it does when it can't read the live
    window, such as a number with a character its reference hasn't learned.
-5. **Save.** Select **Save value**. **Back** returns to the step before. To
+4. **Save.** Select **Save value** in that step. **Back** returns to the step before. To
    finish it later, select **Save as draft** on any step
    ([Drafts](Drafts.md)).
 
@@ -91,7 +90,7 @@ the value as a [draft](Drafts.md), and the Values page lists it under its applic
 **Needs a reference**, with no **Finish** yet. Once a reference that has learned
 every character the value needs is saved, the row says
 **Ready to finish with** that reference, and **Finish** opens the value on
-**Check and save** with it picked. With more than one that fits, it picks the
+**Characters** with it picked. With more than one that fits, it picks the
 newest.
 
 To make the reference as you go, pick **New reference** at the end of the
@@ -100,8 +99,8 @@ references under **Characters**. The step's button becomes
 **New reference** on its own page, starting from the value's screenshot and
 region once you capture the window again. The new reference reads the
 characters the value needs, or the digits while it needs none in particular.
-Saving the reference brings you back to the value on **Check and save**, with
-the new reference picked, once you capture the window again. The check there
+Saving the reference brings you back to the value on **Characters**, with
+the new reference picked, once you capture the window again. The box there
 says which characters the reference still has to learn, if any. If you save the
 reference as a draft or cancel it instead, the value stays a draft. A value
 you make for an automation doesn't offer **New reference**: **Save value**
@@ -758,10 +757,10 @@ headed **Fix** and saves with **Save fix**.
    A **Color** or **State** check cannot have a reading area, so changing
    the check to one of them turns it off.
 3. **How to read it.** Change the colors, the states' names, or the
-   **Tolerance**. A **Number** has two steps here, as a new one does:
-   **Characters** picks another reference and changes **Whole number only**, and
-   **Check and save** follows. The box in the last step shows what the value
-   would read on the live window once saved.
+   **Tolerance**. For a **Number** this step is **Characters**, as for a
+   new one: it picks another reference and changes **Whole number only**.
+   The box in this step shows what the value would read on the live window
+   once saved.
 4. Select **Save changes**. **Discard**, or leaving the editor, keeps the
    value as it was saved. Leaving asks first only once you changed
    something. An edit can't be saved as a [draft](Drafts.md): it changes a

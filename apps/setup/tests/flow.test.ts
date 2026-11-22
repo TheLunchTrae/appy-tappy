@@ -230,7 +230,7 @@ describe('a flow opened from a page ends', () => {
     const resumed = after.kind === 'flow' && after.flow.kind === 'value' ? after.flow.resumed : null;
     const kept = resumed === null ? null : keptSetup(resumed.def);
     expect(resumed?.id).toBe('value-1');
-    expect(kept?.step).toBe('check');
+    expect(kept?.step).toBe('how');
     expect(kept?.draft.reference).toBe('percent');
     // Its draft and Cancel leave the value a draft, as any reference flow ends.
     expect(afterFlow(forValue, drafted, true)).toEqual({ kind: 'listed' });
