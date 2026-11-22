@@ -424,6 +424,11 @@ impl Recording {
         None
     }
 
+    /// Whether the look that is out has an answer that will be dropped.
+    pub(crate) fn look_abandoned(&self) -> bool {
+        matches!(&self.looking, Looking::Window(scan) if scan.gate == Gate::Abandoned)
+    }
+
     /// Forgets the places the last look found text, and drops the answer
     /// to a look that is out: both are of the window as it was.
     fn drop_look(&mut self) {

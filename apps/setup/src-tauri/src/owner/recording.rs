@@ -90,8 +90,14 @@ impl<H: Host> Owner<H> {
         let Some(current) = self.readings_mut() else {
             return;
         };
+        let abandoned = current.look_abandoned();
         let new = current.looked(at, seen, Instant::now());
         self.read_new(new);
+        // The look that was out held back the newest frame when the user
+        // recorded more, and a still window sends no other.
+        if abandoned {
+            self.record_newest();
+        }
     }
 
     /// Sends each of the recording's `new` readings to the text reader.
@@ -182,7 +188,9 @@ impl<H: Host> Owner<H> {
             {
                 recording.resume(follows, now);
                 recording.look_for(examples);
-                Ok(recording.id.number())
+                let id = recording.id.number();
+                self.record_newest();
+                Ok(id)
             },
             Some(Recorder::Readings(_)) if more => Err(
                 "Recording more needs the settings it was recorded with: the same place, a \
@@ -209,6 +217,7 @@ impl<H: Host> Owner<H> {
                     recording.look_for(examples);
                 }
                 self.record_with(Recorder::Readings(recording));
+                self.record_newest();
                 Ok(id.number())
             },
         }
@@ -288,6 +297,25 @@ impl<H: Host> Owner<H> {
     pub(crate) fn discard_recording(&mut self) {
         if let Some(picked) = self.capture.picked_mut() {
             picked.recording = None;
+        }
+    }
+
+    /// Records the newest frame of the picked window as if it arrived now,
+    /// unless its capture failed since. A window sends a frame only when what it shows
+    /// changes, so a recording that starts on a still screen reads what is
+    /// there from this frame alone.
+    fn record_newest(&mut self) {
+        let now = self.host.now();
+        let newest = self
+            .capture
+            .picked_mut()
+            .filter(|picked| picked.failure.is_none())
+            .and_then(|picked| picked.latest.take());
+        if let Some((frame, arrived)) = newest {
+            self.record(&frame, now);
+            if let Some(picked) = self.capture.picked_mut() {
+                picked.latest = Some((frame, arrived));
+            }
         }
     }
 
@@ -467,8 +495,8 @@ mod tests {
         assert_eq!(jobs, [(id, 0), (id, 1)], "one job per new reading");
         assert_eq!(
             harness.readings(),
-            [(2, Text::Pending), (1, Text::Pending)],
-            "a frame with no ink is skipped"
+            [(3, Text::Pending), (1, Text::Pending)],
+            "the frame shown when it starts counts, and a frame with no ink is skipped"
         );
         // Text under another ticket than the recording's, here its
         // capture's, is dropped.
@@ -482,7 +510,7 @@ mod tests {
         }
         assert_eq!(
             harness.readings(),
-            [(2, Text::Read("1".to_owned())), (1, Text::Pending)]
+            [(3, Text::Read("1".to_owned())), (1, Text::Pending)]
         );
         let recording = harness.recording().expect("a recording").id;
         let pixels_of =
@@ -552,6 +580,24 @@ mod tests {
     }
 
     #[test]
+    fn a_recording_reads_the_frame_shown_when_it_starts_and_when_it_goes_on() {
+        // A window sends no frame while what it shows stays the same.
+        let (mut harness, mut handler, root) = capturing("rec-first-frame");
+        harness.ask(start_recording(false)).expect("records");
+        assert_eq!(harness.readings(), [(1, Text::Pending)]);
+        harness.stop_recording();
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        harness.ask(start_recording(true)).expect("goes on");
+        assert_eq!(harness.readings(), [(1, Text::Pending), (1, Text::Pending)]);
+        // A frame from before the capture failed is not what it shows now.
+        harness.ask(Owner::discard_recording);
+        harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
+        harness.ask(start_recording(false)).expect("records");
+        assert_eq!(harness.readings(), []);
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
     fn a_reading_s_pixels_are_answered_only_for_its_own_recording() {
         let (mut harness, root) = with_example_app("rec-pixels-of-its-own");
         let mut handler = harness.pick();
@@ -568,8 +614,8 @@ mod tests {
         // Discarded and recorded again at once: the page's late ask for the
         // old recording's first reading gets none of the new one's pixels.
         harness.ask(Owner::discard_recording);
-        harness.ask(start_recording(false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(3)));
+        harness.ask(start_recording(false)).expect("records");
         let new = harness.recording().expect("a recording").id;
         assert_ne!(new, old);
         assert_eq!(pixels(&mut harness, old), None, "the old ID is dropped");
@@ -608,7 +654,8 @@ mod tests {
             .iter()
             .map(|shape| (shape.frames, shape.readings))
             .collect();
-        assert_eq!(sightings, [(3, 3), (3, 3)]);
+        // The frame shown when it starts is one more sighting of the first.
+        assert_eq!(sightings, [(4, 3), (3, 3)]);
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -747,8 +794,12 @@ mod tests {
         assert!(harness.owner.handle(stale).is_continue());
         assert_eq!(harness.recording().expect("a recording").spots, []);
         assert_eq!(harness.jobs.try_iter().count(), 0);
+        // An answer that comes once the next look is due sends the frame it
+        // looked over no second time.
+        harness.wait(crate::recording::SCAN_EVERY);
         assert!(harness.owner.handle(looked(job.recording)).is_continue());
         assert_eq!(harness.jobs.try_iter().count(), 1, "read as text");
+        assert_eq!(harness.looks.try_iter().count(), 0);
         let view = harness.recording().expect("a recording");
         assert_eq!(view.settings.scope, Scope::Window);
         assert_eq!(view.spots.len(), 1, "where it found the text");
@@ -762,6 +813,35 @@ mod tests {
         harness
             .ask(start_window_recording(0, true))
             .expect("goes on over the whole window");
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_whole_window_recording_that_goes_on_while_a_look_is_out_looks_at_the_frame_shown() {
+        let (mut harness, root) = with_example_app("rec-window-more-while-out");
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        harness
+            .ask(start_window_recording(0, false))
+            .expect("records");
+        let job = harness.looks.try_iter().next().expect("a look goes out");
+        harness.stop_recording();
+        harness
+            .ask(start_window_recording(0, true))
+            .expect("goes on");
+        assert_eq!(harness.looks.try_iter().count(), 0, "the look is still out");
+        // The old look's answer is dropped, and the still window's frame
+        // goes to be looked over in its place.
+        let answer = Message::Sent {
+            ticket: job.recording,
+            event: Event::Looked {
+                at: job.at,
+                seen: Some(look::look(&job)),
+            },
+        };
+        assert!(harness.owner.handle(answer).is_continue());
+        assert_eq!(harness.looks.try_iter().count(), 1);
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -965,12 +1045,12 @@ mod tests {
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // The look thread ended, so nothing takes the frames, starting
+        // with the frame shown when it starts.
+        drop(std::mem::replace(&mut harness.looks, mpsc::channel().1));
         harness
             .ask(start_window_recording(0, false))
             .expect("records");
-        // The look thread ended, so nothing takes the frames.
-        drop(std::mem::replace(&mut harness.looks, mpsc::channel().1));
-        harness.deliver(&mut handler, Ok(&red_columns(3)));
         let view = harness.recording().expect("a recording");
         assert!(!view.recording);
         assert_eq!(
@@ -980,12 +1060,10 @@ mod tests {
                  again."
             )
         );
-        // Record more sends a frame again, and stops the same way.
+        // Record more sends the frame shown again, and stops the same way.
         harness
             .ask(start_window_recording(0, true))
             .expect("goes on");
-        assert!(harness.recording().expect("a recording").recording);
-        harness.deliver(&mut handler, Ok(&red_columns(3)));
         assert!(!harness.recording().expect("a recording").recording);
         std::fs::remove_dir_all(root).expect("clean up");
     }
@@ -1026,13 +1104,18 @@ mod tests {
         );
         assert_eq!(harness.readings().len(), 2, "kept as it was");
         let replaced = harness.recording().expect("a recording").id;
-        harness
+        let another = harness
             .ask(start_recording_from(1, false))
             .expect("records another place");
-        assert_eq!(harness.readings().len(), 0, "a new recording");
+        assert_eq!(
+            harness.readings().len(),
+            1,
+            "a new recording, of the frame shown"
+        );
         let jobs: Vec<ocr::Source> = harness.jobs.try_iter().map(|job| job.source).collect();
         let source = ocr::Source::Recording(Ticket::numbered(replaced));
-        assert_eq!(jobs, [source, source]);
+        let new = ocr::Source::Recording(Ticket::numbered(another));
+        assert_eq!(jobs, [source, source, new]);
         assert!(
             harness
                 .owner
@@ -1040,8 +1123,8 @@ mod tests {
                 .is_continue()
         );
         assert_eq!(
-            harness.readings().len(),
-            0,
+            harness.readings(),
+            [(1, Text::Pending)],
             "text for the old one is dropped"
         );
         let _next = harness.pick();
@@ -1173,14 +1256,14 @@ mod tests {
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(start_recording(false)).expect("records");
         let (closed, _) = mpsc::channel();
         harness.owner.ocr = closed;
+        harness.ask(start_recording(false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         assert_eq!(
             harness.readings(),
             [(
-                1,
+                2,
                 Text::Failed("The text reader stopped. Type what this shows.".to_owned())
             )]
         );
