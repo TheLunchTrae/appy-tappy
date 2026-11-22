@@ -664,4 +664,17 @@ describe('buildReferenceSave', () => {
   test('a new reference still says what it needs', () => {
     expect(buildReferenceSave({ ...EMPTY_DRAFT }, null).ok).toBe(false);
   });
+
+  test('sends the characters the reference reads either way, and none for every character', () => {
+    const windowless = { ...EMPTY_DRAFT, region };
+    expect(buildReferenceSave(windowless, percent, ['1', '%'])).toEqual({
+      ok: true,
+      spec: { kind: 'settings', reference: percent, dropped: [], characters: '1%' },
+    });
+    const draft = { ...EMPTY_DRAFT, boxes: [{ id: 0, screenshot: 1, region, text: '5' }] };
+    const taught = buildReferenceSave(draft, percent, ['5']);
+    expect(taught.ok && taught.spec.kind === 'taught' && taught.spec.characters.characters).toBe('5');
+    const every = buildReferenceSave(draft, percent, []);
+    expect(every.ok && every.spec.kind === 'taught' && 'characters' in every.spec.characters).toBe(false);
+  });
 });

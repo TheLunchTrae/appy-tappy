@@ -348,8 +348,10 @@ pub struct ValueDef {
 /// every value drawn in its font, whatever its size and color: the reader
 /// knows each character by its shape.
 ///
-/// It is a font and no more: which of its characters a value needs is the
-/// value's to say, in its number check.
+/// It reads only the characters it is made for, such as the digits and
+/// `%`, so text on screen with other characters can't pass for its own.
+/// Each value that reads with it may need fewer of them, in its number
+/// check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ReferenceDef {
@@ -364,6 +366,15 @@ pub struct ReferenceDef {
     pub origin: OriginDef,
     /// The pictures it learns from.
     pub samples: Vec<SampleDef>,
+    /// The characters it reads, such as `0123456789%`, or `None` for every
+    /// character it learns. It still learns every character its pictures
+    /// show, and one it learns but doesn't read still counts as a
+    /// character, not as a shape it has yet to learn. A number check reads
+    /// only the characters both it and its reference read. Whitespace does
+    /// not count, as in a label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub characters: Option<String>,
 }
 
 /// A [`ReferenceDef`] as a file holds it: its keys, and three that no
@@ -380,6 +391,8 @@ struct ReferenceKeys {
     #[serde(default)]
     origin: OriginDef,
     samples: Vec<SampleDef>,
+    #[serde(default)]
+    characters: Option<String>,
     #[serde(default, rename = "expects")]
     _expects: IgnoredAny,
     #[serde(default, rename = "ink")]
@@ -396,6 +409,7 @@ impl<'de> Deserialize<'de> for ReferenceDef {
             name: keys.name,
             origin: keys.origin,
             samples: keys.samples,
+            characters: keys.characters,
         })
     }
 }
@@ -661,16 +675,16 @@ pub enum CheckDef {
         whole: bool,
         /// The characters the value needs of its reference, such as
         /// `0123456789%`, or `None` for every character its reference
-        /// knows. A reference is a font that may know more than one value
-        /// shows, so each value says what it needs. The setup app also
-        /// shows which of them the reference has yet to learn.
+        /// reads. A reference may read more than one value shows, so each
+        /// value says what it needs. The setup app also shows which of
+        /// them the reference has yet to learn.
         ///
         /// The value matches what it sees against these characters alone,
         /// so a value that shows only digits cannot read a `0` as an `O`
         /// its reference also knows. Whitespace does not count, as in a
         /// label, and neither does a character the reference has yet to
-        /// learn. A fix that reads with its own reference reads these
-        /// characters of it.
+        /// learn or does not read. A fix that reads with its own reference
+        /// reads these characters of it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         characters: Option<String>,
@@ -1179,6 +1193,7 @@ mod tests {
                     image: sample_name("percent", 1),
                     text: "87%".to_owned(),
                 }],
+                characters: None,
             }],
         }
     }
@@ -1230,6 +1245,16 @@ mod tests {
         }
         let refused = AppFile::parse(&with_key("inkColor")).expect_err("no such key");
         assert!(refused.to_string().contains("inkColor"), "{refused}");
+    }
+
+    #[test]
+    fn a_reference_s_characters_are_left_out_until_chosen_and_round_trip() {
+        let mut file = dash();
+        assert!(!file.to_json().contains("characters"));
+        file.references[0].characters = Some("0123456789%".to_owned());
+        let json = file.to_json();
+        assert!(json.contains("\"characters\": \"0123456789%\""), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file));
     }
 
     #[test]

@@ -6,7 +6,7 @@ import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
 import type { PinDef, RecordingScope, ReferenceRef, SampleDef, SavedReference } from './bindings.ts';
 import { errorText, saveReference, saveReferenceSettings } from './api.ts';
 import { boxOf } from './boxes.ts';
-import type { Editing } from './captureDraft.ts';
+import { type Editing, teachingNeeds } from './captureDraft.ts';
 import {
   type Built,
   type Draft,
@@ -33,7 +33,6 @@ import { useRecording } from './useRecording.ts';
 import { focusNext, useRecordFocus, useReview } from './useReview.ts';
 
 /** No characters needed, which filters no find; one list, so nothing that depends on it runs again. */
-const NO_NEEDS: readonly string[] = [];
 
 /** The saved samples of a new reference. */
 const NO_SAMPLES: readonly SampleDef[] = [];
@@ -101,8 +100,8 @@ export function useReferenceTeaching({
   // Why the reference was not saved. It is the editor's own, and goes when the editor closes, so it never shows as
   // the value's.
   const [error, setError] = useState<string | null>(null);
-  // The characters the value it is taught for needs, which what it learns is compared with; none filters no find.
-  const needs = editing?.needs ?? NO_NEEDS;
+  // The characters what it learns is compared with; none filters no find.
+  const needs = teachingNeeds(editing);
   const focus = useRecordFocus();
   const review = useReview(recording, draft, setDraft, reference, needs, focus);
   // What the reference being edited learns from: its saved pictures, its boxes with text, and its kept readings.
@@ -251,6 +250,7 @@ export function useReferenceTeaching({
             ...named,
             reference: spec.reference,
             dropped: spec.dropped,
+            ...(spec.characters === undefined ? {} : { characters: spec.characters }),
           }));
       setError(null);
       await onSaved(saved, close);

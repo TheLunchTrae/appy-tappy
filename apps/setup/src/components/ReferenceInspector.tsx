@@ -151,10 +151,10 @@ export function ReferenceInspector({
   const { taught, finder, guided, review, recorder, checking, covered } = teaching;
   const chosen = boxes.selected;
   const saved = editing.existing?.samples ?? [];
-  // A look-alike pair warns when it has one of these characters: the value's, or for a reference by itself those of
-  // every value that reads with it.
+  // A look-alike pair warns when it has one of these characters: the value's, or the ones the reference reads, or for
+  // a reference by itself that reads every character it learns, those of every value that reads with it.
   const lookalikeNeeds =
-    needsField !== 'hidden'
+    needsField !== 'hidden' || teaching.needs.length > 0
       ? teaching.needs
       : editing.existing === null || file === null
         ? []
@@ -179,6 +179,11 @@ export function ReferenceInspector({
         labeled={taught.labeled}
         recorded={taught.recorded}
         finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
+        reads={editing.reads}
+        onReads={(reads) => {
+          setEditing((current) => (current === null ? null : { ...current, reads }));
+        }}
+        valueNeeds={editing.needs}
         expected={teaching.needs}
         coverage={covered}
         lookalikes={neededPairs(teaching.risks.lookalikes, lookalikeNeeds)}

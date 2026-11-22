@@ -76,11 +76,15 @@ export const UNLEARNED_HINT =
 
 /** The characters a number value needs. */
 export const EXPECTED_HINT =
-  "The characters this value can show. It reads only these, so it doesn't mistake one for a lookalike, such as 0 for O, and AppyTappy shows which of them its reference has yet to learn. The reference keeps every character it knows, so other values in the same font can share it. A number ends at a colon or slash, so 12:30 and 12/50 each read as 12.";
+  "The characters this value can show. It reads only these, so it doesn't mistake one for a lookalike, such as 0 for O, and AppyTappy shows which of them its reference has yet to learn. A value reads only characters its reference reads too, so other values in the same font can share it and need fewer. A number ends at a colon or slash, so 12:30 and 12/50 each read as 12.";
+
+/** The characters a reference reads. */
+export const READS_HINT =
+  "The characters this reference is for. Find more like it lists only text that may show them, recording looks only for them, and the reference reads only them, so text with other characters on the screen doesn't get in the way. Turn on every character its values show; each value can need fewer. With nothing chosen, it reads every character it learns.";
 
 /** Finding more text like the selected box. */
 export const FIND_LIKE_HINT =
-  "Looks on the selected box's screenshot for other text that stands out as the text in the box does, at any size, and reads each as text. Text as tall as the box's comes first, and a find of another size says how tall it is. For a reference you teach from a value, it lists only text that shows characters the value needs. Each one you tick and add becomes a box, and a reference that learns a size reads it better. A later search on that screenshot skips the finds you didn't add from earlier lists, until you close the reference editor or select Show them again. Draw the box tightly around the text first, so its size is right.";
+  "Looks on the selected box's screenshot for other text that stands out as the text in the box does, at any size, and reads each as text. Text as tall as the box's comes first, and a find of another size says how tall it is. It lists only text that may show the characters the reference reads, or, for a reference you teach from a value, the ones the value needs. Each one you tick and add becomes a box, and a reference that learns a size reads it better. A later search on that screenshot skips the finds you didn't add from earlier lists, until you close the reference editor or select Show them again. Draw the box tightly around the text first, so its size is right.";
 
 /** What the found text's list shows, and what each row's box and field do. */
 export const FOUND_HINT =

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import {
   LETTER_PRESETS,
@@ -12,7 +12,7 @@ import {
   withOther,
   withPreset,
 } from '../lib/expected.ts';
-import { EXPECTED_HINT } from '../lib/hints.ts';
+import { EXPECTED_HINT, READS_HINT } from '../lib/hints.ts';
 import { Hint } from './Hint.tsx';
 
 interface Props {
@@ -60,41 +60,58 @@ function Presets({
   );
 }
 
+/** What the chooser says for the characters of a value, or of a reference, where "it" is the reference. */
+const WORDS = {
+  value: {
+    hint: EXPECTED_HINT,
+    none: 'Nothing chosen, so the value reads every character its reference reads, and any it learns later.',
+    some: 'Turn on everything the value shows: its digits and any sign right after them, such as the % in 87%.',
+    letters:
+      'Letters. A number value reads no text. Turn these on for letters its region shows with the number, such as the Lv in Lv.5.',
+  },
+  reference: {
+    hint: READS_HINT,
+    none: 'Nothing chosen, so it reads every character it learns, and finds and records text of any characters.',
+    some: 'Turn on every character it is for. It finds, records, and reads only these.',
+    letters: 'Letters. Turn these on for letters it reads beside its numbers, such as the Lv in Lv.5.',
+  },
+} as const;
+
 /**
- * The characters a number value needs: presets to turn on, and a field for any other character. It edits one set of
- * characters, which the value reads and its reference is taught against.
+ * The characters a number value needs, or a reference reads: presets to turn on, and a field for any other character.
+ * It edits one set of characters. A value reads only these of its reference, and a reference finds, records, and
+ * reads only its own.
  */
 export function ExpectedCharacters({
   expected,
   onExpected,
+  owner = 'value',
   label = 'Characters it needs',
 }: Props & {
+  /** Whose characters these are, which decides what the chooser says and whether it holds them to a most. */
+  readonly owner?: keyof typeof WORDS;
   /** What the field is called: the value's own name for it, or the reference editor's, where "it" is the reference. */
   readonly label?: string;
 }) {
   // The field's text as typed, and the set it started from, while it is being typed in. Outside that, the field
   // shows the set's own other characters, in order.
   const [typing, setTyping] = useState<{ readonly start: readonly string[]; readonly text: string } | null>(null);
+  // The reference editor can show a reference's chooser and its value's at once.
+  const otherId = useId();
+  const words = WORDS[owner];
   return (
     <div className="field">
       <span className="name">
         <span>{label}</span>
-        <Hint topic={label}>{EXPECTED_HINT}</Hint>
+        <Hint topic={label}>{words.hint}</Hint>
       </span>
-      <span className="note">
-        {expected.length === 0
-          ? 'Nothing chosen, so the value reads every character its reference knows, and any it learns later.'
-          : 'Turn on everything the value shows: its digits and any sign right after them, such as the % in 87%.'}
-      </span>
+      <span className="note">{expected.length === 0 ? words.none : words.some}</span>
       <Presets title="Numbers" presets={NUMBER_PRESETS} expected={expected} onExpected={onExpected} />
-      <span className="note">
-        Letters. A number value reads no text. Turn these on for letters its region shows with the number, such as the
-        Lv in Lv.5.
-      </span>
+      <span className="note">{words.letters}</span>
       <Presets title="Letters" presets={LETTER_PRESETS} expected={expected} onExpected={onExpected} />
-      <label htmlFor="other-characters">Other characters</label>
+      <label htmlFor={otherId}>Other characters</label>
       <input
-        id="other-characters"
+        id={otherId}
         className="input"
         placeholder="Such as / or °"
         autoComplete="off"
@@ -110,7 +127,7 @@ export function ExpectedCharacters({
           setTyping(null);
         }}
       />
-      {tooMany(expected) ? (
+      {owner === 'value' && tooMany(expected) ? (
         <span className="warn" role="alert">
           {TOO_MANY}
         </span>

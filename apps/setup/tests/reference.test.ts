@@ -8,6 +8,7 @@ import {
   readers,
   readersNeed,
   referenceCharacters,
+  unreadBy,
 } from '../src/lib/reference.ts';
 
 const white = { red: 255, green: 255, blue: 255 };
@@ -35,6 +36,18 @@ test("referenceCharacters reads a reference's samples", () => {
       ],
     }),
   ).toEqual(['0', '1', '9', '%']);
+});
+
+test('referenceCharacters leaves out what a reference learned but does not read', () => {
+  expect(
+    referenceCharacters({
+      id: 'percent',
+      name: 'Percent font',
+      origin: { kind: 'byHand' } as const,
+      samples: [{ image: 'ref-percent-1.png', text: 'Lv 10%' }],
+      characters: '0123456789 %',
+    }),
+  ).toEqual(['0', '1', '%']);
 });
 
 test('readers names the number values that read with a reference, in a check or a fix', () => {
@@ -104,6 +117,25 @@ test('readers names the number values that read with a reference, in a check or 
   // Best run reads every character the reference knows.
   expect(readersNeed(needing(['8%', '1', '', '']), 'percent')).toEqual([]);
   expect(readersNeed(needing(['8%', '1', '', '%']), 'none')).toEqual([]);
+  // A reference that reads only some characters needs no others.
+  const reading = (characters: string, file: AppFile): AppFile => ({
+    ...file,
+    references: [{ id: 'percent', name: 'Percent', origin: { kind: 'byHand' }, samples: [], characters }],
+  });
+  expect(readersNeed(reading('0123456789', file), 'percent')).toEqual([
+    '0',
+    '1',
+    '2',
+    '3',
+    '4',
+    '5',
+    '6',
+    '7',
+    '8',
+    '9',
+  ]);
+  expect(readersNeed(reading('18', needing(['8%', '1', '', '%'])), 'percent')).toEqual(['1', '8']);
+  expect(readersNeed(reading('%', { ...file, values: [] }), 'percent')).toEqual(['%']);
 });
 
 test('andList joins names as a sentence does', () => {
@@ -111,4 +143,10 @@ test('andList joins names as a sentence does', () => {
   expect(andList(['A'])).toBe('A');
   expect(andList(['A', 'B'])).toBe('A and B');
   expect(andList(['A', 'B', 'C'])).toBe('A, B and C');
+});
+
+test('unreadBy names what a value needs that its reference does not read', () => {
+  const reference = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, samples: [] };
+  expect(unreadBy({ ...reference, characters: '0123456789' }, ['1', '%', 'O'])).toEqual(['%', 'O']);
+  expect(unreadBy(reference, ['1', '%'])).toEqual([]);
 });

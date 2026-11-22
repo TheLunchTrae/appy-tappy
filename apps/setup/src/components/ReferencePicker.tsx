@@ -1,6 +1,6 @@
-import type { AppFile } from '../lib/bindings.ts';
+import type { AppFile, ReferenceDef } from '../lib/bindings.ts';
 import { coverage, knowsNone } from '../lib/expected.ts';
-import { readers, referenceCharacters } from '../lib/reference.ts';
+import { andList, readers, referenceCharacters, unreadBy } from '../lib/reference.ts';
 import { REFERENCE_HINT } from '../lib/hints.ts';
 import { draftHolds } from '../lib/teaching.ts';
 import { CharacterChips, MissingNote } from './CharacterChips.tsx';
@@ -44,6 +44,9 @@ export function ReferencePicker(props: Props) {
   const chosen = references.find((reference) => reference.id === selected) ?? null;
   const held = chosen === null ? null : draftHolds(chosen, props.drafted);
   const { characters } = props;
+  // What the value needs that a reference reads, which is what it can still have to learn.
+  const readable = (reference: ReferenceDef): readonly string[] =>
+    characters.filter((character) => !unreadBy(reference, characters).includes(character));
   const recordWaits = [hasRegion ? null : NEEDS_REGION_ID, held === null ? null : DRAFT_HOLDS_ID].filter(
     (id) => id !== null,
   );
@@ -79,13 +82,19 @@ export function ReferencePicker(props: Props) {
                     <small>{used === 0 ? 'No values yet' : `Used by ${used} ${used === 1 ? 'value' : 'values'}`}</small>
                   </span>
                   <CharacterChips characters={referenceCharacters(reference)} />
-                  <MissingNote characters={coverage(characters, referenceCharacters(reference)).missing} />
+                  <MissingNote characters={coverage(readable(reference), referenceCharacters(reference)).missing} />
                 </button>
               );
             })}
           </div>
         )}
-        {chosen !== null && knowsNone(characters, referenceCharacters(chosen)) ? (
+        {chosen !== null && unreadBy(chosen, characters).length > 0 ? (
+          <span className="warn" role="status">
+            {chosen.name} doesn&apos;t read {andList([...unreadBy(chosen, characters)])}, so this value can&apos;t
+            either. Edit {chosen.name} to read them, or choose another reference.
+          </span>
+        ) : null}
+        {chosen !== null && knowsNone(readable(chosen), referenceCharacters(chosen)) ? (
           <span className="warn" role="status">
             {chosen.name} knows none of these characters yet. Teach it them, or choose another reference.
           </span>

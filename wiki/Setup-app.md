@@ -343,9 +343,21 @@ This page covers what the user guide leaves out.
   One that a value reads with cannot be deleted.
 - **Expected characters.** A number value may list the characters it needs,
   as [Characters a number needs](Values.md#characters-a-number-needs)
-  describes, in its check's `characters`. The list is the value's: a
-  reference is a font with no list of its own, so values that need different
-  characters share one. The list does two jobs. The value reads only those
+  describes, in its check's `characters`. The list is the value's, of the
+  characters its reference reads: a reference saves its own list, its
+  `characters`, and values that need different characters of it share one.
+  `Readers::reading` in `appytappy-sources` applies the reference's list and
+  then the value's, so a value reads only what both read. The editor keeps
+  the reference's list as `Editing.reads`, which `startEditing` takes from
+  the saved reference, or from the value, or starts as the digits for a
+  reference made by itself. `teachingNeeds` compares what the reference
+  learns with the value's list, or with the reference's own when the value
+  needs none or there is no value, so finding text, recording, and what is
+  missing go by it. `savedReads` adds the value's list to the reference's on
+  save, so the value can read what it needs, and `buildCharacters` and
+  `buildReferenceSave` send it as `characters`, which the save writes
+  through `expected_characters` with no cap. The value's list does two
+  jobs. The value reads only those
   characters of its reference, as [Checks](Screen-regions.md#checks)
   describes, and the page compares the list with what a reference learned,
   to show what is left to teach. `appytappy-sources` builds a reference's
@@ -369,7 +381,7 @@ This page covers what the user guide leaves out.
   reference is saved (`withTaught`). `needsField` says how the editor shows
   it: to change when opened from a value, to read when opened from a fix,
   which needs what its value does, and not at all from the References page,
-  where a reference is taught for no characters. The cap holds where a list
+  where a reference is taught for no value. The cap holds where a list
   is set or changed (`expected_within_limit`, and `buildSpec` on the page),
   so a saved value with a longer list, written by hand, still takes a fix or
   an edit that leaves the list alone. The learned characters are

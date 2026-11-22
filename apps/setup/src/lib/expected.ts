@@ -39,7 +39,7 @@ function preset(name: string, shown: string, characters: string): Preset {
 }
 
 /** The digits `0` to `9`. */
-const DIGITS = preset('Digits', '0–9', '0123456789');
+export const DIGITS = preset('Digits', '0–9', '0123456789');
 
 /** What a number can show: its digits, and the signs each font may or may not use. */
 export const NUMBER_PRESETS: readonly Preset[] = [

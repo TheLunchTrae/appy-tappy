@@ -21,7 +21,10 @@ use crate::screenshots::Shots;
 use crate::words::sentence;
 
 use super::error::{Lesson, cant_learn};
-use super::{Cut, Pictures, ReferenceRef, SpecError, drawn, same_size, size_of, to_region};
+use super::{
+    Cut, Pictures, ReferenceRef, SpecError, drawn, expected_characters, same_size, size_of,
+    to_region,
+};
 
 /// The ID a reference is taught under before it is saved under its own.
 const UNSAVED: &str = "unsaved";
@@ -77,6 +80,12 @@ pub(crate) struct CharactersSpec {
     /// out, which saving it removes.
     #[serde(default)]
     pub(crate) dropped: Vec<String>,
+    /// The characters the reference reads, or `None` for every character
+    /// it learns. The reference saves each once, in order, as
+    /// [`expected_characters`] lists them.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub(crate) characters: Option<String>,
 }
 
 /// A saved sample a reference cannot learn.
@@ -104,19 +113,25 @@ pub(crate) struct SavedReference {
 }
 
 impl SavedReference {
-    /// The reference as it is saved under the name `name`. Its samples
+    /// The reference as it is saved under the name `name`, reading
+    /// `characters`, or every character it learns for `None`. Its samples
     /// stay as they are saved, so no screenshot is needed.
     ///
     /// # Errors
     ///
     /// Returns [`SpecError::NoLabels`] for a reference with no sample, or
     /// why a sample cannot be learned.
-    pub(crate) fn renamed(self, name: &str) -> Result<ReferenceDef, SpecError> {
+    pub(crate) fn with_settings(
+        self,
+        name: &str,
+        characters: Option<&str>,
+    ) -> Result<ReferenceDef, SpecError> {
         if self.reference.samples.is_empty() {
             return Err(SpecError::NoLabels);
         }
         let reference = ReferenceDef {
             name: name.to_owned(),
+            characters: expected_characters(characters.unwrap_or_default()),
             ..self.reference.clone()
         };
         learned(&reference, &[], 0, &self.pictures).map(|_reader| reference)
@@ -409,6 +424,7 @@ impl CharactersSpec {
             name: name.to_owned(),
             origin,
             samples,
+            characters: expected_characters(self.characters.as_deref().unwrap_or_default()),
         };
         let reader = learned(&reference, &pictures, self.labels.len(), &kept)?;
         Ok(Taught {

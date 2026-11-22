@@ -3,13 +3,19 @@
 import type { AppSummary, DraftDef, ReferenceDef, ValueDef } from './bindings.ts';
 import { type Built, type CheckKind, type Draft, fixDraft } from './check.ts';
 import { type Kept, draftProblem, isKept } from './drafts.ts';
+import { DIGITS, expectedSet } from './expected.ts';
 import { NAME_THE_REFERENCE } from './teaching.ts';
 import { sameContent } from './unsaved.ts';
 
-/** The reference being made or changed, and its name as typed. */
+/** The reference being made or changed, its name as typed, and the characters it reads. */
 export interface Editing {
   readonly existing: ReferenceDef | null;
   readonly name: string;
+  /**
+   * The characters the reference reads, each once, as the editor has them; none for every character it learns. It
+   * looks for, records, and reads only these.
+   */
+  readonly reads: readonly string[];
   /**
    * The characters the value it is taught for needs, as the editor has them: the value's own when the editor opens,
    * which the value takes back only when the reference is saved. None for a reference made by itself.
@@ -34,9 +40,38 @@ export function needsField(flow: CaptureFlow): NeedsField {
   return flow === 'fix' ? 'readOnly' : 'editable';
 }
 
-/** The reference editor of `flow` as it opens on `existing`, or on a new reference, from the check `draft`. */
+/**
+ * The reference editor of `flow` as it opens on `existing`, or on a new reference, from the check `draft`. A saved
+ * reference reads what it was saved reading. A new one reads the characters its value needs, or the digits when it
+ * is made by itself.
+ */
 export function startEditing(flow: CaptureFlow, existing: ReferenceDef | null, draft: Draft): Editing {
-  return { existing, name: existing?.name ?? '', needs: flow === 'reference' ? [] : draft.characters };
+  const needs = flow === 'reference' ? [] : draft.characters;
+  const reads =
+    existing !== null ? expectedSet(existing.characters ?? '') : flow === 'reference' ? DIGITS.characters : needs;
+  return { existing, name: existing?.name ?? '', reads, needs };
+}
+
+const NO_NEEDS: readonly string[] = [];
+
+/**
+ * The characters the reference `editing` teaches is compared with: the ones its value needs, or the ones it reads
+ * when it is made by itself or for a value that needs none. Finding text, recording, and what is still missing go by
+ * these.
+ */
+export function teachingNeeds(editing: Editing | null): readonly string[] {
+  if (editing === null) {
+    return NO_NEEDS;
+  }
+  return editing.needs.length > 0 ? editing.needs : editing.reads;
+}
+
+/**
+ * The characters the reference `editing` saves reading: the ones it reads, with those its value needs added, so the
+ * value reads them all. None, for every character it learns, stays none.
+ */
+export function savedReads(editing: Editing): readonly string[] {
+  return editing.reads.length === 0 ? [] : expectedSet([...editing.reads, ...editing.needs].join(''));
 }
 
 /**

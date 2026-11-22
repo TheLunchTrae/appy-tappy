@@ -314,8 +314,20 @@ export function taughtSpec(draft: Draft, reference: ReferenceRef | null): Charac
   return reviewSpec(draft, recordedOf(draft), reference);
 }
 
-/** The characters `draft` teaches the reference `reference`, or a new one when null; or what it still needs. */
-export function buildCharacters(draft: Draft, reference: ReferenceRef | null): Built<CharactersSpec> {
+/** `reads`, the characters a reference reads, as its save sends them: none for every character it learns. */
+function readsOf(reads: readonly string[]): { readonly characters?: string } {
+  return reads.length === 0 ? {} : { characters: reads.join('') };
+}
+
+/**
+ * The characters `draft` teaches the reference `reference`, or a new one when null, which reads `reads`, or every
+ * character it learns when none; or what it still needs.
+ */
+export function buildCharacters(
+  draft: Draft,
+  reference: ReferenceRef | null,
+  reads: readonly string[] = [],
+): Built<CharactersSpec> {
   const spec = taughtSpec(draft, reference);
   if (spec === null) {
     return missing('Draw a box around the characters on a screenshot.');
@@ -323,7 +335,7 @@ export function buildCharacters(draft: Draft, reference: ReferenceRef | null): B
   if (reference === null && spec.labels.length === 0 && spec.recorded.length === 0) {
     return missing('Type what a box shows, or record the characters.');
   }
-  return { ok: true, spec };
+  return { ok: true, spec: { ...spec, ...readsOf(reads) } };
 }
 
 /**
@@ -336,19 +348,25 @@ export type ReferenceSaving =
       readonly kind: 'settings';
       readonly reference: ReferenceRef;
       readonly dropped: readonly string[];
+      /** The characters it reads, or none for every character it learns. */
+      readonly characters?: string;
     };
 
 /**
  * What saving the reference `draft` teaches sends, or what it still needs. A saved reference with no place to read,
  * so with no box and no recording either, saves as it is: there is nothing new for it to learn.
  */
-export function buildReferenceSave(draft: Draft, reference: ReferenceRef | null): Built<ReferenceSaving> {
-  const characters = buildCharacters(draft, reference);
+export function buildReferenceSave(
+  draft: Draft,
+  reference: ReferenceRef | null,
+  reads: readonly string[] = [],
+): Built<ReferenceSaving> {
+  const characters = buildCharacters(draft, reference, reads);
   if (characters.ok) {
     return { ok: true, spec: { kind: 'taught', characters: characters.spec } };
   }
   return reference !== null && readingOf(draft).region === null
-    ? { ok: true, spec: { kind: 'settings', reference, dropped: draft.dropped } }
+    ? { ok: true, spec: { kind: 'settings', reference, dropped: draft.dropped, ...readsOf(reads) } }
     : characters;
 }
 

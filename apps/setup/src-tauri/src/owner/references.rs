@@ -42,6 +42,11 @@ pub(crate) struct ReferenceSettingsSpec {
     /// saving it removes.
     #[serde(default)]
     pub(crate) dropped: Vec<String>,
+    /// The characters the reference reads, or `None` for every character
+    /// it learns.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub(crate) characters: Option<String>,
 }
 
 /// Where a reference was saved.
@@ -209,8 +214,8 @@ impl<H: Host> Owner<H> {
             .map(|picture| pixels::rgba(&picture, max_width))
     }
 
-    /// Saves the name `spec` gives a saved reference, and says where it is
-    /// saved. Its samples stay as they are but for those `spec` leaves
+    /// Saves the name and the characters it reads that `spec` gives a
+    /// saved reference, and says where it is saved. Its samples stay as they are but for those `spec` leaves
     /// out, so this needs no screenshot and no picked window. The
     /// reference must still learn every sample it keeps.
     pub(crate) fn save_reference_settings(
@@ -226,7 +231,7 @@ impl<H: Host> Owner<H> {
             named_apart(&found.file, id, name)?;
             let changed = reference_of(found, id)?
                 .without(&spec.dropped)
-                .renamed(name)
+                .with_settings(name, spec.characters.as_deref())
                 .map_err(|error| error.to_string())?;
             let answer = SavedReferenceId {
                 app: app.clone(),
@@ -676,6 +681,7 @@ mod tests {
             },
             reference_name: name.to_owned(),
             dropped: Vec::new(),
+            characters: None,
         };
         let save = |harness: &mut Harness, spec: ReferenceSettingsSpec| {
             harness.ask(move |owner| owner.save_reference_settings(&spec))
@@ -841,6 +847,7 @@ mod tests {
             reference: digits.clone(),
             reference_name: "Digits".to_owned(),
             dropped: dropped.to_vec(),
+            characters: None,
         };
         harness
             .ask(|owner| owner.save_reference(&boxed("")))
