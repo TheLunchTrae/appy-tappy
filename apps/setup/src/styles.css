@@ -1508,6 +1508,24 @@ div.match-answer {
   margin-block: -6px;
 }
 
+/* A hint among a panel's buttons opens above them, as wide as the row, so it never widens the panel or adds to its
+   height, which would scroll the panel and move the buttons out from under the pointer. */
+.actions {
+  position: relative;
+}
+
+.actions .with-hint {
+  position: static;
+}
+
+.actions .with-hint > .hint-wrap > .tip {
+  top: auto;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  width: auto;
+}
+
 .card > .with-hint + .set-row {
   border-top: 0;
 }
