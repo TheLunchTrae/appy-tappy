@@ -13,7 +13,7 @@ import type { Made, RefFlow, ValueFlow } from '../lib/flow.ts';
 import type { Held } from '../lib/unsaved.ts';
 import { useWindowSearch } from '../lib/useWindowSearch.ts';
 import { ENDED_ASK_PAUSE_MS, FIRST_PICK, endedAsks, pickedWindowStep, windowLanding } from '../lib/windowSearch.ts';
-import type { ReportDraft } from '../lib/drafts.ts';
+import type { ReportDraft, Resumed } from '../lib/drafts.ts';
 
 interface Props {
   /**
@@ -30,6 +30,11 @@ interface Props {
   readonly onSaved: (made: Made) => void;
   /** Closes the flow once its draft is saved or deleted. */
   readonly onDrafted: () => void;
+  /**
+   * Closes a new value's flow once it is kept as a draft, and opens the draft of a reference for it; null where
+   * **Save and make a reference** is not offered.
+   */
+  readonly onMakeReference: ((reference: Resumed) => void) | null;
   /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
   readonly onAddApplication: (chosen: string | null) => void;
   /** Leaves to change how `app` is found, and comes back to it. */
@@ -159,6 +164,7 @@ function SavedCapture({
       }}
       onSaved={onSaved}
       onDrafted={onDrafted}
+      onMakeReference={null}
       onHeld={reportHeld}
       onDraft={onDraft}
     />
@@ -173,6 +179,7 @@ function PickedCapture({
   onCancel,
   onSaved,
   onDrafted,
+  onMakeReference,
   onAddApplication,
   onEditApplication,
   draftedApps,
@@ -248,6 +255,7 @@ function PickedCapture({
       }}
       onSaved={onSaved}
       onDrafted={onDrafted}
+      onMakeReference={onMakeReference}
       onHeld={onHeld}
       onDraft={onDraft}
     />

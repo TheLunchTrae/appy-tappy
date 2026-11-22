@@ -34,6 +34,7 @@ import {
   withState,
   withStateAt,
   withStateStep,
+  NEEDS_REFERENCE,
 } from '../src/lib/check.ts';
 
 const region = { x: 1, y: 2, width: 3, height: 4 };
@@ -67,8 +68,7 @@ describe('buildSpec', () => {
   });
 
   test("builds a number from the application's reference and whether it is whole", () => {
-    const pick = 'Pick a reference to read the number with. References are made on the References page.';
-    expect(buildSpec({ ...EMPTY_DRAFT, region }, 'example')).toEqual({ ok: false, next: pick });
+    expect(buildSpec({ ...EMPTY_DRAFT, region }, 'example')).toEqual({ ok: false, next: NEEDS_REFERENCE });
     expect(buildSpec({ ...EMPTY_DRAFT, region, reference: 'percent', whole: true }, 'example')).toEqual({
       ok: true,
       spec: { kind: 'number', region, reference: percent, whole: true },

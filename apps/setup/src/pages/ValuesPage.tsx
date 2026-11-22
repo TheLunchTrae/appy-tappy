@@ -36,7 +36,7 @@ import {
 import { type LiveApp, useLiveValues } from '../lib/useLiveValues.ts';
 import type { Changing } from '../lib/flow.ts';
 import { type Resumed, draftsOf } from '../lib/drafts.ts';
-import { captureProblem } from '../lib/captureDraft.ts';
+import { captureProblem, finishedWith, referenceWait } from '../lib/captureDraft.ts';
 import { CHECKS, checkSummary } from '../lib/check.ts';
 import { CaptureDraftRow } from '../components/Drafts.tsx';
 
@@ -58,29 +58,51 @@ function valueDrafts(drafts: readonly DraftSummary[] | null, apps: readonly AppS
 /** How many columns the table has, which the heading of each group of rows spans. */
 const COLUMNS = 6;
 
-/** A value or fix draft's rows, with as many cells as the table has columns. */
-function ValueDraftRows({ list, rows }: { readonly list: readonly Resumed[]; readonly rows: DraftRows }) {
-  return list.map((resumed) => (
-    <CaptureDraftRow
-      key={resumed.id}
-      resumed={resumed}
-      problem={captureProblem(resumed.def, rows.apps)}
-      cells={(setup) => (
-        <>
-          <td className="note">{setup === null ? '' : CHECKS[setup.draft.kind].label}</td>
-          <td className="note">{setup?.draft.region === null || setup === null ? 'No region yet' : 'Region drawn'}</td>
-          <td className="note">Doesn&apos;t read</td>
-          <td className="note">Can&apos;t be used until finished</td>
-        </>
-      )}
-      onFinish={() => {
-        rows.onFinish(resumed);
-      }}
-      onDelete={async () => {
-        await rows.onDelete(resumed.id);
-      }}
-    />
-  ));
+interface ValueDraftProps {
+  readonly list: readonly Resumed[];
+  /** The application the drafts belong to, or null when it is no longer saved. */
+  readonly app: AppSummary | null;
+  readonly rows: DraftRows;
+}
+
+/**
+ * A value or fix draft's rows, with as many cells as the table has columns. A number kept without a reference
+ * finishes once its application has a reference it can read with, which Finish opens it with.
+ */
+function ValueDraftRows({ list, app, rows }: ValueDraftProps) {
+  return list.map((resumed) => {
+    const wait = referenceWait(resumed.def, app?.file?.references ?? []);
+    const name = app?.file?.name ?? 'its application';
+    return (
+      <CaptureDraftRow
+        key={resumed.id}
+        resumed={resumed}
+        problem={
+          captureProblem(resumed.def, rows.apps) ??
+          (wait.kind === 'waiting'
+            ? `Needs a reference. Make one for ${name} on the References page.`
+            : null)
+        }
+        ready={wait.kind === 'ready' ? `Ready to finish with ${wait.reference.name}.` : null}
+        cells={(setup) => (
+          <>
+            <td className="note">{setup === null ? '' : CHECKS[setup.draft.kind].label}</td>
+            <td className="note">
+              {setup?.draft.region === null || setup === null ? 'No region yet' : 'Region drawn'}
+            </td>
+            <td className="note">Doesn&apos;t read</td>
+            <td className="note">Can&apos;t be used until finished</td>
+          </>
+        )}
+        onFinish={() => {
+          rows.onFinish(wait.kind === 'ready' ? finishedWith(resumed, wait.reference) : resumed);
+        }}
+        onDelete={async () => {
+          await rows.onDelete(resumed.id);
+        }}
+      />
+    );
+  });
 }
 
 interface AppRowsProps {
@@ -239,7 +261,7 @@ function AppRows({
             <small className="warn">{app.error ?? 'This application could not be read.'}</small>
           </th>
         </tr>
-        <ValueDraftRows list={drafts} rows={rows} />
+        <ValueDraftRows list={drafts} app={app} rows={rows} />
       </tbody>
     );
   }
@@ -349,7 +371,7 @@ function AppRows({
           </tr>
         );
       })}
-      <ValueDraftRows list={drafts} rows={rows} />
+      <ValueDraftRows list={drafts} app={app} rows={rows} />
     </tbody>
   );
 }
@@ -533,7 +555,7 @@ export function ValuesPage({
                   <small className="warn">Their application is no longer saved.</small>
                 </th>
               </tr>
-              <ValueDraftRows list={orphans} rows={rows} />
+              <ValueDraftRows list={orphans} app={null} rows={rows} />
             </tbody>
           )}
         </table>

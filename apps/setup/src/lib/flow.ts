@@ -99,6 +99,11 @@ export interface RefFlow {
   readonly app: string | null;
   /** The saved draft the flow finishes, or null. */
   readonly resumed: Resumed | null;
+  /**
+   * Whether **Save and make a reference** opened it for a value it kept as a draft, which the Values page shows
+   * once the reference is saved.
+   */
+  readonly forValue: boolean;
 }
 
 /** A flow that opens another flow and waits under it. */
@@ -197,12 +202,12 @@ export type Ended =
 
 /**
  * What the window shows once a flow ended: nothing else than it shows now, the flow that opened it, the page that
- * lists what it saved, or the page under it.
+ * lists what it saved or drafted, which lists the flows of kind `of`, or the page under it.
  */
 export type After =
   | { readonly kind: 'nothing' }
   | { readonly kind: 'flow'; readonly flow: Opener }
-  | { readonly kind: 'listed' }
+  | { readonly kind: 'listed'; readonly of: Flow['kind'] }
   | { readonly kind: 'page' };
 
 /**
@@ -210,7 +215,8 @@ export type After =
  * left it for another changes nothing. A flow that waits under it shows again: with the saved application chosen,
  * and for an automation what was handed to it, or as it was left when the flow was canceled. A flow whose draft
  * was saved or deleted made nothing for the flow that waits, which shows again as it was left; with none waiting,
- * the page that lists the draft shows.
+ * the page that lists the draft shows. A reference made for a value draft shows the Values page once it is saved,
+ * where that draft can be finished with it.
  */
 export function afterFlow(flow: Flow, ended: Ended, open: boolean): After {
   if (!open) {
@@ -218,7 +224,11 @@ export function afterFlow(flow: Flow, ended: Ended, open: boolean): After {
   }
   const opener = openerOf(flow);
   if (opener === null) {
-    return { kind: ended.kind === 'canceled' ? 'page' : 'listed' };
+    if (ended.kind === 'canceled') {
+      return { kind: 'page' };
+    }
+    const forValue = flow.kind === 'reference' && flow.forValue && ended.kind === 'saved';
+    return { kind: 'listed', of: forValue ? 'value' : flow.kind };
   }
   if (ended.kind !== 'saved' || ended.made === null) {
     return { kind: 'flow', flow: opener };
@@ -354,6 +364,7 @@ export function resumedFlow(
         existing: def.app === null || reference === undefined ? null : { app: def.app, reference },
         app: def.app,
         resumed,
+        forValue: false,
       };
     }
   }

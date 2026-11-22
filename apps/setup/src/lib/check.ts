@@ -386,6 +386,13 @@ interface CheckEntry<Kind extends CheckKind> {
 }
 
 /**
+ * What a number without a reference still needs. A new value without one is kept as a draft, which the Values page
+ * lists until its application has a reference it can read with.
+ */
+export const NEEDS_REFERENCE =
+  'Needs a reference. Pick one to read the number with, or make one on the References page.';
+
+/**
  * Each kind of check, in the order the capture screen offers them. The keys are the saved files' kinds, so a kind
  * the Rust side adds does not compile until it has an entry here. What a kind's region does about content that
  * moves is in `moving.ts`, and its fields are the capture screen's.
@@ -397,7 +404,7 @@ export const CHECKS: { readonly [Kind in CheckKind]: CheckEntry<Kind> } = {
     reads: 'number',
     build: (draft, region, app) => {
       if (draft.reference === null) {
-        return missing('Pick a reference to read the number with. References are made on the References page.');
+        return missing(NEEDS_REFERENCE);
       }
       const spec = { kind: 'number', region, reference: { app, id: draft.reference }, whole: draft.whole } as const;
       return {

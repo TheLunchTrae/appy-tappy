@@ -341,7 +341,7 @@ export function App() {
         open(after.flow, 'flow');
         break;
       case 'listed':
-        goTo(LISTED_ON[ended.kind]);
+        goTo(LISTED_ON[after.of]);
         break;
       case 'page':
         open(null);
@@ -386,6 +386,22 @@ export function App() {
           onDrafted={() => {
             end(flow, 'drafted');
           }}
+          onMakeReference={
+            // Only a new value opened from its page makes a reference in its place: one made for an automation
+            // returns to the automation.
+            flow.kind === 'value' && flow.changing === null && flow.opener === null
+              ? (reference) => {
+                  open({
+                    kind: 'reference',
+                    existing: null,
+                    app: reference.def.app,
+                    resumed: reference,
+                    forValue: true,
+                  });
+                  background(refresh());
+                }
+              : null
+          }
           {...pickerFor(flow)}
           onHeld={setReported}
           onDraft={reportDraft}
@@ -511,10 +527,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'reference', existing: null, app: null, resumed: null });
+              open({ kind: 'reference', existing: null, app: null, resumed: null, forValue: false });
             }}
             onEdit={(existing) => {
-              open({ kind: 'reference', existing, app: null, resumed: null });
+              open({ kind: 'reference', existing, app: null, resumed: null, forValue: false });
             }}
             onFinish={finish}
             onDeleteDraft={removeDraft}

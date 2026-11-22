@@ -1,13 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { AppSummary, DraftDef, DraftKind, DraftSummary } from '../src/lib/bindings.ts';
+import type { AppSummary, DraftDef, DraftKind, DraftSummary, ReferenceDef } from '../src/lib/bindings.ts';
 import { newAction } from '../src/lib/actions.ts';
 import { EMPTY_DRAFT as EMPTY_AUTOMATION, unfinished, valueChoices } from '../src/lib/automation.ts';
 import {
   type CaptureSetup,
   captureMissing,
   captureProblem,
+  finishedWith,
   fixOutdated,
+  referenceForValue,
+  referenceWait,
   refreshedEditing,
   startEditing,
   keptSetup,
@@ -30,6 +33,7 @@ import {
   removalLoses,
   unfinishedText,
 } from '../src/lib/drafts.ts';
+import { DIGITS } from '../src/lib/expected.ts';
 import { stageHint } from '../src/lib/stageHint.ts';
 import { type AppSetup, startAppSetup, unfinishedApp } from '../src/lib/matching.ts';
 
@@ -509,4 +513,65 @@ test('the characters a reference reads start as saved, else as the digits', () =
   expect(startEditing({ ...saved, characters: '% 1' }).reads).toEqual(['1', '%']);
   // A saved reference that names none reads every character it learns, and goes on doing so.
   expect(startEditing(saved).reads).toEqual([]);
+});
+
+describe('a value kept without a reference', () => {
+  const region = { x: 4, y: 2, width: 20, height: 8 };
+  const number: CaptureSetup = {
+    ...EMPTY_SETUP,
+    valueName: 'Progress',
+    step: 'how',
+    draft: { ...EMPTY_DRAFT, region, drawnOn: 3, characters: ['1', '%'] },
+  };
+  const kept = (setup: CaptureSetup, kind: DraftKind = 'value'): DraftDef =>
+    def(kind, keep(kind, storeSetup(setup)), null, 'example');
+  const reference = (id: string, text: string, characters?: string): ReferenceDef => ({
+    id,
+    name: id,
+    origin: { kind: 'byHand' },
+    samples: text === '' ? [] : [{ image: `${id}.png`, text }],
+    ...(characters === undefined ? {} : { characters }),
+  });
+
+  test('waits for a reference that reads every character it needs, and is ready with the newest', () => {
+    const digits = reference('digits', '0123456789', '0 1 2 3 4 5 6 7 8 9');
+    const empty = reference('empty', '');
+    const percent = reference('percent', '1%');
+    const later = reference('later', '1 %');
+    expect(referenceWait(kept(number), [])).toEqual({ kind: 'waiting' });
+    // One that reads too few characters, has yet to learn one, or learned none yet, does not fit.
+    expect(referenceWait(kept(number), [digits, empty, reference('ones', '1')])).toEqual({ kind: 'waiting' });
+    expect(referenceWait(kept(number), [percent, digits, later])).toEqual({ kind: 'ready', reference: later });
+  });
+
+  test('only a new number without a reference waits for one', () => {
+    const percent = reference('percent', '1%');
+    expect(referenceWait(kept({ ...number, draft: { ...number.draft, reference: 'percent' } }), [percent])).toEqual({
+      kind: 'none',
+    });
+    expect(referenceWait(kept({ ...number, draft: { ...number.draft, kind: 'color' } }), [percent])).toEqual({
+      kind: 'none',
+    });
+    expect(referenceWait(kept(number, 'fix'), [percent])).toEqual({ kind: 'none' });
+  });
+
+  test('finishes on the check step with the reference picked', () => {
+    const finished = finishedWith({ id: 'draft-1', def: kept(number) }, reference('percent', '1%'));
+    const setup = keptSetup(finished.def);
+    expect(finished.id).toBe('draft-1');
+    expect(setup?.step).toBe('check');
+    expect(setup?.draft.reference).toBe('percent');
+    expect(setup?.draft.characters).toEqual(['1', '%']);
+  });
+
+  test("opens a reference's draft with one box at the value's region, reading what the value needs", () => {
+    const made = referenceForValue('example', number);
+    const setup = made === null ? null : keptSetup(made);
+    expect(made).toMatchObject({ kind: 'reference', app: 'example', changes: null });
+    expect(setup?.editing).toEqual({ existing: null, name: '', reads: ['1', '%'] });
+    expect(setup?.draft.boxes).toEqual([{ id: 0, screenshot: 3, region, text: '' }]);
+    const anything = referenceForValue('example', { ...number, draft: { ...number.draft, characters: [] } });
+    expect((anything === null ? null : keptSetup(anything))?.editing?.reads).toEqual([...DIGITS.characters]);
+    expect(referenceForValue('example', { ...number, draft: { ...number.draft, region: null } })).toBeNull();
+  });
 });
