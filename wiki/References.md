@@ -151,10 +151,12 @@ still the surest way to read them.
 A box is a part of a screenshot that shows some characters, with the text you
 type for it. A reference learns from every box that has text. What you type
 is the answer: when a saved picture or a kept reading taught the same shape
-as another character, your newest text replaces it. Draw as many as
-you like, on any screenshot, and several on one screenshot too.
+as another character, your newest text replaces it. Draw as many as you like,
+on the live window or any screenshot, and several on one screenshot too.
 
-- **Draw.** Drag on a screenshot, away from the boxes there. The new box is
+- **Draw.** Drag on the live window, or on a screenshot away from the boxes
+  there. A box drawn on the live window goes on the screenshot that the drag
+  takes as it starts. The new box is
   selected, and the keyboard moves to its row under **Boxes**, so you can
   type what it shows straight away.
 - **Select.** Press a box on the screenshot, or its number under **Boxes**,
@@ -168,8 +170,9 @@ you like, on any screenshot, and several on one screenshot too.
 - **Delete.** Select **Delete** in the box's row, or press Delete while the
   box is selected on the screenshot.
 
-A reference reads the window, and [records](#record-readings), at its first
-box, whose row says **Reads here**.
+A reference is tried on the live window, and
+[records](#record-readings), at box 1, the first in the list, as the note
+under the list says.
 
 Every box goes on a screenshot of one window size, the size the reference
 reads at: the size of the screenshot its first box is on. On a screenshot of

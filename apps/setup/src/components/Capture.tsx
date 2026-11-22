@@ -504,6 +504,18 @@ export function Capture({
       return;
     }
     const size = shot.size;
+    if (editing !== null) {
+      // A box drawn over the live view goes on the screenshot its press took, at the size the reference reads at.
+      setSelected(shot.index);
+      const boxed = regionFromLiveBox(box, size, teaching.readingSize);
+      const drawn = boxed === null ? null : boxes.draw(boxed, 'drawn', shot.index);
+      if (drawn !== null) {
+        requestAnimationFrame(() => {
+          document.getElementById(boxTextId(drawn))?.focus();
+        });
+      }
+      return;
+    }
     const fits = regionSize !== null && sameSize(regionSize, size);
     const region = regionFromLiveBox(box, size, edited?.screen.windowSize ?? null);
     if (region === null) {
@@ -780,13 +792,15 @@ export function Capture({
   // The saved reference a fix of a number shares with its first drawing.
   const fixedCheck = fixing?.screen.check;
   const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
-  // The value's place is drawn over the live window, and the press takes the screenshot it goes on.
+  // The value's place, or a reference's box, is drawn over the live window, and the press takes the screenshot it
+  // goes on.
   const liveFrame = liveDrawFrame({
-    settingPlace: step === 'where' && editing === null,
+    draws: editing !== null || step === 'where',
     live: selected === null ? liveSize : null,
     occupied: recordingNow !== null || sheeted || picking !== null,
   });
-  const regionOnLive = liveFrame === null ? null : regionOverFrame(draft.region, regionSize, liveFrame);
+  const regionOnLive =
+    liveFrame === null || editing !== null ? null : regionOverFrame(draft.region, regionSize, liveFrame);
   const regionShown = regionOnStage(step, draft.kind, recordingNow !== null);
   const drawing: Drawing = liveFrame !== null ? 'live' : editing !== null ? 'boxes' : regionShown ? 'region' : 'none';
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
@@ -1023,7 +1037,7 @@ export function Capture({
                 // region placed at the live frame's size shows over it until a press.
                 region={live.shown.frozen ? (live.shown.box?.rect ?? null) : regionOnLive}
                 area={area}
-                label={regionLabel(valueName, moving)}
+                label={editing === null ? regionLabel(valueName, moving) : `Box ${draft.boxes.length + 1}`}
                 editable={live.shown.box === null}
                 onPointer={(phase) => {
                   if (phase === 'down') {

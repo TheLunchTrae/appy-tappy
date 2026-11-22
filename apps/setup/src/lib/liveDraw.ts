@@ -108,19 +108,19 @@ export function liveSizeAfter(current: Size | null, frame: Size, frozen: boolean
   return frame;
 }
 
-/** What decides whether a drag over the live view draws the value's region. */
+/** What decides whether a drag over the live view draws the value's region or a reference's box. */
 export interface LiveDrawScene {
-  /** Whether Where to read shows, with no reference being taught. */
-  readonly settingPlace: boolean;
+  /** Whether Where to read shows, or a reference is taught. */
+  readonly draws: boolean;
   /** The size of the live frame shown, or null while a screenshot shows or no frame has arrived. */
   readonly live: Size | null;
   /** Whether a recording runs, a review covers the picture, or a click picks a color. */
   readonly occupied: boolean;
 }
 
-/** The live frame the stage draws the value's region over, placed or not, or null when it draws none there. */
-export function liveDrawFrame({ settingPlace, live, occupied }: LiveDrawScene): Size | null {
-  return settingPlace && !occupied ? live : null;
+/** The live frame the stage draws the value's region or a box over, or null when it draws none there. */
+export function liveDrawFrame({ draws, live, occupied }: LiveDrawScene): Size | null {
+  return draws && !occupied ? live : null;
 }
 
 /**

@@ -24,10 +24,10 @@ export function useBoxes(
   readonly others: readonly { readonly id: number; readonly rect: Rect; readonly label: string }[];
   readonly select: (id: number | null) => void;
   /**
-   * Takes a region the stage's drag made: the selected box adjusted, or a new box, which it selects. Returns the
-   * new box's ID, or null when it made none.
+   * Takes a region the stage's drag made on screenshot `on`, the one shown unless given: the selected box adjusted,
+   * or a new box, which it selects. Returns the new box's ID, or null when it made none.
    */
-  readonly draw: (region: Rect, made: 'drawn' | 'adjusted') => number | null;
+  readonly draw: (region: Rect, made: 'drawn' | 'adjusted', on?: number | null) => number | null;
   readonly retype: (id: number, text: string) => void;
   readonly remove: (id: number) => void;
   /** Adds found text, each find as a box. */
@@ -72,9 +72,9 @@ export function useBoxes(
     select: (id) => {
       send({ type: 'select', id });
     },
-    draw: (region, made) => {
+    draw: (region, made, on = shown) => {
       const before = latest.current;
-      const next = send({ type: 'region', shown, region, made });
+      const next = send({ type: 'region', shown: on, region, made });
       return next.boxes.length > before.boxes.length ? next.selectedId : null;
     },
     retype: (id, text) => {
