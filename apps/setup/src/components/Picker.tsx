@@ -121,7 +121,10 @@ export function Picker({
           </button>
         </div>
       </div>
-      <AntiCheatRunning products={found?.antiCheat ?? []} />
+      <AntiCheatRunning
+        products={found?.antiCheat ?? []}
+        setting={'app' in step ? (step.app.summary.file?.antiCheat ?? null) : null}
+      />
       <div className={lockedApp === null ? 'picker' : 'picker alone'}>
         {lockedApp === null ? (
           <section className="windows" aria-label="Applications">

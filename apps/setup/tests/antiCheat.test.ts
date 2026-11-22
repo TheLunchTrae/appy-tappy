@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { clickBlocked, keysBlocked, pickAntiCheat, resumedPick, shownAntiCheat } from '../src/lib/antiCheat.ts';
+import {
+  clickBlocked,
+  keysBlocked,
+  pickAntiCheat,
+  resumedPick,
+  runningToWarn,
+  shownAntiCheat,
+} from '../src/lib/antiCheat.ts';
 
 describe('input is sent only where anti-cheat is none', () => {
   const free = { name: 'Notes', antiCheat: 'none' } as const;
@@ -57,4 +64,11 @@ describe('the application editor asks about anti-cheat too', () => {
     expect(resumedPick(pick, 'none')).toBeNull();
     expect(resumedPick(null, 'none')).toBeNull();
   });
+});
+
+test('running anti-cheat is warned of only while the application has no setting', () => {
+  expect(runningToWarn(['Vanguard'], 'unknown')).toEqual(['Vanguard']);
+  for (const setting of ['none', 'userMode', 'kernelLevel', null] as const) {
+    expect(runningToWarn(['Vanguard'], setting)).toEqual([]);
+  }
 });

@@ -47,6 +47,15 @@ export function clickBlocked(watched: Guarded, clicked: Guarded | null): string 
     : `${blocking.name}'s anti-cheat is ${inWords(blocking.antiCheat)}, so AppyTappy cannot click while it runs: anti-cheat can see clicks that AppyTappy makes. A click needs the watched application and the one it clicks in both set to None, on the Applications page or when you add or edit them.`;
 }
 
+/**
+ * The running anti-cheat products to warn of for an application whose anti-cheat is `setting`: all of them while it
+ * is not set, since the warning asks the user to set it, and none once it is set or while no application is chosen
+ * (`null`). A product runs system-wide, so it says nothing about the application on its own.
+ */
+export function runningToWarn(products: readonly string[], setting: AntiCheatClass | null): readonly string[] {
+  return setting === 'unknown' ? products : [];
+}
+
 /** The class saved now, which a pick in the application editor is made over: not set for a new application. */
 function savedClass(saved: AntiCheatClass | null): AntiCheatClass {
   return saved ?? 'unknown';

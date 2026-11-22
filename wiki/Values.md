@@ -184,9 +184,10 @@ If no open window matches everything that must match, AppyTappy captures the
 fallback window and says so above the window, with
 **Change how it's found** beside it. Check that it is the window you mean.
 
-If an anti-cheat product is running, the editor says so above the window:
-reading the screen is fine, but set the application's
-[anti-cheat](Applications.md#anti-cheat) before giving it key press or click actions.
+If an anti-cheat product is running and the application's anti-cheat is
+**Not set**, the editor says so above the window: reading the screen is fine,
+but set the application's [anti-cheat](Applications.md#anti-cheat) before
+giving it key press or click actions.
 
 ## Draw the region
 
