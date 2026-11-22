@@ -27,8 +27,9 @@ This page covers what the user guide leaves out.
   reference's name with its samples as they
   are, but for the ones the editor left out. `set_characters` and `save_reference` learn from a
   region on a screenshot, so they need a session that has one. The
-  anti-cheat products the look found show above the stage, and so does a
-  window taken only as the fallback. When the window closes, the editor
+  anti-cheat products the look found show above the stage while the
+  application's anti-cheat class is `unknown`, and so does a window taken
+  only as the fallback. When the window closes, the editor
   keeps its session and captures the window again once it is back, as
   [Window search](State-machines.md#window-search) describes. A flow that
   finishes a draft keeps the picker, since the draft's screenshots come back
