@@ -666,7 +666,7 @@ mod tests {
     }
 
     #[test]
-    fn a_number_tried_with_characters_its_reference_knows_none_of_says_so() {
+    fn a_number_tried_with_characters_its_reference_knows_or_reads_none_of_says_so() {
         let (mut harness, _handler, root) = with_percent("live-subset", SizeChangesDef::Often);
         let reading = |characters: &str| {
             let mut tried = trial(CHARGE);
@@ -716,6 +716,25 @@ mod tests {
         assert_eq!(
             harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
+        );
+        // A reference that reads only `%` reads none of the digits.
+        harness
+            .ask(|owner| {
+                owner.update_app("example", crate::owner::Changed::Values, |_owner, found| {
+                    for reference in &mut found.file.references {
+                        reference.characters = Some("%".to_owned());
+                    }
+                    Ok(crate::owner::Edit::Save((), Vec::new()))
+                })
+            })
+            .expect("saves");
+        assert_eq!(
+            harness.ask(|owner| owner.set_check(&reading("39"))),
+            Err(
+                "Percent reads none of the characters this value needs, \"39\". Edit Percent to \
+                 read them, or change the characters the value needs."
+                    .to_owned()
+            )
         );
         fs::remove_dir_all(root).expect("clean up");
     }
