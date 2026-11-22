@@ -45,6 +45,7 @@ use super::{Image, Region, Rgb, Size};
 pub(crate) mod drawn;
 mod ink;
 mod layers;
+mod shade;
 mod shape;
 
 pub use ink::Ink;
@@ -3570,5 +3571,100 @@ mod tests {
         let (read, shown) = sweep(16, &[12, 16, 24, 48]);
         assert_eq!((shown, shown.checked_sub(read)), (72, Some(2)));
         assert_eq!(sweep(40, &[14, 20]), (32, 32));
+    }
+    /// `image` as it shows with a shade that leaves `part` of 256 of each
+    /// color over the pixels `under` says, by column and row.
+    fn shaded(image: &Image, part: u32, under: impl Fn(u32, u32) -> bool) -> Image {
+        let width = image.size().width;
+        let left = |channel: u8| {
+            let left = u32::from(channel)
+                .checked_mul(part)
+                .expect("a part of a color");
+            u8::try_from(left.div_euclid(256)).expect("no more than the whole")
+        };
+        let bgra = (0_u32..)
+            .zip(image.pixels())
+            .flat_map(|(at, pixel)| {
+                if under(at.rem_euclid(width), at.div_euclid(width)) {
+                    [left(pixel[0]), left(pixel[1]), left(pixel[2]), pixel[3]]
+                } else {
+                    *pixel
+                }
+            })
+            .collect();
+        Image::new(image.size(), bgra).unwrap()
+    }
+
+    /// The part of a canvas for digits `height` pixels tall that each
+    /// shade of [`shade_sweep`] lies over: below the middle of the digits,
+    /// above it, right of the second digit, and left of the point.
+    fn shades(height: u32) -> [impl Fn(u32, u32) -> bool; 4] {
+        let size = canvas(height);
+        let middle = size.height.div_euclid(2);
+        [
+            (false, middle, true),
+            (false, middle, false),
+            (true, size.width.div_euclid(3), true),
+            (true, size.width.div_euclid(4), false),
+        ]
+        .map(|(down, edge, after)| {
+            move |x: u32, y: u32| {
+                let at = if down { x } else { y };
+                (at >= edge) == after
+            }
+        })
+    }
+
+    /// Reads "74.05%" with digits `height` pixels tall, in every one of
+    /// [`SCHEMES`], under shades that leave a quarter, half, and three
+    /// quarters of each color over each of [`shades`], with a reader that
+    /// learned at 28 pixels from pictures without a shade: how many it
+    /// read, of how many. A read of another number fails the test.
+    fn shade_sweep(height: u32) -> (u32, u32) {
+        let reader = taught(28, &LABELS);
+        let (mut read, mut shown) = (0_u32, 0_u32);
+        for colors in SCHEMES {
+            let pen = Pen {
+                colors,
+                ..pen(height, 0.3)
+            };
+            let plain = draw_text("74.05%", pen, canvas(height));
+            let reads = [64_u32, 128, 192].map(|part| {
+                shades(height).map(|under| {
+                    let said = reader.read(&shaded(&plain, part, under), false);
+                    let wrong = said.as_ref().is_ok_and(|said| *said != number(74.05));
+                    assert!(!wrong, "{height} {colors:?} {part}: {said:?}");
+                    u32::from(said.is_ok())
+                })
+            });
+            for read_here in reads.as_flattened() {
+                read = read.checked_add(*read_here).expect("few reads");
+                shown = shown.checked_add(1).expect("few reads");
+            }
+        }
+        (read, shown)
+    }
+
+    #[test]
+    fn a_number_reads_with_a_shade_over_a_part_of_it_and_never_as_a_wrong_number() {
+        // Read as it shows, the point in a shaded part goes missing in
+        // some of these, and they read as 7405.
+        assert_eq!(shade_sweep(20), (57, 72));
+        assert_eq!(shade_sweep(28), (69, 72));
+        assert_eq!(shade_sweep(40), (70, 72));
+    }
+
+    #[test]
+    fn a_picture_with_a_shade_over_a_part_of_it_teaches_the_shapes_without_the_shade() {
+        let size = canvas(28);
+        let mut reader = DigitReader::new();
+        for (text, under) in LABELS.iter().zip(shades(28)) {
+            let plain = draw_text(text, pen(28, 0.3), size);
+            reader.learn(&shaded(&plain, 128, under), text).unwrap();
+        }
+        assert_eq!(
+            reader.read(&drawn("74.05%", 28, 0.6), false),
+            Ok(number(74.05))
+        );
     }
 }
