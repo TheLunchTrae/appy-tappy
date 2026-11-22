@@ -189,9 +189,18 @@ export type ReferenceWait =
   | { readonly kind: 'ready'; readonly reference: ReferenceDef };
 
 /**
+ * Whether **Save value** keeps a new value as a draft for want of a reference alone: it has its side and its
+ * screenshot, and of what `missing` lists, the reference is all that is left, since the capture asks for a name and
+ * a region first.
+ */
+export function keptForReference(hasSide: boolean, drawnOn: number | null, missing: readonly string[]): boolean {
+  return hasSide && drawnOn !== null && missing.includes(NEEDS_REFERENCE);
+}
+
+/**
  * What the draft `def` waits for of `references`, its application's saved references. A number kept without a
- * reference, and nothing else the capture asks for first, is ready with the newest that has learned some characters and every character the value needs; any other
- * draft waits for none.
+ * reference, and nothing else the capture asks for first, is ready with the newest that has learned some
+ * characters and every character the value needs; any other draft waits for none.
  */
 export function referenceWait(def: DraftDef, references: readonly ReferenceDef[]): ReferenceWait {
   const draft = def.kind === 'value' ? keptSetup(def)?.draft : undefined;

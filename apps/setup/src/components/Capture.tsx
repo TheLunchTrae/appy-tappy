@@ -22,7 +22,6 @@ import {
   buildSpec,
   savedNeeds,
   EMPTY_DRAFT,
-  NEEDS_REFERENCE,
   firstWithPixels,
   fixDraft,
   onPicture,
@@ -74,6 +73,7 @@ import {
   type Editing,
   type Step,
   captureMissing,
+  keptForReference,
   referenceForValue,
   refreshedEditing,
   restoreSetup,
@@ -728,8 +728,7 @@ export function Capture({
   const canSave = ready && check.state.kind === 'set' && !busy;
   // A new number that needs nothing but a reference saves as a draft, which the Values page lists until its
   // application has a reference it can read with.
-  const keepsWithoutReference =
-    mode.kind === 'value' && hasSide && draft.drawnOn !== null && missing.includes(NEEDS_REFERENCE);
+  const keepsWithoutReference = mode.kind === 'value' && keptForReference(hasSide, draft.drawnOn, missing);
   // **Save and make a reference** is offered where the application has no reference to pick.
   const offersReference = onMakeReference !== null && file?.references.length === 0;
   // Saves a reference's draft, starting from the value's screenshot and region, then the value's draft beside it,

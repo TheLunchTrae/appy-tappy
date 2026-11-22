@@ -9,6 +9,7 @@ import {
   captureProblem,
   finishedWith,
   fixOutdated,
+  keptForReference,
   referenceForValue,
   referenceWait,
   refreshedEditing,
@@ -559,6 +560,14 @@ describe('a value kept without a reference', () => {
     expect(referenceWait(kept({ ...number, valueName: '' }, 'value', ['Name the value.']), [percent])).toEqual({
       kind: 'none',
     });
+  });
+
+  test('Save value keeps it as a draft only when the reference is all it still needs', () => {
+    expect(keptForReference(true, 0, [NEEDS_REFERENCE])).toBe(true);
+    expect(keptForReference(false, 0, [NEEDS_REFERENCE])).toBe(false);
+    expect(keptForReference(true, null, [NEEDS_REFERENCE])).toBe(false);
+    expect(keptForReference(true, 0, ['Name the value.'])).toBe(false);
+    expect(keptForReference(true, 0, [])).toBe(false);
   });
 
   test('finishes on the check step with the reference picked', () => {
