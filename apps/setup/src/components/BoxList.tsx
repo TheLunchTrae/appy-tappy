@@ -94,7 +94,8 @@ export function BoxList({ boxes, selected, full, position, blocked, onSelect, on
       )}
       {boxes.length === 0 ? null : (
         <p className="note">
-          Box 1 is where the reference is tried on the live window, and where recording This place records.
+          Box 1 is where the reference is tried on the live window, and where a recording that looks in This place
+          records.
         </p>
       )}
       {blocked === null ? null : <p className="note">{blocked}</p>}

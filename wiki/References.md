@@ -156,7 +156,7 @@ on the live window or any screenshot, and several on one screenshot too.
 
 - **Draw.** Drag on the live window, or on a screenshot away from the boxes
   there. A box drawn on the live window goes on the screenshot that the drag
-  takes as it starts, at the window size the hint above the window names; a
+  takes as it starts, at the window size the hint under the window names; a
   click there without a drag only takes the screenshot. The new box is
   selected, and the keyboard moves to its row under **Boxes**, so you can
   type what it shows straight away.
