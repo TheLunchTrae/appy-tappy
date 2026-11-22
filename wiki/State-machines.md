@@ -2782,30 +2782,33 @@ answers commands while a look runs. The recording holds a gate (`Gate` in
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
+    Idle --> Out: a start or Record more sends the newest frame
     Idle --> Out: a frame the recording is placed at arrives, SCAN_EVERY or more after the last one sent
     Out --> Idle: the look answers
     Out --> Idle: the look fails, which stops the recording
     Idle --> Idle: the look thread is gone, which stops the recording
     Out --> Abandoned: Record more after a stop, or a frame the recording is not placed at arrives
-    Abandoned --> Idle: the look answers or fails, and the answer is dropped
+    Abandoned --> Out: the look answers or fails, its answer is dropped, and the newest frame goes out
 ```
 
 - **Idle** holds when the last frame that went out arrived. A frame less
-  than `SCAN_EVERY` after it is skipped and not counted. The first frame
-  goes out at once.
+  than `SCAN_EVERY` after it is skipped and not counted. A start and
+  **Record more** send the window's newest frame at once
+  (`Owner::record_newest`), so a still window is looked over too.
 - **Out** skips every frame, so the owner holds one frame for the look and
   no queue of them. A look that takes longer than `SCAN_EVERY` makes the
   looks rarer: the next frame goes out when the answer comes.
 - **Abandoned** is a look that is out and whose answer no longer counts. It
-  skips every frame like **Out**, and when the answer comes the next frame
-  goes out at once.
+  skips every frame like **Out**. When the answer comes it is dropped and
+  the window's newest frame goes out at once, since a still window sends no
+  next frame.
 - The answer (`Event::Looked`) carries the recording's ticket and when its
   frame arrived. The owner drops one for a recording that was discarded or
   replaced. The recording counts and keeps the runs it holds, and sends each
   new reading to the [text reader](#text-reader).
 - **An answer after a stop.** The gate opens and what the look saw is
   dropped, since a stopped recording keeps no more. **Record more** sends
-  the next frame. When **Record more** comes before the answer, the look is
+  the newest frame. When **Record more** comes before the answer, the look is
   **Abandoned**: its frame is from before the stop, so its answer is dropped
   too.
 - **An answer after a resize.** A frame the recording is not placed at
@@ -2818,8 +2821,9 @@ stateDiagram-v2
   thread that ended refuses the frame. Either stops the recording with
   "Recording stopped: the window could not be looked over. Record more to
   try again.", opens the gate, and forgets the places the last look found.
-  **Record more** sends a frame again, and stops the same way if the thread
-  is gone.
+  A start or **Record more** sends the newest frame at once, so when the
+  thread is gone the recording stops during the start itself, and the first
+  read of its state shows the problem.
 - A look takes the 32 runs nearest the recording's region as it lies at the
   frame's size (`MAX_LINES`), of all the sizes together, so the text around the value is counted before
   other text in the window.

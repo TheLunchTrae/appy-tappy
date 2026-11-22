@@ -90,8 +90,15 @@ impl<H: Host> Owner<H> {
         let Some(current) = self.readings_mut() else {
             return;
         };
-        let new = current.looked(at, seen, Instant::now());
+        let abandoned = current.look_abandoned();
+        let now = Instant::now();
+        let new = current.looked(at, seen, now);
         self.read_new(new);
+        // The look that was out held back the newest frame when the user
+        // recorded more, and a still window sends no other.
+        if abandoned {
+            self.record_newest(now);
+        }
     }
 
     /// Sends each of the recording's `new` readings to the text reader.
@@ -294,15 +301,15 @@ impl<H: Host> Owner<H> {
         }
     }
 
-    /// Makes `recorder` what the picked window's capture records, in place
-    /// of any recording.
-    /// Records the newest frame of the picked window at `now`. A window
-    /// sends a frame only when what it shows changes, so a recording that
-    /// starts on a still screen reads what is there from this frame alone.
+    /// Records the newest frame of the picked window at `now`, unless its
+    /// capture failed since. A window sends a frame only when what it shows
+    /// changes, so a recording that starts on a still screen reads what is
+    /// there from this frame alone.
     fn record_newest(&mut self, now: Instant) {
         let newest = self
             .capture
             .picked_mut()
+            .filter(|picked| picked.failure.is_none())
             .and_then(|picked| picked.latest.take());
         if let Some((frame, arrived)) = newest {
             self.record(&frame, now);
@@ -312,6 +319,8 @@ impl<H: Host> Owner<H> {
         }
     }
 
+    /// Makes `recorder` what the picked window's capture records, in place
+    /// of any recording.
     pub(super) fn record_with(&mut self, recorder: Recorder) {
         if let Some(picked) = self.capture.picked_mut() {
             picked.recording = Some(recorder);
@@ -580,6 +589,11 @@ mod tests {
         harness.deliver(&mut handler, Ok(&red_columns(3)));
         harness.ask(start_recording(true)).expect("goes on");
         assert_eq!(harness.readings(), [(1, Text::Pending), (1, Text::Pending)]);
+        // A frame from before the capture failed is not what it shows now.
+        harness.ask(Owner::discard_recording);
+        harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
+        harness.ask(start_recording(false)).expect("records");
+        assert_eq!(harness.readings(), []);
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -795,6 +809,35 @@ mod tests {
         harness
             .ask(start_window_recording(0, true))
             .expect("goes on over the whole window");
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_whole_window_recording_that_goes_on_while_a_look_is_out_looks_at_the_frame_shown() {
+        let (mut harness, root) = with_example_app("rec-window-more-while-out");
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        harness
+            .ask(start_window_recording(0, false))
+            .expect("records");
+        let job = harness.looks.try_iter().next().expect("a look goes out");
+        harness.stop_recording();
+        harness
+            .ask(start_window_recording(0, true))
+            .expect("goes on");
+        assert_eq!(harness.looks.try_iter().count(), 0, "the look is still out");
+        // The old look's answer is dropped, and the still window's frame
+        // goes to be looked over in its place.
+        let answer = Message::Sent {
+            ticket: job.recording,
+            event: Event::Looked {
+                at: job.at,
+                seen: Some(look::look(&job)),
+            },
+        };
+        assert!(harness.owner.handle(answer).is_continue());
+        assert_eq!(harness.looks.try_iter().count(), 1);
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
