@@ -1508,7 +1508,7 @@ div.match-answer {
   margin-block: -6px;
 }
 
-/* A hint among a panel's buttons opens above them, as wide as the row, so it never widens the panel or adds to its
+/* A hint among a panel's buttons opens above its ?, as wide as the row, so it never widens the panel or adds to its
    height, which would scroll the panel and move the buttons out from under the pointer. */
 .actions {
   position: relative;
@@ -1520,10 +1520,12 @@ div.match-answer {
 
 .actions .with-hint > .hint-wrap > .tip {
   top: auto;
-  bottom: calc(100% + 4px);
   left: 0;
   right: 0;
   width: auto;
+  /* Its own line's place, moved up by itself and the 24 pixel ? button, so its bottom meets the ? and the pointer
+     can move onto it. */
+  transform: translateY(calc(-100% - 24px));
 }
 
 .card > .with-hint + .set-row {
