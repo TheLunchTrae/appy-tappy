@@ -287,13 +287,10 @@ mod tests {
         assert_eq!(
             cant_build(&SavedError::Learn {
                 name: "ref-digits-1.png".to_owned(),
-                source: LearnError::Conflict {
-                    learned: '8',
-                    new: '6'
-                },
+                source: LearnError::NoInk,
             }),
-            "its reference can't learn from the picture ref-digits-1.png: a character shaped \
-             like '8' was given as '6'"
+            "its reference can't learn from the picture ref-digits-1.png: nothing in the region \
+             stands out from its background"
         );
         assert_eq!(
             cant_build(&SavedError::SameSize),

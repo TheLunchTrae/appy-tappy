@@ -711,12 +711,17 @@ samples like any box the user drew.
 ### Saved pictures a reference can't learn
 
 A reference learns its saved samples again on each save and each trial,
-before its boxes and kept
-readings (`CharactersSpec::learn`, `saved::reader`). A save writes only
+before its kept readings and then its boxes (`CharactersSpec::learn`,
+`saved::reader`). Each lesson is the user's word for its shapes, so the
+newest wins: a shape learned as another character takes the newest
+lesson's character (`DigitReader::learn`), and a box, whose text the user
+always types, comes after the readings, whose text may be AppyTappy's
+guess. A shape unlike the ones learned for its character is one more
+glyph of it, so a character can have several shapes. A save writes only
 what `saved::reader` learned from the very bytes it writes. A sample
 teaches the reference nothing when no color of it splits into as many
 characters as its text has, as a picture cut without the pixels around its
-text can, or when a shape of it is learned as another character already. A
+text can. A
 picture that is missing from the
 application's folder teaches nothing either. The user sees no screenshot
 or box for such a sample, so the editor shows it

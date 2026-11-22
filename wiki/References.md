@@ -116,7 +116,9 @@ this reference to edit.
 ## Boxes
 
 A box is a part of a screenshot that shows some characters, with the text you
-type for it. A reference learns from every box that has text. Draw as many as
+type for it. A reference learns from every box that has text. What you type
+is the answer: when a saved picture or a kept reading taught the same shape
+as another character, your newest text replaces it. Draw as many as
 you like, on any screenshot, and several on one screenshot too.
 
 - **Draw.** Drag on a screenshot, away from the boxes there. The new box is

@@ -700,11 +700,11 @@ mod tests {
                 &[(0, "1"), (1, "1")],
             ))
             .expect("the label is learned");
-        assert!(
-            labeled[0].is_some(),
-            "the labeled screenshot gave the same shape to another character"
+        assert_eq!(
+            labeled,
+            [None, None],
+            "a box that names a reading's shape otherwise is a correction, not a problem"
         );
-        assert_eq!(labeled[1], None);
         let number = |reading| -> CharactersSpec {
             serde_json::from_str(&format!(
                 r#"{{"region":{{"x":1,"y":1,"width":4,"height":2}},"screenshot":0,

@@ -210,12 +210,12 @@ impl SavedReference {
 /// and those `kept` from the saved reference it adds to, as `saved::reader`
 /// learns it. Every caller teaches the reference in its own editor, so a
 /// problem with a kept sample points at the editor's list of saved
-/// pictures, which shows the picture no box does. The first `boxes` of
-/// `new` are boxes, and the rest kept readings.
+/// pictures, which shows the picture no box does. The first `readings` of
+/// `new` are kept readings, and the rest boxes.
 fn learned(
     reference: &ReferenceDef,
     new: &[(String, Vec<u8>)],
-    boxes: usize,
+    readings: usize,
     kept: &[(String, Vec<u8>)],
 ) -> Result<DigitReader, SpecError> {
     saved::reader(reference, |picture| {
@@ -238,10 +238,10 @@ fn learned(
                 let added = new.iter().position(|(new_name, _)| new_name == name);
                 match (text_of(name), added) {
                     (Some(text), Some(position)) => SpecError::Learn {
-                        lesson: if position < boxes {
-                            Lesson::Box
-                        } else {
+                        lesson: if position < readings {
                             Lesson::Reading
+                        } else {
+                            Lesson::Box
                         },
                         text,
                         source: source.clone(),
@@ -307,8 +307,8 @@ impl CharactersSpec {
     /// The reference these characters teach, saved with the ID `id` and the
     /// name `name`, and what it learned. A saved reference keeps its samples
     /// and their pictures, and the new ones take unused file names:
-    /// `ref-{id}-1.png` onward, the labeled screenshots first and then the
-    /// recorded readings. `None` for `id` teaches a saved reference under
+    /// `ref-{id}-1.png` onward, the recorded readings first and then the
+    /// labeled screenshots. `None` for `id` teaches a saved reference under
     /// its own ID, or a new one under a stand-in. `reserved` names every
     /// picture still used by the application's saved file; no new sample
     /// takes one of those names.
@@ -426,7 +426,7 @@ impl CharactersSpec {
             samples,
             characters: expected_characters(self.characters.as_deref().unwrap_or_default()),
         };
-        let reader = learned(&reference, &pictures, self.labels.len(), &kept)?;
+        let reader = learned(&reference, &pictures, recorded.len(), &kept)?;
         Ok(Taught {
             region,
             window_size,
@@ -453,7 +453,9 @@ impl CharactersSpec {
             let image = recorded_image(session.recording, region, label.reading)?;
             Ok((image.clone(), label.text.as_str()))
         });
-        labeled.chain(kept_readings).collect()
+        // The boxes come last: their text is always the user's, which wins
+        // over a kept reading's that may be the text reader's guess.
+        kept_readings.chain(labeled).collect()
     }
 
     /// Fails unless every labeled screenshot, and the recording when a
@@ -482,9 +484,11 @@ impl CharactersSpec {
     /// Why the reference these characters teach could not learn each of its
     /// recorded readings: `None` for one it learns. It learns the saved
     /// samples and the labeled screenshots first and then the readings in
-    /// order, as [`Self::teach`] does, but leaves out each reading it
-    /// cannot learn, so the ones after it are judged on the ones that
-    /// worked. Review flags the readings this finds, so the reference saved
+    /// order, but leaves out each reading it cannot learn, so the ones
+    /// after it are judged on the ones that worked. A reading fails only on
+    /// its own picture or a full reference, since a lesson never refuses a
+    /// shape for its character, so this order finds what [`Self::teach`]'s
+    /// does. Review flags the readings this finds, so the reference saved
     /// from the kept ones learns them all.
     ///
     /// # Errors
