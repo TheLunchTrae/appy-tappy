@@ -358,12 +358,15 @@ it** until every name can be saved.
 
 ### Characters a number needs
 
-A reference is a font: it can know digits, signs, and letters, and several
-values can share it. Each Number value says which characters it needs, under
-**Characters it needs** in the step that picks its reference. Turn on
+A reference reads the characters chosen for it, its
+[**Characters it reads**](References.md#characters-it-reads), and several
+values can share it. Each Number value says which of those characters it
+needs, under **Characters it needs** in the step that picks its reference. Turn on
 everything the value shows: its digits and any sign right after them, such
 as the `%` in `87%`. A new value starts with nothing turned on, so it reads
-every character its reference knows until you choose.
+every character its reference reads until you choose. A value can't read a
+character its reference doesn't read: when it needs one, the step names it
+under the reference, and **Edit** opens the reference to add it.
 
 - **Digits** is `0` to `9`.
 - **Decimal point**, **Comma**, **Percent**, **Minus**, **Plus**, and
@@ -386,9 +389,8 @@ in **Other characters**, where you can remove each. Select the choice to turn
 all of it on, and again to turn all of it off.
 
 The characters are the value's. Its reference keeps every character it
-knows, so another value can need more of the same reference, the References
-page still lists them all, and picking another reference changes nothing
-you turned on.
+reads, so another value can need more of the same reference, and picking
+another reference changes nothing you turned on.
 
 The list does two things. It says what to teach: the list of references
 shows after **Missing** which needed characters each has yet to learn, and a
@@ -419,7 +421,9 @@ whatever the value needs: text needs no teaching only after a character the
 reference knows has ended the number, such as the `HP` in `37% HP`.
 
 With nothing turned on, the value reads every character its reference
-knows, and any it learns later, and no character shows as missing.
+reads, and any it learns later, and no character shows as missing. When its
+reference reads none of the characters the value needs, AppyTappy doesn't
+read the value, and saving it names the reference to edit.
 
 A [fix](#fix-a-value-at-one-size) that reads with its own reference needs
 the same characters as its value.

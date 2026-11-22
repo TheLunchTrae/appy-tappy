@@ -2887,8 +2887,9 @@ stateDiagram-v2
   again from the box the shown search started from (`searchSkipped`).
   Closing the reference editor forgets them all (`reset`). A find starts
   unticked. It is listed when its text may show only characters the value
-  the reference is taught for needs, a lookalike digit counted as its digit
-  (`fitsNeeds`), or while it is being read or the user typed it. Answers to a search the user
+  the reference is taught for needs, or else the characters the reference
+  reads, a lookalike digit counted as its digit (`fitsNeeds` with
+  `teachingNeeds`), or while it is being read or the user typed it. Answers to a search the user
   moved on from are ignored by the UI's turn. Picture callbacks end when
   the search is replaced or dismissed, or its editor closes, through the
   cleanup of their effect (`ask` in `useFound`); a late picture cannot

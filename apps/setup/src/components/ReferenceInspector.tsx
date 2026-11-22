@@ -3,10 +3,10 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import type { AppFile } from '../lib/bindings.ts';
 import { explainReading } from '../lib/api.ts';
 import { boxOf } from '../lib/boxes.ts';
-import type { Editing, NeedsField } from '../lib/captureDraft.ts';
+import { type Editing, type NeedsField, savedReads } from '../lib/captureDraft.ts';
 import { type Built, type Draft, type ReferenceSaving, withoutSample } from '../lib/check.ts';
 import type { Picture } from '../lib/pixels.ts';
-import { readers, readersNeed } from '../lib/reference.ts';
+import { readers, readersLose, readersNeed } from '../lib/reference.ts';
 import { neededPairs } from '../lib/useReadingRisks.ts';
 import { background } from '../lib/repeat.ts';
 import { checkBackLabel, referenceSave } from '../lib/teaching.ts';
@@ -151,10 +151,10 @@ export function ReferenceInspector({
   const { taught, finder, guided, review, recorder, checking, covered } = teaching;
   const chosen = boxes.selected;
   const saved = editing.existing?.samples ?? [];
-  // A look-alike pair warns when it has one of these characters: the value's, or for a reference by itself those of
-  // every value that reads with it.
+  // A look-alike pair warns when it has one of these characters: the value's, or the ones the reference reads, or for
+  // a reference by itself that reads every character it learns, those of every value that reads with it.
   const lookalikeNeeds =
-    needsField !== 'hidden'
+    needsField !== 'hidden' || teaching.needs.length > 0
       ? teaching.needs
       : editing.existing === null || file === null
         ? []
@@ -179,6 +179,16 @@ export function ReferenceInspector({
         labeled={taught.labeled}
         recorded={taught.recorded}
         finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
+        reads={editing.reads}
+        readersLose={
+          editing.existing === null || file === null
+            ? null
+            : readersLose(file, editing.existing.id, savedReads(editing))
+        }
+        onReads={(reads) => {
+          setEditing((current) => (current === null ? null : { ...current, reads }));
+        }}
+        valueNeeds={editing.needs}
         expected={teaching.needs}
         coverage={covered}
         lookalikes={neededPairs(teaching.risks.lookalikes, lookalikeNeeds)}
@@ -292,7 +302,8 @@ export function ReferenceInspector({
       )}
       {refSave.can && covered.missing.length > 0 ? (
         <p className="note">
-          It has yet to learn every character the value needs. You can save now and teach the rest later.
+          It has yet to learn every character {editing.needs.length > 0 ? 'the value needs' : 'it reads'}. You can save
+          now and teach the rest later.
         </p>
       ) : null}
       {draftError}

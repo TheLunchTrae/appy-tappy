@@ -453,6 +453,7 @@ mod tests {
                 image: "icon.png".to_owned(),
                 text: "1".to_owned(),
             }],
+            characters: None,
         });
         stores
             .apps

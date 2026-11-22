@@ -443,6 +443,7 @@ mod tests {
                 image: "ref-counter-1.png".to_owned(),
                 text: "1".to_owned(),
             }],
+            characters: None,
         }];
         let watching = automation(vec![ActionDef::Media {
             command: MediaCommand::Pause,

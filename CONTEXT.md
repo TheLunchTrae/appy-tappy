@@ -31,10 +31,10 @@ parts fit.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
 - **Expected characters.** The characters the user says a number value
-  needs. The value reads only these characters of its reference, and the
-  setup app shows which of them the reference has yet to learn. With none,
-  the value reads every character its reference knows. The UI calls them
-  **Characters it needs**.
+  needs, of those its reference reads. The value reads only these characters
+  of its reference, and the setup app shows which of them the reference has
+  yet to learn. With none, the value reads every character its reference
+  reads. The UI calls them **Characters it needs**.
 - **Edit.** A saved value changed as it was first drawn, under the ID it
   has, so the automations that watch it stay linked.
 - **Fix.** A screen region value drawn again at one more window size, which
@@ -77,7 +77,11 @@ parts fit.
   time.
 - **Reference.** The characters of one font in one application, learned from
   labeled pictures of its text. A number check reads with one, at any size
-  and in any color.
+  and in any color. A reference reads only the characters chosen for it,
+  which the UI calls **Characters it reads**, or every character it learns
+  when none are chosen. Finding text like a box lists only text that may show
+  those characters, and a recording's review starts readings without them
+  unkept.
 - **Rule.** A condition on signals, the actions to run when it starts to hold,
   a cooldown, and whether those actions restore.
 - **Runtime.** The always-on background program.

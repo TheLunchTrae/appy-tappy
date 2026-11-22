@@ -35,9 +35,31 @@ export function knownCharacters(texts: Iterable<string>): readonly string[] {
   return [...found].toSorted(order);
 }
 
-/** The characters `reference` learned from its saved pictures. */
+/**
+ * The characters `reference` says it reads, or none when it reads every character it learns. A list that names no
+ * character reads every character too, as the runtime reads it.
+ */
+function readsOf(reference: ReferenceDef): readonly string[] {
+  return labelCharacters(reference.characters ?? '');
+}
+
+/**
+ * The characters `reference` reads: those it learned from its saved pictures, of the characters it is made to read
+ * when it says, as the runtime reads with it.
+ */
 export function referenceCharacters(reference: ReferenceDef): readonly string[] {
-  return knownCharacters(reference.samples.map((sample) => sample.text));
+  const learned = knownCharacters(reference.samples.map((sample) => sample.text));
+  const reads = readsOf(reference);
+  return reads.length === 0 ? learned : learned.filter((character) => reads.includes(character));
+}
+
+/**
+ * The characters of `needs`, the ones a value needs, that `reference` does not read, so the value cannot read them
+ * with it until the reference reads them too. None when it reads every character it learns.
+ */
+export function unreadBy(reference: ReferenceDef, needs: readonly string[]): readonly string[] {
+  const reads = readsOf(reference);
+  return reads.length === 0 ? [] : needs.filter((character) => !reads.includes(character));
 }
 
 /** `file`'s values that read with the reference `id`, in their check or in a fix. */
@@ -55,14 +77,27 @@ export function readers(file: AppFile, id: string): readonly string[] {
 }
 
 /**
- * The characters `file`'s values that read with the reference `id` need between them, or none when one of them reads
- * every character the reference knows or no value reads with it. A fix reads the characters its value needs.
+ * The characters `file`'s values that read with the reference `id` need between them, of those the reference reads,
+ * or none for every character. A value that needs none needs every character the reference reads, which is every
+ * character when it does not say, and so is a reference no value reads with. A fix reads the characters its value
+ * needs.
  */
 export function readersNeed(file: AppFile, id: string): readonly string[] {
+  const own = file.references.find((reference) => reference.id === id)?.characters ?? '';
   const needs = readingValues(file, id).map(({ screen }) =>
     screen.check.kind === 'number' ? (screen.check.characters ?? '') : '',
   );
-  return needs.includes('') ? [] : knownCharacters(needs);
+  if (needs.length === 0 || needs.includes('')) {
+    return knownCharacters([own]);
+  }
+  const needed = knownCharacters(needs);
+  const reads = knownCharacters([own]);
+  if (reads.length === 0) {
+    return needed;
+  }
+  // Values that need none of what it reads read nothing with it, so its own characters are the ones that count.
+  const both = needed.filter((character) => reads.includes(character));
+  return both.length === 0 ? reads : both;
 }
 
 /** `names` as a sentence's list: `A`, `A and B`, or `A, B and C`. */
@@ -71,6 +106,28 @@ export function andList(names: readonly string[]): string {
     return names.join('');
   }
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1) ?? ''}`;
+}
+
+/**
+ * What saving the reference `id` reading `reads` would take from `file`'s values that read with it: a sentence naming
+ * each value and the characters it needs that the reference would no longer read, or null. Reading every character,
+ * as none means, takes nothing.
+ */
+export function readersLose(file: AppFile, id: string, reads: readonly string[]): string | null {
+  if (reads.length === 0) {
+    return null;
+  }
+  const losing = readingValues(file, id).flatMap(({ name, screen }) => {
+    const needs = screen.check.kind === 'number' ? knownCharacters([screen.check.characters ?? '']) : [];
+    const lost = needs.filter((character) => !reads.includes(character));
+    return lost.length === 0 ? [] : [{ name, lost }];
+  });
+  if (losing.length === 0) {
+    return null;
+  }
+  const one = losing.length === 1 && losing[0]?.lost.length === 1;
+  const values = losing.length === 1 ? 'the value needs' : 'the values need';
+  return `${andList(losing.map(({ name, lost }) => `${name} needs ${lost.join(' ')}`))}, which it would no longer read. Turn ${one ? 'it' : 'them'} on, or change what ${values}.`;
 }
 
 /** Why a reference that the values `names` read with cannot be deleted, or nothing when no value does. */

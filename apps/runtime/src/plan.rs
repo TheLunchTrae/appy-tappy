@@ -842,6 +842,7 @@ mod tests {
                 image: sample_name("digits", 1),
                 text: "11".to_owned(),
             }],
+            characters: None,
         });
         let mut missing = example.clone();
         missing.references.clear();

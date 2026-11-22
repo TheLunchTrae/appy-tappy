@@ -77,6 +77,7 @@ import {
   refreshedEditing,
   restoreSetup,
   regionOnStage,
+  savedReads,
   shownOnStep,
   storeSetup,
   needsField,
@@ -317,15 +318,17 @@ export function Capture({
     [existingId, appId],
   );
   const isEditing = editing !== null;
+  // What the reference reads once it is saved, which it is tried with too.
+  const reads = useMemo(() => (editing === null ? [] : savedReads(editing)), [editing]);
   // The characters the reference editor teaches while it is open, and the check of the value it was opened from.
   const characters = useMemo(
-    () => (isEditing ? buildCharacters(draft, editingRef) : null),
-    [isEditing, draft, editingRef],
+    () => (isEditing ? buildCharacters(draft, editingRef, reads) : null),
+    [isEditing, draft, editingRef, reads],
   );
   const valueCheck = useMemo(() => buildSpec(draft, appId, needsSaved), [draft, appId, needsSaved]);
   const referenceSave = useMemo(
-    () => (isEditing ? buildReferenceSave(draft, editingRef) : null),
-    [isEditing, draft, editingRef],
+    () => (isEditing ? buildReferenceSave(draft, editingRef, reads) : null),
+    [isEditing, draft, editingRef, reads],
   );
   const built: Built<unknown> = referenceSave ?? valueCheck;
   const builtKind = characters === null ? (valueCheck.ok ? valueCheck.spec.kind : 'none') : 'characters';

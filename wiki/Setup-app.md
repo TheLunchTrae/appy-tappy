@@ -343,9 +343,21 @@ This page covers what the user guide leaves out.
   One that a value reads with cannot be deleted.
 - **Expected characters.** A number value may list the characters it needs,
   as [Characters a number needs](Values.md#characters-a-number-needs)
-  describes, in its check's `characters`. The list is the value's: a
-  reference is a font with no list of its own, so values that need different
-  characters share one. The list does two jobs. The value reads only those
+  describes, in its check's `characters`. The list is the value's, of the
+  characters its reference reads: a reference saves its own list, its
+  `characters`, and values that need different characters of it share one.
+  `Readers::reading` in `appytappy-sources` applies the reference's list and
+  then the value's, so a value reads only what both read. The editor keeps
+  the reference's list as `Editing.reads`, which `startEditing` takes from
+  the saved reference, or from the value, or starts as the digits for a
+  reference made by itself. `teachingNeeds` compares what the reference
+  learns with the value's list, or with the reference's own when the value
+  needs none or there is no value, so finding text, recording, and what is
+  missing go by it. `savedReads` adds the value's list to the reference's on
+  save, so the value can read what it needs, and `buildCharacters` and
+  `buildReferenceSave` send it as `characters`, which the save writes
+  through `expected_characters` with no cap. The value's list does two
+  jobs. The value reads only those
   characters of its reference, as [Checks](Screen-regions.md#checks)
   describes, and the page compares the list with what a reference learned,
   to show what is left to teach. `appytappy-sources` builds a reference's
@@ -369,7 +381,7 @@ This page covers what the user guide leaves out.
   reference is saved (`withTaught`). `needsField` says how the editor shows
   it: to change when opened from a value, to read when opened from a fix,
   which needs what its value does, and not at all from the References page,
-  where a reference is taught for no characters. The cap holds where a list
+  where a reference is taught for no value. The cap holds where a list
   is set or changed (`expected_within_limit`, and `buildSpec` on the page),
   so a saved value with a longer list, written by hand, still takes a fix or
   an edit that leaves the list alone. The learned characters are
@@ -1031,6 +1043,7 @@ saved file still names.
       "id": "percent_font",
       "name": "Percent font",
       "origin": { "kind": "recording" },
+      "characters": "0123456789.%",
       "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }]
     }
   ]
@@ -1116,12 +1129,16 @@ check may have it, and it changes nothing the value reads. Each of its `fixes` h
 region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
 
+A reference's `characters` is the characters it reads, such as
+`"0123456789.%"`, and is left out when it reads every character it learns.
 A number check's `characters` is the characters the value needs of its
 reference, such as `"0123456789%"`, and is left out when it reads every
-character the reference knows. Whitespace in it does not count, and neither
-does a character the reference has yet to learn. A check that names
-characters names at least one, or the file does not load; a value whose
-reference, or whose fix's reference, knows none of them is not read. The
+character the reference reads. The value reads only the characters both
+lists hold. Whitespace in either does not count, and neither does a
+character the reference has yet to learn. A check that names characters
+names at least one, or the file does not load; a value whose reference, or
+whose fix's reference, reads none of them, or knows none of them, is not
+read. The
 setup app writes each character once, the digits first, then the rest by
 code point. Its live check reads with the same glyphs, since `saved::build` chooses
 them for both.
