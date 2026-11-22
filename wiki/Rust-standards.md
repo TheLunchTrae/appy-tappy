@@ -192,5 +192,5 @@ check; an empty selection succeeds without building anything.
 `CODEOWNERS` assigns every path to the owner, because source files can carry
 mutation classifications and lint expectations. The settings that make that a
 gate live on GitHub: require the `quality` and `windows` checks, the
-`mutants 0/4` to `mutants 3/4` checks, and Code Owner review, dismiss stale
+`mutants 0/8` to `mutants 7/8` checks, and Code Owner review, dismiss stale
 approvals on new commits, and disallow bypassing protection.
