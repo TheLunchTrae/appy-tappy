@@ -1111,7 +1111,8 @@ stateDiagram-v2
     Saving --> Open: saved with a flow waiting, which shows again with what was made
     Saving --> Page: saved with none waiting, the page that lists it opens
     Saving --> Page: a reference made for a value draft is saved, the Values page opens
-    Open --> Open: Save and make a reference keeps the value as a draft and opens the reference flow
+    Open --> SavingDraft: Save and make a reference in a new value opened from its page
+    SavingDraft --> Open: the reference's draft and the value's are saved, the reference flow opens on the first
     Saving --> Saving: the tabs, Cancel, and Leave wait until the save ends
     Open --> SavingDraft: Save as draft in the open flow
     SavingDraft --> Open: the draft save fails, the flow shows why

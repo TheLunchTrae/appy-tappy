@@ -36,6 +36,7 @@ import {
   type Made,
   type Opener,
   afterFlow,
+  makesReference,
   applicationFor,
   heldInAll,
   holdsAutomation,
@@ -387,17 +388,18 @@ export function App() {
             end(flow, 'drafted');
           }}
           onMakeReference={
-            // Only a new value opened from its page makes a reference in its place: one made for an automation
-            // returns to the automation.
-            flow.kind === 'value' && flow.changing === null && flow.opener === null
+            flow.kind === 'value' && makesReference(flow)
               ? (reference) => {
-                  open({
-                    kind: 'reference',
-                    existing: null,
-                    app: reference.def.app,
-                    resumed: reference,
-                    forValue: true,
-                  });
+                  open(
+                    {
+                      kind: 'reference',
+                      existing: null,
+                      app: reference.def.app,
+                      resumed: reference,
+                      forValue: true,
+                    },
+                    'flow',
+                  );
                   background(refresh());
                 }
               : null

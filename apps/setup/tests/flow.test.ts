@@ -21,6 +21,7 @@ import {
   keepStep,
   keptAutomation,
   leaveQuestion,
+  makesReference,
   resumedFlow,
   savedNote,
   startOf,
@@ -713,4 +714,18 @@ describe('leaving a stack of flows with Save as draft', () => {
       effects: [],
     });
   });
+});
+
+test('only a new value opened from its page makes a reference in its place', () => {
+  expect(makesReference({ kind: 'value', changing: null, app: null, opener: null, resumed: null })).toBe(true);
+  expect(makesReference(valueFor(waits, 'example'))).toBe(false);
+  expect(
+    makesReference({
+      kind: 'value',
+      changing: { app: 'example', value: progress, how: 'fix' },
+      app: null,
+      opener: null,
+      resumed: null,
+    }),
+  ).toBe(false);
 });

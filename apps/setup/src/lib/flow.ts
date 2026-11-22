@@ -106,6 +106,15 @@ export interface RefFlow {
   readonly forValue: boolean;
 }
 
+/**
+ * Whether the value flow `flow` offers **Save and make a reference**, which ends it and opens the reference flow
+ * in its place: only a new value opened from its page does, since one made for an automation returns to the
+ * automation.
+ */
+export function makesReference(flow: ValueFlow): boolean {
+  return flow.changing === null && flow.opener === null;
+}
+
 /** A flow that opens another flow and waits under it. */
 export type Opener = AutomationFlow | ValueFlow | RefFlow;
 

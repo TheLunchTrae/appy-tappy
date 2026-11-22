@@ -79,9 +79,7 @@ function ValueDraftRows({ list, app, rows }: ValueDraftProps) {
         resumed={resumed}
         problem={
           captureProblem(resumed.def, rows.apps) ??
-          (wait.kind === 'waiting'
-            ? `Needs a reference. Make one for ${name} on the References page.`
-            : null)
+          (wait.kind === 'waiting' ? `Needs a reference. Make one for ${name} on the References page.` : null)
         }
         ready={wait.kind === 'ready' ? `Ready to finish with ${wait.reference.name}.` : null}
         cells={(setup) => (

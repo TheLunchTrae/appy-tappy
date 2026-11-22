@@ -20,7 +20,7 @@ import {
   shownOnStep,
   storeSetup,
 } from '../src/lib/captureDraft.ts';
-import { type Draft, EMPTY_DRAFT, fixDraft } from '../src/lib/check.ts';
+import { type Draft, EMPTY_DRAFT, NEEDS_REFERENCE, fixDraft } from '../src/lib/check.ts';
 import {
   DRAFT_FORMAT,
   draftOfSaved,
@@ -523,8 +523,10 @@ describe('a value kept without a reference', () => {
     step: 'how',
     draft: { ...EMPTY_DRAFT, region, drawnOn: 3, characters: ['1', '%'] },
   };
-  const kept = (setup: CaptureSetup, kind: DraftKind = 'value'): DraftDef =>
-    def(kind, keep(kind, storeSetup(setup)), null, 'example');
+  const kept = (setup: CaptureSetup, kind: DraftKind = 'value', missing = [NEEDS_REFERENCE]): DraftDef => ({
+    ...def(kind, keep(kind, storeSetup(setup)), null, 'example'),
+    missing,
+  });
   const reference = (id: string, text: string, characters?: string): ReferenceDef => ({
     id,
     name: id,
@@ -553,6 +555,10 @@ describe('a value kept without a reference', () => {
       kind: 'none',
     });
     expect(referenceWait(kept(number, 'fix'), [percent])).toEqual({ kind: 'none' });
+    // A draft that still needs its name or region first finishes as any draft does.
+    expect(referenceWait(kept({ ...number, valueName: '' }, 'value', ['Name the value.']), [percent])).toEqual({
+      kind: 'none',
+    });
   });
 
   test('finishes on the check step with the reference picked', () => {

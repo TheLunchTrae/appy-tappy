@@ -729,11 +729,7 @@ export function Capture({
   // A new number that needs nothing but a reference saves as a draft, which the Values page lists until its
   // application has a reference it can read with.
   const keepsWithoutReference =
-    mode.kind === 'value' &&
-    hasSide &&
-    draft.drawnOn !== null &&
-    missing.length === 1 &&
-    missing[0] === NEEDS_REFERENCE;
+    mode.kind === 'value' && hasSide && draft.drawnOn !== null && missing.includes(NEEDS_REFERENCE);
   // **Save and make a reference** is offered where the application has no reference to pick.
   const offersReference = onMakeReference !== null && file?.references.length === 0;
   // Saves a reference's draft, starting from the value's screenshot and region, then the value's draft beside it,

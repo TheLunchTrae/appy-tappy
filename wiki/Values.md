@@ -86,8 +86,8 @@ what it sets. Select a step to go to it.
 ### A value without a reference
 
 A **Number** reads with a reference, but you don't need one to set the value
-up. While no reference is picked, **Save value** keeps the value as a
-[draft](Drafts.md), and the Values page lists it under its application as
+up. Once it has a name and a region but no reference, **Save value** keeps
+the value as a [draft](Drafts.md), and the Values page lists it under its application as
 **Needs a reference**, with no **Finish** yet. Once a reference that has learned
 every character the value needs is saved, the row says
 **Ready to finish with** that reference, and **Finish** opens the value on
@@ -100,8 +100,9 @@ While the application has no reference at all, **Characters** offers
 once you capture the window again. The new reference reads the characters the
 value needs, or the digits while it needs none in particular. Saving the
 reference brings you to the Values page, where the value's row shows
-**Finish**. A value you make for an automation doesn't offer it: **Save value**
-keeps that value as a draft and returns to the automation without it.
+**Finish** once the reference has learned every character the value needs.
+A value you make for an automation doesn't offer it: **Save value** keeps
+that value as a draft and returns to the automation without it.
 
 To use other keys for the screenshot shortcut, select **Change shortcut** and
 press them, or change it in [Settings](Settings.md). F1 to F24, Print Screen,

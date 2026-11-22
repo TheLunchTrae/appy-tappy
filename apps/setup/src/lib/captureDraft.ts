@@ -1,7 +1,7 @@
 // What a draft of a value, a fix, or a reference keeps of the capture screen, and what it still needs.
 
 import type { AppSummary, DraftDef, ReferenceDef, ValueDef } from './bindings.ts';
-import { type Built, type CheckKind, type Draft, EMPTY_DRAFT, fixDraft } from './check.ts';
+import { type Built, type CheckKind, type Draft, EMPTY_DRAFT, NEEDS_REFERENCE, fixDraft } from './check.ts';
 import { type Kept, type Resumed, draftProblem, isKept, keep } from './drafts.ts';
 import { DIGITS, expectedSet } from './expected.ts';
 import { referenceCharacters } from './reference.ts';
@@ -190,12 +190,12 @@ export type ReferenceWait =
 
 /**
  * What the draft `def` waits for of `references`, its application's saved references. A number kept without a
- * reference is ready with the newest that has learned some characters and every character the value needs; any other
+ * reference, and nothing else the capture asks for first, is ready with the newest that has learned some characters and every character the value needs; any other
  * draft waits for none.
  */
 export function referenceWait(def: DraftDef, references: readonly ReferenceDef[]): ReferenceWait {
   const draft = def.kind === 'value' ? keptSetup(def)?.draft : undefined;
-  if (draft?.kind !== 'number' || draft.reference !== null) {
+  if (draft?.kind !== 'number' || draft.reference !== null || !def.missing.includes(NEEDS_REFERENCE)) {
     return { kind: 'none' };
   }
   const reference = references.findLast((each) => {
