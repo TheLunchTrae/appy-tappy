@@ -513,7 +513,8 @@ stray shape and draw a box around it instead.
 1. **Start recording.** Draw a box around the characters first. Under **Record readings**, choose where to
    **Look in**: **This place**, or **The whole window**, which
    [Record the whole window](#record-the-whole-window) describes. Then
-   select **Start recording**. The region turns red while it records. It
+   select **Start recording**. A red outline shows the region it records
+   over the live window while it records. It
    reads what the window shows when you start, so you can start on a
    screen that already shows the characters.
 2. **Use the application.** Go on in it until the region has shown the
@@ -657,8 +658,9 @@ recording collects characters from all of it. The place the reference
 reads, its first box, is the example: AppyTappy looks
 for text in the color the text in that place has when the recording
 starts, as tall as it shows on its screenshot, anywhere in the window, and reads each piece like
-the place itself. While it records, the window shows an
-outline around each piece it found the last time it looked, and **Recording
+the place itself. While it records, the window shows a dashed outline
+around each piece it found the last time it looked, cut close to its text,
+beside the solid outline of the place itself, and **Recording
 the whole window** says in how many places that was.
 
 An application can show the same characters at more than one size, such as a

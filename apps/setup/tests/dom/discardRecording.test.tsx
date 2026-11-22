@@ -26,6 +26,7 @@ const empty: RecordingView = {
   at: size,
   sizes: [],
   spots: [],
+  place: null,
   readings: [],
   shapes: [],
 };

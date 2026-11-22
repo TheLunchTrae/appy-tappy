@@ -1577,6 +1577,11 @@ settings: RecordingSettings,
  */
 at: SizeDef,
 /**
+ * Where it records on a window of the size it is placed at, or `None`
+ * while it cannot place its region there.
+ */
+place: RegionDef | null,
+/**
  * How tall the characters are that a recording of the whole window
  * looks for, smallest first, in pixels of the window the region was
  * drawn on: one size for each example of text that differs from the

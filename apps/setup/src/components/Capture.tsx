@@ -1012,7 +1012,7 @@ export function Capture({
               <CaptureOutlines outline={outline} size={native} shown={shown} />
             )}
             {recording?.recording === true && selected === null ? (
-              <RecordingSpots view={recording} shown={shown} />
+              <RecordingSpots view={recording} shown={shown} place={editing !== null} />
             ) : null}
             {liveFrame !== null ? (
               <RegionSurface
