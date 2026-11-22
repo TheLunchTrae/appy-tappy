@@ -97,6 +97,9 @@ parts fit.
   it runs) until they stop. Rule state resets with each session.
 - **Setup app.** The program the user opens to discover signals, build rules,
   and save its files.
+- **Shade.** A dark sheet over a part of a number's region that leaves a
+  part of each color's light, as a pause menu lays over a window. A read
+  makes the shaded part light again before it looks for ink.
 - **Shared file.** One zip file that holds an application's `app.json` and
   the pictures it names, which **Export** writes and **Import** reads as a
   new application. It holds no automation.

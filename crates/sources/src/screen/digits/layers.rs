@@ -36,6 +36,7 @@ use std::ops::{BitOr, Range};
 
 use super::super::{Image, Rgb, Size};
 use super::ink::{Ink, index};
+use super::shade;
 
 /// The most colors an image is split into.
 const MAX_COLORS: usize = 12;
@@ -109,20 +110,19 @@ pub(super) struct Layers {
     background: u8,
 }
 
-/// The layer of a pixel that is ink of no layer. An image has fewer colors.
-const NO_LAYER: u8 = u8::MAX;
-const _: () = assert!(MAX_COLORS < NO_LAYER as usize);
+/// The colors found in an image, before the blends along its edges are
+/// told from the colors of their own.
+struct Palette {
+    /// The most common colors, each with whether it may be a blend.
+    found: Vec<(Rgb, bool)>,
+    /// Each pixel's place in `found`, row by row from the top, or
+    /// [`NO_LAYER`] for a color past the last one found.
+    placed: Vec<u8>,
+}
 
-impl Layers {
-    /// Splits `image` into its colors.
-    pub(super) fn new(image: &Image) -> Self {
-        let size = image.size();
-        let width = index(size.width).max(1);
-        let pixels: Vec<Rgb> = image
-            .pixels()
-            .iter()
-            .map(|&pixel| Rgb::of_pixel(pixel))
-            .collect();
+impl Palette {
+    /// The colors of `pixels`, an image of `size` row by row from the top.
+    fn of(pixels: &[Rgb], size: Size) -> Self {
         let counted: Vec<u16> = pixels.iter().map(|&pixel| counted(pixel)).collect();
         let mut counts = vec![0_u32; COUNTED];
         // The red, green, and blue of each counted color's pixels, summed.
@@ -199,7 +199,54 @@ impl Layers {
             .iter()
             .map(|&counted| spots.get(usize::from(counted)).copied().unwrap_or(NO_LAYER))
             .collect();
-        let Blends { gone, mixed } = blends(&found, &placed, width);
+        Self { found, placed }
+    }
+
+    /// The blends among the colors, in rows `width` long.
+    fn blends(&self, width: usize) -> Blends {
+        blends(&self.found, &self.placed, width)
+    }
+}
+
+/// The layer of a pixel that is ink of no layer. An image has fewer colors.
+const NO_LAYER: u8 = u8::MAX;
+const _: () = assert!(MAX_COLORS < NO_LAYER as usize);
+
+impl Layers {
+    /// Splits `image` into its colors, as it shows without a shade over
+    /// a part of it ([`shade::lit`]).
+    pub(super) fn new(image: &Image) -> Self {
+        let size = image.size();
+        let width = index(size.width).max(1);
+        let mut pixels: Vec<Rgb> = image
+            .pixels()
+            .iter()
+            .map(|&pixel| Rgb::of_pixel(pixel))
+            .collect();
+        let mut palette = Palette::of(&pixels, size);
+        let mut blends = palette.blends(width);
+        let colors: Vec<Rgb> = palette.found.iter().map(|&(color, _)| color).collect();
+        // The color each pixel is all of, where it is no blend.
+        let own: Vec<Option<u8>> = palette
+            .placed
+            .iter()
+            .zip(&blends.mixed)
+            .map(|(&placed, &mixed)| {
+                let gone = blends
+                    .gone
+                    .get(usize::from(placed))
+                    .copied()
+                    .unwrap_or(true);
+                (!mixed && !gone).then_some(placed)
+            })
+            .collect();
+        if let Some(lit) = shade::lit(&pixels, size, &colors, &own) {
+            pixels = lit;
+            palette = Palette::of(&pixels, size);
+            blends = palette.blends(width);
+        }
+        let Palette { found, placed } = palette;
+        let Blends { gone, mixed } = blends;
         // The place among `colors` of each color found that is one.
         let mut kept = Vec::with_capacity(found.len());
         let mut colors: Vec<Rgb> = Vec::new();

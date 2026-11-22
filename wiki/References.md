@@ -386,6 +386,11 @@ teaches the reference, whatever colors the text and its outline have, and
 there is no color to pick or tolerance to set. A box drawn along the edge
 of a button or a panel teaches the text on it, not the panel.
 
+A reference reads a number that is dim all over, as under a pause menu
+that darkens the window. It reads most numbers that are dim in part, where
+the straight edge of such a dark panel crosses them, and small text less
+often. A box drawn on such a picture teaches the same shapes.
+
 A reference reads one font. These it can't read, or reads less well:
 
 - **Another font.** Its characters are other shapes. Give it its own
@@ -401,6 +406,9 @@ A reference reads one font. These it can't read, or reads less well:
   size too.
 - **Text in the background's own color** reads only with an outline more
   than a pixel wide around it.
+- **A number that is dim in part along a slanted or blurred edge,** or
+  under a colored panel that shows through. It reads when the whole number
+  is dim, and when the edge is straight across or down.
 
 A reference knows how tall a character is beside the others in its box, so
 it tells a `.` from a `0` and a `,` from a `'`. A box that shows a sign

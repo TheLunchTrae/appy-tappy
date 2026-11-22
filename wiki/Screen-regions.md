@@ -142,6 +142,45 @@ are blends. A color with blends and nothing else but pieces
 of fewer than 4 pixels (`SPECK`) is left out whole, so a lone mark that
 small in such a color is not read.
 
+A pause menu or a dialog lays a dark sheet over a part of a window, and a
+region that the sheet's edge crosses shows a part of its number dim. Such a
+region is made light again before its colors are layers (`lit` in
+`screen/digits/shade.rs`), so the number is the one color it is without the
+sheet, and a lesson from such a picture learns the shapes without it. A
+shade is found where all of these hold:
+
+- Two of the region's colors are the same color with a part of its light
+  left, from a fifth (`DARKEST`) to all but the whole, and at least 16
+  pixels are all of each (`STRAY`). Pixels that are a blend tell nothing.
+- One straight line across or down has the light one on one side and the
+  dark one on the other, with no more than one pixel in 16 of either on
+  the wrong side.
+- The dark side shows few pixels in a color of the light side that the
+  shade would have changed. So a background that is the same on both sides
+  lies under no shade: gray text beside white text on it is two
+  brightnesses of text. On a background so dark that a shade leaves it as
+  it is, nothing tells the two apart, and the gray text is made white.
+- No pixel on the dark side is lighter than the shade leaves white, give
+  or take 12 (`OFF`). A gray panel beside a white one is no shade where
+  light text is on it: made light again, that text would be as white as
+  the panel, and the digits beside it would read as a number alone.
+
+The row or column on each side of the line keeps what most of its pixels
+show of the next one, so an edge one pixel soft is lifted too. A shade over
+the whole region needs none of this, since a reference keeps no color.
+These stay as they show, and read or fail as their colors do:
+
+- A shade whose edge is slanted, curved, or more than a pixel soft on each
+  side.
+- A sheet that is not black, which changes the colors and not only how
+  light they are.
+- A shade that leaves less than a fifth of the light, or one over text so
+  dark that the shaded text is the background's color.
+
+Small text under a shade reads less often: in the reader's tests, about
+four in five pictures of digits 20 pixels tall with a shade over a part
+read, and nearly all at 28 and 40. None reads as another number.
+
 Each color is a layer, and one more layer holds every color but the
 background's, for text that is no one color, such as a gradient. The
 background's own color is ink only where other colors close it in, so
