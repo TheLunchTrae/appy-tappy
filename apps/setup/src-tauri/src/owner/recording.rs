@@ -91,13 +91,12 @@ impl<H: Host> Owner<H> {
             return;
         };
         let abandoned = current.look_abandoned();
-        let now = Instant::now();
-        let new = current.looked(at, seen, now);
+        let new = current.looked(at, seen, Instant::now());
         self.read_new(new);
         // The look that was out held back the newest frame when the user
         // recorded more, and a still window sends no other.
         if abandoned {
-            self.record_newest(now);
+            self.record_newest();
         }
     }
 
@@ -190,7 +189,7 @@ impl<H: Host> Owner<H> {
                 recording.resume(follows, now);
                 recording.look_for(examples);
                 let id = recording.id.number();
-                self.record_newest(now);
+                self.record_newest();
                 Ok(id)
             },
             Some(Recorder::Readings(_)) if more => Err(
@@ -218,7 +217,7 @@ impl<H: Host> Owner<H> {
                     recording.look_for(examples);
                 }
                 self.record_with(Recorder::Readings(recording));
-                self.record_newest(now);
+                self.record_newest();
                 Ok(id.number())
             },
         }
@@ -301,11 +300,12 @@ impl<H: Host> Owner<H> {
         }
     }
 
-    /// Records the newest frame of the picked window at `now`, unless its
-    /// capture failed since. A window sends a frame only when what it shows
+    /// Records the newest frame of the picked window as if it arrived now,
+    /// unless its capture failed since. A window sends a frame only when what it shows
     /// changes, so a recording that starts on a still screen reads what is
     /// there from this frame alone.
-    fn record_newest(&mut self, now: Instant) {
+    fn record_newest(&mut self) {
+        let now = self.host.now();
         let newest = self
             .capture
             .picked_mut()
@@ -794,8 +794,12 @@ mod tests {
         assert!(harness.owner.handle(stale).is_continue());
         assert_eq!(harness.recording().expect("a recording").spots, []);
         assert_eq!(harness.jobs.try_iter().count(), 0);
+        // An answer that comes once the next look is due sends the frame it
+        // looked over no second time.
+        harness.wait(crate::recording::SCAN_EVERY);
         assert!(harness.owner.handle(looked(job.recording)).is_continue());
         assert_eq!(harness.jobs.try_iter().count(), 1, "read as text");
+        assert_eq!(harness.looks.try_iter().count(), 0);
         let view = harness.recording().expect("a recording");
         assert_eq!(view.settings.scope, Scope::Window);
         assert_eq!(view.spots.len(), 1, "where it found the text");
