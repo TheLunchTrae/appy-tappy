@@ -1168,8 +1168,12 @@ draft opens from its page with none waiting:
   again when the value's fails), then opens the reference flow on that draft
   with the value's draft as `forValue`. That flow's save opens the value flow
   on the value's draft, on **Check and save** with the saved reference picked
-  (`finishedWith`); its draft and **Cancel** end as any reference flow's, and
-  the value stays a draft.
+  (`finishedWith`), whatever the reference has learned so far, so the check
+  shows what it still can't read; its draft and **Cancel** end as any
+  reference flow's, and the value stays a draft. Whether **New reference** is
+  picked is the Characters step's own state (`newReference` in `Capture`): it
+  starts unpicked when the capture mounts and clears when a saved reference
+  is picked.
 - **Tab.** What leaving loses is what the open flow reports
   (`apps/setup/src/lib/unsaved.ts`) together with the draft of an automation
   that waits (`heldInAll`). A fix and an edit start from the screenshot the

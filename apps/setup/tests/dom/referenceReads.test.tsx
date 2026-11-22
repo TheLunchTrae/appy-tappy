@@ -89,7 +89,7 @@ test('a value that needs a character its reference does not read says so, and co
   expect(missing).not.toContain('%');
 });
 
-test('a value can pick New reference, even while its application has none, and a saved one takes its place', async () => {
+test('a value can pick New reference, even while its application has none, or a saved one instead', async () => {
   const file: AppFile = {
     format: 2,
     name: 'Player',

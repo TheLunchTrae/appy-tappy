@@ -101,7 +101,8 @@ references under **Characters**. The step's button becomes
 region once you capture the window again. The new reference reads the
 characters the value needs, or the digits while it needs none in particular.
 Saving the reference brings you back to the value on **Check and save**, with
-the new reference picked, once you capture the window again. If you save the
+the new reference picked, once you capture the window again. The check there
+says which characters the reference still has to learn, if any. If you save the
 reference as a draft or cancel it instead, the value stays a draft. A value
 you make for an automation doesn't offer **New reference**: **Save value**
 keeps that value as a draft and returns to the automation without it.
