@@ -289,7 +289,9 @@ Closing the reference editor forgets them.
 AppyTappy tends to misread a character the same way wherever it shows, such
 as every `7` as a `1`. **Check characters** lets you fix that once instead of
 in each text. It shows above the list of finds, in a recording's review, and
-under **Not confirmed yet** above **Save reference**. It goes through the
+above **Save reference**, under **Not confirmed yet** while there are
+characters nobody has confirmed. Above **Save reference** it is there as soon
+as the reference has a box, so you can check at any point. It goes through the
 characters of the boxes, the listed finds, and the kept readings together,
 so one answer also fixes a box you drew by hand.
 
