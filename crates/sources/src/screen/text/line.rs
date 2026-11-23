@@ -27,9 +27,10 @@ const MARGIN: u32 = 2;
 
 impl Line {
     /// `ink` as the text reader takes it: black ink on white, cut to the
-    /// line of text with [`MARGIN`] of white around it. Black on white reads
+    /// line of text with two pixels of white around it. Black on white reads
     /// better than the application's own colors, which can be any pair. The
-    /// line is [`rows`]. `None` without ink.
+    /// line is the rows the number reader takes as the text, and the
+    /// nearest mark on each side of them. `None` without ink.
     #[must_use]
     pub fn of(ink: &Ink) -> Option<Self> {
         let size = ink.size();
