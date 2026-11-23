@@ -85,7 +85,8 @@ parts fit.
 - **Guess.** What the text reader says a shape is that a reference has not
   learned, while automations run. Only a reference set to guess takes one,
   which the UI calls **Guess characters it has not learned**, and only when
-  the text reader agrees with every character the reference has learned.
+  the region shows a character the reference has learned and the text
+  reader agrees with every such character.
   A guessed shape is not saved.
 - **Rule.** A condition on signals, the actions to run when it starts to hold,
   a cooldown, and whether those actions restore.

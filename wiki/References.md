@@ -121,8 +121,9 @@ automations run, and the log says so, until you teach the reference that
 character here.
 
 On, AppyTappy reads such a number's text with its text reader while your
-automations run. It learns the new shape only when the text reader agrees
-with every character the reference already knows and the new character is
+automations run. It learns the new shape only when the number also shows a
+character the reference already knows, such as the `%` of `57%`, the text
+reader agrees with every such character, and the new character is
 one of the [characters it reads](#characters-it-reads). The number then
 reads, and that shape reads from then on without the text reader.
 
@@ -131,11 +132,13 @@ such as a digit that shows up rarely. Leave it off when a wrong number
 matters:
 
 - A guess can be wrong, most often in small or stylized text. AppyTappy
-  then reads that shape wrong until it starts reading the application
-  again.
-- What it guesses isn't saved to the reference. It guesses again the next
-  time AppyTappy starts or the window changes size, and **Characters it
+  then reads that shape wrong, or cuts the number short at it, until the
+  window changes size or AppyTappy starts again.
+- What it guesses isn't saved to the reference. It guesses again after the
+  window changes size or AppyTappy starts again, and **Characters it
   knows** doesn't list it.
+- A number made only of characters the reference hasn't learned isn't
+  guessed, since nothing shows that the text reader reads this font right.
 - The text reader uses more memory while it works. AppyTappy lets go of it
   half a minute after the last guess.
 

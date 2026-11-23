@@ -339,6 +339,14 @@ This page covers what the user guide leaves out.
   reference belongs to a saved application. Its name and ID follow the
   rules a value's do, so it keeps its ID when renamed.
   One that a value reads with cannot be deleted.
+- **Guessing.** A reference saves whether it guesses, its `guesses`, as
+  [Guessing](Screen-regions.md#guessing) describes. The editor keeps it as
+  `Editing.guesses`, which `startEditing` takes from the saved reference
+  and starts off for a new one, and `buildCharacters` and
+  `buildReferenceSave` send it with the reference's list
+  (`ReferenceChoices`), whichever way the reference saves. Only the runtime
+  guesses: what the setup app tries and shows is what the reference has
+  learned.
 - **Expected characters.** A number value may list the characters it needs,
   as [Characters a number needs](Values.md#characters-a-number-needs)
   describes, in its check's `characters`. The list is the value's, of the

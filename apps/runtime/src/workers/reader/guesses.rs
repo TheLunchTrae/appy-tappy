@@ -51,6 +51,9 @@ const IDLE: Duration = Duration::from_secs(30);
 pub(super) struct Ask {
     /// The value, by its position among its application's.
     pub(super) value: usize,
+    /// When the value asked, which comes back with the answer and tells
+    /// it from the answer to a question the value asked before.
+    pub(super) since: Instant,
     /// The region's pixels, which come back with the answer.
     pub(super) image: Image,
     /// The line of text in them.
@@ -64,6 +67,8 @@ pub(super) struct Ask {
 pub(super) struct Answer {
     /// The value.
     pub(super) value: usize,
+    /// When the value asked.
+    pub(super) since: Instant,
     /// The region's pixels as the question had them.
     pub(super) image: Image,
     /// What they say, or why the text reader could not say.
@@ -108,6 +113,9 @@ pub(super) struct Guesses {
     start: Start,
     /// The text reader's thread, once a value asked.
     asks: Option<Sender<Ask>>,
+    /// The values whose question found no thread to take it, and why, until
+    /// the next frame says so.
+    unasked: Vec<(usize, String)>,
     reply: Sender<Answer>,
     answers: Receiver<Answer>,
 }
@@ -125,6 +133,7 @@ impl Guesses {
             values: values.collect(),
             start,
             asks: None,
+            unasked: Vec::new(),
             reply,
             answers,
         }
@@ -161,6 +170,7 @@ impl Guesses {
         };
         let mut ask = Ask {
             value,
+            since: now,
             image: image.clone(),
             line,
             reply: self.reply.clone(),
@@ -184,6 +194,14 @@ impl Guesses {
             }
         }
         guess.asking = waiting(now, wait);
+        self.unasked.push((value, NO_THREAD.to_owned()));
+    }
+
+    /// Whether a value waits for an answer, so the frame reader has to
+    /// look for it though the window shows nothing new.
+    pub(super) fn asked(&self) -> bool {
+        let asked = |guess: &Guess| matches!(guess.asking, Asking::Asked { .. });
+        self.values.iter().any(asked)
     }
 
     /// Takes the answers that came since the last frame. A value whose
@@ -191,21 +209,31 @@ impl Guesses {
     /// with the guessed shapes from now on, and may ask again. One whose
     /// answer does not waits before it asks again. `learned` gives the
     /// reader a value's check reads with, for a value without a guess
-    /// yet. Returns why the text reader could not answer, for each value
-    /// it could not.
+    /// yet. An answer to another question than the value's last is
+    /// dropped. Returns why the text reader could not answer, for each
+    /// value it could not, and for each whose question no thread took.
     pub(super) fn hear<'reader>(
         &mut self,
         now: Instant,
         learned: impl Fn(usize) -> Option<&'reader DigitReader>,
     ) -> Vec<(usize, String)> {
-        let mut failed = Vec::new();
-        for Answer { value, image, said } in self.answers.try_iter() {
+        let mut failed = std::mem::take(&mut self.unasked);
+        for answer in self.answers.try_iter() {
+            let Answer {
+                value,
+                since: asked,
+                image,
+                said,
+            } = answer;
             let Some(guess) = self.values.get_mut(value) else {
                 continue;
             };
-            let Asking::Asked { wait, .. } = guess.asking else {
+            let Asking::Asked { since, wait } = guess.asking else {
                 continue;
             };
+            if since != asked {
+                continue;
+            }
             let guessed = match said {
                 Ok(said) => guess
                     .reader
@@ -272,36 +300,40 @@ fn read(reader: &TextReader, line: &Line) -> Result<String, String> {
 /// `load` for its first question. A panic while it loads or reads is an
 /// answer too, so no value waits for one that never comes.
 fn answer(asks: &Receiver<Ask>, idle: Duration, load: impl FnOnce() -> Result<TextReader, String>) {
-    let mut load = Some(load);
-    let mut reader: Option<Result<TextReader, String>> = None;
-    while let Ok(ask) = asks.recv_timeout(idle) {
-        let Ask {
-            value,
-            image,
-            line,
-            reply,
-        } = ask;
-        let loaded = match (&reader, load.take()) {
-            (None, Some(load)) => reader.insert(
-                panic::catch_unwind(AssertUnwindSafe(load))
-                    .unwrap_or_else(|_panic| Err(PANICKED.to_owned())),
-            ),
-            _ => reader.get_or_insert_with(|| Err(PANICKED.to_owned())),
-        };
-        let said = match loaded {
-            Ok(reader) => panic::catch_unwind(AssertUnwindSafe(|| read(reader, &line)))
+    let Ok(mut ask) = asks.recv_timeout(idle) else {
+        return;
+    };
+    let reader = panic::catch_unwind(AssertUnwindSafe(load))
+        .unwrap_or_else(|_panic| Err(PANICKED.to_owned()));
+    loop {
+        let said = match &reader {
+            Ok(reader) => panic::catch_unwind(AssertUnwindSafe(|| read(reader, &ask.line)))
                 .unwrap_or_else(|_panic| Err(PANICKED.to_owned())),
             Err(why) => Err(why.clone()),
         };
-        if reply.send(Answer { value, image, said }).is_err() {
+        let answer = Answer {
+            value: ask.value,
+            since: ask.since,
+            image: ask.image,
+            said,
+        };
+        if ask.reply.send(answer).is_err() {
             return;
         }
+        ask = match asks.recv_timeout(idle) {
+            Ok(next) => next,
+            Err(_ended) => return,
+        };
     }
 }
 
 /// Why a value cannot guess when the text reader panicked.
 const PANICKED: &str =
     "cannot guess at the characters its reference has not learned: the text reader failed";
+
+/// Why a value cannot guess when the text reader's thread cannot start.
+const NO_THREAD: &str =
+    "cannot guess at the characters its reference has not learned: the text reader cannot start";
 
 #[cfg(test)]
 mod tests {
@@ -310,26 +342,43 @@ mod tests {
 
     use super::*;
 
-    /// A black mark on white, which a reader that learned nothing finds
-    /// ink in.
-    fn mark() -> Image {
+    /// A 12 by 7 picture, black on white: a bar, and beside it, when
+    /// `hooked`, a hook, a shape unlike the bar.
+    fn picture(hooked: bool) -> Image {
         let size = Size {
-            width: 6,
-            height: 6,
+            width: 12,
+            height: 7,
         };
-        let bgra = (0..36_u32)
-            .flat_map(|at| {
-                let inked =
-                    (2..4).contains(&at.rem_euclid(6)) && (1..5).contains(&at.div_euclid(6));
-                let level = if inked { 0 } else { 255 };
+        let bgra = (0..7_u32)
+            .flat_map(|y| (0..12_u32).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                let bar = (1..3).contains(&x);
+                let hook = hooked && (x == 6 || (y == 5 && (6..10).contains(&x)));
+                let level = if (1..6).contains(&y) && (bar || hook) {
+                    0
+                } else {
+                    255
+                };
                 [level, level, level, 255]
             })
             .collect();
-        Image::new(size, bgra).expect("a 6 by 6 image")
+        Image::new(size, bgra).expect("a 12 by 7 image")
     }
 
-    /// Guesses for one value, and the questions its text reader gets,
-    /// with how many times the thread started.
+    /// A bar and a hook: a 1 and a shape [`knowing`] has not learned.
+    fn mark() -> Image {
+        picture(true)
+    }
+
+    /// A reader that knows the bar as a 1, and guesses.
+    fn knowing() -> DigitReader {
+        let mut reader = DigitReader::new();
+        reader.learn(&picture(false), "1").expect("one character");
+        reader.with_guesses(None, None)
+    }
+
+    /// Guesses for one value, the questions its text reader gets, and a
+    /// mark for each time its thread started.
     fn guesses() -> (Guesses, Receiver<Ask>, Receiver<()>) {
         let (asks, asked) = mpsc::channel();
         let (started, starts) = mpsc::channel();
@@ -340,20 +389,34 @@ mod tests {
         (Guesses::new(1, start), asked, starts)
     }
 
-    fn guessing() -> DigitReader {
-        DigitReader::new().with_guesses(None, None)
+    /// Answers `ask` with `said`.
+    fn reply(ask: Ask, said: Result<&str, &str>) {
+        ask.reply
+            .send(Answer {
+                value: ask.value,
+                since: ask.since,
+                image: ask.image,
+                said: said.map(str::to_owned).map_err(str::to_owned),
+            })
+            .expect("the guesses listen");
+    }
+
+    fn asking(guesses: &Guesses) -> Option<Asking> {
+        guesses.values.first().map(|guess| guess.asking)
     }
 
     #[test]
     fn a_value_asks_once_until_its_answer_comes() {
         let (mut guesses, asked, starts) = guesses();
         let now = Instant::now();
-        guesses.ask(0, &guessing(), &mark(), now);
-        guesses.ask(0, &guessing(), &mark(), now + Duration::from_secs(29));
+        assert!(!guesses.asked());
+        guesses.ask(0, &knowing(), &mark(), now);
+        assert!(guesses.asked());
+        guesses.ask(0, &knowing(), &mark(), now + Duration::from_secs(29));
         assert_eq!(asked.try_iter().count(), 1);
         assert_eq!(starts.try_iter().count(), 1);
         // An answer that never comes is asked for again.
-        guesses.ask(0, &guessing(), &mark(), now + ANSWER_WITHIN);
+        guesses.ask(0, &knowing(), &mark(), now + ANSWER_WITHIN);
         assert_eq!(asked.try_iter().count(), 1);
         assert_eq!(
             starts.try_iter().count(),
@@ -375,38 +438,28 @@ mod tests {
             vec![255; 4],
         )
         .expect("one pixel");
-        guesses.ask(0, &guessing(), &blank, now);
+        guesses.ask(0, &knowing(), &blank, now);
         // A value the frame reader does not have.
-        guesses.ask(1, &guessing(), &mark(), now);
+        guesses.ask(1, &knowing(), &mark(), now);
         assert_eq!(asked.try_iter().count(), 0);
         assert_eq!(starts.try_iter().count(), 0);
-        assert_eq!(
-            guesses.values.first().map(|guess| guess.asking),
-            Some(Asking::Ready)
-        );
+        assert_eq!(asking(&guesses), Some(Asking::Ready));
     }
 
     #[test]
     fn a_guess_a_value_cannot_take_makes_it_wait_twice_as_long_each_time() {
         let (mut guesses, asked, _starts) = guesses();
-        let reader = guessing();
+        let reader = knowing();
         let mut now = Instant::now();
         for wait in [1, 2, 4, 8, 16, 32, 60, 60].map(Duration::from_secs) {
             guesses.ask(0, &reader, &mark(), now);
-            let ask = asked.try_recv().expect("it asks");
-            // Two characters for the one mark.
-            ask.reply
-                .send(Answer {
-                    value: ask.value,
-                    image: ask.image,
-                    said: Ok("11".to_owned()),
-                })
-                .expect("the guesses listen");
+            // One character for the two marks.
+            reply(asked.try_recv().expect("it asks"), Ok("1"));
             assert_eq!(guesses.hear(now, |_| Some(&reader)), []);
             assert!(guesses.reader(0).is_none());
+            assert!(!guesses.asked());
             // Nothing is asked until the wait is over.
-            let before = now + (wait / 2);
-            guesses.ask(0, &reader, &mark(), before);
+            guesses.ask(0, &reader, &mark(), now + (wait / 2));
             assert_eq!(asked.try_iter().count(), 0, "after {wait:?}");
             now += wait;
         }
@@ -415,46 +468,43 @@ mod tests {
     #[test]
     fn a_guess_that_agrees_teaches_the_value_s_reader_and_lets_it_ask_again() {
         let (mut guesses, asked, _starts) = guesses();
-        let reader = guessing();
+        let reader = knowing();
         let now = Instant::now();
         guesses.ask(0, &reader, &mark(), now);
-        let ask = asked.try_recv().expect("it asks");
-        let answer = |said: &str| Answer {
-            value: 0,
-            image: mark(),
-            said: Ok(said.to_owned()),
-        };
-        ask.reply.send(answer("7")).expect("the guesses listen");
+        reply(asked.try_recv().expect("it asks"), Ok("17"));
         assert_eq!(guesses.hear(now, |_| Some(&reader)), []);
         let taught = guesses.reader(0).expect("a guessed reader").clone();
-        assert_eq!(taught.read(&mark(), false).ok(), Number::new(7.0));
+        assert_eq!(taught.read(&mark(), false).ok(), Number::new(17.0));
         // The next guess builds on the guessed reader, not on the one the
         // check reads with: a second answer for a shape it now knows
         // teaches nothing, and the value waits.
-        guesses.ask(0, &taught, &mark(), now);
-        assert_eq!(asked.try_iter().count(), 1, "it may ask again at once");
-        ask.reply.send(answer("7")).expect("the guesses listen");
+        guesses.ask(0, &reader, &mark(), now);
+        reply(
+            asked.try_recv().expect("it may ask again at once"),
+            Ok("17"),
+        );
         assert_eq!(guesses.hear(now, |_| None), []);
         assert_eq!(guesses.reader(0), Some(&taught));
-        guesses.ask(0, &taught, &mark(), now);
-        assert_eq!(asked.try_iter().count(), 0);
+        assert_eq!(asking(&guesses), Some(waiting(now, FIRST_WAIT)));
     }
 
     #[test]
     fn a_text_reader_that_cannot_answer_says_why_and_the_value_waits() {
         let (mut guesses, asked, _starts) = guesses();
-        let reader = guessing();
+        let reader = knowing();
         let now = Instant::now();
         guesses.ask(0, &reader, &mark(), now);
         let ask = asked.try_recv().expect("it asks");
-        let failed = |value: usize| Answer {
-            value,
-            image: mark(),
-            said: Err("no model".to_owned()),
-        };
-        ask.reply.send(failed(0)).expect("the guesses listen");
         // An answer for a value the frame reader does not have is dropped.
-        ask.reply.send(failed(5)).expect("the guesses listen");
+        ask.reply
+            .send(Answer {
+                value: 5,
+                since: now,
+                image: mark(),
+                said: Err("no model".to_owned()),
+            })
+            .expect("the guesses listen");
+        reply(ask, Err("no model"));
         assert_eq!(
             guesses.hear(now, |_| Some(&reader)),
             [(0, "no model".to_owned())]
@@ -466,56 +516,79 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_nobody_waits_for_changes_nothing() {
-        let (mut guesses, _asked, _starts) = guesses();
-        let reader = guessing();
-        guesses
-            .reply
-            .send(Answer {
-                value: 0,
-                image: mark(),
-                said: Ok("7".to_owned()),
-            })
-            .expect("the guesses listen");
-        assert_eq!(guesses.hear(Instant::now(), |_| Some(&reader)), []);
+    fn an_answer_the_value_does_not_wait_for_changes_nothing() {
+        let (mut guesses, asked, _starts) = guesses();
+        let reader = knowing();
+        let now = Instant::now();
+        let good = |since: Instant| Answer {
+            value: 0,
+            since,
+            image: mark(),
+            said: Ok("17".to_owned()),
+        };
+        // One that comes while the value has asked nothing.
+        guesses.reply.send(good(now)).expect("the guesses listen");
+        assert_eq!(guesses.hear(now, |_| Some(&reader)), []);
+        assert_eq!(asking(&guesses), Some(Asking::Ready));
+        // One to a question the value asked before its last.
+        let again = now + ANSWER_WITHIN;
+        guesses.ask(0, &reader, &mark(), now);
+        guesses.ask(0, &reader, &mark(), again);
+        guesses.reply.send(good(now)).expect("the guesses listen");
+        assert_eq!(guesses.hear(again, |_| Some(&reader)), []);
         assert!(guesses.reader(0).is_none());
+        assert!(guesses.asked(), "it still waits for its last question's");
+        // One that comes while the value waits after a guess it refused.
+        reply(asked.try_iter().last().expect("it asked twice"), Ok("1"));
+        assert_eq!(guesses.hear(again, |_| Some(&reader)), []);
+        guesses.reply.send(good(again)).expect("the guesses listen");
+        assert_eq!(guesses.hear(again, |_| Some(&reader)), []);
+        assert!(guesses.reader(0).is_none());
+        assert_eq!(asking(&guesses), Some(waiting(again, FIRST_WAIT)));
     }
 
     #[test]
-    fn a_thread_that_ended_is_started_again_for_the_next_question() {
+    fn a_thread_that_ended_is_started_again_and_one_that_cannot_start_is_said() {
         // The first thread is gone before it takes a question.
         let (asks, asked) = mpsc::channel();
         let mut threads = vec![Some(asks), Some(mpsc::channel().0)];
         let start: Start = Box::new(move || threads.pop().flatten());
         let mut guesses = Guesses::new(1, start);
+        let reader = knowing();
         let now = Instant::now();
-        guesses.ask(0, &guessing(), &mark(), now);
+        guesses.ask(0, &reader, &mark(), now);
         assert_eq!(asked.try_iter().count(), 1);
-        // No thread starts: the value waits.
+        assert_eq!(guesses.hear(now, |_| Some(&reader)), []);
+        // No thread starts: the value waits, and the next frame says why.
         drop(asked);
-        guesses.ask(0, &guessing(), &mark(), now + ANSWER_WITHIN);
+        let later = now + ANSWER_WITHIN;
+        guesses.ask(0, &reader, &mark(), later);
+        assert_eq!(asking(&guesses), Some(waiting(later, FIRST_WAIT)));
         assert_eq!(
-            guesses.values.first().map(|guess| guess.asking),
-            Some(waiting(now + ANSWER_WITHIN, FIRST_WAIT))
+            guesses.hear(later, |_| Some(&reader)),
+            [(0, NO_THREAD.to_owned())]
         );
+        assert_eq!(guesses.hear(later, |_| Some(&reader)), []);
     }
 
     #[test]
     fn the_text_reader_s_thread_answers_every_question_and_ends_when_none_comes() {
         let (asks, asked) = mpsc::channel();
         let (reply, answers) = mpsc::channel();
+        let now = Instant::now();
+        let ask = |value: usize| Ask {
+            value,
+            since: now,
+            image: mark(),
+            line: Line {
+                width: 1,
+                height: 1,
+                pixels: vec![0],
+            },
+            reply: reply.clone(),
+        };
         for value in 0..2 {
-            asks.send(Ask {
-                value,
-                image: mark(),
-                line: Line {
-                    width: 1,
-                    height: 1,
-                    pixels: vec![0],
-                },
-                reply: reply.clone(),
-            })
-            .expect("the thread listens");
+            asks.send(ask(value)).expect("the thread listens");
         }
         // It ends by itself while `asks` is still open.
         answer(&asked, Duration::from_millis(1), || {
@@ -523,27 +596,17 @@ mod tests {
         });
         let said: Vec<_> = answers
             .try_iter()
-            .map(|answer| (answer.value, answer.said))
+            .map(|answer| (answer.value, answer.since, answer.said))
             .collect();
         assert_eq!(
             said,
             [
-                (0, Err("no model".to_owned())),
-                (1, Err("no model".to_owned()))
+                (0, now, Err("no model".to_owned())),
+                (1, now, Err("no model".to_owned()))
             ]
         );
         // A panic while the model loads is an answer too.
-        asks.send(Ask {
-            value: 3,
-            image: mark(),
-            line: Line {
-                width: 1,
-                height: 1,
-                pixels: vec![0],
-            },
-            reply,
-        })
-        .expect("the thread listens");
+        asks.send(ask(3)).expect("the thread listens");
         answer(&asked, Duration::from_millis(1), || {
             panic!("a broken model")
         });

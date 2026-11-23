@@ -501,8 +501,12 @@ impl DigitReader {
     ///   about what the reader knows is not believed about the rest.
     /// - `said` names an unknown character that the reference does not
     ///   read.
+    /// - `image` shows no character this reader knows, so nothing bears
+    ///   the guess out.
     /// - The image has no character the reader does not know, or the
     ///   reader is full.
+    /// - The reader with the new glyphs still does not read `image` as
+    ///   `said`, as when a new shape is as close to another character's.
     #[must_use]
     pub fn guessing(&self, image: &Image, said: &str) -> Option<Self> {
         let Guesses { reference, value } = self.guesses.as_deref()?;
@@ -520,10 +524,11 @@ impl DigitReader {
             characters.is_none_or(|characters| characters.contains(character))
         };
         let mut guessed = self.clone();
+        let mut agreed = false;
         let marks = attempt.taken.iter().zip(&attempt.sight.marks);
-        for ((taken, mark), said) in marks.zip(said) {
+        for ((taken, mark), &said) in marks.zip(&said) {
             match *taken {
-                Taken::Kept(known) | Taken::LeftOut(known) if known == said => {},
+                Taken::Kept(known) | Taken::LeftOut(known) if known == said => agreed = true,
                 Taken::Kept(_) | Taken::LeftOut(_) => return None,
                 Taken::Unknown(_) if !holds(reference, said) => return None,
                 Taken::Unknown(_) => {
@@ -540,7 +545,18 @@ impl DigitReader {
             }
         }
         let learned = |reader: &Self| reader.glyphs.len().saturating_add(reader.left_out.len());
-        (learned(self) < learned(&guessed) && learned(&guessed) <= MAX_GLYPHS).then_some(guessed)
+        if !agreed || learned(&guessed) == learned(self) || learned(&guessed) > MAX_GLYPHS {
+            return None;
+        }
+        // A shape as close to another character's as to its own stays
+        // unknown however often it is learned, so the guess counts only
+        // when the reader then reads the image as the guess says.
+        let reads = guessed.attempt(&layers).ok()?.taken;
+        let as_said = reads.len() == said.len()
+            && reads.iter().zip(&said).all(|(taken, said)| {
+                matches!(taken, Taken::Kept(known) | Taken::LeftOut(known) if known == said)
+            });
+        as_said.then_some(guessed)
     }
 
     /// The pairs of characters this reader learned glyphs so alike for
@@ -3814,6 +3830,38 @@ mod tests {
         // the number.
         let digit = reader.guessing(&picture, "41.527").unwrap();
         assert_eq!(digit.read(&picture, false), Ok(number(41.527)));
+    }
+
+    #[test]
+    fn a_guess_with_no_character_the_reader_knows_is_not_taken() {
+        let reader = taught(28, &["12.34%"]).with_guesses(None, None);
+        // Nothing in the picture bears the guess out.
+        assert!(reader.guessing(&drawn("57", 28, 0.6), "57").is_none());
+        // One known character does.
+        assert!(reader.guessing(&drawn("57%", 28, 0.6), "57%").is_some());
+    }
+
+    #[test]
+    fn a_guess_that_would_leave_its_shape_unread_is_not_taken() {
+        let plain = taught(28, &["12.34%"]).with_guesses(None, None);
+        let picture = drawn("41.52%", 28, 0.6);
+        let five = plain
+            .guessing(&picture, "41.52%")
+            .and_then(|guessed| guessed.glyphs.last().cloned())
+            .unwrap();
+        assert_eq!(five.character, '5');
+        // A reader that learned the 5's shape as two other characters
+        // takes it for neither, and would not for a 5 either however
+        // often it learned it.
+        let mut torn = plain;
+        for character in ['S', 's'] {
+            torn.glyphs.push(Glyph {
+                character,
+                ..five.clone()
+            });
+        }
+        assert!(torn.read(&picture, false).is_err());
+        assert!(torn.guessing(&picture, "41.52%").is_none());
     }
 
     #[test]

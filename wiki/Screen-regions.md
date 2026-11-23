@@ -314,11 +314,18 @@ these hold:
 
 - The answer has one character for each character the read split the
   region into.
-- Each character the reference has learned, kept or left out by the value,
-  is that character in the answer. A text reader that is wrong about what
-  the reference knows is not believed about the rest.
+- The region shows at least one character the reference has learned, and
+  each such character, kept or left out by the value, is that character in
+  the answer. A text reader that is wrong about what the reference knows
+  is not believed about the rest, and one with nothing to be right about
+  is not believed either, so a region of unlearned shapes alone is not
+  guessed.
 - Each unlearned shape's character is one the reference reads, when the
   reference [reads only some characters](References.md#characters-it-reads).
+- With the new shapes, the reader reads the region as the answer says. A
+  shape as close to another character's shape as to its own stays unread
+  however often it is learned ([Matching](#matching)), so such a guess is
+  refused.
 
 The value then reads with the reference's shapes and the guessed ones, so
 the text reader is asked once for each new shape, and the next read of that
@@ -331,9 +338,16 @@ makes the value wait before it asks again, as
 maps.
 
 The text reader can misread a character, most often in small or stylized
-text, and a misread that passes the three checks is learned and read wrong
-until the capture starts again. That is the cost the user accepts with the
-switch.
+text, and a misread that passes these checks is learned and read wrong
+until the capture starts again. A digit misread as another digit reads as
+another number, and one misread as a character that ends a number, such as
+a letter, cuts the number short there. That is the cost the user accepts
+with the switch.
+
+The answer comes while the window may hold still, and a window that holds
+still makes no frames. So while a value waits for an answer, the frame
+handler asks the capture for its frame again (`NextFrame::Again`), and
+takes the answer with it.
 
 The model file, `models/text-recognition.onnx` beside the runtime, is the
 one [the installer](Installer.md) puts there for the setup app. The runtime
@@ -342,7 +356,8 @@ Loaded, it holds about 13 MB, and a read peaks at about 21 MB, measured on
 Linux, so a session that guesses is outside the
 [footprint](Architecture.md#footprint) targets while the model is loaded.
 A session with no reference that guesses, or with nothing left to guess,
-never loads it.
+never loads it. A value whose guess is refused each time asks once a
+minute at most, and loads the model each time.
 
 ### Why a number is not read
 

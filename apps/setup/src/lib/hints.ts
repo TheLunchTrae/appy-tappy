@@ -138,7 +138,7 @@ export const LOOKALIKE_HINT =
 
 /** What a reference that guesses does while automations run, and what it costs. */
 export const GUESSES_HINT =
-  'Off, a number with a character this reference has not learned is not read until you teach it here. On, AppyTappy reads the text with its text reader while your automations run, and learns the new shape when the text reader agrees with every character the reference already knows. A guess can be wrong, and then the number is read wrong until AppyTappy starts again, so teach the characters here when a wrong number matters. The text reader uses more memory while it works, and what it guesses is not saved to the reference.';
+  'Off, a number with a character this reference has not learned is not read until you teach it here. On, AppyTappy reads the text with its text reader while your automations run, and learns the new shape when the text reader agrees with every character the reference already knows. A guess needs a character the reference knows beside the new one, such as the % of 57%. A guess can still be wrong, and then the number is read wrong, or cut short, until the window changes size or AppyTappy starts again, so teach the characters here when a wrong number matters. The text reader uses more memory while it works, and what it guesses is not saved to the reference.';
 
 /** How to zoom a screenshot and move around it. */
 export const ZOOM_HINT =

@@ -44,6 +44,12 @@ pub enum NextFrame {
     /// The newest frame once this long has passed, such as the wait a
     /// [`crate::schedule::ReadSchedule`] gives.
     After(Duration),
+    /// As [`NextFrame::After`], but when no newer frame has come once this
+    /// long has passed, the frame just handed over is handed over once
+    /// more, received then. A window that holds still makes no frames, so
+    /// a handler that waits for something other than the window's content,
+    /// such as an answer from another thread, asks for this.
+    Again(Duration),
     /// No more frames, as a one-frame grab asks once it has its frame: the
     /// frame loop ends, the handler is handed nothing more, not even the
     /// capture's end, and the capture's thread ends, so closing the session
@@ -145,6 +151,11 @@ struct FrameLoop {
     next_read: Instant,
     /// When the window and the device were last checked.
     checked: Instant,
+    /// When the frame in `buffer` is handed over once more, for a handler
+    /// that asked for it again, unless a newer frame is read first.
+    again: Option<Instant>,
+    /// The window size of the frame in `buffer`, while it holds one whole.
+    shown: Option<Size>,
     /// The copies of the frame being read, in the frame's own coordinates.
     copies: Vec<Placement>,
     buffer: FrameBuffer,
@@ -170,6 +181,8 @@ pub fn run_frames<S: FrameSource>(
         asked: throttle,
         next_read: started,
         checked: started,
+        again: None,
+        shown: None,
         copies: Vec::new(),
         buffer: FrameBuffer::default(),
     };
@@ -189,11 +202,22 @@ pub fn run_frames<S: FrameSource>(
             end(handler, ending);
             break;
         }
-        if let Some(frame) = held.take_if(|_| source.now() >= state.next_read) {
-            match state.read(source, frame, crop, handler) {
-                NextFrame::After(wait) => state.after_read(source, wait),
-                NextFrame::Never => break,
-            }
+        let now = source.now();
+        let next = if let Some(frame) = held.take_if(|_| now >= state.next_read) {
+            state.read(source, frame, crop, handler)
+        } else if state.again.is_some_and(|at| now >= at) {
+            state.reread(now, handler)
+        } else {
+            continue;
+        };
+        state.again = None;
+        match next {
+            NextFrame::After(wait) => state.after_read(source, wait),
+            NextFrame::Again(wait) => {
+                state.after_read(source, wait);
+                state.again = Some(state.next_read);
+            },
+            NextFrame::Never => break,
         }
     }
     if let Some(frame) = held {
@@ -245,13 +269,32 @@ fn end(handler: &mut Handler<'_>, error: io::Error) {
 
 impl FrameLoop {
     /// How long to wait for the next event at `now`: until the check is
-    /// due, or until the read is while a frame is held.
+    /// due, or until the read is while a frame is held, or until the last
+    /// frame is due again.
     fn wait(&self, now: Instant, holding: bool) -> Duration {
         let check_in = HEALTH_CHECK.saturating_sub(now.saturating_duration_since(self.checked));
-        if holding {
-            self.next_read.saturating_duration_since(now).min(check_in)
+        let read = if holding {
+            Some(self.next_read)
         } else {
-            check_in
+            self.again
+        };
+        read.map_or(check_in, |at| {
+            at.saturating_duration_since(now).min(check_in)
+        })
+    }
+
+    /// Hands `handler` the frame in the buffer once more, as received at
+    /// `now`, and returns what the handler asks for next. Without a whole
+    /// frame in the buffer, nothing is handed over.
+    fn reread(&self, now: Instant, handler: &mut Handler<'_>) -> NextFrame {
+        match (self.shown, self.buffer.image()) {
+            (Some(window_size), Some(image)) => handler(Ok(Frame {
+                window_size,
+                image,
+                received: now,
+                delay: Duration::ZERO,
+            })),
+            (_, _) => NextFrame::After(Duration::ZERO),
         }
     }
 
@@ -277,6 +320,7 @@ impl FrameLoop {
     ) -> NextFrame {
         let copied = self.copy(source, &held.frame, crop);
         source.release(held.frame);
+        self.shown = copied.as_ref().ok().copied().flatten();
         match copied {
             Ok(Some(window_size)) => match self.buffer.image() {
                 Some(image) => handler(Ok(Frame {
@@ -1010,6 +1054,54 @@ mod tests {
             Some(&&Call::Released(5)),
             "a handler that waits a day is handed no frame meanwhile"
         );
+    }
+
+    #[test]
+    fn a_handler_that_asks_for_its_frame_again_gets_it_when_no_newer_one_comes() {
+        let mut script = Script::new([(5, frames([1])), (200, Happens::Stop)]);
+        let again = NextFrame::Again(millis(50));
+        let saw = run(&mut script, &Crop::Whole, &[again, again, after(50)]);
+        // The same frame, received anew each time, and no more once the
+        // handler asks only for a new one.
+        let once_more = |received| Seen {
+            delay: Duration::ZERO,
+            ..seen(1, received)
+        };
+        assert_eq!(saw, [Ok(seen(1, 5)), Ok(once_more(55)), Ok(once_more(105))]);
+        assert_eq!(
+            script.did(),
+            [&whole(1), &Call::Released(1)],
+            "the frame is copied once"
+        );
+        assert_eq!(
+            script.waits(),
+            [HEALTH_CHECK, millis(50), millis(50), millis(1_895)],
+            "it waits for the frame's next turn, then only for the check"
+        );
+    }
+
+    #[test]
+    fn a_newer_frame_is_read_in_place_of_the_one_asked_for_again() {
+        let mut script = Script::new([(5, frames([1])), (20, frames([2])), (100, Happens::Stop)]);
+        let saw = run(
+            &mut script,
+            &Crop::Whole,
+            &[NextFrame::Again(millis(50)), after(50)],
+        );
+        assert_eq!(saw, [Ok(seen(1, 5)), Ok(seen(2, 25))]);
+    }
+
+    #[test]
+    fn a_frame_that_failed_is_not_handed_over_again() {
+        let mut script = Script::new([(5, frames([1])), (200, Happens::Stop)]);
+        script.copy_errors = VecDeque::from([Some(io::ErrorKind::Other)]);
+        let saw = run(
+            &mut script,
+            &Crop::Whole,
+            &[NextFrame::Again(millis(50)), after(50)],
+        );
+        assert_eq!(saw.len(), 1, "{saw:?}");
+        assert!(saw.first().is_some_and(Result::is_err));
     }
 
     #[test]

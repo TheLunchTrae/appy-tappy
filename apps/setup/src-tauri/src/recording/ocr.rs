@@ -6,8 +6,9 @@
 //! milliseconds where the owner thread answers the UI in microseconds. The
 //! owner sends it each new reading's ink, and it sends back the text. It
 //! loads its model on the first reading, so a setup session that never
-//! records never loads it. Only the setup app reads text this way; the
-//! runtime reads numbers with the shapes the user's labels taught it.
+//! records never loads it. The runtime reads numbers with the shapes the
+//! user's labels taught it, and has a text reader thread of its own for a
+//! reference that guesses.
 
 use std::collections::VecDeque;
 use std::error::Error;

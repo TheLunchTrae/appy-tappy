@@ -519,6 +519,13 @@ test('the characters a reference reads start as saved, else as the digits', () =
   expect(startEditing(saved).reads).toEqual([]);
 });
 
+test('a reference goes on guessing as it was saved, and a new one guesses nothing', () => {
+  const saved = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, guesses: true, samples: [] };
+  expect(startEditing(saved).guesses).toBe(true);
+  expect(startEditing({ ...saved, guesses: false }).guesses).toBe(false);
+  expect(startEditing(null).guesses).toBe(false);
+});
+
 describe('a value kept without a reference', () => {
   const region = { x: 4, y: 2, width: 20, height: 8 };
   const number: CaptureSetup = {

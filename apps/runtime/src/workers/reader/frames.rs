@@ -213,7 +213,14 @@ impl<E: From<Reading>> FrameReader<E> {
         match self.placed.meaning(frame) {
             Ok(FrameMeaning::Readable(frame)) => {
                 self.captured();
-                NextFrame::After(self.read_all(&frame))
+                let wait = self.read_all(&frame);
+                // A guess's answer comes whether or not the window shows
+                // anything new, so the frame is read again for it.
+                if self.guesses.asked() {
+                    NextFrame::Again(wait)
+                } else {
+                    NextFrame::After(wait)
+                }
             },
             Ok(FrameMeaning::Resized(size)) => {
                 self.captured();
@@ -1094,7 +1101,7 @@ mod tests {
     fn guessing(reader: DigitReader) -> (FrameReader<Reading>, Receiver<Reading>, Receiver<Ask>) {
         let (events, readings) = mpsc::channel::<Reading>();
         let mut value = red_at("count", 1, 1);
-        value.check.drawn.region = Region::new(1, 1, 3, 2).expect("not empty");
+        value.check.drawn.region = Region::new(1, 1, 10, 5).expect("not empty");
         value.check.drawn.check = Check::Number {
             reader,
             whole: false,
@@ -1113,72 +1120,95 @@ mod tests {
         (frames, readings, asked)
     }
 
-    /// One character no reference in these tests has learned.
-    fn unknown() -> appytappy_sources::screen::Image {
-        frame_image(5, 4, |x, y| x == 1 && (1..3).contains(&y))
+    /// A bar, and beside it, when `hooked`, a hook, a shape unlike the bar.
+    fn bar(hooked: bool) -> appytappy_sources::screen::Image {
+        frame_image(12, 7, |x, y| {
+            let hook = hooked && (x == 6 || (y == 5 && (6..10).contains(&x)));
+            (1..6).contains(&y) && ((1..3).contains(&x) || hook)
+        })
+    }
+
+    /// A reader that knows the bar as a 1.
+    fn knows_the_bar() -> DigitReader {
+        let mut reader = DigitReader::new();
+        reader.learn(&bar(false), "1").expect("one character");
+        reader
+    }
+
+    /// Answers `ask` with `said`.
+    fn reply(ask: Ask, said: Result<&str, &str>) {
+        ask.reply
+            .send(Answer {
+                value: ask.value,
+                since: ask.since,
+                image: ask.image,
+                said: said.map(str::to_owned).map_err(str::to_owned),
+            })
+            .expect("the frame reader listens");
     }
 
     #[test]
     fn a_number_whose_reference_guesses_reads_once_the_text_reader_says_what_it_shows() {
-        let (mut frames, readings, asked) = guessing(DigitReader::new().with_guesses(None, None));
-        let one = unknown();
-        frames.handle(Ok(frame(&one, WINDOW)));
+        let (mut frames, readings, asked) = guessing(knows_the_bar().with_guesses(None, None));
+        let hooked = bar(true);
+        let again = |next: NextFrame| matches!(next, NextFrame::Again(_));
+        // While it waits for the answer, it asks for its frame again,
+        // since a window that holds still shows no new one.
+        assert!(again(frames.handle(Ok(frame(&hooked, WINDOW)))));
         assert_eq!(problems(&readings).len(), 1, "it cannot be read yet");
         let ask = asked.try_recv().expect("it asks what the region says");
         assert_eq!(ask.value, 0);
-        // The answer waits for the next frame, and one question is enough.
-        frames.handle(Ok(frame(&one, WINDOW)));
+        // One question is enough.
+        assert!(again(frames.handle(Ok(frame(&hooked, WINDOW)))));
         assert_eq!(asked.try_iter().count(), 0);
-        ask.reply
-            .send(Answer {
-                value: ask.value,
-                image: ask.image,
-                said: Ok("7".to_owned()),
-            })
-            .expect("the frame reader listens");
-        frames.handle(Ok(frame(&one, WINDOW)));
+        reply(ask, Ok("17"));
+        assert!(!again(frames.handle(Ok(frame(&hooked, WINDOW)))));
         assert_eq!(
             flags(&readings),
-            [(0, Value::Number(Number::new(7.0).expect("finite")))]
+            [(0, Value::Number(Number::new(17.0).expect("finite")))]
         );
         assert_eq!(asked.try_iter().count(), 0);
     }
 
     #[test]
-    fn a_number_whose_reference_does_not_guess_asks_the_text_reader_nothing() {
-        let (mut frames, readings, asked) = guessing(DigitReader::new());
-        frames.handle(Ok(frame(&unknown(), WINDOW)));
+    fn a_number_asks_the_text_reader_only_about_a_shape_its_guessing_reference_has_not_learned() {
+        // A reference that does not guess.
+        let (mut frames, readings, asked) = guessing(knows_the_bar());
+        let next = frames.handle(Ok(frame(&bar(true), WINDOW)));
+        assert!(matches!(next, NextFrame::After(_)));
+        assert_eq!(problems(&readings).len(), 1);
+        assert_eq!(asked.try_iter().count(), 0);
+        // A read that fails another way: the region shows nothing.
+        let (mut frames, readings, asked) = guessing(knows_the_bar().with_guesses(None, None));
+        frames.handle(Ok(frame(&frame_image(12, 7, |_, _| false), WINDOW)));
         assert_eq!(problems(&readings).len(), 1);
         assert_eq!(asked.try_iter().count(), 0);
     }
 
     #[test]
     fn a_text_reader_that_cannot_answer_is_a_problem_of_the_value_said_once() {
-        let (mut frames, readings, asked) = guessing(DigitReader::new().with_guesses(None, None));
-        let one = unknown();
+        let (mut frames, readings, asked) = guessing(knows_the_bar().with_guesses(None, None));
+        let hooked = bar(true);
         let start = Instant::now();
         let at = |after: Duration| Frame {
             received: start + after,
-            ..frame(&one, WINDOW)
+            ..frame(&hooked, WINDOW)
         };
         frames.handle(Ok(at(Duration::ZERO)));
         assert_eq!(problems(&readings).len(), 1);
-        let fail = |ask: Ask| {
-            ask.reply
-                .send(Answer {
-                    value: ask.value,
-                    image: ask.image,
-                    said: Err("cannot guess: no model".to_owned()),
-                })
-                .expect("the frame reader listens");
-        };
-        fail(asked.try_recv().expect("it asks"));
+        reply(
+            asked.try_recv().expect("it asks"),
+            Err("cannot guess: no model"),
+        );
         frames.handle(Ok(at(Duration::ZERO)));
         assert_eq!(problems(&readings), ["value 0 cannot guess: no model"]);
         assert_eq!(asked.try_iter().count(), 0, "it waits before it asks again");
         // The same failure again is not said again.
         frames.handle(Ok(at(FIRST_WAIT)));
-        fail(asked.try_recv().expect("it asks again"));
+        reply(
+            asked.try_recv().expect("it asks again"),
+            Err("cannot guess: no model"),
+        );
         frames.handle(Ok(at(FIRST_WAIT)));
         assert_eq!(problems(&readings), [] as [&str; 0]);
     }
