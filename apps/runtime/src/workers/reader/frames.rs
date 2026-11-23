@@ -11,10 +11,12 @@ use std::time::{Duration, Instant};
 use appytappy_config::settings_file::TraceCategory;
 use appytappy_config::signal::Value;
 use appytappy_sources::schedule::{Activity, ReadSchedule};
-use appytappy_sources::screen::check::CheckError;
+use appytappy_sources::screen::check::{Check, CheckError};
+use appytappy_sources::screen::digits::{DigitReader, ReadError};
 use appytappy_sources::screen::saved::Unread;
 use appytappy_sources::screen::{Frame, FrameMeaning, NextFrame, Placed, Size};
 
+use super::guesses::{Guesses, Start};
 use super::{Control, Job, RESTART_AFTER, Reading, Recovery, send};
 use crate::model::{ReaderNumber, SessionId};
 use crate::plan::AppPlan;
@@ -126,6 +128,9 @@ pub(super) struct FrameReader<E> {
     trace: Trace,
     /// Where the reader gives it a new `trace`.
     traces: Receiver<Trace>,
+    /// What the text reader guessed of the characters each value's
+    /// reference has not learned, for the references that guess.
+    guesses: Guesses,
     events: Sender<E>,
     control: Sender<Control>,
 }
@@ -134,7 +139,9 @@ impl<E: From<Reading>> FrameReader<E> {
     /// The handler for the values of `job` as `placed` places them. `heard`
     /// gives back each value's last problem as the reader said it while
     /// frames showed another size, and `traces` gives the trace to record
-    /// to, before the first frame and whenever it changes.
+    /// to, before the first frame and whenever it changes. `text` starts
+    /// the text reader's thread when a value's reference guesses at a
+    /// character it has not learned.
     pub(super) fn new(
         job: &Job,
         placed: Placed,
@@ -142,6 +149,7 @@ impl<E: From<Reading>> FrameReader<E> {
         control: Sender<Control>,
         heard: Receiver<Problems>,
         traces: Receiver<Trace>,
+        text: Start,
     ) -> Self {
         let count = job.plan.runs.values.len();
         Self {
@@ -160,6 +168,7 @@ impl<E: From<Reading>> FrameReader<E> {
             schedule: ReadSchedule::new(job.interval),
             trace: Trace::OFF,
             traces,
+            guesses: Guesses::new(count, text),
             events,
             control,
         }
@@ -279,7 +288,7 @@ impl<E: From<Reading>> FrameReader<E> {
             });
         }
         let mut changes = Vec::new();
-        let mut problems = Vec::new();
+        let mut problems = self.guessed(frame.received);
         // The clock is read only when each reading is traced.
         let timed = self.trace.wants(TraceCategory::Readings);
         let session = self.session;
@@ -386,14 +395,27 @@ impl<E: From<Reading>> FrameReader<E> {
 
     /// Reads the value at `position` from `frame`, or says why it cannot
     /// be read.
-    fn read(&self, position: usize, frame: &Frame<'_>) -> Option<Result<Value, Unreadable>> {
+    fn read(&mut self, position: usize, frame: &Frame<'_>) -> Option<Result<Value, Unreadable>> {
         let value = self.plan.runs.values.get(position)?;
         let at = match self.placed.values().get(position)? {
             Ok(at) => at,
             Err(unread) => return Some(Err(Unreadable::NotRead(*unread))),
         };
         let image = self.placed.cropped(position, frame.image)?;
-        Some(value.check.check(at).read(&image).map_err(|error| {
+        let check = value.check.check(at);
+        let read = match (check, self.guesses.reader(position)) {
+            (Check::Number { whole, .. }, Some(guessed)) => guessed
+                .read(&image, *whole)
+                .map(Value::Number)
+                .map_err(CheckError::Number),
+            (_, _) => check.read(&image),
+        };
+        if let (Check::Number { reader, .. }, Err(CheckError::Number(error))) = (check, &read)
+            && matches!(error, ReadError::UnknownCharacter { .. })
+        {
+            self.guesses.ask(position, reader, &image, frame.received);
+        }
+        Some(read.map_err(|error| {
             Unreadable::Check {
                 error,
                 drawn: value
@@ -402,6 +424,21 @@ impl<E: From<Reading>> FrameReader<E> {
                     .any(|size| size == self.placed.size()),
             }
         }))
+    }
+
+    /// Takes the text reader's answers since the last frame, and returns
+    /// each value's problem that the text reader could not answer, unless
+    /// it was already reported since the value last read.
+    fn guessed(&mut self, now: Instant) -> Vec<(usize, String)> {
+        let (plan, placed) = (&self.plan, &self.placed);
+        let failed = self
+            .guesses
+            .hear(now, |position| learned(plan, placed, position));
+        let problems = &mut self.problems;
+        let new = failed.into_iter().filter_map(|(position, why)| {
+            Some((position, newly(problems.get_mut(position)?, why)?))
+        });
+        new.collect()
     }
 
     /// A value's next problem, unless it was already reported since the
@@ -457,6 +494,20 @@ impl<E: From<Reading>> FrameReader<E> {
     }
 }
 
+/// The reader that the number at `position` reads with, as its reference
+/// learned it.
+fn learned<'plan>(
+    plan: &'plan AppPlan,
+    placed: &'plan Placed,
+    position: usize,
+) -> Option<&'plan DigitReader> {
+    let at = placed.values().get(position)?.as_ref().ok()?;
+    match plan.runs.values.get(position)?.check.check(at) {
+        Check::Number { reader, .. } => Some(reader),
+        Check::BarFill(_) | Check::Color(_) | Check::State(_) => None,
+    }
+}
+
 fn frame_problem(error: &str) -> String {
     format!("a frame cannot be read: {error}")
 }
@@ -476,7 +527,13 @@ mod tests {
     use super::*;
 
     use super::super::examples::*;
+    use super::super::guesses::{Answer, Ask, FIRST_WAIT};
     use super::super::*;
+
+    /// No text reader: its thread cannot start.
+    fn no_text() -> Start {
+        Box::new(|| None)
+    }
 
     /// The frame handler for `job`'s values placed at `size`.
     fn frames_at(
@@ -498,7 +555,15 @@ mod tests {
     ) -> (FrameReader<Reading>, Sender<Problems>) {
         let (said, heard) = mpsc::channel();
         let placed = place(&job.plan, size);
-        let frames = FrameReader::new(job, placed, events, control, heard, mpsc::channel().1);
+        let frames = FrameReader::new(
+            job,
+            placed,
+            events,
+            control,
+            heard,
+            mpsc::channel().1,
+            no_text(),
+        );
         (frames, said)
     }
 
@@ -514,6 +579,7 @@ mod tests {
             mpsc::channel().0,
             mpsc::channel().1,
             traces,
+            no_text(),
         );
         (frames, retrace)
     }
@@ -883,6 +949,7 @@ mod tests {
             control,
             mpsc::channel().1,
             mpsc::channel().1,
+            no_text(),
         );
         assert_eq!(
             small
@@ -1022,6 +1089,100 @@ mod tests {
         );
     }
 
+    /// The frame handler for one number at [`WINDOW`] that reads with
+    /// `reader`, what it sends, and the questions its text reader gets.
+    fn guessing(reader: DigitReader) -> (FrameReader<Reading>, Receiver<Reading>, Receiver<Ask>) {
+        let (events, readings) = mpsc::channel::<Reading>();
+        let mut value = red_at("count", 1, 1);
+        value.check.drawn.region = Region::new(1, 1, 3, 2).expect("not empty");
+        value.check.drawn.check = Check::Number {
+            reader,
+            whole: false,
+        };
+        let job = job(vec![value]);
+        let (asks, asked) = mpsc::channel();
+        let frames = FrameReader::new(
+            &job,
+            place(&job.plan, WINDOW),
+            events,
+            mpsc::channel().0,
+            mpsc::channel().1,
+            mpsc::channel().1,
+            Box::new(move || Some(asks.clone())),
+        );
+        (frames, readings, asked)
+    }
+
+    /// One character no reference in these tests has learned.
+    fn unknown() -> appytappy_sources::screen::Image {
+        frame_image(5, 4, |x, y| x == 1 && (1..3).contains(&y))
+    }
+
+    #[test]
+    fn a_number_whose_reference_guesses_reads_once_the_text_reader_says_what_it_shows() {
+        let (mut frames, readings, asked) = guessing(DigitReader::new().with_guesses(None, None));
+        let one = unknown();
+        frames.handle(Ok(frame(&one, WINDOW)));
+        assert_eq!(problems(&readings).len(), 1, "it cannot be read yet");
+        let ask = asked.try_recv().expect("it asks what the region says");
+        assert_eq!(ask.value, 0);
+        // The answer waits for the next frame, and one question is enough.
+        frames.handle(Ok(frame(&one, WINDOW)));
+        assert_eq!(asked.try_iter().count(), 0);
+        ask.reply
+            .send(Answer {
+                value: ask.value,
+                image: ask.image,
+                said: Ok("7".to_owned()),
+            })
+            .expect("the frame reader listens");
+        frames.handle(Ok(frame(&one, WINDOW)));
+        assert_eq!(
+            flags(&readings),
+            [(0, Value::Number(Number::new(7.0).expect("finite")))]
+        );
+        assert_eq!(asked.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn a_number_whose_reference_does_not_guess_asks_the_text_reader_nothing() {
+        let (mut frames, readings, asked) = guessing(DigitReader::new());
+        frames.handle(Ok(frame(&unknown(), WINDOW)));
+        assert_eq!(problems(&readings).len(), 1);
+        assert_eq!(asked.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn a_text_reader_that_cannot_answer_is_a_problem_of_the_value_said_once() {
+        let (mut frames, readings, asked) = guessing(DigitReader::new().with_guesses(None, None));
+        let one = unknown();
+        let start = Instant::now();
+        let at = |after: Duration| Frame {
+            received: start + after,
+            ..frame(&one, WINDOW)
+        };
+        frames.handle(Ok(at(Duration::ZERO)));
+        assert_eq!(problems(&readings).len(), 1);
+        let fail = |ask: Ask| {
+            ask.reply
+                .send(Answer {
+                    value: ask.value,
+                    image: ask.image,
+                    said: Err("cannot guess: no model".to_owned()),
+                })
+                .expect("the frame reader listens");
+        };
+        fail(asked.try_recv().expect("it asks"));
+        frames.handle(Ok(at(Duration::ZERO)));
+        assert_eq!(problems(&readings), ["value 0 cannot guess: no model"]);
+        assert_eq!(asked.try_iter().count(), 0, "it waits before it asks again");
+        // The same failure again is not said again.
+        frames.handle(Ok(at(FIRST_WAIT)));
+        fail(asked.try_recv().expect("it asks again"));
+        frames.handle(Ok(at(FIRST_WAIT)));
+        assert_eq!(problems(&readings), [] as [&str; 0]);
+    }
+
     #[test]
     fn a_value_says_a_problem_again_once_it_was_read_in_between() {
         let (events, readings) = mpsc::channel::<Reading>();
@@ -1143,6 +1304,7 @@ mod tests {
             control,
             mpsc::channel().1,
             mpsc::channel().1,
+            no_text(),
         );
         let red = frame_image(2, 2, |_, _| true);
         assert_eq!(frames.handle(Ok(frame(&red, WINDOW))), NextFrame::Never);
@@ -1164,6 +1326,7 @@ mod tests {
             control,
             mpsc::channel().1,
             mpsc::channel().1,
+            no_text(),
         );
         let mut recovery = Recovery::new();
         recovery.failed("reading a frame panicked".to_owned(), None, Instant::now());

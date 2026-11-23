@@ -85,6 +85,7 @@ use crate::trace::Trace;
 #[cfg(test)]
 mod examples;
 mod frames;
+mod guesses;
 
 use frames::{FrameReader, Problems, newly, not_read};
 
@@ -474,6 +475,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
             lost.clone(),
             heard,
             traces,
+            Box::new(guesses::text_thread),
         );
         frames.carry(&recovery, std::mem::take(&mut carried));
         let crop = Crop::Layout(layout);
