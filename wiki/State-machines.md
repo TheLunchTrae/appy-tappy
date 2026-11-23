@@ -46,6 +46,10 @@ it was about has gone. These guards reject stale state and messages:
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
   longer runs.
+- **Guess answers.** A value takes the text reader's answer only while it
+  waits for one (`Asking::Asked` in
+  `apps/runtime/src/workers/reader/guesses.rs`). Each frame handler has its
+  own answers, so none comes from the capture before it.
 - **Reader numbers.** A session numbers its readers with a `ReaderNumber`,
   which each reader sends with each batch of changed readings, when its values
   can no longer be seen, and when it ends. The owner drops each of those unless it
@@ -544,8 +548,10 @@ the reader frames show), `last` (each value's last reading), `problems`
 another size), `heard` (where the reader gives it back), `seen` (whether
 it sent a reading since it last sent `Unseen`), `failures` (frames in a
 row that failed), `restart` (whether the reader started this capture
-again after the last one ended, and whether a frame came since), and `trace` (what it
-records to, the newest that the reader handed it before the frame).
+again after the last one ended, and whether a frame came since), `trace` (what it
+records to, the newest that the reader handed it before the frame), and
+`guesses` (each value's [guess](#guesses-at-unlearned-characters) at the
+characters its reference has not learned).
 
 ```mermaid
 stateDiagram-v2
@@ -622,6 +628,56 @@ stateDiagram-v2
 - Each value's problems leave the window size out and are carried into the
   capture started for a new size, so the log says why once for each reason,
   not once for each size or each restart.
+
+### Guesses at unlearned characters
+
+A number whose reference guesses asks the text reader what its region says
+when it shows a shape the reference has not learned
+([Guessing](Screen-regions.md#guessing)). `Guesses`, in
+`apps/runtime/src/workers/reader/guesses.rs`, belongs to the
+[frame handler](#frame-handler) and keeps one `Asking` for each value, and
+the value's reader with the shapes guessed so far once a guess was taken.
+The text reader runs on a thread of its own, `answer` in the same file,
+because it takes tens of milliseconds for a line; the handler sends it an
+`Ask` and takes its `Answer`s at the start of each frame.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Ready
+    Ready --> Asked: a read meets an unlearned shape, Ask sent
+    Ready --> Waiting: the text reader's thread cannot start
+    Asked --> Ready: the answer agrees with every learned character, the shape is learned
+    Asked --> Waiting: the answer does not agree, or the text reader failed
+    Asked --> Asked: no answer for ANSWER_WITHIN, Ask sent again
+    Waiting --> Asked: the wait is over and a read meets an unlearned shape, Ask sent
+```
+
+- **Ready.** The value may ask. A value whose reference does not guess, and
+  a region with no ink, asks nothing and stays here.
+- **Asked.** One question is out, so a counter that changes each frame does
+  not queue a question for each. An answer is taken only in this state: one
+  that comes in any other state is dropped.
+- **Waiting.** The value could not take its last answer and asks nothing
+  until its wait is over. The wait starts at `FIRST_WAIT`, one second, and
+  doubles with each answer in a row that the value cannot take, up to
+  `LONGEST_WAIT`, a minute, so a region the text reader reads wrong does not
+  keep it reading for every frame. A guess that is taken starts the wait
+  over.
+- The text reader's thread starts with the first question and loads its
+  model then. It ends once it has had no question for 30 seconds, and the
+  model goes with it; the next question starts another. A question sent as
+  the thread ends is lost, which is why an **Asked** value asks again after
+  `ANSWER_WITHIN`, 30 seconds.
+- **Failures.** A model that cannot load, a read that fails, and a panic in
+  either are each an answer that says why, so the value waits and the
+  handler says the problem once as the value's, as it says a failed check.
+  A thread that cannot start makes the value wait the same way. The value
+  stays unread, as it is without guessing, and asks again after its wait.
+- A guessed shape lasts as long as its frame handler: a capture started
+  again, such as for another window size, reads with the reference as it
+  is saved and guesses again. Each frame handler has its own text reader
+  thread and its own answers, so an answer never reaches the handler of
+  another capture.
 
 ### Capture frame loop
 
@@ -2850,7 +2906,8 @@ stateDiagram-v2
 
 ### Text reader
 
-The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
+The setup app's text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread.
+The runtime's is [another machine](#guesses-at-unlearned-characters). It
 loads its model on the first line it gets, then reads each recorded reading and
 each find of a search, and sends the text back with the recording's or the
 search's ticket and the line's index (`ocr::Source`).

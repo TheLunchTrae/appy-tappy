@@ -36,7 +36,7 @@ These pages explain how AppyTappy works and why it is built this way.
   pictures it keeps, the page's generated types, and running the setup app
   from source.
 - [Screen regions](Screen-regions.md): the checks, read intervals, capture, and
-  why AppyTappy does not use OCR.
+  where AppyTappy uses a text reader and where it does not.
 - [Rules](Rules.md): conditions, firing and re-arming, cooldowns, restoring,
   and how the engine evaluates them.
 - [Actions](Actions.md): media, volume, key press, open, and sound actions,

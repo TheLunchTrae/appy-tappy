@@ -82,6 +82,11 @@ parts fit.
   when none are chosen. Finding text like a box lists only text that may show
   those characters, and a recording's review starts readings without them
   unkept.
+- **Guess.** What the text reader says a shape is that a reference has not
+  learned, while automations run. Only a reference set to guess takes one,
+  which the UI calls **Guess characters it has not learned**, and only when
+  the text reader agrees with every character the reference has learned.
+  A guessed shape is not saved.
 - **Rule.** A condition on signals, the actions to run when it starts to hold,
   a cooldown, and whether those actions restore.
 - **Runtime.** The always-on background program.

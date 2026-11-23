@@ -117,7 +117,9 @@ reason gives too:
   it a little differently this time: draw a [box](References.md#boxes) around
   this reading on a screenshot of the reference, or
   [record](References.md#record-readings) at its first box until it reads. If it is another character, the reference hasn't
-  learned the one shown: draw a box around a reading with it.
+  learned the one shown: draw a box around a reading with it. For a
+  character you can't catch in setup, you can
+  [let the reference guess](References.md#let-a-reference-guess).
   [What a reference can't learn](References.md#what-a-reference-cant-learn)
   lists the characters no box teaches.
 - **The number shows a character that isn't in Characters it needs.** In

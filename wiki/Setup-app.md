@@ -883,7 +883,8 @@ kept.
 ### The text reader
 
 The text reader guesses each new reading's text, and each find's, so review only needs corrections
-(`recording/ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs), a
+(`recording/ocr.rs`). It is `TextReader` in
+`crates/sources/src/screen/text.rs`, which wraps [`ocrs`](https://github.com/robertknight/ocrs), a
 pure-Rust neural text reader, so it reads the same on every system without the
 operating system's OCR. Only its recognition model loads: the region holds one
 line, so there is no text to find first. It runs on a thread of its own, because
@@ -891,7 +892,7 @@ a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
 as black text on white, whatever the application's colors,
 cut to the rows the number reader takes as the line of text
-(`Ink::line`) and the nearest mark on each side of them (`recording/ink.rs`),
+(`Ink::line`) and the nearest mark on each side of them (`Line::of` in `screen/text/line.rs`),
 with two pixels of white around it. The model takes a line cut close to its
 text, as the lines it learned from are, and scales it to its input height.
 White before the first character wider than about a fifth of the line's height
@@ -907,10 +908,11 @@ text is usually taller and further away, so it stays out, but one that the
 region cuts to a few rows close to the letters joins like a mark, since the
 region is meant to hold one line. Text for a recording or a search the user discarded or
 replaced is dropped by its number, and a queued job of a recording or search
-that a newer one of the same kind replaced is skipped without reading it. Only
-the setup app uses it; the runtime reads
+that a newer one of the same kind replaced is skipped without reading it. The runtime reads
 numbers with the shapes the user's labels and kept readings taught it ([Screen
-regions](Screen-regions.md#checks)).
+regions](Screen-regions.md#checks)), and asks its own text reader only about
+a shape that a reference set to guess has not learned
+([Guessing](Screen-regions.md#guessing)).
 
 Its model, `text-recognition.onnx`, is in a `models` folder beside the setup
 app's program, where [the installer](Installer.md) puts it. It loads on the

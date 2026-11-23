@@ -340,7 +340,8 @@ instant can then be missed.
   `12,5` reads as 12. Any other character after the digits ends the number,
   so a time such as `12:30` and a count such as `12/50` each read as 12, the
   number before the colon or slash. The reference still has to know the `:`
-  or `/`, since a shape it has not learned fails the read. A number written
+  or `/`, since a shape it has not learned fails the read unless the
+  reference [guesses](References.md#let-a-reference-guess). A number written
   with its point first, such as `.5`,
   reads as 0.5, and a `.` with no digit after it, such as `...`, is not a
   number.
