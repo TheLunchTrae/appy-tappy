@@ -155,6 +155,7 @@ test('closing the reference editor cancels a stop waiting for its final state', 
       shapes: [],
       sizes: [],
       spots: [],
+      place: null,
       at: { width: 4, height: 2 },
     });
     expect(await stop).toBe(false);

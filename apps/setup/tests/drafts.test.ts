@@ -507,6 +507,10 @@ test("a number's second step leaves its region to Where to read, unless a record
   expect(stageHint({ ...onScreenshot, selected: null, drawing: 'live', drawnAt: '1920 × 1080' })).toStartWith(
     'Drag over the window at 1920 × 1080 where the value shows;',
   );
+  // A reference's box goes on a screenshot at the size it reads at.
+  expect(stageHint({ ...onScreenshot, selected: null, drawing: 'liveBoxes', drawnAt: '1920 × 1080' })).toStartWith(
+    'Drag over the window at 1920 × 1080 around some characters to draw a box;',
+  );
 });
 
 test('the characters a reference reads start as saved, else as the digits', () => {

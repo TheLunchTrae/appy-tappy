@@ -68,7 +68,7 @@ export const REFERENCE_HINT =
 
 /** The boxes a reference learns from. */
 export const BOXES_HINT =
-  'Drag on any screenshot to draw a box tightly around some characters, then type exactly what it shows, such as 87% or 1,250. Draw as many as you like, several on one screenshot too. Press a box to select it; drag it to move it, drag a corner to resize it, or press Delete to remove it. Each box with text teaches the reference the characters in it. A reference reads and records at the box marked Reads here, the first in the list.';
+  'Drag on the live window or any screenshot to draw a box tightly around some characters, then type exactly what it shows, such as 87% or 1,250. Draw as many as you like, several on one screenshot too. Press a box to select it; drag it to move it, drag a corner to resize it, or press Delete to remove it. Each box with text teaches the reference the characters in it. A reference is tried on the live window at box 1, the first in the list, and a recording that looks in This place records there.';
 
 /** The saved pictures a reference can't learn. */
 export const UNLEARNED_HINT =

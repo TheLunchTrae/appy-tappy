@@ -272,6 +272,8 @@ export function useReferenceTeaching({
     recordBlocked: editing === null ? null : (windowless ?? recordBlocked(draft)),
     /** Why Find more like it cannot search from the selected box, or null. */
     findBlocked: findBlockedBy(boxes.selected),
+    /** The size of the screenshot the reference reads on, which every box keeps to, or null before it has one. */
+    readingSize,
     /** Why no box can be drawn on the picture shown, or null. */
     boxBlock: editing === null ? null : boxBlocked(readingSize, shown),
     /** The name the editor's reference shows under. */

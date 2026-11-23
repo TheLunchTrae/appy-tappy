@@ -11,20 +11,42 @@ export const CHECK_OFFER_ID = 'check-offer-text';
 interface Props {
   /** The characters the reference would learn that nobody has confirmed. */
   readonly characters: readonly string[];
+  /** How many boxes, finds, and kept readings the check goes over. */
+  readonly places: number;
   readonly onCheck: () => void;
 }
 
+/** The id of the note that says why Check characters waits. */
+const NEEDS_PLACE_ID = 'check-needs-place';
+
 /**
- * The offer to check a reference's characters before it is saved, while it would learn some that are the text
- * reader's guesses and that nobody has confirmed one at a time. It sits above Save reference and never holds the
- * save up: the user takes it, or saves.
+ * Check characters above Save reference, which never holds the save up: alone, waiting for a box while there is
+ * nothing to check, or as an offer while the reference would learn characters that are the text reader's guesses and
+ * that nobody has confirmed one at a time, which the user takes, or saves.
  *
  * It says "confirmed", not "checked": the recording panel's Found, not checked yet counts a reading as checked once
  * the user keeps it, and the two show together.
  */
-export function CheckOffer({ characters, onCheck }: Props) {
+export function CheckOffer({ characters, places, onCheck }: Props) {
   if (characters.length === 0) {
-    return null;
+    return (
+      <div className="row">
+        <button
+          type="button"
+          className="btn small"
+          disabled={places === 0}
+          aria-describedby={places === 0 ? NEEDS_PLACE_ID : undefined}
+          onClick={onCheck}
+        >
+          Check characters
+        </button>
+        {places === 0 ? (
+          <span id={NEEDS_PLACE_ID} className="note">
+            Draw a box first.
+          </span>
+        ) : null}
+      </div>
+    );
   }
   const shown = characters.slice(0, SHOWN_CHARACTERS);
   const more = characters.length - shown.length;

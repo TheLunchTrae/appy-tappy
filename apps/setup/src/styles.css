@@ -2286,15 +2286,6 @@ div.match-answer {
   grid-column: 1 / 4;
 }
 
-/* The box a reference taught by itself reads and records at. */
-.box-list .reads-here {
-  margin-left: 8px;
-  padding: 1px 6px;
-  border: 1px solid var(--capture);
-  border-radius: 999px;
-  color: var(--capture);
-}
-
 .autofill .row {
   display: flex;
   flex-wrap: wrap;
@@ -2365,17 +2356,23 @@ div.match-answer {
   background: var(--warn);
 }
 
-/* Where a recording of the whole window found text the last time it looked, over the live window. */
+/* Over the live window: the region a reference's recording records, and, dashed, where a recording of the whole
+   window found text the last time it looked. */
 .record-spots {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
+.record-spots .place,
 .record-spots .spot {
   position: absolute;
   border: 2px solid var(--live);
   border-radius: 3px;
+}
+
+.record-spots .spot {
+  border-style: dashed;
 }
 
 /* A hidden view or strip stays out of the layout, whatever its display. */

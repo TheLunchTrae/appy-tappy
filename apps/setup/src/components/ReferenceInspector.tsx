@@ -291,7 +291,9 @@ export function ReferenceInspector({
         <p className="note">It has yet to learn every character it reads. You can save now and teach the rest later.</p>
       ) : null}
       {draftError}
-      {checking ? null : <CheckOffer characters={guided.unconfirmed} onCheck={guided.open} />}
+      {checking ? null : (
+        <CheckOffer characters={guided.unconfirmed} places={guided.places.length} onCheck={guided.open} />
+      )}
       <div className="actions">
         <button type="button" className="btn" disabled={busy} onClick={onDiscard}>
           Discard

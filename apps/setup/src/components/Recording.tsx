@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import type { RecordedReading, RecordingScope, RecordingView } from '../lib/bindings.ts';
+import type { RecordedReading, RecordingScope, RecordingView, RegionDef } from '../lib/bindings.ts';
 import { CHECK_CHARACTERS_HINT, RECORD_RESIZED_HINT, RECORD_SCOPE_HINT, TEXT_SIZES_HINT } from '../lib/hints.ts';
 import type { Size } from '../lib/region.ts';
 import { background } from '../lib/repeat.ts';
@@ -100,24 +100,37 @@ function spotsNote(count: number): string {
 }
 
 /**
- * Outlines over the live window where a recording of the whole window found text like its region's the last time it
- * looked, scaled from the window size it records at to `shown`.
+ * Outlines over the live window, scaled from the window size a recording records at to `shown`: with `place`, the
+ * region it records, solid, and dashed, where a recording of the whole window found text like its region's the last
+ * time it looked.
  */
-export function RecordingSpots({ view, shown }: { readonly view: RecordingView; readonly shown: Size }) {
+export function RecordingSpots({
+  view,
+  shown,
+  place,
+}: {
+  readonly view: RecordingView;
+  readonly shown: Size;
+  readonly place: boolean;
+}) {
   const { width, height } = view.at;
-  if (view.spots.length === 0 || width === 0 || height === 0) {
+  const region = place ? view.place : null;
+  if ((view.spots.length === 0 && region === null) || width === 0 || height === 0) {
     return null;
   }
   const x = shown.width / width;
   const y = shown.height / height;
+  const at = (spot: RegionDef) => ({
+    left: spot.x * x,
+    top: spot.y * y,
+    width: spot.width * x,
+    height: spot.height * y,
+  });
   return (
     <div className="record-spots" aria-hidden="true">
+      {region === null ? null : <span className="place" style={at(region)} />}
       {view.spots.map((spot) => (
-        <span
-          key={`${spot.x},${spot.y},${spot.width},${spot.height}`}
-          className="spot"
-          style={{ left: spot.x * x, top: spot.y * y, width: spot.width * x, height: spot.height * y }}
-        />
+        <span key={`${spot.x},${spot.y},${spot.width},${spot.height}`} className="spot" style={at(spot)} />
       ))}
     </div>
   );

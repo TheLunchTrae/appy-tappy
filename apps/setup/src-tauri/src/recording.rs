@@ -668,6 +668,7 @@ impl Recording {
                 scope: self.scope(),
             },
             at: self.placed.0.into(),
+            place: self.placed.1.ok().map(RegionDef::from),
             sizes: match &self.looking {
                 Looking::Window(scan) => scan.sizes.heights(),
                 Looking::Place => Vec::new(),
@@ -748,6 +749,9 @@ pub(crate) struct RecordingView {
     /// or the one frames settled at since. The region and the sizes of
     /// text are scaled from the one to the other where they differ.
     pub(crate) at: SizeDef,
+    /// Where it records on a window of the size it is placed at, or `None`
+    /// while it cannot place its region there.
+    pub(crate) place: Option<RegionDef>,
     /// How tall the characters are that a recording of the whole window
     /// looks for, smallest first, in pixels of the window the region was
     /// drawn on: one size for each example of text that differs from the
@@ -1346,6 +1350,16 @@ mod tests {
         assert!(recording.settled(after(start, 250)), "it records there");
         let view = recording.view(after(start, 250));
         assert_eq!((view.at.width, view.problem), (32, None));
+        // The region it records there is the drawn one scaled to the size.
+        assert_eq!(
+            view.place,
+            Some(RegionDef {
+                x: 0,
+                y: 0,
+                width: 16,
+                height: 64
+            })
+        );
         assert!(!recording.settled(after(start, 300)), "placed once");
         assert!(recording.offer(&twice, after(start, 300)).is_some());
         // Where it does not record, asking says why.
@@ -1354,6 +1368,7 @@ mod tests {
         assert!(!waits.settled(after(start, 250)));
         let view = waits.view(after(start, 250));
         assert_eq!(view.at.width, 9);
+        assert_eq!(view.place, None, "nowhere to record at this size");
         assert_eq!(
             view.problem.as_deref(),
             Some(

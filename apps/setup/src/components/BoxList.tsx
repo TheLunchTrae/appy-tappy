@@ -34,8 +34,6 @@ function Crop({ box, full }: { readonly box: Box; readonly full: ReadonlyMap<num
 
 /** The boxes a reference learns from: each one's pixels, what it shows, and a way to select or delete it. */
 export function BoxList({ boxes, selected, full, position, blocked, onSelect, onText, onDelete }: Props) {
-  // The reference reads and records at its first box.
-  const readsAt = boxes[0]?.id;
   return (
     <div className="field">
       <span className="name">
@@ -45,7 +43,7 @@ export function BoxList({ boxes, selected, full, position, blocked, onSelect, on
         </Hint>
       </span>
       {boxes.length === 0 ? (
-        <p className="note">Drag on a screenshot to draw a box around some characters.</p>
+        <p className="note">Drag on the live window or a screenshot to draw a box around some characters.</p>
       ) : (
         <ul className="box-list" aria-labelledby="boxes-title">
           {boxes.map((box) => {
@@ -88,14 +86,17 @@ export function BoxList({ boxes, selected, full, position, blocked, onSelect, on
                 >
                   Delete
                 </button>
-                <span className="where">
-                  On screenshot {position(box.screenshot)}
-                  {box.id === readsAt ? <span className="reads-here">Reads here</span> : null}
-                </span>
+                <span className="where">On screenshot {position(box.screenshot)}</span>
               </li>
             );
           })}
         </ul>
+      )}
+      {boxes.length === 0 ? null : (
+        <p className="note">
+          Box 1 is where the reference is tried on the live window, and where a recording that looks in This place
+          records.
+        </p>
       )}
       {blocked === null ? null : <p className="note">{blocked}</p>}
     </div>

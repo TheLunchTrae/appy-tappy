@@ -151,10 +151,13 @@ still the surest way to read them.
 A box is a part of a screenshot that shows some characters, with the text you
 type for it. A reference learns from every box that has text. What you type
 is the answer: when a saved picture or a kept reading taught the same shape
-as another character, your newest text replaces it. Draw as many as
-you like, on any screenshot, and several on one screenshot too.
+as another character, your newest text replaces it. Draw as many as you like,
+on the live window or any screenshot, and several on one screenshot too.
 
-- **Draw.** Drag on a screenshot, away from the boxes there. The new box is
+- **Draw.** Drag on the live window, or on a screenshot away from the boxes
+  there. A box drawn on the live window goes on the screenshot that the drag
+  takes as it starts, at the window size the hint under the window names; a
+  click there without a drag only takes the screenshot. The new box is
   selected, and the keyboard moves to its row under **Boxes**, so you can
   type what it shows straight away.
 - **Select.** Press a box on the screenshot, or its number under **Boxes**,
@@ -168,8 +171,9 @@ you like, on any screenshot, and several on one screenshot too.
 - **Delete.** Select **Delete** in the box's row, or press Delete while the
   box is selected on the screenshot.
 
-A reference reads the window, and [records](#record-readings), at its first
-box, whose row says **Reads here**.
+A reference is tried on the live window, and
+[records](#record-readings), at box 1, the first in the list, as the note
+under the list says.
 
 Every box goes on a screenshot of one window size, the size the reference
 reads at: the size of the screenshot its first box is on. On a screenshot of
@@ -286,7 +290,10 @@ Closing the reference editor forgets them.
 AppyTappy tends to misread a character the same way wherever it shows, such
 as every `7` as a `1`. **Check characters** lets you fix that once instead of
 in each text. It shows above the list of finds, in a recording's review, and
-under **Not confirmed yet** above **Save reference**. It goes through the
+above **Save reference**, under **Not confirmed yet** while there are
+characters nobody has confirmed. Above **Save reference** it is always there,
+so you can check at any point; until the reference has a box, it waits and
+says **Draw a box first.** It goes through the
 characters of the boxes, the listed finds, and the kept readings together,
 so one answer also fixes a box you drew by hand.
 
@@ -513,7 +520,8 @@ stray shape and draw a box around it instead.
 1. **Start recording.** Draw a box around the characters first. Under **Record readings**, choose where to
    **Look in**: **This place**, or **The whole window**, which
    [Record the whole window](#record-the-whole-window) describes. Then
-   select **Start recording**. The region turns red while it records. It
+   select **Start recording**. A red outline shows the region it records
+   over the live window while it records. It
    reads what the window shows when you start, so you can start on a
    screen that already shows the characters.
 2. **Use the application.** Go on in it until the region has shown the
@@ -657,8 +665,9 @@ recording collects characters from all of it. The place the reference
 reads, its first box, is the example: AppyTappy looks
 for text in the color the text in that place has when the recording
 starts, as tall as it shows on its screenshot, anywhere in the window, and reads each piece like
-the place itself. While it records, the window shows an
-outline around each piece it found the last time it looked, and **Recording
+the place itself. While it records, the window shows a dashed outline
+around each piece it found the last time it looked, cut close to its text,
+beside the solid outline of the place itself, and **Recording
 the whole window** says in how many places that was.
 
 An application can show the same characters at more than one size, such as a
