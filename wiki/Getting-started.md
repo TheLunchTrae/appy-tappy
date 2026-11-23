@@ -163,13 +163,17 @@ cancel, the background part stays closed until you next sign in.
 ## Leave before you save
 
 While you make or change an application, a value, a reference, or an
-automation, selecting a page, even the one it opened from, first asks whether
-to leave without saving when you have changed something, because what you have
-not saved is lost. Select **Stay** to carry on, **Save as draft** to keep it as a
-[draft](Drafts.md) and finish it later, or **Leave** to drop it. While a save is
+automation, selecting a page, even the one it opened from, or closing
+AppyTappy Setup first asks whether to leave without saving when you have
+changed something, because what you have not saved is lost. Select **Stay** to
+carry on, **Save as draft** to keep it as a [draft](Drafts.md) and finish it
+later, or **Leave** to drop it. **Discard** or **Cancel** asks the same way
+before it drops what you changed, with **Discard** in place of **Leave**. While a save is
 still under way, the pages, **Leave**, **Change window**, and **Discard** or
-**Cancel** wait for it to finish. An [edit of a saved value](Values.md#edit-a-value)
-can't be saved as a draft, so its question offers only **Stay** and **Leave**.
+**Cancel** wait for it to finish, and closing AppyTappy Setup waits too, then
+closes it or asks. An [edit of a saved value](Values.md#edit-a-value) can't be
+saved as a draft, so its question offers only **Stay** and **Leave**, or
+**Discard**.
 
 When you opened one from another, such as a value from a new automation,
 **Cancel** returns to the one you came from, as you left it. Selecting a page

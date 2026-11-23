@@ -8,8 +8,6 @@ import { Question, useQuestion } from './Question.tsx';
 interface Props {
   /** Whether installing now would lose work, such as an unsaved value; the install waits until it is saved or left. */
   readonly busy: boolean;
-  /** Whether another question has the nav's place; the notice keeps its state while it waits. */
-  readonly hidden: boolean;
 }
 
 /**
@@ -17,7 +15,7 @@ interface Props {
  * user asks, and installs only after the user agrees with nothing left unsaved, since the install closes AppyTappy
  * Setup and the background part. A failed check shows nothing, since the next opening checks again.
  */
-export function UpdateNotice({ busy, hidden }: Props) {
+export function UpdateNotice({ busy }: Props) {
   const [state, dispatch] = useReducer(nextUpdate, NO_UPDATE);
   const { control, refs } = useQuestion<HTMLButtonElement>(state.kind === 'asking');
   // The notice holds focus while its button gives way to text, and hands it to the next button once one shows.
@@ -45,9 +43,6 @@ export function UpdateNotice({ busy, hidden }: Props) {
     (control.current ?? notice.current)?.focus();
   }, [state.kind, control]);
 
-  if (hidden) {
-    return null;
-  }
   const hold = (): void => {
     following.current = true;
     notice.current?.focus();

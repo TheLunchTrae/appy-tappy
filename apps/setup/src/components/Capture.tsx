@@ -691,6 +691,18 @@ export function Capture({
   const removable = removableRecorded(shots, draft).filter((index) => index !== finder.view?.screenshot);
   // A bar's and a color's fix read with the colors of the first drawing, so they need no more screenshots.
   const offersLooks = draft.kind === 'state' || (fixing === null && draft.kind !== 'number');
+  // What the value reads on the live window now, with what it was set up with.
+  const reading =
+    check.state.kind === 'set' && check.preview !== null && check.preview.unread !== null ? (
+      <p className="reading note">{check.preview.unread}</p>
+    ) : (
+      <ReadingBox
+        built={trial.ok ? null : trial.next}
+        state={check.state}
+        reads={check.reads}
+        windowless={windowless}
+      />
+    );
   const lookPanel =
     offersLooks || looks.view?.recording === true ? (
       <LookPanel
@@ -739,7 +751,10 @@ export function Capture({
   // application has a reference it can read with.
   const keepsWithoutReference = mode.kind === 'value' && keptForReference(hasSide, draft.drawnOn, missing);
   // Whether **New reference** is picked where it is offered, which makes the step's Next make the reference.
-  const makesNew = onMakeReference !== null && newReference;
+  // A number that is not a fix picks its reference and characters in its second step, Characters.
+  const picksReference = draft.kind === 'number' && fixing === null;
+  // New reference stays picked while the check is another kind, and offers nothing then.
+  const makesNew = picksReference && onMakeReference !== null && newReference;
   // Saves a reference's draft, starting from the value's screenshot and region, then the value's draft beside it,
   // and opens the reference's. A value whose draft fails to save takes the reference's draft back.
   const makeReference = async (): Promise<void> => {
@@ -765,17 +780,14 @@ export function Capture({
   // The saved reference a fix of a number shares with its first drawing.
   const fixedCheck = fixing?.screen.check;
   const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
-  // A number's characters and its check are steps of their own; other kinds read and save in their second step.
-  const threeSteps = draft.kind === 'number' && fixing === null;
-  const shownStep: Step = !threeSteps && step === 'check' ? 'how' : step;
   // The value's place is drawn over the live window, and the press takes the screenshot it goes on.
   const liveFrame = liveDrawFrame({
-    settingPlace: shownStep === 'where' && editing === null,
+    settingPlace: step === 'where' && editing === null,
     live: selected === null ? liveSize : null,
     occupied: recordingNow !== null || sheeted || picking !== null,
   });
   const regionOnLive = liveFrame === null ? null : regionOverFrame(draft.region, regionSize, liveFrame);
-  const regionShown = regionOnStage(shownStep, draft.kind, recordingNow !== null);
+  const regionShown = regionOnStage(step, draft.kind, recordingNow !== null);
   const drawing: Drawing = liveFrame !== null ? 'live' : editing !== null ? 'boxes' : regionShown ? 'region' : 'none';
   // While the value's place is set, the strip holds the one screenshot it is on, or the one shown.
   const placeShot = draft.drawnOn ?? selected;
@@ -787,9 +799,9 @@ export function Capture({
   };
   const stepper = (
     <Stepper
-      tabs={stepTabs(threeSteps)}
-      current={shownStep}
-      done={(tab) => (tab === 'where' ? whereDone : tab === 'how' ? threeSteps && draft.reference !== null : false)}
+      tabs={stepTabs(picksReference)}
+      current={step}
+      done={(tab) => (tab === 'where' ? whereDone : picksReference && draft.reference !== null)}
       onStep={goTo}
     />
   );
@@ -830,7 +842,7 @@ export function Capture({
         goTo('how');
       }}
     >
-      {nextFromWhere(threeSteps)}
+      {nextFromWhere(picksReference)}
     </button>
   );
 
@@ -1095,7 +1107,7 @@ export function Capture({
       {editing === null ? (
         <aside className="inspector" aria-label="Value">
           {stepper}
-          {shownStep === 'where' && fixing !== null ? (
+          {step === 'where' && fixing !== null ? (
             <>
               <div className="group-title">
                 <span>
@@ -1126,7 +1138,7 @@ export function Capture({
                 {nextFromFirst}
               </div>
             </>
-          ) : shownStep === 'where' ? (
+          ) : step === 'where' ? (
             <>
               <WhereFields
                 edited={edited}
@@ -1159,9 +1171,10 @@ export function Capture({
                 {nextFromFirst}
               </div>
             </>
-          ) : shownStep === 'how' && threeSteps ? (
+          ) : (
             <>
-              {referencePicker}
+              {picksReference ? reading : null}
+              {picksReference ? referencePicker : howFields[draft.kind]()}
               {appFile.error === null ? null : (
                 <p className="warn" role="alert">
                   {appFile.error}
@@ -1170,14 +1183,32 @@ export function Capture({
               {makesNew ? (
                 <p className="note">
                   {keepsWithoutReference
-                    ? 'Next keeps this value as a draft and opens New reference, starting from this screenshot and region. Saving the reference brings you back to Check and save with it picked.'
+                    ? 'Next keeps this value as a draft and opens New reference, starting from this screenshot and region. Saving the reference brings you back here with it picked.'
                     : missing[0]}
                 </p>
               ) : null}
+              {lookPanel}
+              {picksReference ? null : reading}
+              {edit.built === null || check.preview === null ? null : (
+                <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
+              )}
+              {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
+              <ReadingDetailsBox key={builtKind} ask={check.state.kind === 'set' ? explainReading : null} />
               <div className="sep" />
               {saveError === null ? null : (
                 <p className="warn" role="alert">
                   {saveError}
+                </p>
+              )}
+              {makesNew ? null : (
+                <p className="note">
+                  {fixing !== null
+                    ? `The fix shows on the Values page, beside ${fixing.name}.`
+                    : edited !== null
+                      ? `The changes to ${edited.name} show on the Values page, and its automations keep using it.`
+                      : keepsWithoutReference
+                        ? `No reference is picked, so Save value keeps this value as a draft. The Values page lists it under ${choice.name} until it has a reference to read with.${trail.length > 1 ? ' The automation shows again without it.' : ''}`
+                        : savedNote(trail, choice.name)}
                 </p>
               )}
               {draftError}
@@ -1208,76 +1239,15 @@ export function Capture({
                   <button
                     type="button"
                     className="btn primary"
+                    aria-busy={saving}
+                    disabled={!canSave && !(keepsWithoutReference && !busy)}
                     onClick={() => {
-                      goTo('check');
+                      background(keepsWithoutReference ? drafting.saveAndClose() : save());
                     }}
                   >
-                    Next: check and save
+                    {fixing !== null ? 'Save fix' : edited === null ? 'Save value' : 'Save changes'}
                   </button>
                 )}
-              </div>
-            </>
-          ) : (
-            <>
-              {howFields[draft.kind]()}
-              {appFile.error === null ? null : (
-                <p className="warn" role="alert">
-                  {appFile.error}
-                </p>
-              )}
-              {lookPanel}
-              {check.state.kind === 'set' && check.preview !== null && check.preview.unread !== null ? (
-                <p className="reading note">{check.preview.unread}</p>
-              ) : (
-                <ReadingBox
-                  built={trial.ok ? null : trial.next}
-                  state={check.state}
-                  reads={check.reads}
-                  windowless={windowless}
-                />
-              )}
-              {edit.built === null || check.preview === null ? null : (
-                <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
-              )}
-              {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
-              <ReadingDetailsBox key={builtKind} ask={check.state.kind === 'set' ? explainReading : null} />
-              <div className="sep" />
-              {saveError === null ? null : (
-                <p className="warn" role="alert">
-                  {saveError}
-                </p>
-              )}
-              <p className="note">
-                {fixing !== null
-                  ? `The fix shows on the Values page, beside ${fixing.name}.`
-                  : edited !== null
-                    ? `The changes to ${edited.name} show on the Values page, and its automations keep using it.`
-                    : keepsWithoutReference
-                      ? `No reference is picked, so Save value keeps this value as a draft. The Values page lists it under ${choice.name} until it has a reference to read with.${trail.length > 1 ? ' The automation shows again without it.' : ''}`
-                      : savedNote(trail, choice.name)}
-              </p>
-              {draftError}
-              <div className="actions">
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    goTo(threeSteps ? 'how' : 'where');
-                  }}
-                >
-                  Back
-                </button>
-                {draftButton}
-                <button
-                  type="button"
-                  className="btn primary"
-                  disabled={!canSave && !(keepsWithoutReference && !busy)}
-                  onClick={() => {
-                    background(keepsWithoutReference ? drafting.saveAndClose() : save());
-                  }}
-                >
-                  {fixing !== null ? 'Save fix' : edited === null ? 'Save value' : 'Save changes'}
-                </button>
               </div>
             </>
           )}

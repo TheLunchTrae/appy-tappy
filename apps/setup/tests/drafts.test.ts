@@ -478,13 +478,11 @@ test("entering Where to read shows the screenshot the value's region is drawn on
   // With no region drawn, and in the other steps, what shows stays.
   expect(shownOnStep('where', null, 5)).toBe(5);
   expect(shownOnStep('how', 2, 5)).toBe(5);
-  expect(shownOnStep('check', 2, null)).toBeNull();
 });
 
-test("a number's later steps leave its region to Where to read, unless a recording of it runs", () => {
+test("a number's second step leaves its region to Where to read, unless a recording of it runs", () => {
   expect(regionOnStage('where', 'number', false)).toBe(true);
   expect(regionOnStage('how', 'number', false)).toBe(false);
-  expect(regionOnStage('check', 'number', false)).toBe(false);
   expect(regionOnStage('how', 'number', true)).toBe(true);
   // Other checks read colors and looks inside the region in their second step.
   expect(regionOnStage('how', 'state', false)).toBe(true);
@@ -581,11 +579,11 @@ describe('a value kept without a reference', () => {
     expect(keptForReference(true, 0, [])).toBe(false);
   });
 
-  test('finishes on the check step with the reference picked', () => {
+  test('finishes on Characters with the reference picked', () => {
     const finished = finishedWith({ id: 'draft-1', def: kept(number) }, 'percent');
     const setup = keptSetup(finished.def);
     expect(finished.id).toBe('draft-1');
-    expect(setup?.step).toBe('check');
+    expect(setup?.step).toBe('how');
     expect(setup?.draft.reference).toBe('percent');
     expect(setup?.draft.characters).toEqual(['1', '%']);
   });

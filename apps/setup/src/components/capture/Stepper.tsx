@@ -7,25 +7,19 @@ export interface StepTab {
 }
 
 /**
- * The steps a value is set up in. A number's characters and its check are steps of their own, so it has three; other
- * kinds read and save in their second step.
+ * The steps a value is set up in: where it shows, then how to read it, which for a number that picks its reference is
+ * its characters. The second step reads the live window and saves.
  */
-export function stepTabs(three: boolean): readonly StepTab[] {
-  return three
-    ? [
-        { step: 'where', name: 'Where to read' },
-        { step: 'how', name: 'Characters' },
-        { step: 'check', name: 'Check and save' },
-      ]
-    : [
-        { step: 'where', name: 'Where to read' },
-        { step: 'how', name: 'How to read it' },
-      ];
+export function stepTabs(picksReference: boolean): readonly StepTab[] {
+  return [
+    { step: 'where', name: 'Where to read' },
+    { step: 'how', name: picksReference ? 'Characters' : 'How to read it' },
+  ];
 }
 
 /** What the button that goes on from the first step says. */
-export function nextFromWhere(three: boolean): string {
-  return three ? 'Next: characters' : 'Next: how to read it';
+export function nextFromWhere(picksReference: boolean): string {
+  return picksReference ? 'Next: characters' : 'Next: how to read it';
 }
 
 interface Props {

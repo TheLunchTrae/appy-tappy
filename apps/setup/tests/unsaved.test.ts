@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { EMPTY_DRAFT } from '../src/lib/check.ts';
-import { held, onLeave, sameContent } from '../src/lib/unsaved.ts';
+import { held, onClose, onLeave, sameContent } from '../src/lib/unsaved.ts';
 
 describe('sameContent', () => {
   test('compares what objects hold, not which objects they are', () => {
@@ -49,4 +49,12 @@ test('leaving a flow asks first only for unsaved work, and waits for a save', ()
   expect(onLeave('nothing')).toBe('leave');
   expect(onLeave('unsaved')).toBe('ask');
   expect(onLeave('saving')).toBe('wait');
+});
+
+test('closing the window waits while leaving saves drafts, even once the flows hold nothing', () => {
+  expect(onClose('nothing', true)).toBe('wait');
+  expect(onClose('unsaved', true)).toBe('wait');
+  expect(onClose('nothing', false)).toBe('leave');
+  expect(onClose('unsaved', false)).toBe('ask');
+  expect(onClose('saving', false)).toBe('wait');
 });

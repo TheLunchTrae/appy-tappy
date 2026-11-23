@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import {
   type AppSummary,
@@ -20,7 +21,7 @@ import {
   saveSettings,
   syncOverlays,
 } from './lib/api.ts';
-import { Question, useQuestion } from './components/Question.tsx';
+import { Dialog } from './components/Dialog.tsx';
 import { UpdateNotice } from './components/UpdateNotice.tsx';
 import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
@@ -41,6 +42,7 @@ import {
   heldInAll,
   holdsAutomation,
   keepStep,
+  discardQuestion,
   leaveQuestion,
   resumedFlow,
   trail,
@@ -55,10 +57,16 @@ import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
 import { SettingsContext, type SettingsHandle, type SettingsUpdate, sameSettings } from './lib/settings.ts';
-import { type Held, onLeave } from './lib/unsaved.ts';
+import { type Held, onClose, onLeave } from './lib/unsaved.ts';
 import { type DraftSaver, type Resumed, draftsOf } from './lib/drafts.ts';
 
 type Page = 'automations' | 'applications' | 'values' | 'references' | 'settings' | 'debug';
+
+/**
+ * What leaving an open flow is for: a page its tab opens, **Discard** or **Cancel** in the flow, which ends the open
+ * flow alone, or closing the window.
+ */
+type Leaving = Page | 'discard' | 'close';
 
 /**
  * The pages, Automations first since running them is what the app is for, then in the order something new is set
@@ -96,11 +104,8 @@ export function App() {
   // What the open flow would lose, as it reports it, and what leaving it would lose with the flows that wait under it.
   const [reported, setReported] = useState<Held>('nothing');
   const held = heldInAll(flow, reported);
-  // The page a press asked to leave the flow for, while the question asks whether to; and the last one asked for,
-  // whose tab takes focus back after the answer.
-  const [leaving, setLeaving] = useState<Page | null>(null);
-  const [askedFor, setAskedFor] = useState<Page>('automations');
-  const { control, refs } = useQuestion<HTMLButtonElement>(leaving !== null);
+  // What a press asked to leave the flow for, while the question asks whether to.
+  const [leaving, setLeaving] = useState<Leaving | null>(null);
   // The flow open now, for a save that finishes after the user moved on.
   const openFlow = useRef(flow);
   openFlow.current = flow;
@@ -118,7 +123,7 @@ export function App() {
   const [canDraft, setCanDraft] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
   // Whether leaving is saving the drafts, which the question's answers and everything in the open flow wait for.
-  const keep = useRef<Keeping<Page>>({ kind: 'idle' });
+  const keep = useRef<Keeping<Leaving>>({ kind: 'idle' });
   const [keeping, setKeeping] = useState(false);
   const reportDraft = useCallback((save: DraftSaver | null): void => {
     draftSaver.current = save;
@@ -256,11 +261,78 @@ export function App() {
     setContinued(false);
     setPage(target);
   };
-  const question = flow === null ? null : leaveQuestion(flow, reported, canDraft);
+  let question = null;
+  if (flow !== null) {
+    question = leaving === 'discard' ? discardQuestion(flow, canDraft) : leaveQuestion(flow, reported, canDraft);
+  }
+  // Opens the flow that finishes `resumed`, on the saved item it changes when that is still there.
+  const finish = (resumed: Resumed): void => {
+    const next = resumedFlow(resumed, apps ?? [], automations ?? []);
+    if (next !== null) {
+      open(next);
+    }
+  };
+  // Deletes a draft from its list. No flow is open then, so the click pictures it alone named go with it.
+  const removeDraft = async (id: string): Promise<void> => {
+    await deleteDraft(id);
+    background(forgetUnsavedClickPictures());
+    await refresh();
+  };
+  // A tab leaves an open flow only once the user agrees to lose its work, and never while it saves.
+  const pressTab = (target: Page): void => {
+    switch (onLeave(held)) {
+      case 'leave':
+        goTo(target);
+        break;
+      case 'ask':
+        setLeaving(target);
+        break;
+      case 'wait':
+        break;
+    }
+  };
+  // Shows what follows the flow `ended` once it saved `made`, with 'drafted' saved or deleted its draft, or with
+  // 'canceled' was canceled. What it saved is read into the lists at once, for the page or the flow that shows next.
+  const end = (ended: Flow, made: Made | null | 'drafted' | 'canceled'): void => {
+    const how: Ended =
+      made === 'canceled' || made === 'drafted' ? { kind: made } : { kind: 'saved', made, read: reads.current.started };
+    const after = afterFlow(ended, how, openFlow.current === ended);
+    switch (after.kind) {
+      case 'nothing':
+        break;
+      case 'flow':
+        open(after.flow, 'flow');
+        break;
+      case 'listed':
+        goTo(LISTED_ON[ended.kind]);
+        break;
+      case 'page':
+        open(null);
+        break;
+    }
+    if (how.kind !== 'canceled') {
+      background(refresh());
+    }
+  };
+  // Does what leaving was for, once the user agreed or nothing was held: opens the page, ends the open flow alone,
+  // or closes the window.
+  const leaveFor = (target: Leaving): void => {
+    const open = openFlow.current;
+    if (target === 'discard') {
+      setLeaving(null);
+      if (open !== null) {
+        end(open, 'canceled');
+      }
+    } else if (target === 'close') {
+      background(getCurrentWindow().destroy());
+    } else {
+      goTo(target);
+    }
+  };
   // Leaving with Save as draft saves a draft of each flow that holds work, one after the other (`keepStep`). The
   // state lives in a ref beside the flag the window renders from, since the saves' answers arrive in callbacks of
   // an earlier render.
-  const send = (event: KeepEvent<Page>): void => {
+  const send = (event: KeepEvent<Leaving>): void => {
     const { state, effects } = keepStep(keep.current, event, openFlow.current, apps ?? []);
     keep.current = state;
     setKeeping(state.kind !== 'idle');
@@ -296,62 +368,90 @@ export function App() {
           background(refresh());
           break;
         case 'leave':
-          goTo(effect.target);
+          leaveFor(effect.target);
           background(refresh());
           break;
       }
     }
   };
-  // Opens the flow that finishes `resumed`, on the saved item it changes when that is still there.
-  const finish = (resumed: Resumed): void => {
-    const next = resumedFlow(resumed, apps ?? [], automations ?? []);
-    if (next !== null) {
-      open(next);
-    }
-  };
-  // Deletes a draft from its list. No flow is open then, so the click pictures it alone named go with it.
-  const removeDraft = async (id: string): Promise<void> => {
-    await deleteDraft(id);
-    background(forgetUnsavedClickPictures());
-    await refresh();
-  };
-  // A tab leaves an open flow only once the user agrees to lose its work, and never while it saves.
-  const pressTab = (target: Page): void => {
-    switch (onLeave(held)) {
+  // **Discard** or **Cancel** in the flow `ending` ends it once the user agrees to lose its own work, and never while
+  // it saves. A flow that waits under it shows again as it was left, so only the open flow's work counts.
+  const cancel = (ending: Flow): void => {
+    switch (onLeave(reported)) {
       case 'leave':
-        goTo(target);
+        end(ending, 'canceled');
         break;
       case 'ask':
-        setLeaving(target);
-        setAskedFor(target);
+        setLeaving('discard');
         break;
       case 'wait':
         break;
     }
   };
-  // Shows what follows the flow `ended` once it saved `made`, with 'drafted' saved or deleted its draft, or with
-  // 'canceled' was canceled. What it saved is read into the lists at once, for the page or the flow that shows next.
-  const end = (ended: Flow, made: Made | null | 'drafted' | 'canceled'): void => {
-    const how: Ended =
-      made === 'canceled' || made === 'drafted' ? { kind: made } : { kind: 'saved', made, read: reads.current.started };
-    const after = afterFlow(ended, how, openFlow.current === ended);
-    switch (after.kind) {
-      case 'nothing':
-        break;
-      case 'flow':
-        open(after.flow, 'flow');
-        break;
-      case 'listed':
-        goTo(LISTED_ON[ended.kind]);
-        break;
-      case 'page':
-        open(null);
-        break;
+  // **Save as draft** in the question before Discard saves the open flow's draft and ends that flow alone, as its
+  // own Save as draft does.
+  const draftAndDiscard = (): void => {
+    const save = draftSaver.current;
+    if (save === null) {
+      return;
     }
-    if (how.kind !== 'canceled') {
-      background(refresh());
-    }
+    setKeeping(true);
+    background(
+      save().then((result) => {
+        setKeeping(false);
+        if ('failed' in result) {
+          setLeaveError(`The draft could not be saved. ${result.failed}`);
+          return;
+        }
+        setLeaving(null);
+        const open = openFlow.current;
+        if (open !== null) {
+          end(open, 'drafted');
+        }
+      }),
+    );
   };
+  // Closing the window while a flow holds work asks first, as a tab does. A close during a save waits for it, then
+  // closes or asks, as the flows that are left hold work.
+  const [closeWaits, setCloseWaits] = useState(false);
+  const closing = useRef({ held, keeping });
+  closing.current = { held, keeping };
+  useEffect(() => {
+    const stop = getCurrentWindow().onCloseRequested((event) => {
+      const now = onClose(closing.current.held, closing.current.keeping);
+      if (now === 'leave') {
+        return;
+      }
+      event.preventDefault();
+      if (now === 'ask') {
+        setLeaving('close');
+      } else {
+        setCloseWaits(true);
+      }
+    });
+    return () => {
+      background(
+        stop.then((unlisten) => {
+          unlisten();
+        }),
+      );
+    };
+  }, []);
+  useEffect(() => {
+    if (!closeWaits) {
+      return;
+    }
+    const now = onClose(held, keeping);
+    if (now === 'wait') {
+      return;
+    }
+    setCloseWaits(false);
+    if (now === 'leave') {
+      background(getCurrentWindow().destroy());
+    } else {
+      setLeaving('close');
+    }
+  }, [closeWaits, held, keeping]);
   // The saved applications that have a draft of changes, which the picker opens in place of the saved one.
   const draftedApps = new Set(
     draftsOf(drafts, 'application').flatMap(({ def }) => (def.changes === null ? [] : [def.changes])),
@@ -379,7 +479,7 @@ export function App() {
           trail={path}
           continued={continued}
           onCancel={() => {
-            end(flow, 'canceled');
+            cancel(flow);
           }}
           onSaved={(made) => {
             end(flow, made);
@@ -417,7 +517,7 @@ export function App() {
           draft={flow.resumed}
           trail={path}
           onCancel={() => {
-            end(flow, 'canceled');
+            cancel(flow);
           }}
           onSaved={(id) => {
             end(flow, { app: id, value: null, reference: null });
@@ -440,7 +540,7 @@ export function App() {
           flow={flow}
           continued={continued}
           onCancel={() => {
-            end(flow, 'canceled');
+            cancel(flow);
           }}
           onSaved={() => {
             end(flow, null);
@@ -558,7 +658,6 @@ export function App() {
                 key={id}
                 type="button"
                 className="tab"
-                ref={id === askedFor ? control : undefined}
                 aria-current={page === id && flow === null ? 'page' : undefined}
                 disabled={held === 'saving' || keeping}
                 onClick={() => {
@@ -570,36 +669,67 @@ export function App() {
               </button>
             );
           })}
-          {leaving === null || flow === null ? null : (
-            <Question
-              refs={refs}
-              label="Leave without saving?"
-              keepLabel="Stay"
-              actLabel="Leave"
-              busy={held === 'saving' || keeping}
-              middle={
-                question?.drafts === true
-                  ? {
-                      label: 'Save as draft',
-                      onPress: () => {
-                        send({ kind: 'asked', target: leaving, here: reported === 'unsaved' && canDraft });
-                      },
-                    }
-                  : undefined
-              }
-              onKeep={() => {
-                setLeaving(null);
-                setLeaveError(null);
-              }}
-              onAct={() => {
-                goTo(leaving);
-              }}
-            >
-              {leaveError ?? question?.text}
-            </Question>
-          )}
-          <UpdateNotice busy={held !== 'nothing'} hidden={leaving !== null && flow !== null} />
+          <UpdateNotice busy={held !== 'nothing'} />
         </nav>
+        {leaving === null || question === null ? null : (
+          <Dialog
+            titleId="leave-title"
+            describedBy="leave-what"
+            busy={held === 'saving' || keeping}
+            onClose={() => {
+              setLeaving(null);
+              setLeaveError(null);
+            }}
+          >
+            <h2 id="leave-title">{question.title}</h2>
+            <p id="leave-what">{question.text}</p>
+            {leaveError === null ? null : (
+              <p className="warn" role="alert">
+                {leaveError}
+              </p>
+            )}
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="btn"
+                disabled={held === 'saving' || keeping}
+                onClick={() => {
+                  setLeaving(null);
+                  setLeaveError(null);
+                }}
+              >
+                Stay
+              </button>
+              {question.drafts ? (
+                <button
+                  type="button"
+                  className="btn"
+                  aria-busy={keeping}
+                  disabled={held === 'saving' || keeping}
+                  onClick={() => {
+                    if (leaving === 'discard') {
+                      draftAndDiscard();
+                    } else {
+                      send({ kind: 'asked', target: leaving, here: reported === 'unsaved' && canDraft });
+                    }
+                  }}
+                >
+                  Save as draft
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn danger"
+                disabled={held === 'saving' || keeping}
+                onClick={() => {
+                  leaveFor(leaving);
+                }}
+              >
+                {leaving === 'discard' ? 'Discard' : 'Leave'}
+              </button>
+            </div>
+          </Dialog>
+        )}
         {/* While leaving saves the drafts, nothing in the open flow can end or save it. */}
         <div className="flow-hold" inert={keeping}>
           {content}

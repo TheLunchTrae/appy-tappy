@@ -30,11 +30,8 @@ export function startEditing(existing: ReferenceDef | null): Editing {
   return { existing, name: existing?.name ?? '', reads, guesses: existing?.guesses ?? false };
 }
 
-/**
- * The value's steps: where it shows, then how to read it, which for a number is its characters, then, for a number
- * only, the check of how it reads and its save.
- */
-export type Step = 'where' | 'how' | 'check';
+/** The value's steps: where it shows, then how to read it, which for a number is its characters, and its save. */
+export type Step = 'where' | 'how';
 
 /**
  * The screenshot shown on entering `step`, or null for the live view. Where to read lists only the screenshot the
@@ -45,8 +42,8 @@ export function shownOnStep(step: Step, drawnOn: number | null, selected: number
 }
 
 /**
- * Whether the stage outlines the value's region, and lets it be drawn, in `step`. A number's later steps pick and
- * check its characters, so its region shows there only while a recording of looks, started before the check became
+ * Whether the stage outlines the value's region, and lets it be drawn, in `step`. A number's second step picks
+ * its characters, so its region shows there only while a recording of looks, started before the check became
  * a number, still runs over it; other checks read colors and looks inside the region in their second step, so it shows
  * there too.
  */
@@ -218,7 +215,7 @@ export function referenceWait(def: DraftDef, references: readonly ReferenceDef[]
 
 /**
  * The value draft `resumed` as it opens once the reference `reference` is saved: with that reference picked, on the
- * step that checks how the value reads and saves it.
+ * step that picks it, reads the live window, and saves.
  */
 export function finishedWith(resumed: Resumed, reference: string): Resumed {
   const { def } = resumed;
@@ -230,7 +227,7 @@ export function finishedWith(resumed: Resumed, reference: string): Resumed {
     ...resumed,
     def: {
       ...def,
-      state: keep('value', { ...stored, step: 'check', draft: { ...stored.draft, reference } }),
+      state: keep('value', { ...stored, step: 'how', draft: { ...stored.draft, reference } }),
     },
   };
 }

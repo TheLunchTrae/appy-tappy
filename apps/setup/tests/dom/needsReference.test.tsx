@@ -108,7 +108,7 @@ test('a value kept without a reference finishes once its application has one, wi
   const [opened] = finished;
   const kept = opened === undefined ? null : keptSetup(opened.def);
   expect(opened?.id).toBe('draft-1');
-  expect(kept?.step).toBe('check');
+  expect(kept?.step).toBe('how');
   expect(kept?.draft.reference).toBe('percent');
 });
 

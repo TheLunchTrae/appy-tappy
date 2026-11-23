@@ -10,8 +10,10 @@ While you make or change something, select **Save as draft**. Its **?** says
 what a draft keeps. Until it can be saved, the editor lists what it still
 needs, such as `Name the value.` or `Add an action.`
 
-If you select another page while something isn't saved, AppyTappy asks
-whether to leave, and says what you would lose and what a draft would keep.
+If you select another page, close AppyTappy Setup, or select **Discard** or
+**Cancel** while something isn't saved, AppyTappy asks first, and says what
+you would lose and what a draft would keep
+([Leave before you save](Getting-started.md#leave-before-you-save)).
 Select **Save as draft** there to keep your work, **Leave** to lose it, or
 **Stay** to go back to it.
 

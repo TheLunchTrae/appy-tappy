@@ -450,8 +450,9 @@ function draftNoun(flow: Flow): string {
   return flow.kind === 'value' && flow.changing !== null ? 'fix' : flow.kind;
 }
 
-/** The question before leaving a flow: what it says, and whether it offers to save a draft. */
+/** The question before leaving a flow: what it asks, what it says, and whether it offers to save a draft. */
 export interface LeaveQuestion {
+  readonly title: string;
   readonly text: string;
   /** Whether **Save as draft** is an answer: the open flow, an automation that waits under it, or both are kept. */
   readonly drafts: boolean;
@@ -479,8 +480,31 @@ export function leaveQuestion(flow: Flow, reported: Held, savable: boolean): Lea
       : `Save as draft keeps ${kept.length > 1 ? 'both, each as its own draft' : kept.join('')}${recording}.`;
   const refused = here !== null && isEdit(flow) ? 'An edit cannot be saved as a draft.' : null;
   return {
-    text: ['Leave without saving?', here, under, offer, refused].filter((part) => part !== null).join(' '),
+    title: 'Leave without saving?',
+    text: [here, under, offer, refused].filter((part) => part !== null).join(' '),
     drafts: kept.length > 0,
+  };
+}
+
+/**
+ * What the question before **Discard** or **Cancel** says and offers, when the open flow `flow` holds work: what it
+ * loses, and what **Save as draft** keeps when `savable` says it can save its draft. Only the open flow ends: a flow
+ * that waits under it shows again as it was left, so the question names none of its work.
+ */
+export function discardQuestion(flow: Flow, savable: boolean): LeaveQuestion {
+  const edit = isEdit(flow);
+  const drafts = savable && !edit;
+  const recording = flow.kind === 'value' || flow.kind === 'reference' ? ', without a recording' : '';
+  return {
+    title: 'Discard without saving?',
+    text: [
+      edit ? EDIT_LOST : LOST[flow.kind],
+      drafts ? `Save as draft keeps this ${draftNoun(flow)}${recording}.` : null,
+      edit ? 'An edit cannot be saved as a draft.' : null,
+    ]
+      .filter((part) => part !== null)
+      .join(' '),
+    drafts,
   };
 }
 
