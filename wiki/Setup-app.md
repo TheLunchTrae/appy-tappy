@@ -614,13 +614,15 @@ the shapes alone, so tiles stay put while the user types.
 
 Kept readings are named by index in the spec the UI sends, so their pixels
 never cross into the UI except as thumbnails. A reference learns its saved
-pictures first, then the labeled screenshots, then the kept readings, and
+pictures first, then the kept readings, then the labeled screenshots, and
 saves the new ones as samples after its old ones. Review sends the characters
-it would save and asks which kept readings it could not learn. The owner
-learns them as saving would, in that order, and leaves out each reading
-that fails, so a
-conflict such as one shape typed as `l` in one reading and `1` in another is
-flagged on the reading that causes it. **Record more** goes on with the stopped
+it would save and asks which kept readings it could not learn, such as one
+whose text has more characters than its picture shows. The owner learns the
+saved pictures and the boxes, then each reading, and leaves out each reading
+that fails. A shape typed as `l` in one reading and `1` in another is no
+failure: the later reading's text is learned, and review flags both
+(`disagreements` in `lib/review.ts`) so the user can fix the wrong one.
+**Record more** goes on with the stopped
 recording only when the region and window size are the
 ones it was recorded with, and otherwise says so rather than start over. The
 window size is the one the region was drawn at, not the one the window has
@@ -711,12 +713,17 @@ samples like any box the user drew.
 ### Saved pictures a reference can't learn
 
 A reference learns its saved samples again on each save and each trial,
-before its boxes and kept
-readings (`CharactersSpec::learn`, `saved::reader`). A save writes only
+before its kept readings and then its boxes (`CharactersSpec::learn`,
+`saved::reader`). Each lesson is the user's word for its shapes, so the
+newest wins: a shape learned as another character takes the newest
+lesson's character (`DigitReader::learn`), and a box, whose text the user
+always types, comes after the readings, whose text may be AppyTappy's
+guess. A shape unlike the ones learned for its character is one more
+glyph of it, so a character can have several shapes. A save writes only
 what `saved::reader` learned from the very bytes it writes. A sample
 teaches the reference nothing when no color of it splits into as many
 characters as its text has, as a picture cut without the pixels around its
-text can, or when a shape of it is learned as another character already. A
+text can. A
 picture that is missing from the
 application's folder teaches nothing either. The user sees no screenshot
 or box for such a sample, so the editor shows it

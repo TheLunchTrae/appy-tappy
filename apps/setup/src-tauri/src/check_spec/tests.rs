@@ -923,7 +923,7 @@ fn a_label_the_reference_cannot_learn_names_the_text() {
          2. Characters that touch count as one."
     );
     assert!(error.source().is_some());
-    // A kept reading comes after the boxes, and the words say which it is.
+    // A kept reading comes before the boxes, and the words say which it is.
     let now = std::time::Instant::now();
     let mut recording = Recording::new(
         Ticket::numbered(1),
@@ -961,14 +961,6 @@ fn a_failed_lesson_says_why_in_the_setup_apps_words() {
             "it shows 3 characters but the text has 2. A character drawn as separate marks side \
              by side, as some percent signs are, counts once for each mark, and so does \
              anything else that stands out as the characters do.",
-        ),
-        (
-            LearnError::Conflict {
-                learned: '"',
-                new: '\'',
-            },
-            "a character given as \"'\" has the same shape as one learned as \"\"\". Change the \
-             text of one of them, or leave one out.",
         ),
         (
             LearnError::Full,
@@ -1234,7 +1226,7 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
 }
 
 #[test]
-fn recorded_readings_are_learned_and_saved_after_the_labels() {
+fn recorded_readings_are_learned_and_saved_before_the_labels() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 4, 6).expect("not empty");
     let mut recording = Recording::new(
@@ -1260,8 +1252,27 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
         .map(|sample| sample.image.as_str())
         .collect();
     assert_eq!(images, ["ref-digits-1.png", "ref-digits-2.png"]);
-    let picture = Image::decode_png(&taught.pictures[1].1).expect("a PNG");
+    let picture = Image::decode_png(&taught.pictures[0].1).expect("a PNG");
     assert_eq!(picture.size(), recording.readings()[0].image.size());
+    // A box's text corrects a kept reading of the same shape, whatever the
+    // reading says.
+    let corrected = characters(
+        first(),
+        None,
+        vec![Label {
+            screenshot: 0,
+            region: None,
+            text: "7".to_owned(),
+        }],
+        recorded(0),
+    );
+    let taught =
+        teach(&corrected, session(&screenshots, Some(&recording))).expect("the box corrects it");
+    let stroke = digits::cut(&page(), taught.region).expect("inside");
+    assert_eq!(
+        taught.reader.read(&stroke, false),
+        Ok(Number::new(7.0).expect("finite"))
+    );
 
     let problem = |spec: &CharactersSpec, recording| {
         teach(spec, session(&screenshots, recording))
@@ -1305,18 +1316,18 @@ fn recorded_problems_judge_each_reading_after_the_saved_samples() {
             text: text.to_owned(),
         }]
     };
-    // The saved reference took the stroke for a 1.
+    // The saved reference took the stroke for a 1, which a reading
+    // corrects; one with too many characters for it is a problem.
     let spec = characters(first(), Some(digits_ref()), Vec::new(), as_text("7"));
-    let problems = spec
-        .recorded_problems(session(&[page()], Some(&recording)))
-        .expect("a valid spec");
-    assert_eq!(problems.len(), 1);
-    assert!(problems[0].is_some(), "{problems:?}");
-    let spec = characters(first(), Some(digits_ref()), Vec::new(), as_text("1"));
     assert_eq!(
         spec.recorded_problems(session(&[page()], Some(&recording))),
         Ok(vec![None])
     );
+    let spec = characters(first(), Some(digits_ref()), Vec::new(), as_text("12"));
+    let problems = spec
+        .recorded_problems(session(&[page()], Some(&recording)))
+        .expect("a valid spec");
+    assert!(problems[0].is_some(), "{problems:?}");
 }
 
 #[test]

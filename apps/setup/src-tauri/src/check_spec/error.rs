@@ -331,10 +331,6 @@ pub(crate) fn cant_learn(error: &LearnError) -> String {
              anything else that stands out as the characters do.",
             shown(*found)
         ),
-        LearnError::Conflict { learned, new } => format!(
-            "a character given as \"{new}\" has the same shape as one learned as \
-             \"{learned}\". Change the text of one of them, or leave one out."
-        ),
         LearnError::Full => format!(
             "the reference holds {MAX_GLYPHS} character shapes already, the most one can hold. \
              Remove boxes, readings, or saved pictures it doesn't need."

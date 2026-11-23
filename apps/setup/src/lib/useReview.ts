@@ -124,8 +124,8 @@ export function useReview(
   // object with the same contents, so it reads the spec through a ref.
   const reviewSpecRef = useRef(toReview);
   reviewSpecRef.current = toReview;
-  // Asks which kept readings the check cannot learn, such as one whose shape
-  // a box or an earlier reading gave to another character.
+  // Asks which kept readings the check cannot learn, such as one whose text
+  // has more characters than its picture shows.
   useEffect(() => {
     const toReview = reviewSpecRef.current;
     if (!reviewing || toReview === null) {

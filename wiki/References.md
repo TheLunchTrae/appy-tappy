@@ -116,7 +116,9 @@ this reference to edit.
 ## Boxes
 
 A box is a part of a screenshot that shows some characters, with the text you
-type for it. A reference learns from every box that has text. Draw as many as
+type for it. A reference learns from every box that has text. What you type
+is the answer: when a saved picture or a kept reading taught the same shape
+as another character, your newest text replaces it. Draw as many as
 you like, on any screenshot, and several on one screenshot too.
 
 - **Draw.** Drag on a screenshot, away from the boxes there. The new box is
@@ -522,8 +524,8 @@ stray shape and draw a box around it instead.
    - A reading whose text gives a shape another character than another
      reading's text gives it, such as a `1` read as `l`, is flagged, and so
      is the other reading, whether they are kept or left out. Neither starts
-     left out. Fix the text that is wrong. While both are kept, **Keep**
-     waits.
+     left out. Fix the text that is wrong. If you keep both as they are, the
+     reference learns the later reading's text.
 
    A reading's **Keep** is set once, when review first shows the reading
    with its text read, and after that only you change it. A reading still

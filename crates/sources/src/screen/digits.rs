@@ -391,11 +391,19 @@ impl DigitReader {
     /// one color, such as a gradient, is every pixel that is not
     /// background.
     ///
+    /// The text is the user's word for each shape, so the newest lesson
+    /// wins: a glyph of the same shape learned as another character is
+    /// forgotten, and the shape is learned as `text` says. A shape close to
+    /// one learned for its own character adds nothing, and one further
+    /// from it is another glyph of that character, so a character may have
+    /// several. Lessons learned in the order they were given read the same
+    /// each time.
+    ///
     /// # Errors
     ///
     /// Returns a [`LearnError`] when the image's characters do not line up
-    /// with `text`, when a shape is already learned as another character, or
-    /// when the reader is full. On error the reader is unchanged.
+    /// with `text`, or when the reader is full. On error the reader is
+    /// unchanged.
     pub fn learn(&mut self, image: &Image, text: &str) -> Result<(), LearnError> {
         let expected = text
             .chars()
@@ -404,22 +412,18 @@ impl DigitReader {
         let sight = lesson(&layers, expected.clone().count())?;
         let mut learned = self.glyphs.clone();
         for (character, sample) in expected.zip(sight.samples(&layers)) {
-            let close = |glyph: &&Glyph| glyph.sample.distance(&sample) <= SAME_GLYPH;
-            match learned.iter().find(|glyph| glyph.sample == sample) {
-                Some(glyph) if glyph.character == character => {},
-                Some(glyph) => {
-                    return Err(LearnError::Conflict {
-                        learned: glyph.character,
-                        new: character,
-                    });
-                },
-                None if learned
-                    .iter()
-                    .filter(|glyph| glyph.character == character)
-                    .any(|glyph| close(&glyph)) => {},
-                None if learned.len() >= MAX_GLYPHS => return Err(LearnError::Full),
-                None => learned.push(Glyph { character, sample }),
+            let close = |glyph: &Glyph| glyph.sample.distance(&sample) <= SAME_GLYPH;
+            learned.retain(|glyph| glyph.character == character || glyph.sample != sample);
+            if learned
+                .iter()
+                .any(|glyph| glyph.character == character && close(glyph))
+            {
+                continue;
             }
+            if learned.len() >= MAX_GLYPHS {
+                return Err(LearnError::Full);
+            }
+            learned.push(Glyph { character, sample });
         }
         self.glyphs = learned;
         Ok(())
@@ -1420,13 +1424,6 @@ pub enum LearnError {
         /// Characters in the text, without whitespace.
         expected: usize,
     },
-    /// A character had the same shape as one learned as another character.
-    Conflict {
-        /// The character the shape was learned as.
-        learned: char,
-        /// The character the text gave it now.
-        new: char,
-    },
     /// The reader already knows 256 glyphs.
     Full,
 }
@@ -1446,10 +1443,6 @@ impl fmt::Display for LearnError {
                 "the region shows {found} characters but the text has {expected}; a character \
                  drawn as separate marks side by side, as some percent signs are, counts once \
                  for each mark, and so does anything else that stands out as the characters do"
-            ),
-            Self::Conflict { learned, new } => write!(
-                formatter,
-                "a character shaped like {learned:?} was given as {new:?}"
             ),
             Self::Full => write!(formatter, "a reader learns at most {MAX_GLYPHS} glyphs"),
         }
@@ -1612,13 +1605,6 @@ mod tests {
                 "the region shows 5 characters but the text has 3; a character drawn as \
                  separate marks side by side, as some percent signs are, counts once for each \
                  mark, and so does anything else that stands out as the characters do",
-            ),
-            (
-                LearnError::Conflict {
-                    learned: '1',
-                    new: '7',
-                },
-                "a character shaped like '1' was given as '7'",
             ),
             (LearnError::Full, "a reader learns at most 256 glyphs"),
         ] {
@@ -1952,18 +1938,24 @@ mod tests {
                 expected: 3
             })
         );
-        assert_eq!(
-            reader.learn(&digits, "12"),
-            Err(LearnError::Conflict {
-                learned: '1',
-                new: '2'
-            })
-        );
         assert!(!knows(&reader, '1'));
         assert_eq!(reader.learn(&draw(&["..."]), "1"), Err(LearnError::NoInk));
         reader.learn(&draw(&["#"]), "1").unwrap();
         reader.learn(&draw(&["#"]), "1").unwrap();
         assert_eq!(reader.glyphs.len(), 1);
+    }
+
+    #[test]
+    fn the_newest_lesson_names_a_shape() {
+        let mut reader = DigitReader::new();
+        reader.learn(&draw(&["#", "#", "#"]), "1").unwrap();
+        reader.learn(&draw(&["#", "#", "#"]), "7").unwrap();
+        assert!(!knows(&reader, '1'), "the correction replaces the old name");
+        assert_eq!(reader.read(&draw(&["#", "#", "#"]), false), Ok(number(7.0)));
+        // Two marks of one shape given two characters take the later one.
+        reader.learn(&draw(&["#.#", "#.#", "#.#"]), "12").unwrap();
+        assert_eq!(reader.glyphs.len(), 1);
+        assert!(knows(&reader, '2'));
     }
 
     #[test]
