@@ -287,6 +287,7 @@ describe('the breadcrumb', () => {
       origin: { kind: 'byHand' } as const,
       ink: { red: 0, green: 0, blue: 0 },
       tolerance: 0,
+      guesses: false,
       samples: [],
     };
     const changing = { ...reference, existing: { app: 'example', reference: percent } };
@@ -495,6 +496,7 @@ describe('a draft opens the flow that finishes it', () => {
     origin: { kind: 'byHand' } as const,
     ink: { red: 0, green: 0, blue: 0 },
     tolerance: 0,
+    guesses: false,
     samples: [],
   };
   const saved: AppSummary = {

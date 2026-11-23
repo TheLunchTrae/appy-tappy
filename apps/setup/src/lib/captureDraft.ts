@@ -17,15 +17,17 @@ export interface Editing {
    * looks for, records, and reads only these.
    */
   readonly reads: readonly string[];
+  /** Whether a running automation guesses at the characters the reference has not learned. */
+  readonly guesses: boolean;
 }
 
 /**
  * The reference editor as it opens on `existing`, or on a new reference. A saved reference reads what it was saved
- * reading, and a new one the digits.
+ * reading and guesses if it was saved guessing, and a new one reads the digits and guesses nothing.
  */
 export function startEditing(existing: ReferenceDef | null): Editing {
   const reads = existing === null ? DIGITS.characters : expectedSet(existing.characters ?? '');
-  return { existing, name: existing?.name ?? '', reads };
+  return { existing, name: existing?.name ?? '', reads, guesses: existing?.guesses ?? false };
 }
 
 /**
@@ -248,7 +250,7 @@ export function referenceForValue(app: string, setup: CaptureSetup): DraftDef | 
     valueName: '',
     step: 'where',
     mayMove: false,
-    editing: { existing: null, name: '', reads },
+    editing: { existing: null, name: '', reads, guesses: false },
     draft: { ...EMPTY_DRAFT, boxes: [{ id: 0, screenshot: drawnOn, region, text: '' }] },
   };
   return {

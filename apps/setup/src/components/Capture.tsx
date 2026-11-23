@@ -301,17 +301,19 @@ export function Capture({
     [existingId, appId],
   );
   const isEditing = editing !== null;
-  // What the reference reads, which it is tried and saved with.
+  // What the reference reads and whether it guesses, which it is tried and saved with.
   const reads = editing?.reads ?? NO_CHARACTERS;
+  const guesses = editing?.guesses ?? false;
+  const chosen = useMemo(() => ({ reads, guesses }), [reads, guesses]);
   // The characters a reference's capture teaches, and the check of every other capture.
   const characters = useMemo(
-    () => (isEditing ? buildCharacters(draft, editingRef, reads) : null),
-    [isEditing, draft, editingRef, reads],
+    () => (isEditing ? buildCharacters(draft, editingRef, chosen) : null),
+    [isEditing, draft, editingRef, chosen],
   );
   const valueCheck = useMemo(() => buildSpec(draft, appId, needsSaved), [draft, appId, needsSaved]);
   const referenceSave = useMemo(
-    () => (isEditing ? buildReferenceSave(draft, editingRef, reads) : null),
-    [isEditing, draft, editingRef, reads],
+    () => (isEditing ? buildReferenceSave(draft, editingRef, chosen) : null),
+    [isEditing, draft, editingRef, chosen],
   );
   const built: Built<unknown> = referenceSave ?? valueCheck;
   const builtKind = characters === null ? (valueCheck.ok ? valueCheck.spec.kind : 'none') : 'characters';

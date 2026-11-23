@@ -6,7 +6,13 @@ import { userEvent } from '@testing-library/user-event';
 import type { AppFile, ReadingRisks, ReferenceDef } from '../../src/lib/bindings.ts';
 import { RiskMark } from '../../src/components/RiskMark.tsx';
 
-const font: ReferenceDef = { id: 'font', name: 'Percent font', origin: { kind: 'byHand' }, samples: [] };
+const font: ReferenceDef = {
+  id: 'font',
+  name: 'Percent font',
+  origin: { kind: 'byHand' },
+  guesses: false,
+  samples: [],
+};
 const file: AppFile = {
   format: 1,
   name: 'Player',

@@ -60,6 +60,7 @@ const percent: ReferenceDef = {
   id: 'percent',
   name: 'Percent font',
   origin: { kind: 'byHand' },
+  guesses: false,
   samples: [{ image: 'percent.png', text: '1%' }],
 };
 

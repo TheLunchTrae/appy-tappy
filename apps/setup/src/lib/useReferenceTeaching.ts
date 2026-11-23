@@ -220,6 +220,7 @@ export function useReferenceTeaching({
             ...named,
             reference: spec.reference,
             dropped: spec.dropped,
+            guesses: spec.guesses,
             ...(spec.characters === undefined ? {} : { characters: spec.characters }),
           }));
       setError(null);

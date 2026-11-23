@@ -27,7 +27,7 @@ const app: AppSummary = {
     },
     sizeChanges: 'often',
     antiCheat: 'none',
-    references: [{ id: 'font', name: 'Percent font', origin: { kind: 'byHand' }, samples: [] }],
+    references: [{ id: 'font', name: 'Percent font', origin: { kind: 'byHand' }, guesses: false, samples: [] }],
     values: [
       {
         id: 'icon',

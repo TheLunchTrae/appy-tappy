@@ -168,6 +168,7 @@ describe('what a draft keeps', () => {
         existing: null,
         name: 'Digits',
         reads: ['1', '2', '%'],
+        guesses: false,
       },
       draft,
     };
@@ -184,8 +185,8 @@ describe('the shape a draft keeps', () => {
   // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
   // the older shape say they were saved by another version instead of opening with fields missing.
   test('is the one this format names', () => {
-    expect(DRAFT_FORMAT).toBe(9);
-    expect(Object.keys(startEditing(null)).sort()).toEqual(['existing', 'name', 'reads']);
+    expect(DRAFT_FORMAT).toBe(10);
+    expect(Object.keys(startEditing(null)).sort()).toEqual(['existing', 'guesses', 'name', 'reads']);
     expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
       'actions',
       'cooldown',
@@ -328,7 +329,7 @@ describe('what an unfinished item still needs', () => {
     expect(captureMissing(drawn, next, false)).toEqual(['Pick the reference.']);
     const editing = {
       ...drawn,
-      editing: { existing: null, name: '', reads: [] },
+      editing: { existing: null, name: '', reads: [], guesses: false },
     };
     expect(captureMissing(editing, next, false)).toEqual(['Name the reference.']);
   });
@@ -410,10 +411,11 @@ describe('a draft and what it belongs to', () => {
       origin: { kind: 'byHand' } as const,
       ink: { red: 0, green: 0, blue: 0 },
       tolerance: 0,
+      guesses: false,
       samples: [],
     };
     const taught = { ...saved, tolerance: 12 };
-    const editing = { existing: saved, name: 'Percent', reads: [] };
+    const editing = { existing: saved, name: 'Percent', reads: [], guesses: false };
     expect(refreshedEditing(editing, [taught])).toEqual({ ...editing, existing: taught });
     // A reference deleted since is made as a new one, and a new one stays new.
     expect(refreshedEditing(editing, [])).toEqual({ ...editing, existing: null });
@@ -428,12 +430,13 @@ describe('a draft and what it belongs to', () => {
       name: 'Percent',
       origin: { kind: 'byHand' } as const,
       tolerance: 40,
+      guesses: false,
       samples: [{ image: 'ref-percent-2.png', text: '1' }],
     };
     const draft = { ...EMPTY_DRAFT, dropped: ['ref-percent-2.png'] };
-    const setup = { ...EMPTY_SETUP, editing: { existing: saved, name: 'Percent', reads: [] }, draft };
+    const setup = { ...EMPTY_SETUP, editing: { existing: saved, name: 'Percent', reads: [], guesses: false }, draft };
     // Two replacements can give a different picture the same name and label.
-    const reused = { ...saved, samples: [{ image: 'ref-percent-2.png', text: '1' }] };
+    const reused = { ...saved, guesses: false, samples: [{ image: 'ref-percent-2.png', text: '1' }] };
     for (const current of [undefined, saved, reused, null]) {
       expect(restoreSetup(storeSetup(setup), current).draft.dropped).toEqual([]);
     }
@@ -509,7 +512,7 @@ test("a number's later steps leave its region to Where to read, unless a recordi
 });
 
 test('the characters a reference reads start as saved, else as the digits', () => {
-  const saved = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, samples: [] };
+  const saved = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, guesses: false, samples: [] };
   expect(startEditing(null).reads).toEqual(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
   expect(startEditing({ ...saved, characters: '% 1' }).reads).toEqual(['1', '%']);
   // A saved reference that names none reads every character it learns, and goes on doing so.
@@ -532,6 +535,7 @@ describe('a value kept without a reference', () => {
     id,
     name: id,
     origin: { kind: 'byHand' },
+    guesses: false,
     samples: text === '' ? [] : [{ image: `${id}.png`, text }],
     ...(characters === undefined ? {} : { characters }),
   });
@@ -583,7 +587,7 @@ describe('a value kept without a reference', () => {
     const made = referenceForValue('example', number);
     const setup = made === null ? null : keptSetup(made);
     expect(made).toMatchObject({ kind: 'reference', app: 'example', changes: null });
-    expect(setup?.editing).toEqual({ existing: null, name: '', reads: ['1', '%'] });
+    expect(setup?.editing).toEqual({ existing: null, name: '', reads: ['1', '%'], guesses: false });
     expect(setup?.draft.boxes).toEqual([{ id: 0, screenshot: 3, region, text: '' }]);
     const anything = referenceForValue('example', { ...number, draft: { ...number.draft, characters: [] } });
     expect((anything === null ? null : keptSetup(anything))?.editing?.reads).toEqual([...DIGITS.characters]);

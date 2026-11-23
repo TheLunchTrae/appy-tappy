@@ -458,7 +458,12 @@ dropped: Array<string>,
  * it learns. The reference saves each once, in order, as
  * [`expected_characters`] lists them.
  */
-characters?: string, }>;
+characters?: string,
+/**
+ * Whether a running automation guesses at the characters the
+ * reference has not learned.
+ */
+guesses: boolean, }>;
 
 /**
  * How many times fall in each bar of a chart.
@@ -1633,7 +1638,14 @@ samples: Array<SampleDef>,
  * only the characters both it and its reference read. Whitespace does
  * not count, as in a label.
  */
-characters?: string, }>;
+characters?: string,
+/**
+ * Whether a running automation guesses at a character the reference
+ * has not learned, with the text reader, where the guess agrees with
+ * every character it has. Without it, such a number is not read.
+ * `false` when the file leaves it out.
+ */
+guesses: boolean, }>;
 
 /**
  * A saved reference of a saved application.
@@ -1688,7 +1700,12 @@ dropped: Array<string>,
  * The characters the reference reads, or `None` for every character
  * it learns.
  */
-characters?: string, }>;
+characters?: string,
+/**
+ * Whether a running automation guesses at the characters the
+ * reference has not learned.
+ */
+guesses: boolean, }>;
 
 /**
  * A reference being taught to try on the live window before it is saved,

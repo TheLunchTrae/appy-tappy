@@ -17,6 +17,7 @@ const characters: CharactersSpec = {
   labels: [{ screenshot: 0, region, text: '5' }],
   recorded: [],
   dropped: ['ref-percent-2.png'],
+  guesses: false,
 };
 const taught: ReferenceSaving = { kind: 'taught', characters };
 
@@ -24,7 +25,7 @@ test('a saved reference asks about its pictures without the ones it leaves out',
   expect(unlearnedAsk(null)).toBeNull();
   expect(unlearnedAsk({ kind: 'taught', characters: { ...characters, reference: null } })).toBeNull();
   expect(unlearnedAsk(taught)).toEqual({ reference: percent, dropped: ['ref-percent-2.png'] });
-  expect(unlearnedAsk({ kind: 'settings', reference: percent, dropped: [] })).toEqual({
+  expect(unlearnedAsk({ kind: 'settings', reference: percent, dropped: [], guesses: false })).toEqual({
     reference: percent,
     dropped: [],
   });
@@ -34,7 +35,7 @@ test('an answer shows only while the editor asks under the key it was asked unde
   const key = (saving: ReferenceSaving, saved = samples): string | null => unlearnedKey(unlearnedAsk(saving), saved);
   const asked = key(taught) ?? '';
   const unlearned = [{ image: 'ref-percent-1.png', text: '87%', problem: 'No pixel stands out.', missing: false }];
-  const answer = { key: asked, samples: unlearned };
+  const answer = { key: asked, guesses: false, samples: unlearned };
   expect(unlearnedKey(null, samples)).toBeNull();
   expect(unlearnedArrived(answer, asked)).toEqual(unlearned);
   // The boxes it adds are learned after its saved pictures, so they ask nothing new.

@@ -86,6 +86,10 @@ pub(crate) struct CharactersSpec {
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
     pub(crate) characters: Option<String>,
+    /// Whether a running automation guesses at the characters the
+    /// reference has not learned.
+    #[serde(default)]
+    pub(crate) guesses: bool,
 }
 
 /// A saved sample a reference cannot learn.
@@ -114,8 +118,9 @@ pub(crate) struct SavedReference {
 
 impl SavedReference {
     /// The reference as it is saved under the name `name`, reading
-    /// `characters`, or every character it learns for `None`. Its samples
-    /// stay as they are saved, so no screenshot is needed.
+    /// `characters`, or every character it learns for `None`, and
+    /// guessing at the rest when `guesses`. Its samples stay as they are
+    /// saved, so no screenshot is needed.
     ///
     /// # Errors
     ///
@@ -125,6 +130,7 @@ impl SavedReference {
         self,
         name: &str,
         characters: Option<&str>,
+        guesses: bool,
     ) -> Result<ReferenceDef, SpecError> {
         if self.reference.samples.is_empty() {
             return Err(SpecError::NoLabels);
@@ -132,6 +138,7 @@ impl SavedReference {
         let reference = ReferenceDef {
             name: name.to_owned(),
             characters: expected_characters(characters.unwrap_or_default()),
+            guesses,
             ..self.reference.clone()
         };
         learned(&reference, &[], 0, &self.pictures).map(|_reader| reference)
@@ -425,7 +432,7 @@ impl CharactersSpec {
             origin,
             samples,
             characters: expected_characters(self.characters.as_deref().unwrap_or_default()),
-            guesses: false,
+            guesses: self.guesses,
         };
         let reader = learned(&reference, &pictures, self.labels.len(), &kept)?;
         Ok(Taught {
