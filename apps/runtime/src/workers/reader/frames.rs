@@ -1183,6 +1183,14 @@ mod tests {
         frames.handle(Ok(frame(&frame_image(12, 7, |_, _| false), WINDOW)));
         assert_eq!(problems(&readings).len(), 1);
         assert_eq!(asked.try_iter().count(), 0);
+        // And another: the region shows a sign the reference knows, and
+        // no number.
+        let mut sign = DigitReader::new();
+        sign.learn(&bar(false), "%").expect("one character");
+        let (mut frames, readings, asked) = guessing(sign.with_guesses(None, None));
+        frames.handle(Ok(frame(&bar(false), WINDOW)));
+        assert_eq!(problems(&readings).len(), 1);
+        assert_eq!(asked.try_iter().count(), 0);
     }
 
     #[test]

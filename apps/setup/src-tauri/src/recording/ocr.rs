@@ -11,7 +11,6 @@
 //! reference that guesses.
 
 use std::collections::VecDeque;
-use std::error::Error;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender};
@@ -141,10 +140,10 @@ fn load(model: &Path) -> Result<TextReader, String> {
             "The text reader's model, {}, could not be loaded ({}). Reinstall AppyTappy to put \
              it back",
             path.display(),
-            cause(&error)
+            error.cause()
         ),
         TextError::Start(_) | TextError::Read(_) => {
-            format!("The text reader could not start: {}", cause(&error))
+            format!("The text reader could not start: {}", error.cause())
         },
     })
 }
@@ -153,15 +152,8 @@ fn load(model: &Path) -> Result<TextReader, String> {
 fn read(engine: &TextReader, line: &Line) -> Text {
     match engine.read(line) {
         Ok(text) => Text::Read(text),
-        Err(error) => Text::Failed(format!("The text reader failed: {}", cause(&error))),
+        Err(error) => Text::Failed(format!("The text reader failed: {}", error.cause())),
     }
-}
-
-/// What caused `error`, or the error itself where it names no cause.
-fn cause(error: &TextError) -> String {
-    error
-        .source()
-        .map_or_else(|| error.to_string(), ToString::to_string)
 }
 
 #[cfg(test)]
@@ -218,6 +210,7 @@ mod tests {
             model.display()
         );
         let engine = load(&model).expect("the model loads");
+        assert_eq!(format!("{engine:?}"), "TextReader");
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/readings.png");
         let sheet = Image::decode_png(&fs::read(fixture).expect("the fixture reads"))
             .expect("the fixture is a PNG");
@@ -269,6 +262,11 @@ mod tests {
                 } => {
                     assert_eq!((ticket.number(), index), (4, expected));
                     assert!(why.contains("appytappy-no-model.onnx"), "{why}");
+                    let cause = TextReader::load(&model)
+                        .expect_err("no such file")
+                        .cause()
+                        .to_string();
+                    assert!(why.contains(&format!("({cause})")), "{why}");
                 },
                 other => panic!("unexpected {other:?}"),
             }

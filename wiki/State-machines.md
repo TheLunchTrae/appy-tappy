@@ -661,7 +661,7 @@ stateDiagram-v2
   not queue a question for each. An answer is taken only in this state, and
   only the answer to the value's last question, which carries the time the
   value asked (`Ask::since`): any other is dropped. While any value is in
-  this state, the handler returns `NextFrame::Again`, so the
+  this state, or has a thread that cannot start to tell of, the handler returns `NextFrame::Again`, so the
   [frame loop](#capture-frame-loop) hands it its frame once more when the
   window shows nothing new, and the answer is taken though the window
   holds still.
@@ -680,7 +680,7 @@ stateDiagram-v2
   either are each an answer that says why, so the value waits and the
   handler says the problem once as the value's, as it says a failed check.
   A thread that cannot start makes the value wait the same way, and the
-  handler says so with the next frame. The value
+  handler asks for its frame again to say so. The value
   stays unread, as it is without guessing, and asks again after its wait.
   A value whose guess is refused each time asks once a minute, and the
   thread, which ends after 30 seconds, loads the model again for each.
@@ -710,6 +710,8 @@ stateDiagram-v2
     Holding --> Holding: a newer frame arrives, the older is given back
     Empty --> Empty: a frame arrives after the wait and is read
     Holding --> Empty: the wait ends, the frame is read
+    Empty --> Empty: the wait ends for a handler that asked for its frame again, the copy is handed over
+    Empty --> [*]: the copy is handed over again, and the handler wants no more frames
     Empty --> Ended: the check finds the window closed or the device lost
     Holding --> Ended: the check finds the window closed or the device lost
     Empty --> Ended: a read cannot follow the window's size, or the device is lost
@@ -721,8 +723,9 @@ stateDiagram-v2
     Ended --> [*]
 ```
 
-- **Empty.** The loop holds no frame and waits for the next event or the next
-  check, whichever comes first.
+- **Empty.** The loop holds no frame and waits for the next event, the next
+  check, or the end of the wait of a handler that asked for its frame
+  again, whichever comes first.
 - **Holding.** The loop holds the newest frame until the handler's wait ends,
   and gives every older one back to the system unread. It waits until the read
   or the next check, whichever comes first.

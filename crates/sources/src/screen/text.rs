@@ -72,13 +72,22 @@ impl fmt::Display for TextError {
     }
 }
 
-impl Error for TextError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+impl TextError {
+    /// What the model's code failed with, which says more than the error
+    /// does: that the file is missing, or what in it is wrong.
+    #[must_use]
+    pub fn cause(&self) -> &(dyn Error + Send + Sync + 'static) {
         match self {
             Self::Model { source, .. } | Self::Start(source) | Self::Read(source) => {
-                Some(source.as_ref())
+                source.as_ref()
             },
         }
+    }
+}
+
+impl Error for TextError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.cause())
     }
 }
 
@@ -144,6 +153,28 @@ impl TextReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_error_says_what_failed_and_keeps_its_cause() {
+        let missing = Path::new("no-such-folder").join(MODEL_FILE);
+        let error = TextReader::load(&missing).expect_err("no such file");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "the text reader's model, {}, could not be loaded",
+                missing.display()
+            )
+        );
+        let cause = error.cause().to_string();
+        assert_ne!(cause, "");
+        assert_eq!(error.source().map(ToString::to_string), Some(cause));
+        let start = TextError::Start("no input".into());
+        assert_eq!(start.to_string(), "the text reader could not start");
+        assert_eq!(start.cause().to_string(), "no input");
+        let read = TextError::Read("too small".into());
+        assert_eq!(read.to_string(), "the text reader could not read the line");
+        assert_eq!(read.cause().to_string(), "too small");
+    }
 
     #[test]
     fn the_model_is_beside_the_program() {

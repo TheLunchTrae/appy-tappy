@@ -19,14 +19,13 @@
 //! `wiki/State-machines.md` maps each value's guess.
 
 use std::panic::{self, AssertUnwindSafe};
-use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use appytappy_sources::screen::Image;
 use appytappy_sources::screen::digits::DigitReader;
-use appytappy_sources::screen::text::{self, Line, TextReader};
+use appytappy_sources::screen::text::{self, Line, TextError, TextReader};
 
 /// How long a value waits after a guess it could not take before it asks
 /// again, at first. Each such guess in a row doubles the wait, up to
@@ -197,11 +196,12 @@ impl Guesses {
         self.unasked.push((value, NO_THREAD.to_owned()));
     }
 
-    /// Whether a value waits for an answer, so the frame reader has to
-    /// look for it though the window shows nothing new.
+    /// Whether a value waits for an answer, or has a problem to say, so
+    /// the frame reader has to hear of it though the window shows nothing
+    /// new.
     pub(super) fn asked(&self) -> bool {
         let asked = |guess: &Guess| matches!(guess.asking, Asking::Asked { .. });
-        self.values.iter().any(asked)
+        !self.unasked.is_empty() || self.values.iter().any(asked)
     }
 
     /// Takes the answers that came since the last frame. A value whose
@@ -273,33 +273,41 @@ pub(super) fn text_thread() -> Option<Sender<Ask>> {
     let (asks, asked) = mpsc::channel();
     thread::Builder::new()
         .name("text reader".to_owned())
-        .spawn(move || answer(&asked, IDLE, || load(&model)))
+        .spawn(move || {
+            let load = || TextReader::load(&model).map_err(|error| not_loaded(&error));
+            let read = |reader: &TextReader, line: &Line| {
+                reader.read(line).map_err(|error| not_read(&error))
+            };
+            answer(&asked, IDLE, load, read);
+        })
         .ok()
         .map(|_detached| asks)
 }
 
-/// The text reader with the model at `model`, or why it cannot guess.
-fn load(model: &Path) -> Result<TextReader, String> {
-    TextReader::load(model).map_err(|error| {
-        format!(
-            "cannot guess at the characters its reference has not learned: {error}; reinstall \
-             AppyTappy to put the text reader back"
-        )
-    })
+/// Why a value cannot guess when the text reader did not load.
+fn not_loaded(error: &TextError) -> String {
+    format!(
+        "{NO_GUESS}: {error} ({}); reinstall AppyTappy to put the text reader back",
+        error.cause()
+    )
 }
 
-/// What `reader` reads `line` as, or why it cannot.
-fn read(reader: &TextReader, line: &Line) -> Result<String, String> {
-    reader.read(line).map_err(|error| {
-        format!("cannot guess at the characters its reference has not learned: {error}")
-    })
+/// Why a value cannot guess when the text reader did not read its line.
+fn not_read(error: &TextError) -> String {
+    format!("{NO_GUESS}: {error} ({})", error.cause())
 }
 
 /// The text reader's thread: answers each of `asks` until none comes for
 /// `idle` or the frame reader is gone. It loads the text reader with
-/// `load` for its first question. A panic while it loads or reads is an
-/// answer too, so no value waits for one that never comes.
-fn answer(asks: &Receiver<Ask>, idle: Duration, load: impl FnOnce() -> Result<TextReader, String>) {
+/// `load` for its first question, and reads each line with `read`. A panic
+/// while it loads or reads is an answer too, so no value waits for one
+/// that never comes.
+fn answer<R>(
+    asks: &Receiver<Ask>,
+    idle: Duration,
+    load: impl FnOnce() -> Result<R, String>,
+    read: impl Fn(&R, &Line) -> Result<String, String>,
+) {
     let Ok(mut ask) = asks.recv_timeout(idle) else {
         return;
     };
@@ -326,6 +334,9 @@ fn answer(asks: &Receiver<Ask>, idle: Duration, load: impl FnOnce() -> Result<Te
         };
     }
 }
+
+/// How each reason a value cannot guess starts, after the value's name.
+const NO_GUESS: &str = "cannot guess at the characters its reference has not learned";
 
 /// Why a value cannot guess when the text reader panicked.
 const PANICKED: &str =
@@ -564,21 +575,20 @@ mod tests {
         let later = now + ANSWER_WITHIN;
         guesses.ask(0, &reader, &mark(), later);
         assert_eq!(asking(&guesses), Some(waiting(later, FIRST_WAIT)));
+        assert!(guesses.asked(), "the frame reader has a problem to hear");
         assert_eq!(
             guesses.hear(later, |_| Some(&reader)),
             [(0, NO_THREAD.to_owned())]
         );
         assert_eq!(guesses.hear(later, |_| Some(&reader)), []);
+        assert!(!guesses.asked());
     }
 
-    #[test]
-    fn the_text_reader_s_thread_answers_every_question_and_ends_when_none_comes() {
-        let (asks, asked) = mpsc::channel();
-        let (reply, answers) = mpsc::channel();
-        let now = Instant::now();
-        let ask = |value: usize| Ask {
+    /// A question about a line of one pixel, from `value`.
+    fn question(value: usize, since: Instant, reply: &Sender<Answer>) -> Ask {
+        Ask {
             value,
-            since: now,
+            since,
             image: mark(),
             line: Line {
                 width: 1,
@@ -586,31 +596,101 @@ mod tests {
                 pixels: vec![0],
             },
             reply: reply.clone(),
+        }
+    }
+
+    #[test]
+    fn the_text_reader_s_thread_answers_every_question_and_ends_when_none_comes() {
+        let (asks, asked) = mpsc::channel();
+        let (reply, answers) = mpsc::channel();
+        let now = Instant::now();
+        let idle = Duration::from_millis(1);
+        let said = || -> Vec<_> {
+            let each = answers.try_iter();
+            each.map(|answer: Answer| (answer.value, answer.since, answer.said))
+                .collect()
         };
+        // A reader that reads a line as its width.
+        let width = |reader: &&str, line: &Line| Ok(format!("{reader} {}", line.width));
         for value in 0..2 {
-            asks.send(ask(value)).expect("the thread listens");
+            asks.send(question(value, now, &reply))
+                .expect("the thread listens");
         }
         // It ends by itself while `asks` is still open.
-        answer(&asked, Duration::from_millis(1), || {
-            Err("no model".to_owned())
-        });
-        let said: Vec<_> = answers
-            .try_iter()
-            .map(|answer| (answer.value, answer.since, answer.said))
-            .collect();
+        answer(&asked, idle, || Ok("wide"), width);
         assert_eq!(
-            said,
+            said(),
             [
-                (0, now, Err("no model".to_owned())),
-                (1, now, Err("no model".to_owned()))
+                (0, now, Ok("wide 1".to_owned())),
+                (1, now, Ok("wide 1".to_owned()))
             ]
         );
-        // A panic while the model loads is an answer too.
-        asks.send(ask(3)).expect("the thread listens");
-        answer(&asked, Duration::from_millis(1), || {
-            panic!("a broken model")
-        });
-        let said: Vec<_> = answers.try_iter().map(|answer| answer.said).collect();
-        assert_eq!(said, [Err(PANICKED.to_owned())]);
+        // A reader that did not load answers why, each time.
+        for value in 2..4 {
+            asks.send(question(value, now, &reply))
+                .expect("the thread listens");
+        }
+        answer(&asked, idle, || Err("no model".to_owned()), width);
+        assert_eq!(
+            said(),
+            [
+                (2, now, Err("no model".to_owned())),
+                (3, now, Err("no model".to_owned()))
+            ]
+        );
+        // A read that fails, and a panic while the model loads or a line
+        // is read, are answers too.
+        let refuses = |_: &&str, _: &Line| Err("no line".to_owned());
+        asks.send(question(4, now, &reply))
+            .expect("the thread listens");
+        answer(&asked, idle, || Ok("wide"), refuses);
+        asks.send(question(5, now, &reply))
+            .expect("the thread listens");
+        answer(&asked, idle, || panic!("a broken model"), width);
+        asks.send(question(6, now, &reply))
+            .expect("the thread listens");
+        let breaks = |_: &&str, _: &Line| panic!("a broken line");
+        answer(&asked, idle, || Ok("wide"), breaks);
+        assert_eq!(
+            said(),
+            [
+                (4, now, Err("no line".to_owned())),
+                (5, now, Err(PANICKED.to_owned())),
+                (6, now, Err(PANICKED.to_owned()))
+            ]
+        );
+    }
+
+    #[test]
+    fn the_runtime_s_text_thread_says_that_its_model_is_missing() {
+        // No model is beside the test program.
+        let asks = text_thread().expect("the thread starts");
+        let (reply, answers) = mpsc::channel();
+        asks.send(question(0, Instant::now(), &reply))
+            .expect("the thread listens");
+        let answer = answers
+            .recv_timeout(Duration::from_secs(30))
+            .expect("an answer");
+        let why = answer.said.expect_err("no model");
+        assert!(
+            why.starts_with(
+                "cannot guess at the characters its reference has not learned: the text \
+                 reader's model, "
+            ),
+            "{why}"
+        );
+        assert!(
+            why.ends_with("); reinstall AppyTappy to put the text reader back"),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn a_line_the_text_reader_cannot_read_says_why() {
+        assert_eq!(
+            not_read(&TextError::Read("too small".into())),
+            "cannot guess at the characters its reference has not learned: the text reader \
+             could not read the line (too small)"
+        );
     }
 }
