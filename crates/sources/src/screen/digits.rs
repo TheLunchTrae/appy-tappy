@@ -523,13 +523,16 @@ impl DigitReader {
         let holds = |characters: Option<&str>, character: char| {
             characters.is_none_or(|characters| characters.contains(character))
         };
+        // The last check holds each known character to the guess.
+        let known = attempt
+            .taken
+            .iter()
+            .any(|taken| !matches!(taken, Taken::Unknown(_)));
         let mut guessed = self.clone();
-        let mut agreed = false;
         let marks = attempt.taken.iter().zip(&attempt.sight.marks);
         for ((taken, mark), &said) in marks.zip(&said) {
             match *taken {
-                Taken::Kept(known) | Taken::LeftOut(known) if known == said => agreed = true,
-                Taken::Kept(_) | Taken::LeftOut(_) => return None,
+                Taken::Kept(_) | Taken::LeftOut(_) => {},
                 Taken::Unknown(_) if !holds(reference, said) => return None,
                 Taken::Unknown(_) => {
                     let glyph = Glyph {
@@ -545,7 +548,7 @@ impl DigitReader {
             }
         }
         let learned = |reader: &Self| reader.glyphs.len().saturating_add(reader.left_out.len());
-        if !agreed || learned(&guessed) == learned(self) || learned(&guessed) > MAX_GLYPHS {
+        if !known || learned(&guessed) == learned(self) || learned(&guessed) > MAX_GLYPHS {
             return None;
         }
         // A shape as close to another character's as to its own stays
