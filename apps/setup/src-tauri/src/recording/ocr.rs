@@ -6,28 +6,21 @@
 //! milliseconds where the owner thread answers the UI in microseconds. The
 //! owner sends it each new reading's ink, and it sends back the text. It
 //! loads its model on the first reading, so a setup session that never
-//! records never loads it. Only the setup app reads text this way; the
-//! runtime reads numbers with the shapes the user's labels taught it.
+//! records never loads it. The runtime reads numbers with the shapes the
+//! user's labels taught it, and has a text reader thread of its own for a
+//! reference that guesses.
 
 use std::collections::VecDeque;
-use std::error::Error;
 use std::panic::{self, AssertUnwindSafe};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender};
 
-use ocrs::{ImageSource, OcrEngine, OcrEngineParams};
-use rten::Model;
-use rten_imageproc::{Point, Rect, RotatedRect};
+use appytappy_sources::screen::text::{Line, TextError, TextReader};
 
 use crate::owner::{Event, Message};
 use crate::ticket::Ticket;
 
 use super::Text;
-use super::ink::Line;
-
-/// The text reader's model file, in the `models` folder beside the setup
-/// app's program.
-pub(crate) const MODEL_FILE: &str = "text-recognition.onnx";
 
 /// What a job's line belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,16 +68,6 @@ impl Newest {
     }
 }
 
-/// Where the model file is for the program at `program`: in the `models`
-/// folder beside it, where the installer puts it.
-pub(crate) fn model_path(program: &Path) -> PathBuf {
-    program
-        .parent()
-        .unwrap_or(program)
-        .join("models")
-        .join(MODEL_FILE)
-}
-
 /// Reads each job's line as text and sends the owner the result, until the
 /// owner drops its sender. The model at `model` loads on the first job;
 /// when it cannot, every reading says why, and the user types the text.
@@ -92,7 +75,7 @@ pub(crate) fn model_path(program: &Path) -> PathBuf {
 /// queued are skipped: the user discarded or replaced it, and the owner
 /// would drop their text.
 pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>, model: &Path) {
-    let mut engine: Option<Result<OcrEngine, String>> = None;
+    let mut engine: Option<Result<TextReader, String>> = None;
     let mut queue = VecDeque::new();
     let mut newest = Newest::default();
     loop {
@@ -149,56 +132,41 @@ pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>, model: &Path
     }
 }
 
-/// The text reader with the recognition model at `model`.
-fn load(model: &Path) -> Result<OcrEngine, String> {
-    let model = Model::load_file(model).map_err(|error| {
-        format!(
-            "The text reader's model, {}, could not be loaded ({error}). Reinstall AppyTappy to \
-             put it back",
-            model.display()
-        )
-    })?;
-    OcrEngine::new(OcrEngineParams {
-        recognition_model: Some(model),
-        ..OcrEngineParams::default()
+/// The text reader with the model at `model`, or why it could not load,
+/// in the user's words.
+fn load(model: &Path) -> Result<TextReader, String> {
+    TextReader::load(model).map_err(|error| match &error {
+        TextError::Model { path, .. } => format!(
+            "The text reader's model, {}, could not be loaded ({}). Reinstall AppyTappy to put \
+             it back",
+            path.display(),
+            error.cause()
+        ),
+        TextError::Start(_) | TextError::Read(_) => {
+            format!("The text reader could not start: {}", error.cause())
+        },
     })
-    .map_err(|error| format!("The text reader could not start: {error:#}"))
 }
 
-/// What `engine` reads on `line`.
-fn read(engine: &OcrEngine, line: &Line) -> Text {
-    match recognize(engine, line) {
+/// What `engine` reads `line` as, or why it could not.
+fn read(engine: &TextReader, line: &Line) -> Text {
+    match engine.read(line) {
         Ok(text) => Text::Read(text),
-        Err(error) => Text::Failed(format!("The text reader failed: {error:#}")),
+        Err(error) => Text::Failed(format!("The text reader failed: {}", error.cause())),
     }
-}
-
-/// The text `engine` recognizes on `line`, taken as one line of text: the
-/// region holds one counter, so no text needs finding first.
-fn recognize(engine: &OcrEngine, line: &Line) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let source = ImageSource::from_bytes(&line.pixels, (line.width, line.height))?;
-    let input = engine.prepare_input(source)?;
-    let whole = Rect::new(
-        Point::from_yx(0.0, 0.0),
-        Point::from_yx(line.height as f32, line.width as f32),
-    );
-    let lines = engine.recognize_text(&input, &[vec![RotatedRect::from_rect(whole)]])?;
-    Ok(lines
-        .into_iter()
-        .flatten()
-        .map(|text| text.to_string().trim().to_owned())
-        .collect::<Vec<_>>()
-        .join(" "))
 }
 
 #[cfg(test)]
 mod tests {
     use std::env;
     use std::fs;
+    use std::path::PathBuf;
     use std::sync::mpsc;
 
     use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::{Image, Region};
+
+    use appytappy_sources::screen::text::MODEL_FILE;
 
     use super::*;
 
@@ -242,6 +210,7 @@ mod tests {
             model.display()
         );
         let engine = load(&model).expect("the model loads");
+        assert_eq!(format!("{engine:?}"), "TextReader");
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/readings.png");
         let sheet = Image::decode_png(&fs::read(fixture).expect("the fixture reads"))
             .expect("the fixture is a PNG");
@@ -260,15 +229,6 @@ mod tests {
             .map(|&(_, text)| Text::Read(text.to_owned()))
             .collect();
         assert_eq!(read, shown);
-    }
-
-    #[test]
-    fn the_model_is_beside_the_program() {
-        let program = Path::new("install").join("appytappy-setup.exe");
-        assert_eq!(
-            model_path(&program),
-            Path::new("install").join("models").join(MODEL_FILE)
-        );
     }
 
     #[test]
@@ -302,6 +262,11 @@ mod tests {
                 } => {
                     assert_eq!((ticket.number(), index), (4, expected));
                     assert!(why.contains("appytappy-no-model.onnx"), "{why}");
+                    let cause = TextReader::load(&model)
+                        .expect_err("no such file")
+                        .cause()
+                        .to_string();
+                    assert!(why.contains(&format!("({cause})")), "{why}");
                 },
                 other => panic!("unexpected {other:?}"),
             }

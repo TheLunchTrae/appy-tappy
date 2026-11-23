@@ -47,6 +47,10 @@ pub(crate) struct ReferenceSettingsSpec {
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
     pub(crate) characters: Option<String>,
+    /// Whether a running automation guesses at the characters the
+    /// reference has not learned.
+    #[serde(default)]
+    pub(crate) guesses: bool,
 }
 
 /// Where a reference was saved.
@@ -231,7 +235,7 @@ impl<H: Host> Owner<H> {
             named_apart(&found.file, id, name)?;
             let changed = reference_of(found, id)?
                 .without(&spec.dropped)
-                .with_settings(name, spec.characters.as_deref())
+                .with_settings(name, spec.characters.as_deref(), spec.guesses)
                 .map_err(|error| error.to_string())?;
             let answer = SavedReferenceId {
                 app: app.clone(),
@@ -682,6 +686,7 @@ mod tests {
             reference_name: name.to_owned(),
             dropped: Vec::new(),
             characters: None,
+            guesses: false,
         };
         let save = |harness: &mut Harness, spec: ReferenceSettingsSpec| {
             harness.ask(move |owner| owner.save_reference_settings(&spec))
@@ -848,6 +853,7 @@ mod tests {
             reference_name: "Digits".to_owned(),
             dropped: dropped.to_vec(),
             characters: None,
+            guesses: false,
         };
         harness
             .ask(|owner| owner.save_reference(&boxed("")))

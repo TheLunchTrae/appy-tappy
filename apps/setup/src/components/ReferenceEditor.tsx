@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 import type { Coverage } from '../lib/expected.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
-import { LOOKALIKE_HINT } from '../lib/hints.ts';
+import { GUESSES_HINT, LOOKALIKE_HINT } from '../lib/hints.ts';
 import { lookalikeWarning } from '../lib/useReadingRisks.ts';
 import { CharacterChips, MissingChips } from './CharacterChips.tsx';
 import { ExpectedCharacters } from './ExpectedCharacters.tsx';
@@ -19,6 +19,9 @@ interface Props {
   /** The characters it reads, each once; none for every character it learns. What it learned is compared with these. */
   readonly reads: readonly string[];
   readonly onReads: (reads: readonly string[]) => void;
+  /** Whether a running automation guesses at the characters it has not learned. */
+  readonly guesses: boolean;
+  readonly onGuesses: (guesses: boolean) => void;
   /** What saving it reading those would take from the values that read with it, or null. */
   readonly readersLose: string | null;
   /** How the characters in those texts compare with the ones it reads. */
@@ -98,6 +101,25 @@ export function ReferenceEditor(props: Props) {
           {props.readersLose}
         </p>
       )}
+      <div className="field">
+        <span className="name">
+          <label className="toggle">
+            <input
+              type="checkbox"
+              className="switch"
+              aria-describedby="hint-guesses"
+              checked={props.guesses}
+              onChange={(event) => {
+                props.onGuesses(event.target.checked);
+              }}
+            />
+            Guess characters it has not learned
+          </label>
+          <Hint topic="Guess characters it has not learned" id="hint-guesses">
+            {GUESSES_HINT}
+          </Hint>
+        </span>
+      </div>
       {props.boxes}
       {props.findPanel}
       {chosen ? (

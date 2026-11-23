@@ -32,10 +32,11 @@ the logs and the setup app's [drafts](Setup-app.md#drafts), with their
 screenshots, in `%LOCALAPPDATA%\AppyTappy`. No test covers the hooks: they
 run only in the installer on Windows.
 
-The installer also holds the setup app's text reader model,
-`models\text-recognition.onnx` beside the setup app, which
+The installer also holds the text reader model,
+`models\text-recognition.onnx` beside the setup app and the runtime, which
 [recording readings](References.md#record-readings) uses
-([The text reader](Setup-app.md#the-text-reader)). `mise run
+([The text reader](Setup-app.md#the-text-reader)), and which the runtime
+loads for a reference that [guesses](Screen-regions.md#guessing). `mise run
 installer:build` downloads it first with `mise run ocr:model`, which fails when
 the download does not match the hash pinned in
 `.config/mise/conf.d/installer.toml`.

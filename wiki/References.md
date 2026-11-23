@@ -113,6 +113,39 @@ reading those characters. When the reference reads none of the characters
 a value needs, AppyTappy doesn't read the value, and saving the value names
 this reference to edit.
 
+## Let a reference guess
+
+**Guess characters it has not learned** is off for a new reference. Off, a
+number with a character the reference hasn't learned isn't read while your
+automations run, and the log says so, until you teach the reference that
+character here.
+
+On, AppyTappy reads such a number's text with its text reader while your
+automations run. It learns the new shape only when the number also shows a
+character the reference already knows, such as the `%` of `57%`, the text
+reader agrees with every such character, and the new character is
+one of the [characters it reads](#characters-it-reads). The number then
+reads, and that shape reads from then on without the text reader.
+
+Turn it on for a counter whose characters you can't all catch in setup,
+such as a digit that shows up rarely. Leave it off when a wrong number
+matters:
+
+- A guess can be wrong, most often in small or stylized text. AppyTappy
+  then reads that shape wrong, or cuts the number short at it, until the
+  window changes size or AppyTappy starts again.
+- What it guesses isn't saved to the reference. It guesses again after the
+  window changes size or AppyTappy starts again, and **Characters it
+  knows** doesn't list it.
+- A number made only of characters the reference hasn't learned isn't
+  guessed, since nothing shows that the text reader reads this font right.
+- The text reader uses more memory while it works. AppyTappy lets go of it
+  half a minute after the last guess.
+
+A reference with more characters taught guesses better, since the text
+reader has to agree with more of them. Teaching the characters here is
+still the surest way to read them.
+
 ## Boxes
 
 A box is a part of a screenshot that shows some characters, with the text you

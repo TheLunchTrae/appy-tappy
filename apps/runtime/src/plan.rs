@@ -843,6 +843,7 @@ mod tests {
                 text: "11".to_owned(),
             }],
             characters: None,
+            guesses: false,
         });
         let mut missing = example.clone();
         missing.references.clear();

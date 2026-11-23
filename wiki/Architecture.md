@@ -581,6 +581,11 @@ phase it also reports the trace files' size, their rows and rows a second, the
 records the trace dropped, and the memory and CPU the trace added to the
 active phase. The CPU it added compares the two phases' first samples.
 
+No value in the script's application reads with a reference that
+[guesses](Screen-regions.md#guessing), so the memory and CPU targets hold
+for a runtime that guesses nothing. The text reader's model is outside
+them while it is loaded; the binary size target counts its code.
+
 ## Sources, rules, and actions
 
 These three parts stay separate so that each one can grow without the others

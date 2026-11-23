@@ -136,6 +136,10 @@ export const IMPORT_ANTI_CHEAT_HINT =
 export const LOOKALIKE_HINT =
   'AppyTappy reads a character as the learned shape it matches, whatever its color or size, and forgives an edge that is a little off. When the shapes it learned for two characters are that close, it cannot say which one it sees, and reads neither. Most often one of the pictures has the wrong text: check each, and remove or retype the wrong one.';
 
+/** What a reference that guesses does while automations run, and what it costs. */
+export const GUESSES_HINT =
+  'Off, a number with a character this reference has not learned is not read until you teach it here. On, AppyTappy reads the text with its text reader while your automations run, and learns the new shape when the text reader agrees with every character the reference already knows. A guess needs a character the reference knows beside the new one, such as the % of 57%. A guess can still be wrong, and then the number is read wrong, or cut short, until the window changes size or AppyTappy starts again, so teach the characters here when a wrong number matters. The text reader uses more memory while it works, and what it guesses is not saved to the reference.';
+
 /** How to zoom a screenshot and move around it. */
 export const ZOOM_HINT =
   'Hold Ctrl and turn the mouse wheel to zoom around the pointer. While the screenshot is larger than the view, hold the right or the middle mouse button and drag to move around it, or turn the wheel.';

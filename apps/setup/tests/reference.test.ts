@@ -31,6 +31,7 @@ test("referenceCharacters reads a reference's samples", () => {
       id: 'percent',
       name: 'Percent font',
       origin: { kind: 'byHand' } as const,
+      guesses: false,
       samples: [
         { image: 'ref-percent-1.png', text: '10%' },
         { image: 'ref-percent-2.png', text: '9' },
@@ -45,6 +46,7 @@ test('referenceCharacters leaves out what a reference learned but does not read'
       id: 'percent',
       name: 'Percent font',
       origin: { kind: 'byHand' } as const,
+      guesses: false,
       samples: [{ image: 'ref-percent-1.png', text: 'Lv 10%' }],
       characters: '0123456789 %',
     }),
@@ -121,7 +123,9 @@ test('readers names the number values that read with a reference, in a check or 
   // A reference that reads only some characters needs no others.
   const reading = (characters: string, file: AppFile): AppFile => ({
     ...file,
-    references: [{ id: 'percent', name: 'Percent', origin: { kind: 'byHand' }, samples: [], characters }],
+    references: [
+      { id: 'percent', name: 'Percent', origin: { kind: 'byHand' }, guesses: false, samples: [], characters },
+    ],
   });
   expect(readersNeed(reading('0123456789', file), 'percent')).toEqual([
     '0',
@@ -149,7 +153,13 @@ test('andList joins names as a sentence does', () => {
 });
 
 test('unreadBy names what a value needs that its reference does not read', () => {
-  const reference = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, samples: [] };
+  const reference = {
+    id: 'percent',
+    name: 'Percent',
+    origin: { kind: 'byHand' } as const,
+    guesses: false,
+    samples: [],
+  };
   expect(unreadBy({ ...reference, characters: '0123456789' }, ['1', '%', 'O'])).toEqual(['%', 'O']);
   expect(unreadBy(reference, ['1', '%'])).toEqual([]);
 });
@@ -192,6 +202,9 @@ test('readersLose names what the values that read with a reference would stop re
 
 test('referenceCharacters and unreadBy take a list that names no character as every character', () => {
   const reference = { id: 'percent', name: 'Percent', origin: { kind: 'byHand' } as const, characters: ' ' };
-  expect(referenceCharacters({ ...reference, samples: [{ image: 'a.png', text: '1%' }] })).toEqual(['1', '%']);
-  expect(unreadBy({ ...reference, samples: [] }, ['%'])).toEqual([]);
+  expect(referenceCharacters({ ...reference, guesses: false, samples: [{ image: 'a.png', text: '1%' }] })).toEqual([
+    '1',
+    '%',
+  ]);
+  expect(unreadBy({ ...reference, guesses: false, samples: [] }, ['%'])).toEqual([]);
 });

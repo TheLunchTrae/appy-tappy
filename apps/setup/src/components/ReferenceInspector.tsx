@@ -179,6 +179,10 @@ export function ReferenceInspector({
         onReads={(reads) => {
           setEditing((current) => (current === null ? null : { ...current, reads }));
         }}
+        guesses={editing.guesses}
+        onGuesses={(guesses) => {
+          setEditing((current) => (current === null ? null : { ...current, guesses }));
+        }}
         coverage={covered}
         lookalikes={neededPairs(teaching.risks.lookalikes, lookalikeNeeds)}
         risksProblem={teaching.risks.problem}

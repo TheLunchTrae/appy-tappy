@@ -46,6 +46,11 @@ it was about has gone. These guards reject stale state and messages:
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
   longer runs.
+- **Guess answers.** A value takes the text reader's answer only while it
+  waits for one, and only when the answer carries the time of the value's
+  last question (`Asking::Asked` and `Ask::since` in
+  `apps/runtime/src/workers/reader/guesses.rs`). Each frame handler has its
+  own answers, so none comes from the capture before it.
 - **Reader numbers.** A session numbers its readers with a `ReaderNumber`,
   which each reader sends with each batch of changed readings, when its values
   can no longer be seen, and when it ends. The owner drops each of those unless it
@@ -544,8 +549,10 @@ the reader frames show), `last` (each value's last reading), `problems`
 another size), `heard` (where the reader gives it back), `seen` (whether
 it sent a reading since it last sent `Unseen`), `failures` (frames in a
 row that failed), `restart` (whether the reader started this capture
-again after the last one ended, and whether a frame came since), and `trace` (what it
-records to, the newest that the reader handed it before the frame).
+again after the last one ended, and whether a frame came since), `trace` (what it
+records to, the newest that the reader handed it before the frame), and
+`guesses` (each value's [guess](#guesses-at-unlearned-characters) at the
+characters its reference has not learned).
 
 ```mermaid
 stateDiagram-v2
@@ -623,6 +630,66 @@ stateDiagram-v2
   capture started for a new size, so the log says why once for each reason,
   not once for each size or each restart.
 
+### Guesses at unlearned characters
+
+A number whose reference guesses asks the text reader what its region says
+when it shows a shape the reference has not learned
+([Guessing](Screen-regions.md#guessing)). `Guesses`, in
+`apps/runtime/src/workers/reader/guesses.rs`, belongs to the
+[frame handler](#frame-handler) and keeps one `Asking` for each value, and
+the value's reader with the shapes guessed so far once a guess was taken.
+The text reader runs on a thread of its own, `answer` in the same file,
+because it takes tens of milliseconds for a line; the handler sends it an
+`Ask` and takes its `Answer`s at the start of each frame.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Ready
+    Ready --> Asked: a read meets an unlearned shape, Ask sent
+    Ready --> Waiting: the text reader's thread cannot start
+    Asked --> Ready: the guess is taken, the shape is learned
+    Asked --> Waiting: the guess is refused, or the text reader failed
+    Asked --> Asked: no answer for ANSWER_WITHIN, Ask sent again
+    Asked --> Waiting: no answer for ANSWER_WITHIN, and the thread cannot start
+    Waiting --> Asked: the wait is over and a read meets an unlearned shape, Ask sent
+    Waiting --> Waiting: the wait is over, and the thread cannot start
+```
+
+- **Ready.** The value may ask. A value whose reference does not guess, and
+  a region with no ink, asks nothing and stays here.
+- **Asked.** One question is out, so a counter that changes each frame does
+  not queue a question for each. An answer is taken only in this state, and
+  only the answer to the value's last question, which carries the time the
+  value asked (`Ask::since`): any other is dropped. While any value is in
+  this state, or has a thread that cannot start to tell of, the handler returns `NextFrame::Again`, so the
+  [frame loop](#capture-frame-loop) hands it its frame once more when the
+  window shows nothing new, and the answer is taken though the window
+  holds still.
+- **Waiting.** The value could not take its last answer and asks nothing
+  until its wait is over. The wait starts at `FIRST_WAIT`, one second, and
+  doubles with each answer in a row that the value cannot take, up to
+  `LONGEST_WAIT`, a minute, so a region the text reader reads wrong does not
+  keep it reading for every frame. A guess that is taken starts the wait
+  over.
+- The text reader's thread starts with the first question and loads its
+  model then. It ends once it has had no question for 30 seconds, and the
+  model goes with it; the next question starts another. A question sent as
+  the thread ends is lost, which is why an **Asked** value asks again after
+  `ANSWER_WITHIN`, 30 seconds.
+- **Failures.** A model that cannot load, a read that fails, and a panic in
+  either are each an answer that says why, so the value waits and the
+  handler says the problem once as the value's, as it says a failed check.
+  A thread that cannot start makes the value wait the same way, and the
+  handler asks for its frame again to say so. The value
+  stays unread, as it is without guessing, and asks again after its wait.
+  A value whose guess is refused each time asks once a minute, and the
+  thread, which ends after 30 seconds, loads the model again for each.
+- A guessed shape lasts as long as its frame handler: a capture started
+  again, such as for another window size, reads with the reference as it
+  is saved and guesses again. Each frame handler has its own text reader
+  thread and its own answers, so an answer never reaches the handler of
+  another capture.
+
 ### Capture frame loop
 
 `run_frames` in `crates/sources/src/screen/frames.rs` runs on each capture's
@@ -631,8 +698,10 @@ Windows capture (`crates/sources/src/win/capture.rs`) is its `FrameSource`: it
 waits for the thread's next event and makes each system call the loop asks
 for. The loop's state is the frame it holds, when the handler's last wait
 ends (`next_read`), when it last checked the window and the device
-(`checked`), the size the system makes frames at (`frames`), and the interval
-it last asked the system for (`asked`).
+(`checked`), the size the system makes frames at (`frames`), the interval
+it last asked the system for (`asked`), and, for a handler that asked for
+its frame again, when that is due (`again`) and the window size of the frame
+its buffer still holds (`shown`).
 
 ```mermaid
 stateDiagram-v2
@@ -641,6 +710,8 @@ stateDiagram-v2
     Holding --> Holding: a newer frame arrives, the older is given back
     Empty --> Empty: a frame arrives after the wait and is read
     Holding --> Empty: the wait ends, the frame is read
+    Empty --> Empty: the wait ends for a handler that asked for its frame again, the copy is handed over
+    Empty --> [*]: the copy is handed over again, and the handler wants no more frames
     Empty --> Ended: the check finds the window closed or the device lost
     Holding --> Ended: the check finds the window closed or the device lost
     Empty --> Ended: a read cannot follow the window's size, or the device is lost
@@ -652,8 +723,9 @@ stateDiagram-v2
     Ended --> [*]
 ```
 
-- **Empty.** The loop holds no frame and waits for the next event or the next
-  check, whichever comes first.
+- **Empty.** The loop holds no frame and waits for the next event, the next
+  check, or the end of the wait of a handler that asked for its frame
+  again, whichever comes first.
 - **Holding.** The loop holds the newest frame until the handler's wait ends,
   and gives every older one back to the system unread. It waits until the read
   or the next check, whichever comes first.
@@ -669,6 +741,16 @@ stateDiagram-v2
   holds and returns. The handler hears nothing more, not even a panic in
   the loop after it. The capture's thread then ends; on Windows it stops the
   system capture first, and closing the session waits for that thread.
+- **The frame again.** A handler that returns `NextFrame::Again` waits as
+  for `NextFrame::After`, and when the wait ends with no newer frame held,
+  the loop hands it the copy still in its buffer once more, received then,
+  without a system call. A newer frame is read in its place. A frame that
+  failed, or was dropped for its size, left no whole copy, so nothing is
+  handed over again. The runtime's [frame handler](#frame-handler) asks for
+  this while a value waits for a
+  [guess](#guesses-at-unlearned-characters), since a window that holds
+  still makes no frames. Each hand-over asks anew, so it stops once the
+  handler returns `After`.
 - **A frame that fails.** A region that lies outside the window's content, or
   a copy the system fails, reaches the handler as that frame's error, and the
   loop goes on with the wait the handler returns, or ends if the handler wants
@@ -2850,7 +2932,8 @@ stateDiagram-v2
 
 ### Text reader
 
-The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
+The setup app's text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread.
+The runtime's is [another machine](#guesses-at-unlearned-characters). It
 loads its model on the first line it gets, then reads each recorded reading and
 each find of a search, and sends the text back with the recording's or the
 search's ticket and the line's index (`ocr::Source`).

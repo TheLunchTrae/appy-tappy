@@ -52,7 +52,7 @@ describe('trialOf', () => {
     },
   };
   const keyOf = (edited: typeof draft, kind: 'characters' | 'check' = 'characters') => {
-    const trial = trialOf(kind, buildCharacters(edited, null, []), set);
+    const trial = trialOf(kind, buildCharacters(edited, null, { reads: [], guesses: false }), set);
     return trial.ok ? trial.key : null;
   };
 
@@ -73,7 +73,7 @@ describe('trialOf', () => {
   });
 
   test('passes on what the trial still needs', () => {
-    expect(trialOf('characters', buildCharacters(EMPTY_DRAFT, null, []), set)).toEqual({
+    expect(trialOf('characters', buildCharacters(EMPTY_DRAFT, null, { reads: [], guesses: false }), set)).toEqual({
       ok: false,
       next: 'Draw a box around the characters on a screenshot.',
     });

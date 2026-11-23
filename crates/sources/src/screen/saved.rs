@@ -297,10 +297,9 @@ impl<'app> Readers<'app> {
         characters: Option<&str>,
         picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
     ) -> Result<DigitReader, SavedError> {
-        let own = self
-            .references
-            .iter()
-            .find(|known| known.id == id)
+        let reference = self.references.iter().find(|known| known.id == id);
+        let guesses = reference.is_some_and(|known| known.guesses);
+        let own = reference
             .and_then(|known| known.characters.as_deref())
             .filter(|own| own.chars().any(is_label_character));
         let reader = self.reader(id, picture)?.clone();
@@ -317,6 +316,13 @@ impl<'app> Readers<'app> {
         reader
             .reading(own)
             .and_then(|reader| reader.reading(characters))
+            .map(|reader| {
+                if guesses {
+                    reader.with_guesses(own, characters)
+                } else {
+                    reader
+                }
+            })
             .ok_or_else(|| SavedError::NoCharacters {
                 id: id.to_owned(),
                 characters: characters.or(own).unwrap_or_default().to_owned(),
@@ -1063,6 +1069,7 @@ mod tests {
                 text: text.to_owned(),
             }],
             characters: None,
+            guesses: false,
         }
     }
 
@@ -1111,6 +1118,7 @@ mod tests {
             origin: OriginDef::ByHand,
             samples,
             characters: None,
+            guesses: false,
         };
         let value = ScreenDef {
             window_size: SizeDef {
@@ -1521,6 +1529,33 @@ mod tests {
         assert_ne!(built[0], built[1]);
     }
 
+    #[test]
+    fn a_value_of_a_reference_that_guesses_reads_with_a_reader_that_takes_guesses() {
+        let files = pictures(&[(&sample_name("counter", 1), &elevens(3))]);
+        let number = screen(CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: false,
+            characters: None,
+        });
+        let reader = |guesses: bool| {
+            let reference = ReferenceDef {
+                guesses,
+                ..counter("11")
+            };
+            let built = build(
+                &number,
+                &mut Readers::new(&[reference]),
+                OFTEN,
+                from(&files),
+            );
+            match built.expect("builds").drawn.check {
+                Check::Number { reader, .. } => reader,
+                other => panic!("no number check: {other:?}"),
+            }
+        };
+        assert!(reader(true).guesses());
+        assert!(!reader(false).guesses());
+    }
     #[test]
     fn a_reader_learned_already_is_read_with_and_its_pictures_are_not_asked_for() {
         let references = [counter("O0")];

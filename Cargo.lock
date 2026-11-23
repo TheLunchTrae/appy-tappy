@@ -127,10 +127,7 @@ dependencies = [
  "appytappy-sources",
  "flate2",
  "mutants",
- "ocrs",
  "proptest",
- "rten",
- "rten-imageproc",
  "serde",
  "serde_json",
  "tauri",
@@ -149,8 +146,11 @@ version = "0.1.1"
 dependencies = [
  "appytappy-config",
  "mutants",
+ "ocrs",
  "png",
  "proptest",
+ "rten",
+ "rten-imageproc",
  "windows",
 ]
 

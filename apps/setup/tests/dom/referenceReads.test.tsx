@@ -11,7 +11,7 @@ afterEach(cleanup);
 
 const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
-function editor(onReads: (reads: readonly string[]) => void) {
+function editor(onReads: (reads: readonly string[]) => void, onGuesses: (guesses: boolean) => void = () => {}) {
   return (
     <ReferenceEditor
       name="Percent font"
@@ -21,6 +21,8 @@ function editor(onReads: (reads: readonly string[]) => void) {
       recorded={[]}
       reads={DIGITS}
       onReads={onReads}
+      guesses={false}
+      onGuesses={onGuesses}
       readersLose={null}
       coverage={coverage(DIGITS, ['7', '8', '%', 'L', 'v'])}
       lookalikes={[]}
@@ -48,6 +50,22 @@ test('a reference chooses the characters it reads, and says what else it learned
   expect(screen.getByText('Not among the characters it reads, so it reads none of these:')).toBeTruthy();
 });
 
+test('a reference guesses nothing until its switch is turned on', async () => {
+  const guesses: boolean[] = [];
+  render(
+    editor(
+      () => {},
+      (on) => {
+        guesses.push(on);
+      },
+    ),
+  );
+  const toggle = screen.getByRole('checkbox', { name: 'Guess characters it has not learned' });
+  expect(toggle).toHaveProperty('checked', false);
+  await userEvent.click(toggle);
+  expect(guesses).toEqual([true]);
+});
+
 test('a value that needs a character its reference does not read says so, and counts it as not missing', () => {
   const file: AppFile = {
     format: 2,
@@ -60,6 +78,7 @@ test('a value that needs a character its reference does not read says so, and co
         id: 'digits',
         name: 'Digit font',
         origin: { kind: 'byHand' },
+        guesses: false,
         samples: [{ image: 'ref-digits-1.png', text: '1' }],
         characters: '0123456789',
       },
@@ -120,7 +139,7 @@ test('a value can pick New reference, even while its application has none, or a 
   );
   const { rerender } = render(picker([], false));
   await userEvent.click(screen.getByRole('button', { name: /New reference/u }));
-  const digits = { id: 'digits', name: 'Digit font', origin: { kind: 'byHand' as const }, samples: [] };
+  const digits = { id: 'digits', name: 'Digit font', origin: { kind: 'byHand' as const }, guesses: false, samples: [] };
   rerender(picker([digits], true));
   expect(screen.getByRole('button', { name: /New reference/u }).getAttribute('aria-pressed')).toBe('true');
   // While New reference is picked, the reference the draft names is not shown as picked too.

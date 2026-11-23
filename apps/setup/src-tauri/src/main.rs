@@ -39,6 +39,7 @@ use std::thread;
 
 use appytappy_config::paths::Locations;
 use appytappy_sources::HostSystem;
+use appytappy_sources::screen::text;
 
 use crate::commands::Bridge;
 use crate::owner::{Desktop, Message, Owner};
@@ -64,8 +65,8 @@ fn main() -> ExitCode {
     // ends once the owner drops its sender.
     let (jobs, inbox) = mpsc::channel();
     let model = env::current_exe().map_or_else(
-        |_unknown| ocr::model_path(ocr::MODEL_FILE.as_ref()),
-        |program| ocr::model_path(&program),
+        |_unknown| text::model_path(text::MODEL_FILE.as_ref()),
+        |program| text::model_path(&program),
     );
     let reader_messages = sender.clone();
     let Ok(reader_thread) = thread::Builder::new()

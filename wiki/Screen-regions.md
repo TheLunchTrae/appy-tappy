@@ -45,8 +45,8 @@ color for each pixel of its region, and the ink of each color.
   speck elsewhere in the region does not throw it off. Each character takes
   the closest learned shape, if the two are close and no other character's
   shape is about as close, as [Matching](#matching) describes. A character it has not learned fails the
-  read rather than being guessed, unless the number has already ended, as in
-  the "HP" of "37% HP", and a read that fails
+  read, unless the number has already ended, as in
+  the "HP" of "37% HP", or the reference [guesses](#guessing), and a read that fails
   [says at which stage](#why-a-number-is-not-read). It does not read rotated
   text, characters that touch, or text over a background of many colors, such as
   a scene that shows through; those need a different check. A character drawn as marks
@@ -297,6 +297,68 @@ These limits follow:
 - A different font is different shapes. Each font takes its own reference,
   or more labeled pictures in the same one.
 
+### Guessing
+
+A reference saved with `guesses` lets a running automation guess at a
+character it has not learned ([Let a reference
+guess](References.md#let-a-reference-guess) is what the user sees). It is
+off unless the user turns it on, because a wrong reading is worse than no
+reading: without it, the runtime reads only shapes the user's own labels
+taught.
+
+A read that meets an unlearned shape still fails. The runtime then asks
+the text reader, [`ocrs`](https://github.com/robertknight/ocrs)
+(`crates/sources/src/screen/text.rs`), what the region says, on a thread of
+its own, and `DigitReader::guessing` takes the answer only when all of
+these hold:
+
+- The answer has one character for each character the read split the
+  region into.
+- The region shows at least one character the reference has learned, and
+  each such character, kept or left out by the value, is that character in
+  the answer. A text reader that is wrong about what the reference knows
+  is not believed about the rest, and one with nothing to be right about
+  is not believed either, so a region of unlearned shapes alone is not
+  guessed.
+- Each unlearned shape's character is one the reference reads, when the
+  reference [reads only some characters](References.md#characters-it-reads).
+- With the new shapes, the reader reads the region as the answer says. A
+  shape as close to another character's shape as to its own stays unread
+  however often it is learned ([Matching](#matching)), so such a guess is
+  refused.
+
+The value then reads with the reference's shapes and the guessed ones, so
+the text reader is asked once for each new shape, and the next read of that
+shape takes under a millisecond like any other. A guessed character that
+the value leaves out is text beside the number, as a learned one is. The
+guessed shapes are kept in memory only: they are not saved to the
+reference, and a capture that starts again guesses again. A refused answer
+makes the value wait before it asks again, as
+[Guesses at unlearned characters](State-machines.md#guesses-at-unlearned-characters)
+maps.
+
+The text reader can misread a character, most often in small or stylized
+text, and a misread that passes these checks is learned and read wrong
+until the capture starts again. A digit misread as another digit reads as
+another number, and one misread as a character that ends a number, such as
+a letter, cuts the number short there. That is the cost the user accepts
+with the switch.
+
+The answer comes while the window may hold still, and a window that holds
+still makes no frames. So while a value waits for an answer, the frame
+handler asks the capture for its frame again (`NextFrame::Again`), and
+takes the answer with it.
+
+The model file, `models/text-recognition.onnx` beside the runtime, is the
+one [the installer](Installer.md) puts there for the setup app. The runtime
+loads it for the first question and drops it after 30 seconds without one.
+Loaded, it holds about 13 MB, and a read peaks at about 21 MB, measured on
+Linux, so a session that guesses is outside the
+[footprint](Architecture.md#footprint) targets while the model is loaded.
+A session with no reference that guesses, or with nothing left to guess,
+never loads it. A value whose guess is refused each time asks once a
+minute at most, and loads the model each time.
+
 ### Why a number is not read
 
 A read fails at one of six stages, `ReadError` in `screen/digits.rs`. The
@@ -336,14 +398,13 @@ less, and a state check about a microsecond for each of its states. `mise run ru
 prints the current numbers.
 
 Windows has its own OCR engine, and `ocrs` is a pure-Rust neural OCR crate.
-The runtime uses neither. Windows OCR would make results depend on the Windows
+The runtime reads no value with either. Windows OCR would make results depend on the Windows
 version and its language packs. `ocrs` keeps a neural network model in
 memory and runs it on the CPU for each read, to read text that a learned shape
-match reads in under a millisecond. The setup app uses `ocrs` only to guess the text of
-[recorded readings](Setup-app.md#recording) for the user to check.
-Reading with it at runtime stays an option for text the number check cannot
-read
-([#33](https://github.com/TheLunchTrae/appy-tappy/issues/33)).
+match reads in under a millisecond. The setup app uses `ocrs` to guess the text of
+[recorded readings](Setup-app.md#recording) for the user to check, and the
+runtime uses it only to [guess](#guessing) at a shape a reference has not
+learned, for a reference set to guess.
 
 ## Saved pictures
 
@@ -493,7 +554,8 @@ drawn larger than the content, a reading area, covers every place it shows:
 - **Number** finds the ink anywhere in the region, so blank margin on any
   side changes nothing. All ink on the text's rows is read as characters,
   left to right, so other ink of the text's color beside the number is read
-  with it. A shape the reference has not learned fails the read when it
+  with it. A shape the reference has not learned fails the read, and is
+  [guessed](#guessing) for a reference that guesses, when it
   comes before the number or right after its digits; once a learned
   character such as `%` has ended the number, whether the value reads it or
   leaves it out, a shape after it is skipped.

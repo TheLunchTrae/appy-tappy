@@ -29,15 +29,6 @@ flate2 = { version = "1.1.9", default-features = false, features = ["rust_backen
 # Provides `#[mutants::skip]` for functions no test can reach; it expands to
 # nothing.
 mutants.workspace = true
-# Reads a recorded reading's text so the user only corrects it: a pure-Rust
-# neural text reader, so it runs the same on every system and needs no
-# operating system OCR. Only its recognition model loads, from the file
-# wiki/Setup-app.md names. Not used by the runtime.
-ocrs = { version = "0.14.0", default-features = false, features = ["onnx"] }
-# Loads the text reader's model file, and gives the rectangle of the line
-# it reads.
-rten = { version = "0.28.0", default-features = false, features = ["onnx_format"] }
-rten-imageproc = "0.28.0"
 # Command arguments and replies cross into the web UI as JSON.
 serde.workspace = true
 # Keeps a downloaded update's release manifest until the user installs it,

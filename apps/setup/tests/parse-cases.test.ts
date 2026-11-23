@@ -27,7 +27,7 @@ function pressFor(shortcut: string): KeyPress {
   };
 }
 
-/** The page's reading of each parser's samples, by the parser's name in `PARSE_CASES`. */
+/** The page's reading of each parser's guesses: false, samples, by the parser's name in `PARSE_CASES`. */
 const PAGE_READS = new Map<string, (text: string) => string | null>(
   Object.entries({
     openTarget,

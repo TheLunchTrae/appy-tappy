@@ -46,6 +46,7 @@ test('an answer shows only while the reference asks under the key it was asked u
     labels: [{ screenshot: 0, region: { x: 0, y: 0, width: 10, height: 10 }, text: '86' }],
     recorded: [],
     dropped: [],
+    guesses: false,
   };
   const asked = riskKey(spec) ?? '';
   const risks = { lookalikes: [['8', '6']], problem: null } as const;

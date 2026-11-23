@@ -454,6 +454,7 @@ mod tests {
                 text: "1".to_owned(),
             }],
             characters: None,
+            guesses: false,
         });
         stores
             .apps

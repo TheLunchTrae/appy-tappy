@@ -7,7 +7,13 @@ import { ReadWith } from '../../src/components/capture/ReadWith.tsx';
 
 afterEach(cleanup);
 
-const reference = (id: string, name: string): ReferenceDef => ({ id, name, origin: { kind: 'byHand' }, samples: [] });
+const reference = (id: string, name: string): ReferenceDef => ({
+  id,
+  name,
+  origin: { kind: 'byHand' },
+  guesses: false,
+  samples: [],
+});
 
 test("a fix reads with its value's reference, listed once and first, or picks another of the application's", async () => {
   const picked: string[] = [];

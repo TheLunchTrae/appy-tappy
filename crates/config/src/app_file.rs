@@ -375,6 +375,12 @@ pub struct ReferenceDef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub characters: Option<String>,
+    /// Whether a running automation guesses at a character the reference
+    /// has not learned, with the text reader, where the guess agrees with
+    /// every character it has. Without it, such a number is not read.
+    /// `false` when the file leaves it out.
+    #[serde(default)]
+    pub guesses: bool,
 }
 
 /// A [`ReferenceDef`] as a file holds it: its keys, and three that no
@@ -393,6 +399,8 @@ struct ReferenceKeys {
     samples: Vec<SampleDef>,
     #[serde(default)]
     characters: Option<String>,
+    #[serde(default)]
+    guesses: bool,
     #[serde(default, rename = "expects")]
     _expects: IgnoredAny,
     #[serde(default, rename = "ink")]
@@ -410,6 +418,7 @@ impl<'de> Deserialize<'de> for ReferenceDef {
             origin: keys.origin,
             samples: keys.samples,
             characters: keys.characters,
+            guesses: keys.guesses,
         })
     }
 }
@@ -1194,6 +1203,7 @@ mod tests {
                     text: "87%".to_owned(),
                 }],
                 characters: None,
+                guesses: false,
             }],
         }
     }
