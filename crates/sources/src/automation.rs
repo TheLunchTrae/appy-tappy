@@ -444,6 +444,7 @@ mod tests {
                 text: "1".to_owned(),
             }],
             characters: None,
+            guesses: false,
         }];
         let watching = automation(vec![ActionDef::Media {
             command: MediaCommand::Pause,

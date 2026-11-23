@@ -425,6 +425,7 @@ impl CharactersSpec {
             origin,
             samples,
             characters: expected_characters(self.characters.as_deref().unwrap_or_default()),
+            guesses: false,
         };
         let reader = learned(&reference, &pictures, self.labels.len(), &kept)?;
         Ok(Taught {

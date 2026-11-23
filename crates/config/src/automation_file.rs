@@ -820,6 +820,7 @@ mod tests {
                     text: "12%".to_owned(),
                 }],
                 characters: None,
+                guesses: false,
             }],
         }
     }

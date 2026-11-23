@@ -154,6 +154,7 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
                 text: "1".to_owned(),
             }],
             characters: None,
+            guesses: false,
         },
         pictures: vec![(
             sample_name("digits", 1),
@@ -1062,6 +1063,7 @@ fn a_new_reference_names_one_picture_per_label() {
                 text: "1".to_owned(),
             }],
             characters: None,
+            guesses: false,
         }
     );
     let pictures = taught.pictures;

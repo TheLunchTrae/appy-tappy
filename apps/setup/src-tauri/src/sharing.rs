@@ -497,6 +497,7 @@ mod tests {
                 })
                 .collect(),
             characters: None,
+            guesses: false,
         }
     }
 
