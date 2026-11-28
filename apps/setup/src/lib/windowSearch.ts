@@ -1,7 +1,7 @@
 // How a value's or reference's capture screen gets its application's window: it opens without one, looks for the
 // window, and captures it once it is found.
 
-import type { WindowChoice } from './bindings.ts';
+import type { DraftShot, WindowChoice } from './bindings.ts';
 import { type PickerStep, fallbackNote, lookFailedText, offersMatchEdit } from './picker.ts';
 
 /**
@@ -135,7 +135,7 @@ export function windowAbsence(step: PickerStep, capture: WindowCapture, name: st
       return {
         ...still,
         heading: "The application can't be read",
-        text: "The application this belongs to can't be read anymore. Discard, then check the Applications page.",
+        text: "The application this belongs to can't be read anymore: it was removed, or its file can't be read. Check the Applications page.",
       };
   }
 }
@@ -234,4 +234,44 @@ export function endedAsks(
  */
 export function showsNewCloseSign(before: readonly (string | null)[], signs: readonly (string | null)[]): boolean {
   return signs.some((sign, index) => sign !== null && sign !== before[index]);
+}
+
+/**
+ * Where a capture screen's draft stands with its screenshots: waiting for the window, being brought back, back, or
+ * refused with the reason. `screenshots` is null once the window changed, which starts over without them.
+ */
+export type Restoring =
+  | { readonly kind: 'waiting' }
+  | { readonly kind: 'asking' }
+  | { readonly kind: 'restored'; readonly screenshots: readonly DraftShot[] | null }
+  | { readonly kind: 'failed'; readonly error: string };
+
+export type RestoreEvent =
+  /** The window's capture runs. */
+  | { readonly kind: 'captured' }
+  | { readonly kind: 'answered'; readonly screenshots: readonly DraftShot[] }
+  | { readonly kind: 'refused'; readonly error: string }
+  /** The user asked to try again after a refusal. */
+  | { readonly kind: 'retried' }
+  /** The user changed the window, which starts the editor over without what the draft kept. */
+  | { readonly kind: 'changed' };
+
+/**
+ * The draft's screenshots after `event`. They are asked for once, when the window's first capture runs, since a
+ * capture that starts afresh clears the session's: a capture that runs again, such as after the window closed and
+ * opened again, keeps them and asks nothing more. An answer that arrives while none is asked for is dropped.
+ */
+export function restoreStep(restoring: Restoring, event: RestoreEvent): Restoring {
+  switch (event.kind) {
+    case 'captured':
+      return restoring.kind === 'waiting' ? { kind: 'asking' } : restoring;
+    case 'answered':
+      return restoring.kind === 'asking' ? { kind: 'restored', screenshots: event.screenshots } : restoring;
+    case 'refused':
+      return restoring.kind === 'asking' ? { kind: 'failed', error: event.error } : restoring;
+    case 'retried':
+      return restoring.kind === 'failed' ? { kind: 'asking' } : restoring;
+    case 'changed':
+      return { kind: 'restored', screenshots: null };
+  }
 }

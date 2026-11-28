@@ -459,8 +459,8 @@ export function App() {
   // What lets the flow `opener` open the application flow from its picker, and show again when that ends as its
   // picker stood.
   const pickerFor = (opener: Opener) => ({
-    onAddApplication: (chosen: string | null): void => {
-      open(applicationFor(opener, chosen, null, drafts), 'flow');
+    onAddApplication: (): void => {
+      open(applicationFor(opener, null, null, drafts), 'flow');
     },
     onEditApplication: (existing: AppSummary): void => {
       open(applicationFor(opener, existing.id, existing, drafts), 'flow');

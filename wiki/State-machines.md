@@ -1532,7 +1532,10 @@ stateDiagram-v2
   **Refresh** makes a new look, and each look that finds exactly one window
   starts its capture, so nothing else is pressed. While the application
   isn't open, a new look starts two seconds after each one answers
-  (`waitsForOpen`), so the window is captured once the application opens. Where the window cannot be
+  (`waitsForOpen`), so the window is captured once the application opens.
+  That look is quiet (`refreshQuietly`): the last answer stays on show
+  until it answers, so the panel, its status, and its controls stay put
+  while the application stays closed. Where the window cannot be
   told from the application's match, the panel offers
   **Change how it's found**, which opens the application flow as the picker
   does; it is off while the editor holds unsaved work, which leaving would
@@ -1554,13 +1557,17 @@ stateDiagram-v2
   shows only when the newest look found several windows that fit equally
   well. It stops the capture and opens a new editor on a new look, after
   asking about unsaved work.
-- **A draft** waits for its window before its editor shows: the screen
-  shows the panel alone, with **Cancel**, until the capture first runs, then
-  brings back the draft's screenshots (`restore_draft_screenshots`), since a
-  capture that starts afresh clears the session's, and opens the editor on
-  them. A failure to bring them back shows why, with **Try again**. After
-  **Change window**, the new editor starts over without what the draft
-  kept; a draft saved then still replaces the same draft.
+- **A draft** waits for its window before its editor shows, as `restoreStep`
+  in `apps/setup/src/lib/windowSearch.ts` steps it. **Waiting** shows the
+  panel alone, with **Cancel**. The first capture that runs moves it to
+  **Asking**, which sends one `restore_draft_screenshots`, since a capture
+  that starts afresh clears the session's; a capture that runs again later
+  keeps them and asks nothing. The answer moves it to **Restored**, which
+  opens the editor on the screenshots, and a refusal to **Failed**, which
+  shows why with **Try again**, back to **Asking**. An answer that arrives
+  while nothing is asked is dropped. **Change window** moves it to
+  **Restored** without screenshots, so the new editor starts over without
+  what the draft kept; a draft saved then still replaces the same draft.
 - **The window closes.** Three signs ask the owner whether the capture
   slot is **Ended** (`capture_ended`): each failure of the live view, a
   screenshot that is refused, and a recording that stops with a problem or
@@ -1894,11 +1901,10 @@ stateDiagram-v2
   error: a closed window, a lost graphics device, or a capture panic. Frames
   after it are dropped, and a screenshot, a new recording, and **Record
   more** are refused with the failure's error. `capture_ended` answers
-  whether the slot is in it, and each screen says its own way back: a new
-  value's or reference's capture screen says to select **Change window**
-  (`PickedCapture`), which drops an answer asked under an older
-  [pick number](#how-to-read-this-page), and the [window search](#window-search) shows its
-  panel. Only a stop or another pick leaves it.
+  whether the slot is in it, and each screen says its own way back: a
+  value's or reference's capture screen shows the
+  [window search](#window-search)'s panel and captures the window again once
+  it is back. Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show. Nothing starts the capture again, at any window size: the
   editor watches the value again.

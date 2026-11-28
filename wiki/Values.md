@@ -18,10 +18,13 @@ back to the automation with the value picked.
 
 1. **Choose the application.** Select the application the value belongs to
    in the list, which says whether each one is running. With only one saved
-   application there is nothing to choose, and this step doesn't show. If it
-   isn't in the list yet, select **Add application** to
+   application there is nothing to choose, and this step doesn't show: to
+   make it for another application, add that one on the Applications page
+   first. If it isn't in the list yet, select **Add application** to
    [add it](Applications.md#add-change-or-remove-an-application); saving it
-   brings you on with it chosen, and canceling brings you back here.
+   brings you on with it chosen, and canceling brings you back here. To make
+   it for another application once you chose one, select **Discard** and
+   start again.
    AppyTappy then finds the application's window the way it does when it
    runs your automations and captures it, with nothing to select.
    [When the window isn't found](#when-the-window-isnt-found) says what

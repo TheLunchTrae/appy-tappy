@@ -127,7 +127,7 @@ function draftName(mode: Exclude<CaptureMode, { readonly kind: 'edit' }>, setup:
 }
 
 /** What came back from the draft the capture finishes when its window was picked. */
-export interface Restored {
+interface Restored {
   /**
    * Which of the draft's screenshots are this session's again, each with whether a recording of looks kept it, or null
    * once the window changed, which starts the capture again without what the draft kept.

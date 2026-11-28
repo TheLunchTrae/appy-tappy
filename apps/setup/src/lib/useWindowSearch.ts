@@ -52,7 +52,7 @@ export function useWindowSearch(
   /** Whether the newest look found several windows that fit equally well, so there is another window to change to. */
   readonly several: boolean;
 } {
-  const { look, refresh: lookAgain } = useAppWindows();
+  const { look, refresh: lookAgain, refreshQuietly } = useAppWindows();
   const [capture, send] = useReducer(searchStep, NO_CAPTURE);
   const step = useMemo(() => pickerStep(app, look), [app, look]);
   useEffect(() => {
@@ -76,17 +76,18 @@ export function useWindowSearch(
     [starting, pick],
   );
 
-  // An application that isn't open is looked for again until it opens, and its window is captured then.
+  // An application that isn't open is looked for again until it opens, and its window is captured then. The look is
+  // quiet, so the panel and its controls stay as they are while the application stays closed.
   const waiting = look.kind === 'seen' && waitsForOpen(step, capture);
   useEffect(() => {
     if (!waiting) {
       return undefined;
     }
-    const timer = setTimeout(lookAgain, OPEN_LOOK_PAUSE_MS);
+    const timer = setTimeout(refreshQuietly, OPEN_LOOK_PAUSE_MS);
     return () => {
       clearTimeout(timer);
     };
-  }, [waiting, look, lookAgain]);
+  }, [waiting, look, refreshQuietly]);
 
   const seen = known(look);
   const found = seen?.apps.find((each) => each.id === app) ?? null;

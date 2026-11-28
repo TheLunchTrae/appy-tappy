@@ -4,11 +4,14 @@ import type { AppSummary, WindowChoice } from '../src/lib/bindings.ts';
 import { exactWindow } from '../src/lib/matching.ts';
 import type { PickerApp, PickerStep } from '../src/lib/picker.ts';
 import {
+  type RestoreEvent,
+  type Restoring,
   type SearchEvent,
   type WindowCapture,
   NO_CAPTURE,
   endedAsks,
   fallbackWarning,
+  restoreStep,
   searchStep,
   showsNewCloseSign,
   waitsForOpen,
@@ -292,4 +295,26 @@ test('a refused screenshot or a stopped recording is a new sign that the window 
     showsNewCloseSign(refused, ['The captured window closed.', 'Recording stopped: The captured window closed.']),
   ).toBe(true);
   expect(showsNewCloseSign(refused, ['A frame was lost.', null])).toBe(true);
+});
+
+describe("a draft's screenshots", () => {
+  const shots = [{ index: 0, recorded: false }];
+  const waiting: Restoring = { kind: 'waiting' };
+  const asking: Restoring = { kind: 'asking' };
+  const failed: Restoring = { kind: 'failed', error: 'gone' };
+  const restored: Restoring = { kind: 'restored', screenshots: shots };
+  const cases: readonly (readonly [string, Restoring, RestoreEvent, Restoring])[] = [
+    ['are asked for once the window is first captured', waiting, { kind: 'captured' }, asking],
+    ['come back with the answer', asking, { kind: 'answered', screenshots: shots }, restored],
+    ['say why they could not come back', asking, { kind: 'refused', error: 'gone' }, failed],
+    ['are asked for again on Try again', failed, { kind: 'retried' }, asking],
+    ['are not asked for again when the window is captured again', restored, { kind: 'captured' }, restored],
+    ['are not asked for twice while an ask is under way', asking, { kind: 'captured' }, asking],
+    ['drop an answer that nothing asked for', waiting, { kind: 'answered', screenshots: shots }, waiting],
+    ['drop a late refusal', restored, { kind: 'refused', error: 'late' }, restored],
+    ['are left behind by another window', restored, { kind: 'changed' }, { kind: 'restored', screenshots: null }],
+  ];
+  test.each(cases)('%s', (_name, restoring, event, next) => {
+    expect(restoreStep(restoring, event)).toEqual(next);
+  });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import type { AppSummary } from '../lib/bindings.ts';
 import { errorText, restoreDraftScreenshots } from '../lib/api.ts';
@@ -6,7 +6,7 @@ import { useCapture } from '../lib/capture.ts';
 import { useLanding } from '../lib/landing.ts';
 import { ask } from '../lib/request.ts';
 import { AntiCheatRunning } from '../components/AntiCheatRunning.tsx';
-import { Capture, type CaptureMode, type Restored } from '../components/Capture.tsx';
+import { Capture, type CaptureMode } from '../components/Capture.tsx';
 import { WindowAbsent } from '../components/capture/WindowAbsent.tsx';
 import { MatchEdit } from '../components/MatchEdit.tsx';
 import { Picker } from '../components/Picker.tsx';
@@ -14,7 +14,9 @@ import { Trail } from '../components/Trail.tsx';
 import type { Made, RefFlow, ValueFlow } from '../lib/flow.ts';
 import type { Held } from '../lib/unsaved.ts';
 import { useWindowSearch } from '../lib/useWindowSearch.ts';
-import { windowLanding } from '../lib/windowSearch.ts';
+import { type Restoring, restoreStep, windowLanding } from '../lib/windowSearch.ts';
+
+const NOTHING_RESTORED: Restoring = { kind: 'restored', screenshots: null };
 import type { ReportDraft, Resumed } from '../lib/drafts.ts';
 
 interface Props {
@@ -37,8 +39,8 @@ interface Props {
    * for it; null where **New reference** is not offered.
    */
   readonly onMakeReference: ((reference: Resumed, value: Resumed) => void) | null;
-  /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
-  readonly onAddApplication: (chosen: string | null) => void;
+  /** Leaves to add an application, and comes back with it chosen, or to choose again when that is canceled. */
+  readonly onAddApplication: () => void;
   /** Leaves to change how `app` is found, and comes back to it. */
   readonly onEditApplication: (app: AppSummary) => void;
   /** The saved applications that have a draft of changes. */
@@ -73,12 +75,6 @@ function flowHeading(flow: ValueFlow | RefFlow): string {
   return changing.how === 'fix' ? `Fix ${changing.value.name} at this size` : `Edit ${changing.value.name}`;
 }
 
-/** Where a draft's screenshots stand: none to bring back, waiting for the window, brought back, or refused. */
-type Restoring =
-  | { readonly kind: 'waiting' }
-  | { readonly kind: 'restored'; readonly restored: Restored | null }
-  | { readonly kind: 'failed'; readonly error: string };
-
 /**
  * The capture screen of a value or reference of the saved application `app`, which finds that application's window
  * and captures it itself. A draft opens once its window is captured, since its screenshots come back only with a
@@ -109,26 +105,29 @@ function SearchedCapture({
   );
   // Each start over is a new editor, as each pick of a window is.
   const [startedOver, setStartedOver] = useState(0);
-  const [restoring, setRestoring] = useState<Restoring>(
-    draft === null ? { kind: 'restored', restored: null } : { kind: 'waiting' },
-  );
+  // A draft's screenshots come back once its window is first captured; anything else starts without any.
+  const [restoring, tellRestoring] = useReducer(restoreStep, draft === null ? NOTHING_RESTORED : { kind: 'waiting' });
   const captured = absence === null;
-  const waitingDraft = restoring.kind === 'waiting' && draft !== null ? draft.id : null;
-  // Capturing the window forgets the session's screenshots, so a draft's come back after its first capture.
+  useEffect(() => {
+    if (captured) {
+      tellRestoring({ kind: 'captured' });
+    }
+  }, [captured]);
+  const asking = restoring.kind === 'asking' && draft !== null ? draft.id : null;
   useEffect(
     () =>
-      waitingDraft === null || !captured
+      asking === null
         ? undefined
         : ask(
-            async () => restoreDraftScreenshots(waitingDraft),
+            async () => restoreDraftScreenshots(asking),
             (screenshots) => {
-              setRestoring({ kind: 'restored', restored: { screenshots } });
+              tellRestoring({ kind: 'answered', screenshots });
             },
             (error) => {
-              setRestoring({ kind: 'failed', error: errorText(error) });
+              tellRestoring({ kind: 'refused', error: errorText(error) });
             },
           ),
-    [waitingDraft, captured],
+    [asking],
   );
   const [held, setHeld] = useState<Held>('nothing');
   const reportHeld = useCallback(
@@ -184,7 +183,7 @@ function SearchedCapture({
                 type="button"
                 className="btn"
                 onClick={() => {
-                  setRestoring({ kind: 'waiting' });
+                  tellRestoring({ kind: 'retried' });
                 }}
               >
                 Try again
@@ -223,7 +222,7 @@ function SearchedCapture({
       landing={{ owed: continued, target: windowLanding(absence) }}
       mode={mode}
       resumed={draft}
-      restored={restoring.restored}
+      restored={draft === null ? null : { screenshots: restoring.screenshots }}
       trail={trail}
       onCancel={onCancel}
       onChangeWindow={
@@ -232,9 +231,7 @@ function SearchedCapture({
               stop();
               restart();
               // The new window starts over, without what the draft kept.
-              if (draft !== null) {
-                setRestoring({ kind: 'restored', restored: { screenshots: null } });
-              }
+              tellRestoring({ kind: 'changed' });
               setStartedOver((count) => count + 1);
             }
           : null
@@ -257,10 +254,6 @@ export function CaptureFlow(props: Props) {
   // What the flow started for: its mode stays the same object while it shows.
   const [{ mode, lockedApp }] = useState(() => subject(props.flow));
   const [app, setApp] = useState(() => lockedApp ?? props.flow.resumed?.def.app ?? props.flow.app);
-  const { onAddApplication } = props;
-  const addApplication = useCallback((): void => {
-    onAddApplication(null);
-  }, [onAddApplication]);
   return app === null ? (
     <Picker
       heading={flowHeading(props.flow)}
@@ -268,7 +261,7 @@ export function CaptureFlow(props: Props) {
       continued={props.continued}
       onCancel={props.onCancel}
       onChoose={setApp}
-      onAddApplication={addApplication}
+      onAddApplication={props.onAddApplication}
     />
   ) : (
     <SearchedCapture {...props} app={app} mode={mode} />

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, jest, test } from 'bun:test';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
@@ -97,22 +97,41 @@ test('one of several saved applications is taken once it is chosen, with no wind
 });
 
 test('an application that is not open is captured once it opens, with nothing pressed', async () => {
-  let open = false;
-  native(() => windows([summary('player', 'Player')], open));
-  const picked: number[] = [];
-  const { result } = renderHook(() =>
-    useWindowSearch('player', async (handle) => {
-      picked.push(handle);
-    }),
-  );
-  await act(async () => {});
-  expect(result.current.absence?.heading).toBe("Player isn't open");
-  open = true;
-  await act(async () => {
-    await new Promise((resolve) => {
-      setTimeout(resolve, 2100);
+  jest.useFakeTimers();
+  try {
+    let open = false;
+    let looks = 0;
+    native(() => {
+      looks += 1;
+      return windows([summary('player', 'Player')], open);
     });
-  });
-  expect(picked).toEqual([7]);
-  expect(result.current.absence).toBeNull();
+    const picked: number[] = [];
+    const seen: (string | undefined)[] = [];
+    const { result } = renderHook(() => {
+      const search = useWindowSearch('player', async (handle) => {
+        picked.push(handle);
+      });
+      seen.push(search.absence?.heading);
+      return search;
+    });
+    await act(async () => {});
+    expect(result.current.absence?.heading).toBe("Player isn't open");
+    // A look while it stays closed changes nothing on show.
+    const shown = seen.length;
+    await act(async () => {
+      jest.advanceTimersByTime(2000);
+    });
+    await act(async () => {});
+    expect(looks).toBe(2);
+    expect(seen.slice(shown).every((heading) => heading === "Player isn't open")).toBe(true);
+    open = true;
+    await act(async () => {
+      jest.advanceTimersByTime(2000);
+    });
+    await act(async () => {});
+    expect(picked).toEqual([7]);
+    expect(result.current.absence).toBeNull();
+  } finally {
+    jest.useRealTimers();
+  }
 });
