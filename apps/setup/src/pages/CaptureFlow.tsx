@@ -15,8 +15,6 @@ import type { Made, RefFlow, ValueFlow } from '../lib/flow.ts';
 import type { Held } from '../lib/unsaved.ts';
 import { useWindowSearch } from '../lib/useWindowSearch.ts';
 import { type Restoring, restoreStep, windowLanding } from '../lib/windowSearch.ts';
-
-const NOTHING_RESTORED: Restoring = { kind: 'restored', screenshots: null };
 import type { ReportDraft, Resumed } from '../lib/drafts.ts';
 
 interface Props {
@@ -62,6 +60,9 @@ function subject(flow: ValueFlow | RefFlow): { readonly mode: CaptureMode; reado
     ? { mode: { kind: 'value' }, lockedApp: null }
     : { mode: { kind: changing.how, value: changing.value }, lockedApp: changing.app };
 }
+
+/** What a capture screen that finishes no draft starts with. */
+const NOTHING_RESTORED: Restoring = { kind: 'restored', screenshots: null };
 
 /** The heading of `flow`'s page. */
 function flowHeading(flow: ValueFlow | RefFlow): string {
