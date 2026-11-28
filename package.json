@@ -14,8 +14,8 @@
     "standards:check": "bun run lint && bun run format:check"
   },
   "devDependencies": {
-    "markdownlint-cli2": "^0.24.1",
-    "oxfmt": "^0.78.0"
+    "markdownlint-cli2": "^0.24.2",
+    "oxfmt": "^0.79.0"
   },
   "overrides": {
     "katex": "^0.19.1"
