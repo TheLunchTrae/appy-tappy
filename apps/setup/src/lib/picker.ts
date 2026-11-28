@@ -1,4 +1,5 @@
-// What the picker of a value or reference shows: the application first, then the window that application reads.
+// The saved applications and the open windows, the application a new value or reference belongs to, and the
+// window of that application a capture takes.
 
 import type { AppSummary, AppWindows, WindowChoice, WindowFit } from './bindings.ts';
 import { sentence } from './matching.ts';
@@ -87,27 +88,14 @@ function readable(fits: readonly WindowFit[], windows: readonly WindowChoice[]):
   };
 }
 
-/** What the picker knows: the look, the application chosen, and the window picked among several. */
-interface Picking {
-  /** Whether the flow belongs to an application already, so there is none to choose. */
-  readonly locked: boolean;
-  /** The chosen application's ID: the flow's own, one handed over, or the one the user chose. */
-  readonly chosen: string | null;
-  readonly look: Look;
-  /** The handle of the window the user picked among several. */
-  readonly picked: number | null;
-}
-
-/** Where the picker stands. Only `one`, and `several` with a window picked, have a window to capture. */
+/** Where the look for one saved application's window stands. Only `one` has a window to capture at once. */
 export type PickerStep =
   /** No look has answered yet, so not even the applications are known. */
   | { readonly kind: 'looking' }
   /** The saved applications or the open windows could not be read. */
   | { readonly kind: 'failed'; readonly error: string }
-  | { readonly kind: 'no-applications' }
-  /** The chosen application is not among the saved ones. `locked` says it is the one the flow belongs to. */
-  | { readonly kind: 'missing'; readonly locked: boolean }
-  | { readonly kind: 'choosing' }
+  /** The application is not among the saved ones: it was removed, or its file can't be read. */
+  | { readonly kind: 'missing' }
   | { readonly kind: 'resolving'; readonly app: PickerApp }
   | { readonly kind: 'none'; readonly app: PickerApp; readonly unlisted: boolean }
   | { readonly kind: 'one'; readonly app: PickerApp; readonly window: WindowChoice; readonly fallback: boolean }
@@ -115,58 +103,32 @@ export type PickerStep =
       readonly kind: 'several';
       readonly app: PickerApp;
       readonly windows: readonly WindowChoice[];
-      readonly picked: WindowChoice | null;
       /** The handle of the one a session that started now would read. */
       readonly reads: number | null;
       readonly fallback: boolean;
     };
 
-export function pickerStep({ locked, chosen, look, picked }: Picking): PickerStep {
+/** Where the look for the window of the saved application `app` stands at `look`. */
+export function pickerStep(app: string, look: Look): PickerStep {
   if (look.kind === 'failed') {
     return { kind: 'failed', error: look.error };
   }
-  const found = known(look);
-  if (found === null) {
-    return { kind: 'looking' };
-  }
-  const [only, ...others] = found.apps;
-  // With one saved application there is nothing to choose between.
-  const id = chosen ?? (others.length === 0 ? only?.id : undefined);
-  const app = found.apps.find((each) => each.id === id);
-  if (app === undefined) {
-    // An application handed over or chosen before that the look does not find is said, not swapped for a choice.
-    if (chosen !== null) {
-      return { kind: 'missing', locked };
-    }
-    return only === undefined ? { kind: 'no-applications' } : { kind: 'choosing' };
+  const found = known(look)?.apps.find((each) => each.id === app);
+  if (found === undefined) {
+    return known(look) === null ? { kind: 'looking' } : { kind: 'missing' };
   }
   if (look.kind === 'looking') {
-    return { kind: 'resolving', app };
+    return { kind: 'resolving', app: found };
   }
-  const window = readable(app.fits, found.windows);
+  const window = readable(found.fits, known(look)?.windows ?? []);
   switch (window.kind) {
     case 'one':
-      return { kind: 'one', app, window: window.window, fallback: window.fallback };
+      return { kind: 'one', app: found, window: window.window, fallback: window.fallback };
     case 'several':
-      return {
-        kind: 'several',
-        app,
-        windows: window.windows,
-        picked: window.windows.find((each) => each.handle === picked) ?? null,
-        reads: window.reads,
-        fallback: window.fallback,
-      };
+      return { kind: 'several', app: found, windows: window.windows, reads: window.reads, fallback: window.fallback };
     case 'none':
-      return { kind: 'none', app, unlisted: window.unlisted };
+      return { kind: 'none', app: found, unlisted: window.unlisted };
   }
-}
-
-/** The window **Capture this window** captures at `step`, or null while there is none. */
-export function captureWindow(step: PickerStep): WindowChoice | null {
-  if (step.kind === 'one') {
-    return step.window;
-  }
-  return step.kind === 'several' ? step.picked : null;
 }
 
 /** Whether `step` offers to change how its application is found, because no one window can be told from it. */
@@ -179,50 +141,35 @@ export function fallbackNote(these: string, fallback: boolean): string {
   return fallback ? ` ${these} the fallback: no open window matches everything that must match.` : '';
 }
 
-/** What the picker says at `step`, and whether it is a problem that keeps the capture off. */
-export function stepStatus(step: PickerStep): { readonly text: string; readonly warn: boolean } {
-  switch (step.kind) {
-    case 'looking':
-      return { text: 'Reading the saved applications and looking for their windows…', warn: false };
-    case 'failed':
-      return {
-        text: `Couldn't read the saved applications and the open windows: ${sentence(step.error)} Refresh to try again.`,
-        warn: true,
-      };
-    case 'no-applications':
-      return {
-        text: 'Values and references belong to an application, and none is saved yet. Add the application to carry on.',
-        warn: false,
-      };
-    case 'missing':
-      return {
-        text: step.locked
-          ? "The application this belongs to can't be read any more. Cancel, then check the Applications page."
-          : "The application chosen here isn't among the saved applications: it was removed, or its file can't be read. Choose another, or add it again.",
-        warn: true,
-      };
-    case 'choosing':
-      return { text: 'Choose the application, or add it if it is not in the list.', warn: false };
-    case 'resolving':
-      return { text: `Looking for ${step.app.name}'s window…`, warn: false };
-    case 'none':
-      return {
-        text: step.unlisted
-          ? `AppyTappy reads a window of ${step.app.name} that can't be captured, such as one with no title. Change how it's found so that it finds the window you want.`
-          : `${step.app.name} isn't open, or its window doesn't match how ${step.app.name} is found. Open it and refresh, or change how it's found.`,
-        warn: true,
-      };
-    case 'one':
-      return {
-        text: `${step.app.name}'s window is “${step.window.title}”.${fallbackNote('It is', step.fallback)}`,
-        warn: false,
-      };
-    case 'several':
-      return {
-        text: `${step.windows.length} open windows fit ${step.app.name} equally well, and AppyTappy reads one of them. Pick the one to capture, or change how it's found so that only one fits.${fallbackNote('They are', step.fallback)}`,
-        warn: false,
-      };
+/** Why the saved applications and the open windows could not be read. */
+export function lookFailedText(error: string): string {
+  return `Couldn't read the saved applications and the open windows: ${sentence(error)} Refresh to try again.`;
+}
+
+/**
+ * Where choosing the application of a new value or reference stands: before any look answered, a failed look,
+ * no saved application, several to choose from, or the only one, which needs no choice.
+ */
+export type ChooserStep =
+  | { readonly kind: 'looking' }
+  | { readonly kind: 'failed'; readonly error: string }
+  | { readonly kind: 'no-applications' }
+  | { readonly kind: 'choosing'; readonly apps: readonly PickerApp[] }
+  | { readonly kind: 'only'; readonly app: PickerApp };
+
+export function chooserStep(look: Look): ChooserStep {
+  if (look.kind === 'failed') {
+    return { kind: 'failed', error: look.error };
   }
+  const found = known(look);
+  if (found === null) {
+    return { kind: 'looking' };
+  }
+  const [only, ...others] = found.apps;
+  if (only === undefined) {
+    return { kind: 'no-applications' };
+  }
+  return others.length === 0 ? { kind: 'only', app: only } : { kind: 'choosing', apps: found.apps };
 }
 
 /** Whether `app` runs, which is to say its match takes an open window, or null while a look is under way or failed. */

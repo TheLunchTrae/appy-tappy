@@ -29,12 +29,17 @@ Select **New reference** on the References page. A reference is made only
 here, on its own, never as a step of
 [making a value](Values.md#make-a-value): a value picks a reference that is
 saved already. First choose the application the reference belongs to, or
-select **Add application**, then select **Capture this window**, as the first
-step of [making a value](Values.md#make-a-value) describes.
+select **Add application**, as the first step of
+[making a value](Values.md#make-a-value) describes. With only one saved
+application there is nothing to choose. AppyTappy then captures that
+application's window itself; if it isn't open, open it and the window shows
+as soon as it does.
 
 A value can open a new reference for itself with **New reference**, as
 [A value without a reference](Values.md#a-value-without-a-reference)
-describes. The reference then starts with one box where the value is.
+describes. The reference starts with the value's screenshots and the
+characters the value needs, and with no boxes: draw them where the
+reference should learn its characters.
 
 1. **Name it,** such as `Percent font`, with a name no other reference of
    the application has. Capitals of the letters A to Z don't count:

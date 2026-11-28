@@ -17,13 +17,15 @@ make an automation: it starts with the automation's
 back to the automation with the value picked.
 
 1. **Choose the application.** Select the application the value belongs to
-   in the list, which says whether each one is running. If it isn't in the
-   list yet, select **Add application** to
-   [add it](Applications.md#add-change-or-remove-an-application); saving or
-   canceling it brings you back here. AppyTappy then finds the application's
-   window the way it does when it runs your automations, and names it. Select
-   **Capture this window**. [When the window isn't found](#when-the-window-isnt-found)
-   says what to do when it has no window to capture.
+   in the list, which says whether each one is running. With only one saved
+   application there is nothing to choose, and this step doesn't show. If it
+   isn't in the list yet, select **Add application** to
+   [add it](Applications.md#add-change-or-remove-an-application); saving it
+   brings you on with it chosen, and canceling brings you back here.
+   AppyTappy then finds the application's window the way it does when it
+   runs your automations and captures it, with nothing to select.
+   [When the window isn't found](#when-the-window-isnt-found) says what
+   shows when it has no window to capture.
 2. **Where to read.** Type a **Value name**, such as `Progress`, that no
    other value of the application has. Capitals of the letters A to Z don't
    count: `Progress` and `progress` are one name. Choose the **Check**, one
@@ -113,7 +115,7 @@ Home, End, Page Up, or Page Down needs Ctrl, Alt, Shift, or Win with it, so
 it keeps working everywhere else. Other keys can't be the shortcut.
 
 AppyTappy keeps the screenshots until you remove them, select
-**Change window**, or leave the new value, and saves only the part inside the
+capture another window, or leave the new value, and saves only the part inside the
 box you drew, as
 [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps) describes.
 Only a [draft](Drafts.md) keeps the screenshots themselves, until you finish
@@ -121,7 +123,8 @@ or delete it.
 Before a change of window or leaving drops work you have not saved, it asks
 first: select **Keep this window** or **Stay** to carry on, as
 [Leave before you save](Getting-started.md#leave-before-you-save) describes.
-**Change window** returns to the first step with the same application chosen.
+**Change window** shows only when several windows of the application fit
+equally well: it starts over and lists them again to pick from.
 
 To remove a screenshot, select it in the strip, then select
 **Remove screenshot** with its number. The other screenshots keep their
@@ -131,15 +134,15 @@ from it: draw the region on another screenshot, or remove the state, first.
 ### When the window isn't found
 
 AppyTappy captures only a window it would read for the application, so what you
-draw is what your automations see. A saved value's or reference's editor
-shows the same reasons in place of the window, as
+draw is what your automations see. Until it has the window, the editor shows
+the reason in place of the window, as
 [While the application isn't open](#while-the-application-isnt-open)
 describes.
 
 - **The application isn't open, or its window doesn't match.** Open the
-  application and select **Refresh**. If it is open, the way AppyTappy finds
-  its window no longer fits, such as after its title changed: select
-  **Change how it's found** to
+  application: AppyTappy keeps looking, and captures the window as soon as it
+  opens. If it is open, the way AppyTappy finds its window no longer fits,
+  such as after its title changed: select **Change how it's found** to
   [change it](Applications.md#how-appytappy-finds-the-window), and saving or
   canceling brings you back.
 - **Several windows fit equally well.** AppyTappy reads one of them, as
@@ -157,14 +160,17 @@ describes.
 
 ### While the application isn't open
 
-**Edit** and **Fix at this size** on a value, and **Edit** on a
-[reference](References.md), open the editor at once, with no step before it.
-AppyTappy looks for the application's window and shows it live as soon as it
-finds the one window that fits.
+Once the application is known, the editor opens at once, with no step
+before it: for a new value or reference, a draft, **Edit** and
+**Fix at this size** on a value, and **Edit** on a
+[reference](References.md). AppyTappy looks for the application's window and
+shows it live as soon as it finds the one window that fits. A draft opens
+once the window shows, since its screenshots come back with it.
 
 Until then, the editor shows a panel where the window would be, such as
-**Example App isn't open**, with **Refresh**. Open the application and select
-**Refresh**; the window then shows without another step. If several windows
+**Example App isn't open**. Open the application and the window shows
+without another step: AppyTappy looks again every two seconds while the
+application isn't open, and **Refresh** looks at once. If several windows
 fit equally well, the panel lists them: pick one. **Change how it's found**
 is there when the window doesn't match, once you saved or discarded what you
 changed in the editor.
@@ -180,7 +186,7 @@ under the stage reads **No window** instead of **Live**.
 If the application closes while you edit, the same panel takes the live
 window's place. What you changed stays, and so do the screenshots you took:
 select one under the stage to keep working on it. Open the application
-again and select **Refresh**, and the editor goes on with the window.
+again, and the editor goes on with the window.
 
 If no open window matches everything that must match, AppyTappy captures the
 fallback window and says so above the window, with

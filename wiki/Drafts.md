@@ -76,9 +76,9 @@ sizes: **Fix at this size** always starts a new fix, and you finish a fix
 draft from its own row.
 
 - **Finish** opens it where you left off. A value, fix, or reference draft
-  first asks for its application's window again, then brings back its
-  screenshots. Save it as usual and the draft goes away. If you select
-  **Change window** there, AppyTappy asks first and starts over on the new
+  first captures its application's window again, then brings back its
+  screenshots. Save it as usual and the draft goes away. If several windows fit
+  and you select **Change window** there, AppyTappy asks first and starts over on the new
   window; the draft stays as it is unless you save it again.
 - **Delete**, then **Delete draft** to confirm, removes it with its
   screenshots and pictures. While you finish a draft, **Delete draft** there

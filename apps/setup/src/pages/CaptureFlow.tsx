@@ -1,18 +1,20 @@
-import { useCallback, useReducer, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AppSummary } from '../lib/bindings.ts';
-import { captureEnded, restoreDraftScreenshots } from '../lib/api.ts';
-import { background, backgroundLater } from '../lib/repeat.ts';
+import { errorText, restoreDraftScreenshots } from '../lib/api.ts';
 import { useCapture } from '../lib/capture.ts';
+import { useLanding } from '../lib/landing.ts';
+import { ask } from '../lib/request.ts';
 import { AntiCheatRunning } from '../components/AntiCheatRunning.tsx';
 import { Capture, type CaptureMode, type Restored } from '../components/Capture.tsx';
 import { WindowAbsent } from '../components/capture/WindowAbsent.tsx';
 import { MatchEdit } from '../components/MatchEdit.tsx';
-import { type Choice, Picker } from '../components/Picker.tsx';
+import { Picker } from '../components/Picker.tsx';
+import { Trail } from '../components/Trail.tsx';
 import type { Made, RefFlow, ValueFlow } from '../lib/flow.ts';
 import type { Held } from '../lib/unsaved.ts';
 import { useWindowSearch } from '../lib/useWindowSearch.ts';
-import { ENDED_ASK_PAUSE_MS, FIRST_PICK, endedAsks, pickedWindowStep, windowLanding } from '../lib/windowSearch.ts';
+import { windowLanding } from '../lib/windowSearch.ts';
 import type { ReportDraft, Resumed } from '../lib/drafts.ts';
 
 interface Props {
@@ -59,8 +61,8 @@ function subject(flow: ValueFlow | RefFlow): { readonly mode: CaptureMode; reado
     : { mode: { kind: changing.how, value: changing.value }, lockedApp: changing.app };
 }
 
-/** The picker's heading for `flow`. */
-function pickerHeading(flow: ValueFlow | RefFlow): string {
+/** The heading of `flow`'s page. */
+function flowHeading(flow: ValueFlow | RefFlow): string {
   if (flow.kind === 'reference') {
     return flow.existing === null ? 'New reference' : `Edit ${flow.existing.reference.name}`;
   }
@@ -71,10 +73,19 @@ function pickerHeading(flow: ValueFlow | RefFlow): string {
   return changing.how === 'fix' ? `Fix ${changing.value.name} at this size` : `Edit ${changing.value.name}`;
 }
 
-const NO_LANDING = { owed: false, target: null };
+/** Where a draft's screenshots stand: none to bring back, waiting for the window, brought back, or refused. */
+type Restoring =
+  | { readonly kind: 'waiting' }
+  | { readonly kind: 'restored'; readonly restored: Restored | null }
+  | { readonly kind: 'failed'; readonly error: string };
 
-/** The editor of a saved value or reference, which shows with or without its application's window. */
-function SavedCapture({
+/**
+ * The capture screen of a value or reference of the saved application `app`, which finds that application's window
+ * and captures it itself. A draft opens once its window is captured, since its screenshots come back only with a
+ * window.
+ */
+function SearchedCapture({
+  flow,
   app,
   mode,
   trail,
@@ -82,20 +93,43 @@ function SavedCapture({
   onCancel,
   onSaved,
   onDrafted,
+  onMakeReference,
   onEditApplication,
   draftedApps,
   onHeld,
   onDraft,
 }: Props & { readonly app: string; readonly mode: CaptureMode }) {
+  const draft = flow.resumed;
   // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at. A window that
   // closed and opened again is picked in place of the capture that ended, so the editor keeps its screenshots.
   const { pickAgain, stop } = useCapture();
-  const { absence, found, antiCheat, fallback, windowFailed, refresh, choose, restart } = useWindowSearch(
+  const { absence, found, antiCheat, fallback, windowFailed, refresh, choose, restart, several } = useWindowSearch(
     app,
     pickAgain,
   );
   // Each start over is a new editor, as each pick of a window is.
   const [startedOver, setStartedOver] = useState(0);
+  const [restoring, setRestoring] = useState<Restoring>(
+    draft === null ? { kind: 'restored', restored: null } : { kind: 'waiting' },
+  );
+  const captured = absence === null;
+  const waitingDraft = restoring.kind === 'waiting' && draft !== null ? draft.id : null;
+  // Capturing the window forgets the session's screenshots, so a draft's come back after its first capture.
+  useEffect(
+    () =>
+      waitingDraft === null || !captured
+        ? undefined
+        : ask(
+            async () => restoreDraftScreenshots(waitingDraft),
+            (screenshots) => {
+              setRestoring({ kind: 'restored', restored: { screenshots } });
+            },
+            (error) => {
+              setRestoring({ kind: 'failed', error: errorText(error) });
+            },
+          ),
+    [waitingDraft, captured],
+  );
   const [held, setHeld] = useState<Held>('nothing');
   const reportHeld = useCallback(
     (now: Held): void => {
@@ -104,6 +138,9 @@ function SavedCapture({
     },
     [onHeld],
   );
+  const page = useRef<HTMLElement>(null);
+  const holding = restoring.kind !== 'restored';
+  useLanding(continued && holding, windowLanding(absence), page);
   const matchEdit =
     found === null ? null : (
       <MatchEdit
@@ -120,25 +157,57 @@ function SavedCapture({
         }}
       />
     );
+  const panel =
+    absence === null ? null : (
+      <WindowAbsent
+        absence={absence}
+        onRefresh={refresh}
+        onChoose={choose}
+        matchEdit={absence.offersMatchEdit ? matchEdit : null}
+      />
+    );
+  if (restoring.kind !== 'restored') {
+    return (
+      <main className="page" ref={page}>
+        <Trail trail={trail} here={flowHeading(flow)} />
+        <div className="page-head">
+          <h1>{flowHeading(flow)}</h1>
+        </div>
+        <AntiCheatRunning products={antiCheat} setting={found?.summary.file?.antiCheat ?? null} />
+        {panel ??
+          (restoring.kind === 'failed' ? (
+            <div className="row">
+              <p className="warn" role="alert">
+                Couldn't bring back the draft's screenshots: {restoring.error}
+              </p>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setRestoring({ kind: 'waiting' });
+                }}
+              >
+                Try again
+              </button>
+            </div>
+          ) : (
+            <p className="note" role="status">
+              Bringing back the draft's screenshots…
+            </p>
+          ))}
+        <div className="actions">
+          <button type="button" className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </main>
+    );
+  }
   return (
     <Capture
       key={startedOver}
       choice={{ app, name: found?.name ?? 'the application' }}
-      absent={
-        absence === null
-          ? null
-          : {
-              reason: absence.reason,
-              panel: (
-                <WindowAbsent
-                  absence={absence}
-                  onRefresh={refresh}
-                  onChoose={choose}
-                  matchEdit={absence.offersMatchEdit ? matchEdit : null}
-                />
-              ),
-            }
-      }
+      absent={absence === null || panel === null ? null : { reason: absence.reason, panel }}
       windowNotes={
         <>
           <AntiCheatRunning products={antiCheat} setting={found?.summary.file?.antiCheat ?? null} />
@@ -153,110 +222,27 @@ function SavedCapture({
       onWindowFailed={windowFailed}
       landing={{ owed: continued, target: windowLanding(absence) }}
       mode={mode}
-      resumed={null}
-      restored={null}
-      trail={trail}
-      onCancel={onCancel}
-      onChangeWindow={() => {
-        stop();
-        restart();
-        setStartedOver((count) => count + 1);
-      }}
-      onSaved={onSaved}
-      onDrafted={onDrafted}
-      onMakeReference={null}
-      onHeld={reportHeld}
-      onDraft={onDraft}
-    />
-  );
-}
-
-/** The picker, then the capture of the window it picked. */
-function PickedCapture({
-  flow,
-  trail,
-  continued,
-  onCancel,
-  onSaved,
-  onDrafted,
-  onMakeReference,
-  onAddApplication,
-  onEditApplication,
-  draftedApps,
-  onHeld,
-  onDraft,
-  lockedApp,
-  mode,
-}: Props & { readonly lockedApp: string | null; readonly mode: CaptureMode }) {
-  const draft = flow.resumed;
-  const [choice, setChoice] = useState<Choice | null>(null);
-  const [picking, setPicking] = useState(true);
-  const [restored, setRestored] = useState<Restored | null>(null);
-  // Whether a window was picked before: only the first pick brings a draft's screenshots back.
-  const [pickedBefore, setPickedBefore] = useState(false);
-  // The flow holds the window's capture, which would otherwise keep copying frames nobody looks at.
-  const { pick, stop } = useCapture();
-  // Whether the picked window closed, which only another pick gets past.
-  const [pickedWindow, tell] = useReducer(pickedWindowStep, FIRST_PICK);
-  const [askEnded] = useState(() => endedAsks(captureEnded, ENDED_ASK_PAUSE_MS, Date.now, backgroundLater));
-  const asked = pickedWindow.pick;
-  const windowFailed = useCallback((): void => {
-    background(
-      askEnded(() => {
-        tell({ kind: 'ended', pick: asked });
-      }),
-    );
-  }, [askEnded, asked]);
-  if (picking || choice === null) {
-    return (
-      <Picker
-        heading={pickerHeading(flow)}
-        trail={trail}
-        continued={continued}
-        lockedApp={lockedApp ?? draft?.def.app ?? null}
-        startApp={choice?.app ?? flow.app}
-        startWindow={choice?.window.handle ?? null}
-        onCancel={onCancel}
-        onAddApplication={onAddApplication}
-        onEditApplication={onEditApplication}
-        draftedApps={draftedApps}
-        onCapture={pick}
-        onPick={async (picked) => {
-          // Picking the window forgets the session's screenshots, so a draft's come back after it, the first time.
-          if (draft !== null) {
-            setRestored({ screenshots: pickedBefore ? null : await restoreDraftScreenshots(draft.id) });
-          }
-          setPickedBefore(true);
-          setChoice(picked);
-          setPicking(false);
-        }}
-      />
-    );
-  }
-  return (
-    <Capture
-      choice={choice}
-      absent={null}
-      windowNotes={
-        pickedWindow.closed ? <p className="warn">The window closed. Select Change window to pick it again.</p> : null
-      }
-      onWindowFailed={windowFailed}
-      landing={NO_LANDING}
-      mode={mode}
       resumed={draft}
-      restored={restored}
+      restored={restoring.restored}
       trail={trail}
       onCancel={onCancel}
-      onChangeWindow={() => {
-        // The capture ends here, not when another window is picked, so nothing keeps its screenshots meanwhile.
-        stop();
-        tell({ kind: 'repicked' });
-        setPicking(true);
-      }}
+      onChangeWindow={
+        several
+          ? () => {
+              stop();
+              restart();
+              // The new window starts over, without what the draft kept.
+              if (draft !== null) {
+                setRestoring({ kind: 'restored', restored: { screenshots: null } });
+              }
+              setStartedOver((count) => count + 1);
+            }
+          : null
+      }
       onSaved={onSaved}
       onDrafted={onDrafted}
       onMakeReference={onMakeReference}
-      onHeld={onHeld}
+      onHeld={reportHeld}
       onDraft={onDraft}
     />
   );
@@ -264,16 +250,27 @@ function PickedCapture({
 
 /**
  * Making a value, fixing a saved one at another window size, editing one, or making or changing a reference. A
- * saved value or reference opens in its editor at once, which looks for its application's window itself. Anything
- * new, and a draft, whose screenshots come back only with a window, chooses the application and captures its window
- * first.
+ * value or reference whose application is known, its own, its draft's, or one handed over, opens its capture screen
+ * at once, which finds and captures that application's window itself. Anything else first chooses its application.
  */
 export function CaptureFlow(props: Props) {
   // What the flow started for: its mode stays the same object while it shows.
   const [{ mode, lockedApp }] = useState(() => subject(props.flow));
-  return lockedApp !== null && props.flow.resumed === null ? (
-    <SavedCapture {...props} app={lockedApp} mode={mode} />
+  const [app, setApp] = useState(() => lockedApp ?? props.flow.resumed?.def.app ?? props.flow.app);
+  const { onAddApplication } = props;
+  const addApplication = useCallback((): void => {
+    onAddApplication(null);
+  }, [onAddApplication]);
+  return app === null ? (
+    <Picker
+      heading={flowHeading(props.flow)}
+      trail={props.trail}
+      continued={props.continued}
+      onCancel={props.onCancel}
+      onChoose={setApp}
+      onAddApplication={addApplication}
+    />
   ) : (
-    <PickedCapture {...props} lockedApp={lockedApp} mode={mode} />
+    <SearchedCapture {...props} app={app} mode={mode} />
   );
 }

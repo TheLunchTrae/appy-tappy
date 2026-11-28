@@ -592,14 +592,10 @@ describe('a value kept without a reference', () => {
     expect(setup?.draft.characters).toEqual(['1', '%']);
   });
 
-  test("opens a reference's draft with one box at the value's region, reading what the value needs", () => {
-    const made = referenceForValue('example', number);
-    const setup = made === null ? null : keptSetup(made);
-    expect(made).toMatchObject({ kind: 'reference', app: 'example', changes: null });
+  test("opens a reference's draft with no box where the value is, reading what the value needs", () => {
+    const setup = keptSetup(referenceForValue('example', number.draft.characters));
     expect(setup?.editing).toEqual({ existing: null, name: '', reads: ['1', '%'], guesses: false });
-    expect(setup?.draft.boxes).toEqual([{ id: 0, screenshot: 3, region, text: '' }]);
-    const anything = referenceForValue('example', { ...number, draft: { ...number.draft, characters: [] } });
-    expect((anything === null ? null : keptSetup(anything))?.editing?.reads).toEqual([...DIGITS.characters]);
-    expect(referenceForValue('example', { ...number, draft: { ...number.draft, region: null } })).toBeNull();
+    expect(setup?.draft.boxes).toEqual([]);
+    expect(keptSetup(referenceForValue('example', []))?.editing?.reads).toEqual([...DIGITS.characters]);
   });
 });

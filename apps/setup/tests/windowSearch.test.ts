@@ -6,13 +6,12 @@ import type { PickerApp, PickerStep } from '../src/lib/picker.ts';
 import {
   type SearchEvent,
   type WindowCapture,
-  FIRST_PICK,
   NO_CAPTURE,
   endedAsks,
   fallbackWarning,
-  pickedWindowStep,
   searchStep,
   showsNewCloseSign,
+  waitsForOpen,
   windowAbsence,
   windowLanding,
 } from '../src/lib/windowSearch.ts';
@@ -42,7 +41,7 @@ const summary: AppSummary = {
 const app: PickerApp = { id: 'example', name: 'Example App', executable: 'Example.exe', fits: [], summary };
 
 const one: PickerStep = { kind: 'one', app, window: main, fallback: false };
-const several: PickerStep = { kind: 'several', app, windows: [main, second], picked: null, reads: 8, fallback: false };
+const several: PickerStep = { kind: 'several', app, windows: [main, second], reads: 8, fallback: false };
 const closed: PickerStep = { kind: 'none', app, unlisted: false };
 
 const starting: WindowCapture = { kind: 'starting', window: main, fallback: false };
@@ -50,7 +49,7 @@ const refused: WindowCapture = { kind: 'refused', error: 'That window closed.' }
 const running: WindowCapture = { kind: 'running', window: main, fallback: false };
 const fallbackRunning: WindowCapture = { kind: 'running', window: second, fallback: true };
 
-describe('the capture of a saved value’s or reference’s window', () => {
+describe('the capture of a value’s or reference’s window', () => {
   const cases: readonly (readonly [string, WindowCapture, SearchEvent, WindowCapture])[] = [
     ['the only window that fits is captured without asking', NO_CAPTURE, { kind: 'looked', step: one }, starting],
     ['several that fit wait for a choice', NO_CAPTURE, { kind: 'looked', step: several }, NO_CAPTURE],
@@ -153,12 +152,19 @@ describe('what shows in place of the window', () => {
       windows: [],
       offersMatchEdit: false,
     });
-    expect(windowAbsence({ kind: 'missing', locked: true }, NO_CAPTURE, null)).toMatchObject({
+    expect(windowAbsence({ kind: 'missing' }, NO_CAPTURE, null)).toMatchObject({
       busy: false,
       windows: [],
       offersMatchEdit: false,
     });
   });
+});
+
+test('looks again by itself only while the application is not open and nothing is captured', () => {
+  expect(waitsForOpen(closed, NO_CAPTURE)).toBe(true);
+  expect(waitsForOpen(closed, refused)).toBe(false);
+  expect(waitsForOpen({ ...closed, unlisted: true }, NO_CAPTURE)).toBe(false);
+  expect(waitsForOpen(several, NO_CAPTURE)).toBe(false);
 });
 
 describe('where the focus lands when the editor of a saved value or reference shows again', () => {
@@ -273,18 +279,6 @@ describe('asking whether the capture ended', () => {
     answer(false);
     await put;
     expect(later).toHaveLength(1);
-  });
-});
-
-describe('the window a capture screen picked', () => {
-  test('closes when the owner says its capture ended', () => {
-    expect(pickedWindowStep(FIRST_PICK, { kind: 'ended', pick: 0 })).toEqual({ pick: 0, closed: true });
-  });
-
-  test('is open again once the user picks again, and drops the end of the pick before', () => {
-    const again = pickedWindowStep({ pick: 0, closed: true }, { kind: 'repicked' });
-    expect(again).toEqual({ pick: 1, closed: false });
-    expect(pickedWindowStep(again, { kind: 'ended', pick: 0 })).toEqual(again);
   });
 });
 

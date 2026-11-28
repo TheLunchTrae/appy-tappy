@@ -2,7 +2,7 @@
 
 import { type RefObject, useEffect, useRef } from 'react';
 
-import type { PickerStep } from './picker.ts';
+import type { ChooserStep } from './picker.ts';
 import type { WatchStep } from './watch.ts';
 
 /** A control of the automation editor's When card that can take the focus. */
@@ -31,29 +31,22 @@ export function editorLanding(step: WatchStep): WatchControl | null {
 }
 
 /** A control of the picker that can take the focus. */
-export type PickerControl = 'add-application' | 'refresh' | 'windows' | 'match' | 'capture';
+export type PickerControl = 'add-application' | 'refresh';
 
 /**
- * The control of the picker that takes the focus at `step`. Null while the look is under way, so the focus moves
- * once the chosen application's window is known.
+ * The control of the picker that takes the focus at `step`. Null while the look is under way, and when the only
+ * saved application is taken, which leaves the picker.
  */
-export function pickerLanding(step: PickerStep): PickerControl | null {
+export function pickerLanding(step: ChooserStep): PickerControl | null {
   switch (step.kind) {
     case 'looking':
-    case 'resolving':
+    case 'only':
       return null;
     case 'no-applications':
     case 'choosing':
       return 'add-application';
     case 'failed':
-    case 'missing':
       return 'refresh';
-    case 'none':
-      return 'match';
-    case 'one':
-      return 'capture';
-    case 'several':
-      return step.picked === null ? 'windows' : 'capture';
   }
 }
 
