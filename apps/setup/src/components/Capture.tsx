@@ -49,7 +49,6 @@ import { FoundMarks } from './Found.tsx';
 import { listed } from '../lib/found.ts';
 import { ReferenceInspector, teachingSheet } from './ReferenceInspector.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
-import type { Choice } from './Picker.tsx';
 import { colorAt } from '../lib/pixels.ts';
 import { RecordingSpots } from './Recording.tsx';
 import { LookPanel } from './LookRecording.tsx';
@@ -128,7 +127,7 @@ function draftName(mode: Exclude<CaptureMode, { readonly kind: 'edit' }>, setup:
 }
 
 /** What came back from the draft the capture finishes when its window was picked. */
-export interface Restored {
+interface Restored {
   /**
    * Which of the draft's screenshots are this session's again, each with whether a recording of looks kept it, or null
    * once the window changed, which starts the capture again without what the draft kept.
@@ -157,7 +156,7 @@ function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restor
 
 interface Props {
   /** The saved application the value or reference belongs to. */
-  readonly choice: Pick<Choice, 'app' | 'name'>;
+  readonly choice: { readonly app: string; readonly name: string };
   /**
    * What shows in place of the window while it is not captured, and why what needs the window waits, or null once it
    * is captured. Everything that needs no window goes on without it.
@@ -183,7 +182,8 @@ interface Props {
   /** The way to the capture's flow, for its breadcrumb: its page, then each flow that waits under it. */
   readonly trail: readonly string[];
   readonly onCancel: () => void;
-  readonly onChangeWindow: () => void;
+  /** Starts over on another window, or null while no other window fits as well. */
+  readonly onChangeWindow: (() => void) | null;
   /** Hears what the flow saved: where a value is, or the application of a reference. */
   readonly onSaved: (made: Made) => void;
   /** Closes the flow once its draft is saved or deleted. */
@@ -767,8 +767,8 @@ export function Capture({
   const picksReference = draft.kind === 'number' && fixing === null;
   // New reference stays picked while the check is another kind, and offers nothing then.
   const makesNew = picksReference && onMakeReference !== null && newReference;
-  // Saves a reference's draft, starting from the value's screenshot and region, then the value's draft beside it,
-  // and opens the reference's. A value whose draft fails to save takes the reference's draft back.
+  // Saves a reference's draft, with copies of the value's screenshots and a box at its region, then the value's
+  // draft beside it, and opens the reference's. A value whose draft fails to save takes the reference's draft back.
   const makeReference = async (): Promise<void> => {
     const reference = referenceForValue(appId, setup);
     if (onMakeReference === null || reference === null) {
@@ -967,7 +967,7 @@ export function Capture({
           size: sheeted ? null : (native ?? null),
         }}
         actions={
-          absent === null ? (
+          absent === null && onChangeWindow !== null ? (
             <ChangeWindow
               busy={busy}
               // Finishing a draft starts on its screenshots, which the new window leaves behind.

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { ValueChoice } from '../src/lib/automation.ts';
 import { type PickerControl, type WatchControl, editorLanding, pickerLanding, settle } from '../src/lib/landing.ts';
-import type { PickerApp, PickerStep } from '../src/lib/picker.ts';
+import type { ChooserStep, PickerApp } from '../src/lib/picker.ts';
 import type { WatchStep } from '../src/lib/watch.ts';
 
 describe('where the focus lands when the automation editor shows again', () => {
@@ -47,14 +47,6 @@ describe('where the focus lands when the automation editor shows again', () => {
 });
 
 describe('where the focus lands when the picker shows after another flow', () => {
-  const window = {
-    handle: 3,
-    title: 'Example App',
-    class: 'ExampleWindow',
-    executable: 'Example.exe',
-    width: 1280,
-    height: 720,
-  };
   const app: PickerApp = {
     id: 'example',
     name: 'Example App',
@@ -63,19 +55,10 @@ describe('where the focus lands when the picker shows after another flow', () =>
     summary: { id: 'example', file: null, error: null, windows: [], running: null },
   };
 
-  test('is the capture once there is a window to capture', () => {
-    expect(pickerLanding({ kind: 'one', app, window, fallback: false })).toBe('capture');
-    const several = { kind: 'several', app, windows: [window], reads: null, fallback: false } as const;
-    expect(pickerLanding({ ...several, picked: window })).toBe('capture');
-    expect(pickerLanding({ ...several, picked: null })).toBe('windows');
-  });
-
-  test('is the way forward when there is none', () => {
-    const steps: readonly (readonly [PickerStep, PickerControl])[] = [
-      [{ kind: 'none', app, unlisted: false }, 'match'],
-      [{ kind: 'missing', locked: false }, 'refresh'],
+  test('is the way forward while there is an application to choose or a look to repeat', () => {
+    const steps: readonly (readonly [ChooserStep, PickerControl])[] = [
       [{ kind: 'failed', error: 'access is denied' }, 'refresh'],
-      [{ kind: 'choosing' }, 'add-application'],
+      [{ kind: 'choosing', apps: [app] }, 'add-application'],
       [{ kind: 'no-applications' }, 'add-application'],
     ];
     for (const [step, control] of steps) {
@@ -83,9 +66,9 @@ describe('where the focus lands when the picker shows after another flow', () =>
     }
   });
 
-  test('waits while the look is under way', () => {
+  test('waits while the look is under way, and when the only application is taken', () => {
     expect(pickerLanding({ kind: 'looking' })).toBeNull();
-    expect(pickerLanding({ kind: 'resolving', app })).toBeNull();
+    expect(pickerLanding({ kind: 'only', app })).toBeNull();
   });
 });
 

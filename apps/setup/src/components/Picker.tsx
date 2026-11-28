@@ -1,26 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
-import type { AppSummary, WindowChoice } from '../lib/bindings.ts';
-import { errorText } from '../lib/api.ts';
 import { pickerLanding, useLanding } from '../lib/landing.ts';
-import { captureWindow, isRunning, known, offersMatchEdit, pickerStep, stepStatus } from '../lib/picker.ts';
-import { background } from '../lib/repeat.ts';
+import { chooserStep, isRunning, known, lookFailedText } from '../lib/picker.ts';
 import { useAppWindows } from '../lib/useAppWindows.ts';
-import { AntiCheatRunning } from './AntiCheatRunning.tsx';
-import { MatchEdit } from './MatchEdit.tsx';
 import { Trail } from './Trail.tsx';
-
-/** The window to capture and the application its values belong to. */
-export interface Choice {
-  readonly window: WindowChoice;
-  /** The saved application's ID. */
-  readonly app: string;
-  /** The application's name. */
-  readonly name: string;
-}
-
-/** The capture of the chosen window: not asked for, starting, or refused with the reason. */
-type Start = 'idle' | 'starting' | { readonly error: string };
 
 interface Props {
   /** The page's heading, such as New value. */
@@ -29,216 +12,99 @@ interface Props {
   readonly trail: readonly string[];
   /** Whether the picker shows because another flow opened its flow or ended, so the focus has to land somewhere. */
   readonly continued: boolean;
-  /** The saved application the flow belongs to already, such as a reference's own, or null to let the user choose. */
-  readonly lockedApp: string | null;
-  /** The application chosen at first: the last choice's, or one handed over to this flow. */
-  readonly startApp: string | null;
-  /** The window of the last choice, picked again when several fit. */
-  readonly startWindow: number | null;
   readonly onCancel: () => void;
-  /** Starts the capture of a window, for the screen that holds it. */
-  readonly onCapture: (window: number) => Promise<void>;
-  /** Takes the picked window; the picker shows why when it fails. */
-  readonly onPick: (choice: Choice) => Promise<void>;
-  /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
-  readonly onAddApplication: (chosen: string | null) => void;
-  /** Leaves to change how `app` is found, and comes back to it. */
-  readonly onEditApplication: (app: AppSummary) => void;
-  /** The saved applications that have a draft of changes, which changing how one is found finishes. */
-  readonly draftedApps: ReadonlySet<string>;
+  /** Takes the application chosen, or the only saved one, by its ID. Its capture screen gets its window. */
+  readonly onChoose: (app: string) => void;
+  /** Leaves to add an application, and comes back with it chosen. */
+  readonly onAddApplication: () => void;
 }
 
-/** Chooses the application a value or reference belongs to, then the window that application reads. */
-export function Picker({
-  heading,
-  trail,
-  continued,
-  lockedApp,
-  startApp,
-  startWindow,
-  onCancel,
-  onCapture,
-  onPick,
-  onAddApplication,
-  onEditApplication,
-  draftedApps,
-}: Props) {
-  const [chosen, setChosen] = useState(lockedApp ?? startApp);
-  const [picked, setPicked] = useState(startWindow);
-  const [start, setStart] = useState<Start>('idle');
-  const { look, refresh } = useAppWindows();
+/** What the picker says before it lists the applications, and whether it is a problem. */
+function statusOf(step: ReturnType<typeof chooserStep>): { readonly text: string; readonly warn: boolean } {
+  switch (step.kind) {
+    case 'looking':
+    case 'only':
+      return { text: 'Reading the saved applications…', warn: false };
+    case 'failed':
+      return { text: lookFailedText(step.error), warn: true };
+    case 'no-applications':
+      return {
+        text: 'Values and references belong to an application, and none is saved yet. Add the application to carry on.',
+        warn: false,
+      };
+    case 'choosing':
+      return { text: 'Choose the application, or add it if it is not in the list.', warn: false };
+  }
+}
 
-  const found = known(look);
-  const step = pickerStep({ locked: lockedApp !== null, chosen, look, picked });
-  const status = stepStatus(step);
-  const target = captureWindow(step);
-  const busy = start === 'starting';
+/**
+ * Chooses the application a new value or reference belongs to. With one saved application there is nothing to
+ * choose, so it is taken at once. The capture screen then finds and captures that application's window itself.
+ */
+export function Picker({ heading, trail, continued, onCancel, onChoose, onAddApplication }: Props) {
+  const { look, refresh } = useAppWindows();
+  const step = chooserStep(look);
+  const status = statusOf(step);
   const page = useRef<HTMLElement>(null);
   useLanding(continued, pickerLanding(step), page);
-
-  const choose = (app: string): void => {
-    setChosen(app);
-    setPicked(null);
-    setStart('idle');
-  };
-
-  const capture = async (): Promise<void> => {
-    if (target === null || !('app' in step)) {
-      return;
+  const only = step.kind === 'only' ? step.app.id : null;
+  useEffect(() => {
+    if (only !== null) {
+      onChoose(only);
     }
-    setStart('starting');
-    try {
-      await onCapture(target.handle);
-      await onPick({ window: target, app: step.app.id, name: step.app.name });
-      setStart('idle');
-    } catch (error: unknown) {
-      setStart({ error: errorText(error) });
-    }
-  };
+  }, [only, onChoose]);
 
   return (
     <main className="page" ref={page}>
       <Trail trail={trail} here={heading} />
       <div className="page-head">
         <h1>{heading}</h1>
-        <span className="lead">
-          {lockedApp === null
-            ? 'Choose the application, then capture its window.'
-            : "Capture the application's window."}
-        </span>
+        <span className="lead">Choose the application it belongs to.</span>
         <div className="end">
-          <button
-            type="button"
-            className="btn"
-            data-landing="refresh"
-            disabled={busy}
-            onClick={() => {
-              setStart('idle');
-              refresh();
-            }}
-          >
+          <button type="button" className="btn" data-landing="refresh" onClick={refresh}>
             Refresh
           </button>
         </div>
       </div>
-      <AntiCheatRunning
-        products={found?.antiCheat ?? []}
-        setting={'app' in step ? (step.app.summary.file?.antiCheat ?? null) : null}
-      />
-      <div className={lockedApp === null ? 'picker' : 'picker alone'}>
-        {lockedApp === null ? (
-          <section className="windows" aria-label="Applications">
-            <ul className="window-list">
-              {(found?.apps ?? []).map((app) => {
-                const running = isRunning(look, app);
-                return (
-                  <li key={app.id}>
-                    <button
-                      type="button"
-                      aria-pressed={'app' in step && step.app.id === app.id}
-                      disabled={busy}
-                      onClick={() => {
-                        choose(app.id);
-                      }}
-                    >
-                      <span className="title">{app.name}</span>
-                      {running === null ? (
-                        <small />
-                      ) : (
-                        <small className={running ? 'ok' : undefined}>{running ? 'Running' : 'Not running'}</small>
-                      )}
-                      <small>{app.executable}</small>
-                    </button>
-                  </li>
-                );
-              })}
-              <li>
+      <p className={status.warn ? 'warn' : 'note'} role="status">
+        {status.text}
+      </p>
+      <section className="windows" aria-label="Applications">
+        <ul className="window-list">
+          {(known(look)?.apps ?? []).map((app) => {
+            const running = isRunning(look, app);
+            return (
+              <li key={app.id}>
                 <button
                   type="button"
-                  className="add"
-                  data-landing="add-application"
-                  disabled={busy}
                   onClick={() => {
-                    onAddApplication('app' in step ? step.app.id : null);
+                    onChoose(app.id);
                   }}
                 >
-                  <span className="title">Add application</span>
-                  <small />
-                  <small>For a program that is not in this list yet. You come back here with it chosen.</small>
+                  <span className="title">{app.name}</span>
+                  {running === null ? (
+                    <small />
+                  ) : (
+                    <small className={running ? 'ok' : undefined}>{running ? 'Running' : 'Not running'}</small>
+                  )}
+                  <small>{app.executable}</small>
                 </button>
               </li>
-            </ul>
-          </section>
-        ) : null}
-        <aside className="side" aria-label="Window">
-          <h2>{'app' in step ? step.app.name : 'Application'}</h2>
-          <p className={status.warn ? 'warn' : 'note'} role="status">
-            {status.text}
-          </p>
-          {step.kind === 'one' ? (
-            <p className="note">
-              {step.window.width} × {step.window.height} · {step.window.class} · {step.window.executable}
-            </p>
-          ) : null}
-          {step.kind === 'several' ? (
-            <ul className="window-list" aria-label="Windows that fit">
-              {step.windows.map((each, index) => (
-                <li key={each.handle}>
-                  <button
-                    type="button"
-                    data-landing={index === 0 ? 'windows' : undefined}
-                    aria-pressed={step.picked?.handle === each.handle}
-                    disabled={busy}
-                    onClick={() => {
-                      setPicked(each.handle);
-                      setStart('idle');
-                    }}
-                  >
-                    <span className="title">{each.title}</span>
-                    <small>
-                      {each.width} × {each.height}
-                    </small>
-                    <small>
-                      {each.class} · {each.executable}
-                    </small>
-                    {step.reads === each.handle ? <small className="ok">Read if it starts now</small> : <small />}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {'app' in step && offersMatchEdit(step) ? (
-            <MatchEdit
-              app={step.app}
-              drafted={draftedApps.has(step.app.id)}
-              disabled={busy}
-              onEdit={() => {
-                onEditApplication(step.app.summary);
-              }}
-            />
-          ) : null}
-          {typeof start === 'object' ? (
-            <p className="warn" role="alert">
-              {start.error}
-            </p>
-          ) : null}
-          <div className="actions">
-            <button type="button" className="btn" onClick={onCancel}>
-              Cancel
+            );
+          })}
+          <li>
+            <button type="button" className="add" data-landing="add-application" onClick={onAddApplication}>
+              <span className="title">Add application</span>
+              <small />
+              <small>For a program that is not in this list yet. You come back with it chosen.</small>
             </button>
-            <button
-              type="button"
-              className="btn primary"
-              data-landing="capture"
-              disabled={target === null || busy}
-              onClick={() => {
-                background(capture());
-              }}
-            >
-              Capture this window
-            </button>
-          </div>
-        </aside>
+          </li>
+        </ul>
+      </section>
+      <div className="actions">
+        <button type="button" className="btn" onClick={onCancel}>
+          Cancel
+        </button>
       </div>
     </main>
   );

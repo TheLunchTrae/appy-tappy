@@ -1,8 +1,8 @@
-// How a flow that changes a saved value or reference gets its application's window: it opens without one, looks for
-// the window, and captures it once it is found.
+// How a value's or reference's capture screen gets its application's window: it opens without one, looks for the
+// window, and captures it once it is found.
 
-import type { WindowChoice } from './bindings.ts';
-import { type PickerStep, fallbackNote, offersMatchEdit, stepStatus } from './picker.ts';
+import type { DraftShot, WindowChoice } from './bindings.ts';
+import { type PickerStep, fallbackNote, lookFailedText, offersMatchEdit } from './picker.ts';
 
 /**
  * The capture of the application's window: not asked for, starting, refused with the reason, or running. `fallback`
@@ -111,32 +111,38 @@ export function windowAbsence(step: PickerStep, capture: WindowCapture, name: st
       return { ...waiting, heading: `Looking for ${app}'s window…`, text: 'It is captured as soon as it is found.' };
     case 'none':
       return step.unlisted
-        ? { ...still, heading: `${app}'s window can't be captured`, text: stepStatus(step).text }
+        ? {
+            ...still,
+            heading: `${app}'s window can't be captured`,
+            text: `AppyTappy reads a window of ${app} that can't be captured, such as one with no title. Change how it's found so that it finds the window you want.`,
+          }
         : {
             ...still,
             heading: `${app} isn't open`,
-            text: `Open ${app}, then select Refresh. Until then, you can change everything here that doesn't need its window. If ${app} is open, its window doesn't match how it's found.`,
-            reason: `${app} isn't open. Open it, then select Refresh.`,
+            text: `Open ${app}. Its window is captured as soon as it opens. Until then, you can change everything here that doesn't need its window. If ${app} is open, its window doesn't match how it's found.`,
+            reason: `${app} isn't open. Its window is captured as soon as it opens.`,
           };
     case 'several':
       return {
         ...still,
         heading: `Pick ${app}'s window`,
-        text: stepStatus(step).text,
+        text: `${step.windows.length} open windows fit ${app} equally well, and AppyTappy reads one of them. Pick the one to capture, or change how it's found so that only one fits.${fallbackNote('They are', step.fallback)}`,
         reason: `Pick ${app}'s window first.`,
       };
     case 'failed':
-      return { ...still, heading: "Couldn't look for the window", text: stepStatus(step).text };
-    // A flow that has its application never chooses one, so any step without it is an application that is gone.
+      return { ...still, heading: "Couldn't look for the window", text: lookFailedText(step.error) };
     case 'missing':
-    case 'no-applications':
-    case 'choosing':
       return {
         ...still,
         heading: "The application can't be read",
-        text: "The application this belongs to can't be read anymore. Discard, then check the Applications page.",
+        text: "The application this belongs to can't be read anymore: it was removed, or its file can't be read. Check the Applications page.",
       };
   }
+}
+
+/** Whether the look for the window goes on by itself: while the application isn't open and nothing is captured. */
+export function waitsForOpen(step: PickerStep, capture: WindowCapture): boolean {
+  return capture.kind === 'none' && step.kind === 'none' && !step.unlisted;
 }
 
 /** The control the focus lands on when the editor shows again after another flow ended. */
@@ -222,37 +228,50 @@ export function endedAsks(
   return sign;
 }
 
-/** A capture screen's picked window: the number of its pick, and whether that window closed. */
-interface PickedWindow {
-  readonly pick: number;
-  readonly closed: boolean;
-}
-
-export const FIRST_PICK: PickedWindow = { pick: 0, closed: false };
-
-type PickedWindowEvent =
-  /** The user left the window to pick one again. */
-  | { readonly kind: 'repicked' }
-  /** The owner answered that the capture of pick `pick` ended. */
-  | { readonly kind: 'ended'; readonly pick: number };
-
-/**
- * The picked window after `event`. An end that was asked about before the user picked again is dropped, so it
- * never says that the window picked since has closed.
- */
-export function pickedWindowStep(window: PickedWindow, event: PickedWindowEvent): PickedWindow {
-  switch (event.kind) {
-    case 'repicked':
-      return { pick: window.pick + 1, closed: false };
-    case 'ended':
-      return event.pick === window.pick ? { ...window, closed: true } : window;
-  }
-}
-
 /**
  * Whether the capture screen shows a sign that its window may have closed which it did not show `before`: a
  * screenshot that was refused, or a recording that stopped or could not start, each with its reason or null.
  */
 export function showsNewCloseSign(before: readonly (string | null)[], signs: readonly (string | null)[]): boolean {
   return signs.some((sign, index) => sign !== null && sign !== before[index]);
+}
+
+/**
+ * Where a capture screen's draft stands with its screenshots: waiting for the window, being brought back, back, or
+ * refused with the reason. `screenshots` is null once the window changed, which starts over without them.
+ */
+export type Restoring =
+  | { readonly kind: 'waiting' }
+  | { readonly kind: 'asking' }
+  | { readonly kind: 'restored'; readonly screenshots: readonly DraftShot[] | null }
+  | { readonly kind: 'failed'; readonly error: string };
+
+export type RestoreEvent =
+  /** The window's capture runs. */
+  | { readonly kind: 'captured' }
+  | { readonly kind: 'answered'; readonly screenshots: readonly DraftShot[] }
+  | { readonly kind: 'refused'; readonly error: string }
+  /** The user asked to try again after a refusal. */
+  | { readonly kind: 'retried' }
+  /** The user changed the window, which starts the editor over without what the draft kept. */
+  | { readonly kind: 'changed' };
+
+/**
+ * The draft's screenshots after `event`. They are asked for once, when the window's first capture runs, since a
+ * capture that starts afresh clears the session's: a capture that runs again, such as after the window closed and
+ * opened again, keeps them and asks nothing more. An answer that arrives while none is asked for is dropped.
+ */
+export function restoreStep(restoring: Restoring, event: RestoreEvent): Restoring {
+  switch (event.kind) {
+    case 'captured':
+      return restoring.kind === 'waiting' ? { kind: 'asking' } : restoring;
+    case 'answered':
+      return restoring.kind === 'asking' ? { kind: 'restored', screenshots: event.screenshots } : restoring;
+    case 'refused':
+      return restoring.kind === 'asking' ? { kind: 'failed', error: event.error } : restoring;
+    case 'retried':
+      return restoring.kind === 'failed' ? { kind: 'asking' } : restoring;
+    case 'changed':
+      return { kind: 'restored', screenshots: null };
+  }
 }

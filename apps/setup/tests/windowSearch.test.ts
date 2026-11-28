@@ -4,15 +4,17 @@ import type { AppSummary, WindowChoice } from '../src/lib/bindings.ts';
 import { exactWindow } from '../src/lib/matching.ts';
 import type { PickerApp, PickerStep } from '../src/lib/picker.ts';
 import {
+  type RestoreEvent,
+  type Restoring,
   type SearchEvent,
   type WindowCapture,
-  FIRST_PICK,
   NO_CAPTURE,
   endedAsks,
   fallbackWarning,
-  pickedWindowStep,
+  restoreStep,
   searchStep,
   showsNewCloseSign,
+  waitsForOpen,
   windowAbsence,
   windowLanding,
 } from '../src/lib/windowSearch.ts';
@@ -42,7 +44,7 @@ const summary: AppSummary = {
 const app: PickerApp = { id: 'example', name: 'Example App', executable: 'Example.exe', fits: [], summary };
 
 const one: PickerStep = { kind: 'one', app, window: main, fallback: false };
-const several: PickerStep = { kind: 'several', app, windows: [main, second], picked: null, reads: 8, fallback: false };
+const several: PickerStep = { kind: 'several', app, windows: [main, second], reads: 8, fallback: false };
 const closed: PickerStep = { kind: 'none', app, unlisted: false };
 
 const starting: WindowCapture = { kind: 'starting', window: main, fallback: false };
@@ -50,7 +52,7 @@ const refused: WindowCapture = { kind: 'refused', error: 'That window closed.' }
 const running: WindowCapture = { kind: 'running', window: main, fallback: false };
 const fallbackRunning: WindowCapture = { kind: 'running', window: second, fallback: true };
 
-describe('the capture of a saved value’s or reference’s window', () => {
+describe('the capture of a value’s or reference’s window', () => {
   const cases: readonly (readonly [string, WindowCapture, SearchEvent, WindowCapture])[] = [
     ['the only window that fits is captured without asking', NO_CAPTURE, { kind: 'looked', step: one }, starting],
     ['several that fit wait for a choice', NO_CAPTURE, { kind: 'looked', step: several }, NO_CAPTURE],
@@ -153,12 +155,19 @@ describe('what shows in place of the window', () => {
       windows: [],
       offersMatchEdit: false,
     });
-    expect(windowAbsence({ kind: 'missing', locked: true }, NO_CAPTURE, null)).toMatchObject({
+    expect(windowAbsence({ kind: 'missing' }, NO_CAPTURE, null)).toMatchObject({
       busy: false,
       windows: [],
       offersMatchEdit: false,
     });
   });
+});
+
+test('looks again by itself only while the application is not open and nothing is captured', () => {
+  expect(waitsForOpen(closed, NO_CAPTURE)).toBe(true);
+  expect(waitsForOpen(closed, refused)).toBe(false);
+  expect(waitsForOpen({ ...closed, unlisted: true }, NO_CAPTURE)).toBe(false);
+  expect(waitsForOpen(several, NO_CAPTURE)).toBe(false);
 });
 
 describe('where the focus lands when the editor of a saved value or reference shows again', () => {
@@ -276,18 +285,6 @@ describe('asking whether the capture ended', () => {
   });
 });
 
-describe('the window a capture screen picked', () => {
-  test('closes when the owner says its capture ended', () => {
-    expect(pickedWindowStep(FIRST_PICK, { kind: 'ended', pick: 0 })).toEqual({ pick: 0, closed: true });
-  });
-
-  test('is open again once the user picks again, and drops the end of the pick before', () => {
-    const again = pickedWindowStep({ pick: 0, closed: true }, { kind: 'repicked' });
-    expect(again).toEqual({ pick: 1, closed: false });
-    expect(pickedWindowStep(again, { kind: 'ended', pick: 0 })).toEqual(again);
-  });
-});
-
 test('a refused screenshot or a stopped recording is a new sign that the window closed, once', () => {
   const none = [null, null];
   const refused = ['The captured window closed.', null];
@@ -298,4 +295,26 @@ test('a refused screenshot or a stopped recording is a new sign that the window 
     showsNewCloseSign(refused, ['The captured window closed.', 'Recording stopped: The captured window closed.']),
   ).toBe(true);
   expect(showsNewCloseSign(refused, ['A frame was lost.', null])).toBe(true);
+});
+
+describe("a draft's screenshots", () => {
+  const shots = [{ index: 0, recorded: false }];
+  const waiting: Restoring = { kind: 'waiting' };
+  const asking: Restoring = { kind: 'asking' };
+  const failed: Restoring = { kind: 'failed', error: 'gone' };
+  const restored: Restoring = { kind: 'restored', screenshots: shots };
+  const cases: readonly (readonly [string, Restoring, RestoreEvent, Restoring])[] = [
+    ['are asked for once the window is first captured', waiting, { kind: 'captured' }, asking],
+    ['come back with the answer', asking, { kind: 'answered', screenshots: shots }, restored],
+    ['say why they could not come back', asking, { kind: 'refused', error: 'gone' }, failed],
+    ['are asked for again on Try again', failed, { kind: 'retried' }, asking],
+    ['are not asked for again when the window is captured again', restored, { kind: 'captured' }, restored],
+    ['are not asked for twice while an ask is under way', asking, { kind: 'captured' }, asking],
+    ['drop an answer that nothing asked for', waiting, { kind: 'answered', screenshots: shots }, waiting],
+    ['drop a late refusal', restored, { kind: 'refused', error: 'late' }, restored],
+    ['are left behind by another window', restored, { kind: 'changed' }, { kind: 'restored', screenshots: null }],
+  ];
+  test.each(cases)('%s', (_name, restoring, event, next) => {
+    expect(restoreStep(restoring, event)).toEqual(next);
+  });
 });

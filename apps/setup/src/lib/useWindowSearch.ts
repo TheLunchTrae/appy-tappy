@@ -15,13 +15,18 @@ import {
   endedAsks,
   fallbackWarning,
   searchStep,
+  waitsForOpen,
   windowAbsence,
 } from './windowSearch.ts';
 
+/** How long the look waits before it looks again while the application isn't open. */
+const OPEN_LOOK_PAUSE_MS = 2000;
+
 /**
- * Looks for the window of the saved application `app` when the flow opens and on `refresh`, and captures it with
- * `pick` once it is found: the only window that fits at once, and one of several when the user chooses it. A
- * capture whose window closed is looked for again the same way.
+ * Looks for the window of the saved application `app` when the flow opens, on `refresh`, and every two seconds
+ * while the application isn't open, and captures it with `pick` once it is found: the only window that fits at
+ * once, and one of several when the user chooses it. A capture whose window closed is looked for again the same
+ * way.
  */
 export function useWindowSearch(
   app: string,
@@ -44,10 +49,12 @@ export function useWindowSearch(
   readonly choose: (window: WindowChoice) => void;
   /** Looks again from the start, once the flow stopped its capture. */
   readonly restart: () => void;
+  /** Whether the newest look found several windows that fit equally well, so there is another window to change to. */
+  readonly several: boolean;
 } {
-  const { look, refresh: lookAgain } = useAppWindows();
+  const { look, refresh: lookAgain, refreshQuietly } = useAppWindows();
   const [capture, send] = useReducer(searchStep, NO_CAPTURE);
-  const step = useMemo(() => pickerStep({ locked: true, chosen: app, look, picked: null }), [app, look]);
+  const step = useMemo(() => pickerStep(app, look), [app, look]);
   useEffect(() => {
     send({ kind: 'looked', step });
   }, [step]);
@@ -68,6 +75,19 @@ export function useWindowSearch(
           ),
     [starting, pick],
   );
+
+  // An application that isn't open is looked for again until it opens, and its window is captured then. The look is
+  // quiet, so the panel and its controls stay as they are while the application stays closed.
+  const waiting = look.kind === 'seen' && waitsForOpen(step, capture);
+  useEffect(() => {
+    if (!waiting) {
+      return undefined;
+    }
+    const timer = setTimeout(refreshQuietly, OPEN_LOOK_PAUSE_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [waiting, look, refreshQuietly]);
 
   const seen = known(look);
   const found = seen?.apps.find((each) => each.id === app) ?? null;
@@ -108,5 +128,6 @@ export function useWindowSearch(
     refresh,
     choose,
     restart,
+    several: step.kind === 'several',
   };
 }

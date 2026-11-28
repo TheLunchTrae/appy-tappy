@@ -107,12 +107,6 @@ it was about has gone. These guards reject stale state and messages:
   recording, as one that never joined and was never left out
   (`earlierOf`), and forgets a box that joined once the box is deleted,
   so a box drawn with its ID is not taken for it.
-- **Pick numbers.** A capture screen that picks its window with the picker
-  numbers each pick (`pickedWindowStep` in
-  `apps/setup/src/lib/windowSearch.ts`). The owner's answer that the capture
-  ended carries the number of the pick it was asked under, and one for an
-  older pick is dropped, so an answer still on its way at
-  **Change window** never says that the window picked since has closed.
 - **Detection keys.** The capture screen keys a bar detection by its region,
   the screenshot the region was drawn on, and the indexes of the screenshots
   there are. An answer for any other key than the request under way is dropped. What two
@@ -1226,26 +1220,26 @@ allow only these stacks, the flow on screen last; a fix or an edit of a saved
 value is a value flow that no automation opens, and a flow that finishes a
 draft opens from its page with none waiting:
 
-| Stack                            | How it comes about                                                                             |
-| -------------------------------- | ---------------------------------------------------------------------------------------------- |
-| automation                       | **New automation** or **Edit**                                                                 |
-| automation, application          | **Add application** in the automation editor                                                   |
-| automation, value                | **New value** in the automation editor                                                         |
-| automation, value, application   | **Add application** or **Change how it's found** in that value's [picker](#picker)             |
-| value, application               | **Add application** or **Change how it's found** in the picker of a value from the Values page |
-| reference, application           | The same in a reference's picker                                                               |
-| value, reference, or application | **New** or **Edit** on its own page, with none waiting                                         |
+| Stack                            | How it comes about                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------------------ |
+| automation                       | **New automation** or **Edit**                                                                   |
+| automation, application          | **Add application** in the automation editor                                                     |
+| automation, value                | **New value** in the automation editor                                                           |
+| automation, value, application   | **Change how it's found** on that value's capture screen                                         |
+| value, application               | **Add application** in the [picker](#picker), or **Change how it's found** on the capture screen |
+| reference, application           | The same for a reference                                                                         |
+| value, reference, or application | **New** or **Edit** on its own page, with none waiting                                           |
 
 - **Opening.** `valueFor` and `applicationFor` make the flow to open, with
   its opener in it. The opener keeps the application it showed chosen, so it
   shows again as the user left it. The automation editor also hands over its
   draft (`waiting`), because the opener unmounts while the other flow shows.
-  The value and reference flows open the application flow only from their
-  picker, before a capture holds anything, so they wait with nothing but that
-  application.
+  The value and reference flows open the application flow from their picker
+  or, once nothing is unsaved, from their capture screen, so they wait with
+  nothing but that application.
 - **Save and Cancel.** `afterFlow` decides what follows a flow that ended. A
   save shows the opener with what the save answered: the application's ID to
-  a value or reference flow, whose picker starts with it, and the
+  a value or reference flow, whose capture screen opens on it, and the
   application's ID with the value's ID from `save_value` to the automation
   flow, with the number of the newest read of the saved lists started before
   the save was heard. **Cancel** shows the opener as it was left. With none waiting, a save
@@ -1319,8 +1313,8 @@ draft opens from its page with none waiting:
   wait and the open flow is inert, so nothing in it can end or save it. An
   answer for a flow that is no longer the open one, or for a save that is not
   the one under way, is dropped.
-- **An application opened from a picker.** **Change how it's found** opens
-  the application flow for the picker's flow (`applicationFor`). When the
+- **An application opened from a capture screen.** **Change how it's found**
+  opens the application flow for the capture screen's flow (`applicationFor`). When the
   application has a draft of changes, the flow finishes that draft, and the
   button says **Finish draft**, as the Applications page does, so there is one
   way to change an application that has a draft.
@@ -1333,12 +1327,11 @@ draft opens from its page with none waiting:
   saved automation, application, or reference with a draft of changes offers
   **Finish draft** in place of **Edit**, so the saved item and its draft
   never change apart. A value, fix, or reference flow that finishes a draft
-  starts with the [picker](#picker) and
-  brings the draft's screenshots back only after its window is picked, since
-  picking a window clears the session's. **Change window** after that asks
-  first, then starts the capture over without what the draft kept; a draft
-  saved then still replaces the same draft, and leaving without one keeps it
-  as it was.
+  brings the draft's screenshots back only after its window is captured, as
+  [Window search](#window-search) describes, since a new capture clears the
+  session's. **Change window** after that asks first, then starts the
+  capture over without what the draft kept; a draft saved then still
+  replaces the same draft, and leaving without one keeps it as it was.
 - **A save that finishes after the user moved on.** `App.tsx` tells
   `afterFlow` whether the flow that saved is still the one open, by identity,
   and `afterFlow` changes nothing when it is not. The tabs and **Cancel** are
@@ -1348,8 +1341,8 @@ draft opens from its page with none waiting:
 - **Pictures.** Leaving a value or reference flow unmounts it and stops its
   capture, which clears its screenshots, recording, and found text, and
   **Change window**
-  stops the capture too, before the picker shows, so nothing holds them
-  while the user picks. A click picture taken for an automation's draft
+  stops the capture too, before the next look, so nothing holds them while
+  the user picks. A click picture taken for an automation's draft
   stays while the automation's flow is open or waits under a flow it opened,
   since the draft that names it waits with it. Once no automation flow is
   left, on a save, **Save as draft**, **Cancel**, or **Leave**, the window
@@ -1458,55 +1451,33 @@ guide is a status region that stays mounted and describes those controls, so
 a screen reader hears the step, that what was saved is being read, and the
 value once it is picked. The [picker](#picker) does the same when it shows
 after another flow (`pickerLanding`), by the same rule: the focus moves to
-**Capture this window** once there is a window, and otherwise to the way
-forward.
+**Add application** while there is an application to choose, and to
+**Refresh** after a failed look.
 
 ### Picker
 
-The first step of a flow that makes a value or a reference, or finishes a
-draft of one, (`apps/setup/src/components/Picker.tsx`) chooses the
-application and finds the window to capture. A flow that changes a saved
-value or reference has no such step: its editor makes the
-[window search](#window-search). Its state is the chosen application, the window picked
-among several, the capture it asked for (`Start`), and the newest look at the
-saved applications and the open windows (`Look`, from
-`apps/setup/src/lib/useAppWindows.ts`). `pickerStep` in
-`apps/setup/src/lib/picker.ts` names where those stand as one `PickerStep`.
+A flow that makes a value or a reference and does not know its application
+yet (`apps/setup/src/components/Picker.tsx`) chooses it first. A flow knows
+its application when it changes a saved value or reference, finishes a
+draft, or was handed one, such as a value made for an automation or an
+application just added for the flow; it opens its capture screen at once,
+which makes the [window search](#window-search). The picker's state is the
+newest look at the saved applications and the open windows (`Look`, from
+`apps/setup/src/lib/useAppWindows.ts`), which `chooserStep` in
+`apps/setup/src/lib/picker.ts` names as one `ChooserStep`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Looking: the picker opens and the first look starts
     Looking --> NoApplications: the look finds no saved application
-    Looking --> Choosing: it finds several, and none is chosen
-    Looking --> Missing: the chosen application is not among them
-    Looking --> One: the chosen application, or the only one, has one window that fits best
-    Looking --> Several: it has several that fit equally well
-    Looking --> None: it has no window to capture
+    Looking --> Choosing: it finds several
+    Looking --> Only: it finds one
     Looking --> LookFailed: the look fails
-    LookFailed --> Looking: Refresh, before any look answered
-    LookFailed --> Resolving: Refresh, after one answered
+    LookFailed --> Looking: Refresh
+    Choosing --> Choosing: Refresh, with what the last look found on show
     NoApplications --> [*]: Add application
-    Choosing --> [*]: Add application
-    Choosing --> Resolving: an application is chosen
-    Missing --> Missing: Refresh, until the look answers
-    Missing --> Resolving: the look finds the application again, or another application is chosen
-    Missing --> LookFailed: the look fails
-    Resolving --> One: the look finds one window that fits best
-    Resolving --> Several: the look finds several that fit equally well
-    Resolving --> None: the look finds no window to capture
-    Resolving --> LookFailed: the look fails
-    Resolving --> Missing: the look no longer finds the application
-    One --> Resolving: Refresh, or another application is chosen
-    Several --> Resolving: Refresh, or another application is chosen
-    None --> Resolving: Refresh, or another application is chosen
-    Several --> Several: a window is picked
-    Several --> [*]: Change how it's found
-    None --> [*]: Change how it's found
-    One --> Starting: Capture this window
-    Several --> Starting: Capture this window, with a window picked
-    Starting --> [*]: the capture starts, and the flow moves on with the application and the window
-    Starting --> One: the capture is refused, the picker shows why
-    Starting --> Several: the capture is refused, the picker shows why
+    Choosing --> [*]: Add application, or an application is chosen
+    Only --> [*]: the only application is taken without asking
 ```
 
 - A look is one `list_app_windows` command, so its applications, windows,
@@ -1517,50 +1488,26 @@ stateDiagram-v2
 - **Looking** is before any look answered: not even the applications are
   known.
 - **LookFailed** is a look that could not read the saved applications or list
-  the windows. It shows the reason, whatever application is chosen, and
-  **Refresh** looks again.
+  the windows. It shows the reason, and **Refresh** looks again.
 - **NoApplications** and **Choosing** show the list of saved applications
-  with **Add application** in it. With one saved application there is no
-  choice, and the picker resolves that one. A flow that finishes the draft
-  of a fix or of a reference's changes has its application already, so it
-  shows no list and never reaches them.
-- **Missing** is a chosen application that the look does not find: the flow's
-  own, one handed over by the application flow, or the last choice. The
-  picker says so instead of asking for a choice as if none had been made.
-  **Refresh** keeps it until the new look answers, since the last answer
-  still lacks the application, and leaves it only if that look finds the
-  application again. Choosing another application or **Add application**
-  leaves it too; a flow with its own application has neither, so apart from
-  such a look only **Cancel** leaves it.
-- **Resolving** resolves the chosen application's window: at once from a
-  look that has answered, and otherwise when the look under way answers.
-  While a look is under way after one answered, a picker with no application
-  chosen stays in **Choosing** or **NoApplications**.
-- **One** has the window to capture. **Several** has one once the user picks
-  it among the windows that fit equally well; a look that no longer lists the
-  picked window leaves none picked. Both say when the windows are only the
-  application's fallback.
-- **None** is no window to capture: nothing fits, or a session reads a window
-  the list of open windows leaves out, such as one with no title. Only
-  **Refresh**, another application, or **Change how it's found** leaves it.
-- **Starting** disables every control but **Cancel** until `pick_window`
-  answers. A refusal, such as a window that closed since the look, shows in
-  the step it came from, and the next choice or look clears it.
-- **Add application** and **Change how it's found** end the picker: the
-  application flow opens for the picker's flow, and a new picker opens when
-  it ends, as [Pages and flows](#pages-and-flows) describes. **Change window**
-  in the capture opens a new picker with the same application, and with the
-  same window picked when several fit.
+  with **Add application** in it, each marked **Running** or
+  **Not running**. Choosing one opens the capture screen on it, with no
+  window to pick.
+- **Only** is the one saved application, which needs no choice: the picker
+  takes it as soon as the look answers.
+- **Add application** ends the picker: the application flow opens for the
+  picker's flow, and the flow shows again when it ends, with the saved
+  application chosen, or with the picker again when it was canceled, as
+  [Pages and flows](#pages-and-flows) describes.
 
 ### Window search
 
-**Fix at this size** and **Edit** on a value, and **Edit** on a reference
-that has no draft, open the capture screen at once
-(`SavedCapture` in `apps/setup/src/pages/CaptureFlow.tsx`), which gets its
-window while it shows. Its state is the newest look at the saved
-applications and the open windows, as the [picker](#picker) makes them and
-resolved by `pickerStep` for the flow's application, and the capture it
-asked for, a `WindowCapture`. `searchStep` in
+A value's or reference's capture screen
+(`SearchedCapture` in `apps/setup/src/pages/CaptureFlow.tsx`) gets its
+application's window while it shows. Its state is the newest look at the
+saved applications and the open windows, as the [picker](#picker) makes
+them and resolved by `pickerStep` for the flow's application, and the
+capture it asked for, a `WindowCapture`. `searchStep` in
 `apps/setup/src/lib/windowSearch.ts` is the capture's transition, and
 `windowAbsence` names what the stage shows in place of the window.
 
@@ -1573,7 +1520,8 @@ stateDiagram-v2
     Starting --> Refused: pick_window fails
     Refused --> None: Refresh
     Refused --> Starting: the user picks one of several
-    Running --> None: Change window, which stops the capture and looks again
+    None --> None: the application isn't open, and a new look starts two seconds after the last answered
+    Running --> None: Change window, offered while several fit, which stops the capture and looks again
     Running --> None: the window closes, and a new look starts
 ```
 
@@ -1582,7 +1530,12 @@ stateDiagram-v2
   under way, the application isn't open, several windows fit and are listed
   to pick from, the look failed, or the application can't be read anymore.
   **Refresh** makes a new look, and each look that finds exactly one window
-  starts its capture, so nothing else is pressed. Where the window cannot be
+  starts its capture, so nothing else is pressed. While the application
+  isn't open, a new look starts two seconds after each one answers
+  (`waitsForOpen`), so the window is captured once the application opens.
+  That look is quiet (`refreshQuietly`): the last answer stays on show
+  until it answers, so the panel, its status, and its controls stay put
+  while the application stays closed. Where the window cannot be
   told from the application's match, the panel offers
   **Change how it's found**, which opens the application flow as the picker
   does; it is off while the editor holds unsaved work, which leaving would
@@ -1601,8 +1554,20 @@ stateDiagram-v2
 - **Running** shows the live window, and the look is not consulted again.
   When the window was taken only as the fallback, the editor says so above
   the stage and offers **Change how it's found** there. **Change window**
-  stops the capture and opens a new editor on a new look, after asking
-  about unsaved work.
+  shows only when the newest look found several windows that fit equally
+  well. It stops the capture and opens a new editor on a new look, after
+  asking about unsaved work.
+- **A draft** waits for its window before its editor shows, as `restoreStep`
+  in `apps/setup/src/lib/windowSearch.ts` steps it. **Waiting** shows the
+  panel alone, with **Cancel**. The first capture that runs moves it to
+  **Asking**, which sends one `restore_draft_screenshots`, since a capture
+  that starts afresh clears the session's; a capture that runs again later
+  keeps them and asks nothing. The answer moves it to **Restored**, which
+  opens the editor on the screenshots, and a refusal to **Failed**, which
+  shows why with **Try again**, back to **Asking**. An answer that arrives
+  while nothing is asked is dropped. **Change window** moves it to
+  **Restored** without screenshots, so the new editor starts over without
+  what the draft kept; a draft saved then still replaces the same draft.
 - **The window closes.** Three signs ask the owner whether the capture
   slot is **Ended** (`capture_ended`): each failure of the live view, a
   screenshot that is refused, and a recording that stops with a problem or
@@ -1936,11 +1901,10 @@ stateDiagram-v2
   error: a closed window, a lost graphics device, or a capture panic. Frames
   after it are dropped, and a screenshot, a new recording, and **Record
   more** are refused with the failure's error. `capture_ended` answers
-  whether the slot is in it, and each screen says its own way back: a new
-  value's or reference's capture screen says to select **Change window**
-  (`PickedCapture`), which drops an answer asked under an older
-  [pick number](#how-to-read-this-page), and the [window search](#window-search) shows its
-  panel. Only a stop or another pick leaves it.
+  whether the slot is in it, and each screen says its own way back: a
+  value's or reference's capture screen shows the
+  [window search](#window-search)'s panel and captures the window again once
+  it is back. Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show. Nothing starts the capture again, at any window size: the
   editor watches the value again.

@@ -14,46 +14,43 @@ This page covers what the user guide leaves out.
 
 ## Behavior the guide leaves out
 
-- **Editing without the window.** A saved value's or reference's flow opens
-  its editor at once and looks for the application's window from there
+- **Capturing without asking.** A value's or reference's capture screen
+  looks for its application's window from there and captures it itself
   (`lib/windowSearch.ts`, `lib/useWindowSearch.ts`);
   [Window search](State-machines.md#window-search) lists its states. It
-  resolves the window as the picker does, with the same look and
-  `pickerStep`, so it captures only a window a session would read. The
-  owner's commands that the editor calls answer without a picked window:
-  `try_edit` judges the trial against the saved files, `reading`,
-  `explain_reading`, and `window_size` answer nothing, `edit_value` saves
-  what names no screenshot, and `save_reference_settings` saves a saved
-  reference's name with its samples as they
-  are, but for the ones the editor left out. `set_characters` and `save_reference` learn from a
-  region on a screenshot, so they need a session that has one. The
-  anti-cheat products the look found show above the stage while the
-  application's anti-cheat class is `unknown`. A window taken only as the
-  fallback shows there too. When the window closes, the editor
-  keeps its session and captures the window again once it is back, as
-  [Window search](State-machines.md#window-search) describes. A flow that
-  finishes a draft keeps the picker, since the draft's screenshots come back
-  only into a picked window's session.
-- **Picker.** The picker of a new value or reference chooses a saved application
-  and then resolves that application's window with its own match
-  (`lib/picker.ts`); [Picker](State-machines.md#picker) lists its states. One
+  resolves the window with the application's own match (`pickerStep` in
+  `lib/picker.ts`), so it captures only a window a session would read. One
   look (`lib/useAppWindows.ts`) is one `list_app_windows` command: the owner
   reads the saved applications and lists the desktop once, and answers the
   applications, the open windows, and the windows each application's match
-  takes, so the three agree. The picker shows the applications from that
-  answer, not from the pages' list, so **Refresh** reads them again and a
-  failed read shows with its reason. `window_list::matching` marks the window
-  a new session would read as `best`, and every offered window that fits as
-  well as it as `tied`. `tied` covers only offered windows: one the list
-  filters out, untitled, without a size, or of a desktop class, ties with
-  none even where the runtime could read it, and when the runtime reads such
-  a window no offered window is tied. Capture allows only a tied window,
-  since the runtime reads one of those: the only one without asking, or the
-  one the user picks among several. A window the match takes with a worse fit
-  is never offered. The chosen application's ID travels with the captured
-  window as the `Choice`, and every save names it, so nothing reads the owner
-  back from the window. **Add application** and **Change how it's found**
-  open the application flow for the picker's flow, as
+  takes, so the three agree. `window_list::matching` marks the window a new
+  session would read as `best`, and every offered window that fits as well
+  as it as `tied`. `tied` covers only offered windows: one the list filters
+  out, untitled, without a size, or of a desktop class, ties with none even
+  where the runtime could read it, and when the runtime reads such a window
+  no offered window is tied. Capture allows only a tied window, since the
+  runtime reads one of those: the only one without asking, or the one the
+  user picks among several. A window the match takes with a worse fit is
+  never offered. The owner's commands that the editor calls answer without a
+  picked window: `try_edit` judges the trial against the saved files,
+  `reading`, `explain_reading`, and `window_size` answer nothing,
+  `edit_value` saves what names no screenshot, and `save_reference_settings`
+  saves a saved reference's name with its samples as they are, but for the
+  ones the editor left out. `set_characters` and `save_reference` learn from
+  a region on a screenshot, so they need a session that has one. The
+  anti-cheat products the look found show above the stage while the
+  application's anti-cheat class is `unknown`. A window taken only as the
+  fallback shows there too. When the window closes, the editor keeps its
+  session and captures the window again once it is back. The flow's
+  application ID travels with every save, so nothing reads the owner back
+  from the window.
+- **Picker.** A new value or reference whose flow doesn't know its
+  application chooses it first ([Picker](State-machines.md#picker)), from the
+  same look, so **Refresh** reads the saved applications again and a failed
+  read shows with its reason. With one saved application it takes that one
+  without asking. **Add application** there, and **Change how it's found** on
+  the capture screen, open the application flow for the value's or
+  reference's flow, as
   [Pages and flows](State-machines.md#pages-and-flows) describes.
 - **One flow from an automation.** The automation editor is where a first
   automation starts: its condition chooses the application, then one of that
