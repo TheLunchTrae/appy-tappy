@@ -37,9 +37,11 @@ as soon as it does.
 
 A value can open a new reference for itself with **New reference**, as
 [A value without a reference](Values.md#a-value-without-a-reference)
-describes. The reference starts with the value's screenshots and the
-characters the value needs, and with no boxes: draw them where the
-reference should learn its characters.
+describes. The reference starts with its own copies of the value's
+screenshots, the characters the value needs, and one box where the value
+is, since that is usually where its characters show. The box and the
+screenshots are the reference's alone: delete the box, or remove a
+screenshot once no box is on it, and the value keeps its own.
 
 1. **Name it,** such as `Percent font`, with a name no other reference of
    the application has. Capitals of the letters A to Z don't count:

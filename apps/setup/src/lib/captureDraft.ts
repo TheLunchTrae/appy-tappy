@@ -233,18 +233,22 @@ export function finishedWith(resumed: Resumed, reference: string): Resumed {
 }
 
 /**
- * The draft of a new reference that **New reference** opens for a value of the application `app` that needs
- * `characters`: it reads those characters, or the digits while the value needs none in particular. It starts with
- * no boxes: where the value is says nothing about where the reference learns its characters.
+ * The draft of a new reference that **New reference** opens for the value `setup` sets up for the
+ * application `app`: one box at the value's region, on the screenshot it is drawn on, to read the characters the
+ * value needs, or the digits while it needs none in particular. Null while the value has no region.
  */
-export function referenceForValue(app: string, characters: readonly string[]): DraftDef {
+export function referenceForValue(app: string, setup: CaptureSetup): DraftDef | null {
+  const { region, drawnOn, characters } = setup.draft;
+  if (region === null || drawnOn === null) {
+    return null;
+  }
   const reads = characters.length > 0 ? characters : DIGITS.characters;
   const reference: CaptureSetup = {
     valueName: '',
     step: 'where',
     mayMove: false,
     editing: { existing: null, name: '', reads, guesses: false },
-    draft: EMPTY_DRAFT,
+    draft: { ...EMPTY_DRAFT, boxes: [{ id: 0, screenshot: drawnOn, region, text: '' }] },
   };
   return {
     kind: 'reference',

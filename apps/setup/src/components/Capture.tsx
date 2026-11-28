@@ -767,13 +767,13 @@ export function Capture({
   const picksReference = draft.kind === 'number' && fixing === null;
   // New reference stays picked while the check is another kind, and offers nothing then.
   const makesNew = picksReference && onMakeReference !== null && newReference;
-  // Saves a reference's draft, with the value's screenshots, then the value's draft beside it, and opens the
-  // reference's. A value whose draft fails to save takes the reference's draft back.
+  // Saves a reference's draft, with copies of the value's screenshots and a box at its region, then the value's
+  // draft beside it, and opens the reference's. A value whose draft fails to save takes the reference's draft back.
   const makeReference = async (): Promise<void> => {
-    if (onMakeReference === null) {
+    const reference = referenceForValue(appId, setup);
+    if (onMakeReference === null || reference === null) {
       return;
     }
-    const reference = referenceForValue(appId, draft.characters);
     setSaving(true);
     try {
       const saved = await saveBeside(reference, drafting.save);
